@@ -1,0 +1,8 @@
+{
+  "version": "0.1.0",
+  "database": "/Users/user/Documents/agent-replay/.agent-replay/traces.db",
+  "created_at": "2026-02-28T01:19:50.003Z",
+  "ai": {
+    "provider": "auto"
+  }
+}
