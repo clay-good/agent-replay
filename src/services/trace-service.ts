@@ -114,7 +114,7 @@ function rowToSnapshot(row: Record<string, unknown>): TraceSnapshot {
   return {
     id: row.id as string,
     step_id: row.step_id as string,
-    context_window: parseJson(row.context_window as string),
+    context_window: row.context_window ? JSON.parse(row.context_window as string) : null,
     environment: parseJson(row.environment as string) ?? {},
     tool_state: parseJson(row.tool_state as string) ?? {},
     token_count: row.token_count as number,
@@ -369,13 +369,13 @@ export function listTraces(
 
   const countRow = db
     .prepare(`SELECT COUNT(*) as cnt FROM agent_traces ${whereClause}`)
-    .get(...params) as { cnt: number };
+    .get([...params]) as { cnt: number };
 
   const rows = db
     .prepare(
       `SELECT * FROM agent_traces ${whereClause} ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?`,
     )
-    .all(...params, limit, offset) as Record<string, unknown>[];
+    .all([...params, limit, offset]) as Record<string, unknown>[];
 
   return {
     items: rows.map(rowToTrace),

@@ -149,7 +149,7 @@ export interface UpdateTraceInput {
 }
 
 export interface CreateEvalInput {
-  evaluator_type: string;
+  evaluator_type: EvalType;
   evaluator_name: string;
   score: number;
   passed: boolean;

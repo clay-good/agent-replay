@@ -1,5 +1,5 @@
 import { existsSync, rmSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 import chalk from 'chalk';
 import { ensureDatabase } from '../db/index.js';
 import { runInit } from './init.js';
@@ -28,7 +28,7 @@ export async function runDemo(opts: DemoOptions = {}): Promise<void> {
 
   // Reset if requested — safety check: only delete .agent-replay directories
   if (opts.reset && existsSync(baseDir)) {
-    const baseName = baseDir.split('/').pop() ?? '';
+    const baseName = basename(baseDir);
     if (!baseName.startsWith('.agent-replay') && !baseName.startsWith('agent-replay')) {
       console.error(chalk.red(`  Refusing to delete "${baseDir}" — expected an agent-replay data directory.`));
       return;

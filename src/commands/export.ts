@@ -52,11 +52,11 @@ export function runExport(opts: ExportOptions = {}): void {
 
     if (opts.output) {
       const outPath = resolve(opts.output);
-      writeFileSync(outPath, output + '\n');
+      writeFileSync(outPath, output);
       successSpinner(spinner, `Exported to ${outPath}`);
     } else {
       spinner.stop();
-      process.stdout.write(output + '\n');
+      process.stdout.write(output);
     }
   } catch (err) {
     failSpinner(spinner, `Export failed: ${errorMessage(err)}`);

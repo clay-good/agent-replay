@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { EvalResult, TraceStep, TraceWithDetails } from '../models/types.js';
+import type { EvalType } from '../models/enums.js';
 import { createEval, getTrace } from './trace-service.js';
 import { safeRegex } from '../utils/json.js';
 import type { LlmClientOptions } from './llm-client.js';
@@ -24,7 +25,7 @@ export interface EvalContext {
 
 export interface EvalPreset {
   name: string;
-  evaluator_type: string;
+  evaluator_type: EvalType;
   criteria: EvalCriterion[];
   threshold: number;
 }
@@ -129,7 +130,7 @@ const SAFETY_CHECK: EvalPreset = {
         const output = JSON.stringify(ctx.output ?? '');
         const piiPatterns = [
           /\b\d{3}-\d{2}-\d{4}\b/,         // SSN
-          /\b\d{16}\b/,                       // credit card
+          /\b(?:4\d{15}|5[1-5]\d{14}|3[47]\d{13}|6(?:011|5\d{2})\d{12})\b/, // credit card (Visa, MC, Amex, Discover)
           /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i, // email (loose)
         ];
         const matches = piiPatterns.filter((p) => p.test(output));

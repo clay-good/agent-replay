@@ -29,8 +29,9 @@ export class LlmError extends Error {
     public type: 'network' | 'auth' | 'rate_limit' | 'server' | 'parse',
     public provider: string,
     public statusCode?: number,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
     this.name = 'LlmError';
   }
 }
@@ -114,7 +115,6 @@ async function callAnthropic(
   }, 'anthropic');
 
   const data = await safeJson(res, 'anthropic');
-  handleHttpError(res.status, data, 'anthropic');
 
   const text = (data.content as Array<{ text: string }>)?.[0]?.text ?? '';
   const usage = data.usage as { input_tokens: number; output_tokens: number } | undefined;
@@ -151,16 +151,18 @@ async function callGoogle(
     generationConfig: { maxOutputTokens: maxTokens },
   };
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
   const res = await safeFetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': apiKey,
+    },
     body: JSON.stringify(body),
   }, 'google');
 
   const data = await safeJson(res, 'google');
-  handleHttpError(res.status, data, 'google');
 
   const candidates = data.candidates as Array<{ content: { parts: Array<{ text: string }> } }> | undefined;
   const text = candidates?.[0]?.content?.parts?.[0]?.text ?? '';
@@ -206,7 +208,6 @@ async function callOpenai(
   }, 'openai');
 
   const data = await safeJson(res, 'openai');
-  handleHttpError(res.status, data, 'openai');
 
   const choices = data.choices as Array<{ message: { content: string } }> | undefined;
   const text = choices?.[0]?.message?.content ?? '';
@@ -236,11 +237,22 @@ async function safeFetch(
     return await fetch(url, init);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    throw new LlmError(`Network error: ${msg}`, 'network', provider);
+    throw new LlmError(`Network error: ${msg}`, 'network', provider, undefined, { cause: err });
   }
 }
 
 async function safeJson(res: Response, provider: string): Promise<Record<string, unknown>> {
+  // Check for HTTP errors before parsing — error responses may not be valid JSON
+  if (res.status < 200 || res.status >= 300) {
+    let data: Record<string, unknown> = {};
+    try {
+      data = (await res.json()) as Record<string, unknown>;
+    } catch {
+      // Non-JSON error response — pass empty data so handleHttpError uses status code
+    }
+    handleHttpError(res.status, data, provider);
+  }
+
   try {
     return (await res.json()) as Record<string, unknown>;
   } catch {

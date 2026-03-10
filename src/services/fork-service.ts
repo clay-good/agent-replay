@@ -118,9 +118,9 @@ export function forkTrace(
 
       if (snapshot) {
         const newSnapId = generateId('snp');
-        // Apply modified context to the environment field if provided
+        // Apply modified context only at the fork point, not to earlier steps
         const environment =
-          modifiedContext
+          (modifiedContext && (step.step_number as number) === fromStep)
             ? JSON.stringify(modifiedContext)
             : (snapshot.environment as string);
 
