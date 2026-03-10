@@ -10,6 +10,26 @@ export function safeJsonParse<T = unknown>(text: string, fallback: T | null = nu
 }
 
 /**
+ * Parse a JSON string, returning the raw string on failure (useful for row conversion).
+ */
+export function safeParseJson(raw: string | null): unknown {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+/**
+ * Truncate a string to a maximum length, appending '...' if truncated.
+ */
+export function truncate(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return s.slice(0, max - 3) + '...';
+}
+
+/**
  * Pretty-print a value as indented JSON.
  * Safe against circular references.
  */
@@ -64,14 +84,19 @@ export function safeParseFloat(str: string | undefined, fallback: number): numbe
 
 /**
  * Compile a regex from user input with protection against ReDoS.
- * Returns null if the pattern is invalid.
+ * Returns null if the pattern is invalid or contains dangerous constructs.
+ *
+ * Rejects patterns with nested quantifiers (e.g. `(a+)+`, `(a*)*`, `(a{2,})+`)
+ * which are the most common cause of catastrophic backtracking.
  */
 export function safeRegex(pattern: string, flags = 'i'): RegExp | null {
+  // Reject nested quantifiers: a quantifier immediately after a group that
+  // itself contains a quantifier. Matches patterns like (x+)+, (x*)+, (x{n})*
+  if (/([+*?]|\{\d+,?\d*\})\s*\)\s*([+*?]|\{\d+,?\d*\})/.test(pattern)) {
+    return null;
+  }
   try {
-    const re = new RegExp(pattern, flags);
-    // Quick sanity test with a short string to reject catastrophic patterns
-    re.test('test');
-    return re;
+    return new RegExp(pattern, flags);
   } catch {
     return null;
   }

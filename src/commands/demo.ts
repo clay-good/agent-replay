@@ -22,7 +22,7 @@ export interface DemoOptions {
  * The actual seed data is loaded from src/demo/seed-data.ts (created in Prompt 11).
  * This command handles init, reset, seeding, and the walkthrough flow.
  */
-export function runDemo(opts: DemoOptions = {}): void {
+export async function runDemo(opts: DemoOptions = {}): Promise<void> {
   const baseDir = resolve(opts.dir ?? '.agent-replay');
   const dbPath = resolve(baseDir, 'traces.db');
 

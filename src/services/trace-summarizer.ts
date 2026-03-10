@@ -1,4 +1,6 @@
 import type { TraceWithDetails, TraceStep, TraceDiffResult } from '../models/types.js';
+import { formatDuration } from '../utils/time.js';
+import { truncate } from '../utils/json.js';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -35,7 +37,7 @@ export function summarizeTrace(
   }
 
   // Step summary header
-  const totalDur = trace.total_duration_ms != null ? `, ${fmtMs(trace.total_duration_ms)}` : '';
+  const totalDur = trace.total_duration_ms != null ? `, ${formatDuration(trace.total_duration_ms)}` : '';
   const totalTok = trace.total_tokens != null ? `, ${trace.total_tokens} tokens` : '';
   lines.push(`\nSTEPS (${trace.steps.length} total${totalDur}${totalTok}):`);
 
@@ -46,7 +48,7 @@ export function summarizeTrace(
 
   // Error
   if (trace.error) {
-    lines.push(`\nERROR: ${trunc(trace.error, 300)}`);
+    lines.push(`\nERROR: ${truncate(trace.error, 300)}`);
   }
 
   // Tags
@@ -74,8 +76,8 @@ export function summarizeDiffForLlm(
   // Trace headers
   const leftVer = left.agent_version ? ` v${left.agent_version}` : '';
   const rightVer = right.agent_version ? ` v${right.agent_version}` : '';
-  lines.push(`TRACE A: ${left.agent_name}${leftVer} [${left.status.toUpperCase()}] (${left.steps.length} steps${left.total_duration_ms ? `, ${fmtMs(left.total_duration_ms)}` : ''})`);
-  lines.push(`TRACE B: ${right.agent_name}${rightVer} [${right.status.toUpperCase()}] (${right.steps.length} steps${right.total_duration_ms ? `, ${fmtMs(right.total_duration_ms)}` : ''})`);
+  lines.push(`TRACE A: ${left.agent_name}${leftVer} [${left.status.toUpperCase()}] (${left.steps.length} steps${left.total_duration_ms ? `, ${formatDuration(left.total_duration_ms)}` : ''})`);
+  lines.push(`TRACE B: ${right.agent_name}${rightVer} [${right.status.toUpperCase()}] (${right.steps.length} steps${right.total_duration_ms ? `, ${formatDuration(right.total_duration_ms)}` : ''})`);
 
   // Input comparison
   lines.push(`\nINPUT A: ${truncObj(left.input, 200)}`);
@@ -94,8 +96,8 @@ export function summarizeDiffForLlm(
   if (diff.diffs.length > 0) {
     lines.push(`\nDIFFERENCES (${diff.diffs.length}):`);
     for (const d of diff.diffs.slice(0, 15)) {
-      const leftVal = trunc(String(d.left_value ?? '(missing)'), 80);
-      const rightVal = trunc(String(d.right_value ?? '(missing)'), 80);
+      const leftVal = truncate(String(d.left_value ?? '(missing)'), 80);
+      const rightVal = truncate(String(d.right_value ?? '(missing)'), 80);
       lines.push(`- Step ${d.step_number}, ${d.field}: LEFT=${leftVal} | RIGHT=${rightVal}`);
     }
     if (diff.diffs.length > 15) {
@@ -104,8 +106,8 @@ export function summarizeDiffForLlm(
   }
 
   // Errors
-  if (left.error) lines.push(`\nERROR A: ${trunc(left.error, 200)}`);
-  if (right.error) lines.push(`ERROR B: ${trunc(right.error, 200)}`);
+  if (left.error) lines.push(`\nERROR A: ${truncate(left.error, 200)}`);
+  if (right.error) lines.push(`ERROR B: ${truncate(right.error, 200)}`);
 
   const text = lines.join('\n');
   return {
@@ -133,7 +135,7 @@ function summarizeSteps(steps: TraceStep[], charBudget: number): string[] {
 
     // Duration + tokens
     const parts: string[] = [];
-    if (step.duration_ms != null) parts.push(fmtMs(step.duration_ms));
+    if (step.duration_ms != null) parts.push(formatDuration(step.duration_ms));
     if (step.tokens_used != null) parts.push(`${step.tokens_used}tok`);
     if (step.model) parts.push(`model=${step.model}`);
     if (parts.length > 0) line += ` (${parts.join(', ')})`;
@@ -154,7 +156,7 @@ function summarizeSteps(steps: TraceStep[], charBudget: number): string[] {
 
     // Error detail
     if (step.error) {
-      line += `\n   error: ${trunc(step.error, 150)}`;
+      line += `\n   error: ${truncate(step.error, 150)}`;
     }
 
     if (totalChars + line.length > charBudget) {
@@ -177,15 +179,4 @@ function truncObj(obj: Record<string, unknown>, maxLen: number): string {
   } catch {
     return String(obj).slice(0, maxLen);
   }
-}
-
-function trunc(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max - 3) + '...';
-}
-
-function fmtMs(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60000).toFixed(1)}m`;
 }

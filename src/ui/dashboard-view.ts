@@ -4,6 +4,8 @@ import type Database from 'better-sqlite3';
 import type { Trace, EvalResult } from '../models/types.js';
 import type { TraceStatus } from '../models/enums.js';
 import { TRACE_STATUSES } from '../models/enums.js';
+import { formatDuration, formatRelativeTime } from '../utils/time.js';
+import { truncate } from '../utils/json.js';
 
 /**
  * Full-screen blessed TUI dashboard.
@@ -224,7 +226,7 @@ export class DashboardView {
       `{cyan-fg}Evaluations:{/cyan-fg}  ${evalRow.cnt}`,
       `{cyan-fg}Policies:{/cyan-fg}     ${policyRow.cnt}`,
       '',
-      `{cyan-fg}Avg Duration:{/cyan-fg} ${avgDur.avg_dur != null ? formatMs(avgDur.avg_dur) : '-'}`,
+      `{cyan-fg}Avg Duration:{/cyan-fg} ${avgDur.avg_dur != null ? formatDuration(avgDur.avg_dur) : '-'}`,
       `{cyan-fg}Total Tokens:{/cyan-fg} ${totalTokens.total != null ? totalTokens.total.toLocaleString() : '-'}`,
       `{cyan-fg}Total Cost:{/cyan-fg}   ${totalCost.total != null ? '$' + totalCost.total.toFixed(4) : '-'}`,
     ];
@@ -252,7 +254,7 @@ export class DashboardView {
       r.id.slice(0, 12),
       truncate(r.agent_name, 18),
       r.status,
-      formatRelative(r.started_at),
+      formatRelativeTime(r.started_at),
     ]);
 
     this.traceTable.setData({
@@ -301,28 +303,4 @@ export class DashboardView {
       },
     ]);
   }
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────
-
-function formatMs(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60000).toFixed(1)}m`;
-}
-
-function formatRelative(iso: string): string {
-  const d = new Date(iso);
-  const diffMs = Date.now() - d.getTime();
-  const diffSec = Math.floor(diffMs / 1000);
-
-  if (diffSec < 60) return 'just now';
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
-  return `${Math.floor(diffSec / 86400)}d ago`;
-}
-
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max - 1) + '\u2026';
 }

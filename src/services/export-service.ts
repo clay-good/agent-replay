@@ -7,6 +7,7 @@ import type {
   ListTracesFilter,
 } from '../models/types.js';
 import { listTraces, getTrace } from './trace-service.js';
+import { safeParseJson } from '../utils/json.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -121,13 +122,4 @@ function exportGolden(db: Database.Database, items: Trace[]): string {
   });
 
   return JSON.stringify(entries, null, 2) + '\n';
-}
-
-function safeParseJson(raw: string | null): unknown {
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return raw;
-  }
 }

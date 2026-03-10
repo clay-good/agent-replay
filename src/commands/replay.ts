@@ -7,7 +7,8 @@ import { ensureDatabase } from '../db/index.js';
 import { traceHeaderPanel } from '../ui/boxen-panels.js';
 import { stepSpinner, successSpinner, failSpinner, warnSpinner } from '../ui/spinner.js';
 import { stepIcon, stepLabel, heading, separator, colors } from '../ui/theme.js';
-import { errorMessage, safeParseFloat, safeParseInt } from '../utils/json.js';
+import { errorMessage, safeParseFloat, safeParseInt, truncate } from '../utils/json.js';
+import { formatDuration } from '../utils/time.js';
 
 export interface ReplayOptions {
   speed?: string;
@@ -174,15 +175,4 @@ function waitForKeypress(): Promise<void> {
       resolve();
     });
   });
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60000).toFixed(1)}m`;
-}
-
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max - 3) + '...';
 }

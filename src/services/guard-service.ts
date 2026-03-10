@@ -1,12 +1,9 @@
 import type Database from 'better-sqlite3';
-import { nanoid } from 'nanoid';
 import type { GuardrailPolicy, TraceStep } from '../models/types.js';
 import type { GuardAction } from '../models/enums.js';
 import { safeRegex } from '../utils/json.js';
-
-function generateId(prefix: string): string {
-  return `${prefix}_${nanoid(12)}`;
-}
+import { generateId } from '../utils/id.js';
+import { rowToStep } from './trace-service.js';
 
 function parseJson(raw: string | null): Record<string, unknown> {
   if (!raw) return {};
@@ -138,7 +135,7 @@ export function testPolicies(
   const results: StepPolicyResult[] = [];
 
   for (const rawStep of steps) {
-    const step = rowToTraceStep(rawStep);
+    const step = rowToStep(rawStep);
     const matches: PolicyMatch[] = [];
 
     for (const policy of parsedPolicies) {
@@ -218,21 +215,3 @@ function matchesPolicy(step: TraceStep, policy: GuardrailPolicy): string | null 
   return reasons.join(', ');
 }
 
-function rowToTraceStep(row: Record<string, unknown>): TraceStep {
-  return {
-    id: row.id as string,
-    trace_id: row.trace_id as string,
-    step_number: row.step_number as number,
-    step_type: row.step_type as TraceStep['step_type'],
-    name: row.name as string,
-    input: parseJson(row.input as string),
-    output: row.output ? parseJson(row.output as string) : null,
-    started_at: row.started_at as string,
-    ended_at: (row.ended_at as string) ?? null,
-    duration_ms: (row.duration_ms as number) ?? null,
-    tokens_used: (row.tokens_used as number) ?? null,
-    model: (row.model as string) ?? null,
-    error: (row.error as string) ?? null,
-    metadata: parseJson(row.metadata as string),
-  };
-}

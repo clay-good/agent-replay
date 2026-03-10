@@ -28,7 +28,7 @@ program
   .option('--dir <path>', 'Custom directory instead of .agent-replay/')
   .action(async (opts) => {
     const { runInit } = await import('./commands/init.js');
-    runInit(opts);
+    await runInit(opts);
   });
 
 // --- demo ---
@@ -37,6 +37,7 @@ program
   .description('Load sample data and run an interactive feature walkthrough')
   .option('--no-interactive', 'Just load data, skip walkthrough')
   .option('--reset', 'Clear existing data first')
+  .option('--dir <path>', 'Custom data directory')
   .action(async (opts) => {
     const { runDemo } = await import('./commands/demo.js');
     await runDemo(opts);
@@ -49,9 +50,10 @@ program
   .option('--format <format>', 'File format: json or jsonl (auto-detected if omitted)')
   .option('--tags <tags>', 'Comma-separated tags to add to all ingested traces')
   .option('--dry-run', 'Validate without inserting')
+  .option('--dir <path>', 'Custom data directory')
   .action(async (file, opts) => {
     const { runIngest } = await import('./commands/ingest.js');
-    runIngest(file, opts);
+    await runIngest(file, opts);
   });
 
 // --- list ---
@@ -65,9 +67,10 @@ program
   .option('--sort <field>', 'Sort by: started_at, duration, tokens, cost')
   .option('--limit <n>', 'Max results (default 25)', '25')
   .option('--json', 'Output raw JSON')
+  .option('--dir <path>', 'Custom data directory')
   .action(async (opts) => {
     const { runList } = await import('./commands/list.js');
-    runList(opts);
+    await runList(opts);
   });
 
 // --- show ---
@@ -78,9 +81,10 @@ program
   .option('--steps-only', 'Only show the step timeline')
   .option('--evals', 'Include evaluation results')
   .option('--snapshots', 'Show full snapshot data for each step')
+  .option('--dir <path>', 'Custom data directory')
   .action(async (traceId, opts) => {
     const { runShow } = await import('./commands/show.js');
-    runShow(traceId, opts);
+    await runShow(traceId, opts);
   });
 
 // --- replay ---
@@ -91,6 +95,7 @@ program
   .option('--pause', 'Pause after each step')
   .option('--from-step <n>', 'Start replay from step N')
   .option('--to-step <n>', 'Stop at step N')
+  .option('--dir <path>', 'Custom data directory')
   .action(async (traceId, opts) => {
     const { runReplay } = await import('./commands/replay.js');
     await runReplay(traceId, opts);
@@ -104,6 +109,7 @@ program
   .option('--json', 'Output raw JSON diff')
   .option('--fields <fields>', 'Only compare specific fields (comma-separated)')
   .option('--ai', 'Include AI-powered analysis of why traces diverged')
+  .option('--dir <path>', 'Custom data directory')
   .action(async (traceA, traceB, opts) => {
     const { runDiff } = await import('./commands/diff.js');
     await runDiff(traceA, traceB, opts);
@@ -117,9 +123,10 @@ program
   .option('--modify-input <json>', 'Modified input JSON for the forked trace')
   .option('--modify-context <json>', 'Modified context JSON at the fork point')
   .option('--tag <tag>', 'Tag the forked trace')
+  .option('--dir <path>', 'Custom data directory')
   .action(async (traceId, opts) => {
     const { runFork } = await import('./commands/fork.js');
-    runFork(traceId, opts);
+    await runFork(traceId, opts);
   });
 
 // --- eval ---
@@ -132,6 +139,7 @@ program
   .option('--ai', 'Run all AI-powered evaluation presets')
   .option('--max-cost <usd>', 'Maximum cost budget for AI evals in USD (e.g. 0.05)')
   .option('--json', 'Output raw JSON results')
+  .option('--dir <path>', 'Custom data directory')
   .action(async (traceId, opts) => {
     const { runEvalCommand } = await import('./commands/eval.js');
     await runEvalCommand(traceId, opts);
@@ -145,9 +153,10 @@ const guardCmd = program
 guardCmd
   .command('list')
   .description('Show all guardrail policies')
-  .action(async () => {
+  .option('--dir <path>', 'Custom data directory')
+  .action(async (opts) => {
     const { runGuardList } = await import('./commands/guard.js');
-    runGuardList();
+    await runGuardList(opts);
   });
 
 guardCmd
@@ -158,25 +167,28 @@ guardCmd
   .requiredOption('--action <action>', 'Action: allow, deny, warn, require_review')
   .option('--description <text>', 'Policy description')
   .option('--priority <n>', 'Priority (default 0)', '0')
+  .option('--dir <path>', 'Custom data directory')
   .action(async (opts) => {
     const { runGuardAdd } = await import('./commands/guard.js');
-    runGuardAdd(opts);
+    await runGuardAdd(opts);
   });
 
 guardCmd
   .command('remove <policy-id>')
   .description('Remove a guardrail policy')
-  .action(async (policyId) => {
+  .option('--dir <path>', 'Custom data directory')
+  .action(async (policyId, opts) => {
     const { runGuardRemove } = await import('./commands/guard.js');
-    runGuardRemove(policyId);
+    await runGuardRemove(policyId, opts);
   });
 
 guardCmd
   .command('test <trace-id>')
   .description('Run all policies against a trace')
-  .action(async (traceId) => {
+  .option('--dir <path>', 'Custom data directory')
+  .action(async (traceId, opts) => {
     const { runGuardTest } = await import('./commands/guard.js');
-    runGuardTest(traceId);
+    await runGuardTest(traceId, opts);
   });
 
 // --- export ---
@@ -191,9 +203,10 @@ program
   .option('--with-evals', 'Include evaluation results')
   .option('--with-snapshots', 'Include full snapshots')
   .option('--output <file>', 'Output file path (default: stdout)')
+  .option('--dir <path>', 'Custom data directory')
   .action(async (opts) => {
     const { runExport } = await import('./commands/export.js');
-    runExport(opts);
+    await runExport(opts);
   });
 
 // --- dashboard ---
@@ -201,9 +214,10 @@ program
   .command('dashboard')
   .description('Launch an interactive terminal dashboard')
   .option('--refresh <seconds>', 'Auto-refresh interval in seconds', '5')
+  .option('--dir <path>', 'Custom data directory')
   .action(async (opts) => {
     const { runDashboard } = await import('./commands/dashboard.js');
-    runDashboard(opts);
+    await runDashboard(opts);
   });
 
 // --- config ---
@@ -217,7 +231,7 @@ configCmd
   .option('--dir <path>', 'Custom directory')
   .action(async (opts) => {
     const { runConfigList } = await import('./commands/config.js');
-    runConfigList(opts);
+    await runConfigList(opts);
   });
 
 configCmd
@@ -226,7 +240,7 @@ configCmd
   .option('--dir <path>', 'Custom directory')
   .action(async (key, opts) => {
     const { runConfigGet } = await import('./commands/config.js');
-    runConfigGet(key, opts);
+    await runConfigGet(key, opts);
   });
 
 configCmd
@@ -235,7 +249,7 @@ configCmd
   .option('--dir <path>', 'Custom directory')
   .action(async (key, value, opts) => {
     const { runConfigSet } = await import('./commands/config.js');
-    runConfigSet(key, value, opts);
+    await runConfigSet(key, value, opts);
   });
 
 configCmd

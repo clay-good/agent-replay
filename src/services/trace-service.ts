@@ -78,7 +78,7 @@ function rowToTrace(row: Record<string, unknown>): Trace {
   };
 }
 
-function rowToStep(row: Record<string, unknown>): TraceStep {
+export function rowToStep(row: Record<string, unknown>): TraceStep {
   return {
     id: row.id as string,
     trace_id: row.trace_id as string,
@@ -349,7 +349,7 @@ export function listTraces(
   const whereClause =
     conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  // Sort
+  // Sort — whitelist column names to prevent SQL injection
   const sortMap: Record<string, string> = {
     started_at: 'started_at',
     duration: 'total_duration_ms',
@@ -357,7 +357,11 @@ export function listTraces(
     cost: 'total_cost_usd',
     agent_name: 'agent_name',
   };
+  const allowedColumns = new Set(Object.values(sortMap));
   const sortCol = sortMap[filter.sort_by ?? 'started_at'] ?? 'started_at';
+  if (!allowedColumns.has(sortCol)) {
+    throw new Error(`Invalid sort column: ${filter.sort_by}`);
+  }
   const sortDir = filter.sort_order === 'asc' ? 'ASC' : 'DESC';
 
   const limit = filter.limit ?? 25;

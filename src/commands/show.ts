@@ -6,6 +6,7 @@ import type { StepType } from '../models/enums.js';
 import { getTrace, getStepSnapshot } from '../services/trace-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { traceHeaderPanel } from '../ui/boxen-panels.js';
+import { truncate } from '../utils/json.js';
 import { renderTimeline } from '../ui/timeline.js';
 import { evalTable } from '../ui/table.js';
 import { heading, separator } from '../ui/theme.js';
@@ -118,7 +119,3 @@ function renderSnapshots(db: Database.Database, trace: TraceWithDetails): void {
   }
 }
 
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max - 3) + '...';
-}

@@ -109,13 +109,16 @@ export function runConfigSet(key: string, value: string, opts: ConfigOptions = {
     }
   }
 
-  // Store numeric values as numbers
-  const storeValue = key === 'ai.max_tokens' ? String(parseInt(value, 10) || 1024) : value;
-  setConfigValue(config, key, storeValue);
-
-  // For max_tokens, also fix the type in the config object
-  if (key === 'ai.max_tokens' && config.ai) {
-    (config.ai as Record<string, unknown>).max_tokens = parseInt(value, 10) || 1024;
+  // For numeric keys, set the value as a number directly instead of going
+  // through setConfigValue (which always stores strings)
+  if (key === 'ai.max_tokens') {
+    const numValue = parseInt(value, 10) || 1024;
+    if (!config.ai) {
+      (config as unknown as Record<string, unknown>).ai = {};
+    }
+    config.ai!.max_tokens = numValue;
+  } else {
+    setConfigValue(config, key, value);
   }
 
   saveConfig(config, opts.dir);

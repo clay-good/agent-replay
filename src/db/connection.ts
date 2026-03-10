@@ -67,9 +67,20 @@ export class DatabaseConnection {
 
 /** Get or create the shared DatabaseConnection singleton. */
 export function getConnection(dbPath?: string): DatabaseConnection {
-  if (!instance) {
-    instance = new DatabaseConnection(dbPath);
+  if (instance) {
+    // If a specific dbPath was requested, verify it matches the existing instance
+    if (dbPath != null) {
+      const resolvedPath = resolve(dbPath);
+      const existingPath = resolve(instance.getPath());
+      if (resolvedPath !== existingPath) {
+        // Path mismatch — close old connection and create a new one
+        instance.close();
+        instance = new DatabaseConnection(dbPath);
+      }
+    }
+    return instance;
   }
+  instance = new DatabaseConnection(dbPath);
   return instance;
 }
 

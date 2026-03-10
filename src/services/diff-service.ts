@@ -5,6 +5,7 @@ import { callLlm } from './llm-client.js';
 import { getTrace } from './trace-service.js';
 import { summarizeDiffForLlm } from './trace-summarizer.js';
 import { extractJson } from './eval-service.js';
+import { safeParseJson } from '../utils/json.js';
 
 /**
  * Compare two traces step-by-step, identifying the divergence point and
@@ -110,15 +111,6 @@ export function diffTraces(
     right_step_count: rightSteps.length,
     diffs,
   };
-}
-
-function safeParseJson(raw: string | null): unknown {
-  if (raw === null || raw === undefined) return null;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return raw;
-  }
 }
 
 // ── AI-Powered Diff Analysis ────────────────────────────────────────────

@@ -1,10 +1,6 @@
 import type Database from 'better-sqlite3';
-import { nanoid } from 'nanoid';
 import type { ForkResult } from '../models/types.js';
-
-function generateId(prefix: string): string {
-  return `${prefix}_${nanoid(12)}`;
-}
+import { generateId } from '../utils/id.js';
 
 /**
  * Fork a trace at a specific step, creating a new trace that copies steps
