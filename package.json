@@ -56,7 +56,7 @@
     "figures": "^6.1.0",
     "nanoid": "^5.0.9",
     "ora": "^8.1.1",
-    "yaml": "^2.6.1"
+    "yaml": "^2.8.3"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
