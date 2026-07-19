@@ -164,6 +164,38 @@ describe('CLI integration', () => {
     expect(r.stdout).toMatch(/go|completed/i);
   });
 
+  it('diffs two traces and reports the model divergence', () => {
+    const a = join(dir, '..', 'a.jsonl');
+    const b = join(dir, '..', 'b.jsonl');
+    writeFileSync(a, JSON.stringify({ agent_name: 'd', status: 'completed', steps: [{ step_number: 1, step_type: 'llm_call', name: 'g', model: 'gpt-4' }] }));
+    writeFileSync(b, JSON.stringify({ agent_name: 'd', status: 'completed', steps: [{ step_number: 1, step_type: 'llm_call', name: 'g', model: 'gpt-5.4-nano' }] }));
+    run(['ingest', a]);
+    run(['ingest', b]);
+    const items = JSON.parse(run(['list', '--json']).stdout).items;
+    const res = run(['diff', items[0].id, items[1].id, '--json']);
+    expect(res.code).toBe(0);
+    const diff = JSON.parse(res.stdout);
+    expect(diff.diffs.some((x: { field: string }) => x.field === 'model')).toBe(true);
+  });
+
+  it('forks a trace, copying steps up to the fork point', () => {
+    const stream = [
+      '{"v":1,"type":"trace_start","trace_id":"tfk","agent_name":"f"}',
+      '{"v":1,"type":"step","trace_id":"tfk","step_number":1,"step_type":"thought","name":"a"}',
+      '{"v":1,"type":"step","trace_id":"tfk","step_number":2,"step_type":"tool_call","name":"b"}',
+      '{"v":1,"type":"step","trace_id":"tfk","step_number":3,"step_type":"output","name":"c"}',
+      '{"v":1,"type":"trace_end","trace_id":"tfk","status":"completed"}',
+    ].join('\n');
+    run(['record'], stream);
+    expect(run(['fork', 'tfk', '--from-step', '2']).code).toBe(0);
+    // A new trace exists whose lineage points at the original.
+    const forked = JSON.parse(run(['list', '--json']).stdout).items.find((t: { parent_trace_id: string | null }) => t.parent_trace_id);
+    expect(forked).toBeTruthy();
+    const full = JSON.parse(run(['show', forked.id, '--json']).stdout);
+    expect(full.steps).toHaveLength(2); // steps 1..2 copied
+    expect(full.forked_from_step).toBe(2);
+  });
+
   it('exits non-zero and reports on an unknown command', () => {
     const r = run(['definitely-not-a-command']);
     expect(r.code).not.toBe(0);
