@@ -6,7 +6,7 @@ import { ensureDatabase } from '../db/index.js';
 import { traceTable } from '../ui/table.js';
 import { heading } from '../ui/theme.js';
 import { parseSinceToIso } from '../utils/time.js';
-import { safeParseInt } from '../utils/json.js';
+import { safeParseInt, errorMessage } from '../utils/json.js';
 
 export interface ListOptions {
   status?: string;
@@ -41,7 +41,14 @@ export function runList(opts: ListOptions = {}): void {
   }
   filter.limit = safeParseInt(opts.limit, 25);
 
-  const { items: traces, total } = listTraces(db, filter);
+  let traces, total;
+  try {
+    ({ items: traces, total } = listTraces(db, filter));
+  } catch (err) {
+    console.error(chalk.red(`  ${errorMessage(err)}`));
+    process.exitCode = 2;
+    return;
+  }
 
   if (opts.json) {
     console.log(JSON.stringify({ items: traces, total }, null, 2));

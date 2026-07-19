@@ -255,6 +255,10 @@ describe('listTraces', () => {
     const { items } = listTraces(db, { sort_by: 'tokens', sort_order: 'asc' });
     expect(items[0].total_tokens).toBeLessThanOrEqual(items[1].total_tokens!);
   });
+
+  it('rejects an unknown sort field instead of silently defaulting', () => {
+    expect(() => listTraces(db, { sort_by: 'nonsense' })).toThrow(/Invalid sort field/);
+  });
 });
 
 // ── updateTrace ───────────────────────────────────────────────────────────

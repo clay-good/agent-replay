@@ -648,10 +648,13 @@ export function listTraces(
     cost: 'total_cost_usd',
     agent_name: 'agent_name',
   };
-  const allowedColumns = new Set(Object.values(sortMap));
-  const sortCol = sortMap[filter.sort_by ?? 'started_at'] ?? 'started_at';
-  if (!allowedColumns.has(sortCol)) {
-    throw new Error(`Invalid sort column: ${filter.sort_by}`);
+  // Reject an unknown sort field rather than silently falling back to the
+  // default order (which would hide the user's mistake). sortCol is always one
+  // of the whitelisted column names, so it is safe to interpolate below.
+  const sortKey = filter.sort_by ?? 'started_at';
+  const sortCol = sortMap[sortKey];
+  if (!sortCol) {
+    throw new Error(`Invalid sort field: '${sortKey}'. Valid: ${Object.keys(sortMap).join(', ')}`);
   }
   const sortDir = filter.sort_order === 'asc' ? 'ASC' : 'DESC';
 
