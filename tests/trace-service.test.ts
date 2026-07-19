@@ -216,6 +216,15 @@ describe('listTraces', () => {
     expect(items).toHaveLength(2);
   });
 
+  it('populates step_count for the list view', () => {
+    ingestTrace(db, makeTrace()); // makeTrace has 3 steps
+    ingestTrace(db, makeTrace({ agent_name: 'no-steps', steps: [] }));
+    const { items } = listTraces(db, { sort_by: 'agent_name', sort_order: 'asc' });
+    const byAgent = Object.fromEntries(items.map((t) => [t.agent_name, t.step_count]));
+    expect(byAgent['no-steps']).toBe(0);
+    expect(byAgent['test-agent']).toBe(3);
+  });
+
   it('filters by status', () => {
     ingestTrace(db, makeTrace({ status: 'completed' }));
     ingestTrace(db, makeTrace({ status: 'failed' }));

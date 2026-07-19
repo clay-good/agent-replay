@@ -119,8 +119,8 @@ export function policyTable(policies: GuardrailPolicy[]): string {
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 function stepCountStr(trace: Trace): string {
-  // We don't have step count on the Trace object directly,
-  // so we show '-' unless metadata has it
+  // listTraces computes step_count; fall back to metadata, then a dash.
+  if (trace.step_count != null) return String(trace.step_count);
   const meta = trace.metadata as Record<string, unknown>;
   if (meta?.step_count != null) return String(meta.step_count);
   return chalk.dim('-');

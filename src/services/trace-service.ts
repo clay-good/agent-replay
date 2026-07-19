@@ -665,14 +665,22 @@ export function listTraces(
     .prepare(`SELECT COUNT(*) as cnt FROM agent_traces ${whereClause}`)
     .get([...params]) as { cnt: number };
 
+  // Include a per-trace step count (fast via idx_agent_trace_steps_trace) so the
+  // list view can show it instead of a placeholder dash.
   const rows = db
     .prepare(
-      `SELECT * FROM agent_traces ${whereClause} ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?`,
+      `SELECT *,
+        (SELECT COUNT(*) FROM agent_trace_steps s WHERE s.trace_id = agent_traces.id) AS step_count
+       FROM agent_traces ${whereClause} ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?`,
     )
     .all([...params, limit, offset]) as Record<string, unknown>[];
 
   return {
-    items: rows.map(rowToTrace),
+    items: rows.map((row) => {
+      const trace = rowToTrace(row);
+      trace.step_count = (row.step_count as number) ?? 0;
+      return trace;
+    }),
     total: countRow.cnt,
   };
 }

@@ -30,6 +30,8 @@ export interface Trace {
   forked_from_step: number | null;
   session_id: string | null;
   created_at: string;
+  /** Not a stored column — populated by listTraces for display (step count). */
+  step_count?: number;
 }
 
 // ── Decision records ──────────────────────────────────────────────────────
