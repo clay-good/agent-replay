@@ -62,14 +62,13 @@ export function parseDurationString(str: string): number {
  * Returns the original string if it looks like an ISO date already.
  */
 export function parseSinceToIso(since: string): string {
-  // If it looks like an ISO date, return as-is
+  // An ISO date is used as-is.
   if (/^\d{4}-\d{2}/.test(since)) return since;
-  try {
-    const ms = parseDurationString(since);
-    return new Date(Date.now() - ms).toISOString();
-  } catch {
-    return since; // Let the database handle it
-  }
+  // Otherwise it must be a duration (1h, 7d, 30m, …). parseDurationString throws
+  // on anything unparseable — surface that rather than passing garbage to the DB,
+  // which would silently produce wrong results.
+  const ms = parseDurationString(since);
+  return new Date(Date.now() - ms).toISOString();
 }
 
 /**

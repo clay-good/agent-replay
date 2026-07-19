@@ -32,7 +32,15 @@ export function runExport(opts: ExportOptions = {}): void {
   if (opts.status) filter.status = opts.status;
   if (opts.agent) filter.agent_name = opts.agent;
   if (opts.tag) filter.tag = opts.tag;
-  if (opts.since) filter.since = parseSinceToIso(opts.since);
+  if (opts.since) {
+    try {
+      filter.since = parseSinceToIso(opts.since);
+    } catch (err) {
+      console.error(chalk.red(`  ${errorMessage(err)}`));
+      process.exitCode = 2;
+      return;
+    }
+  }
 
   const format = (opts.format ?? 'json') as ExportFormat;
   const validFormats: ExportFormat[] = ['json', 'jsonl', 'golden'];

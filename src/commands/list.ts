@@ -33,7 +33,6 @@ export function runList(opts: ListOptions = {}): void {
   if (opts.agent) filter.agent_name = opts.agent;
   if (opts.tag) filter.tag = opts.tag;
   if (opts.session) filter.session_id = opts.session;
-  if (opts.since) filter.since = parseSinceToIso(opts.since);
   if (opts.sort) {
     const desc = opts.sort.startsWith('-');
     filter.sort_by = desc ? opts.sort.slice(1) : opts.sort;
@@ -43,6 +42,7 @@ export function runList(opts: ListOptions = {}): void {
 
   let traces, total;
   try {
+    if (opts.since) filter.since = parseSinceToIso(opts.since);
     ({ items: traces, total } = listTraces(db, filter));
   } catch (err) {
     console.error(chalk.red(`  ${errorMessage(err)}`));

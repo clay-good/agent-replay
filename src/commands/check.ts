@@ -59,7 +59,15 @@ export function runCheck(opts: CheckOptions = {}): void {
   } else {
     const filter: Record<string, unknown> = { limit: 10000 };
     if (opts.agent) filter.agent_name = opts.agent;
-    if (opts.since) filter.since = parseSinceToIso(opts.since);
+    if (opts.since) {
+      try {
+        filter.since = parseSinceToIso(opts.since);
+      } catch (err) {
+        console.error(chalk.red(`  ${errorMessage(err)}`));
+        process.exitCode = 2;
+        return;
+      }
+    }
     const { items } = listTraces(db, filter);
     for (const item of items) {
       const full = getTrace(db, item.id);
