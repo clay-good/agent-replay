@@ -196,6 +196,24 @@ describe('CLI integration', () => {
     expect(full.forked_from_step).toBe(2);
   });
 
+  it('runs deterministic evaluations offline via eval --all', () => {
+    const f = join(dir, '..', 'e.jsonl');
+    writeFileSync(f, JSON.stringify({
+      agent_name: 'ev', status: 'completed',
+      output: { text: 'Here is the answer.' },
+      steps: [{ step_number: 1, step_type: 'output', name: 'respond', output: { text: 'Here is the answer.' } }],
+    }));
+    run(['ingest', f]);
+    const id = firstTraceId();
+    const res = run(['eval', id, '--all', '--json']);
+    expect(res.code).toBe(0);
+    // Deterministic presets produce scored results without any API key.
+    const parsed = JSON.parse(res.stdout);
+    const results = Array.isArray(parsed) ? parsed : parsed.results ?? parsed.evals ?? [];
+    expect(results.length).toBeGreaterThan(0);
+    expect(typeof results[0].score).toBe('number');
+  });
+
   it('exits non-zero and reports on an unknown command', () => {
     const r = run(['definitely-not-a-command']);
     expect(r.code).not.toBe(0);
