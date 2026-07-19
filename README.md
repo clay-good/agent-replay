@@ -26,10 +26,11 @@ Every time you fix a bug, it might break something else. `agent-replay export --
 
 ## What It Is
 
-A CLI tool that stores agent execution traces in a local SQLite database and gives you tools to debug, evaluate, compare, and protect your AI agents.
+A CLI tool that stores agent execution traces in a local SQLite database and gives you tools to debug, evaluate, compare, and protect your AI agents — both after the fact and **live**, as an agent runs.
 
 - 100% local. Single SQLite file. No cloud dependency.
-- Works with any agent framework — just export your traces as JSON.
+- Works with any agent framework — export traces as JSON, or capture live from the harnesses people already use: the [hook convention](#hook-capture) (Claude Code, Codex CLI, Gemini CLI), the [CLIs' own event streams](#live-capture), [OpenTelemetry](#opentelemetry-ingest), or [`agent-replay run`](#run-under-supervision).
+- More than an observer: [enforce guardrails](#enforcement-block-dangerous-tool-calls-live) at the moment a dangerous tool call is attempted, and turn known-good runs into a [CI regression gate](#regression-check-ci).
 - AI-powered evaluation using your own API key (Anthropic, Google, or OpenAI). Uses the cheapest models by default.
 
 ## Quick Start

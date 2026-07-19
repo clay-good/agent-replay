@@ -1,6 +1,6 @@
 {
   "name": "agent-replay",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Agent Flight Data Recorder & Replay Engine — time-travel debugging, auto-eval, and what-if sandboxing for AI agents",
   "type": "module",
   "license": "MIT",
