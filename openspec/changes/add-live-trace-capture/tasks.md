@@ -27,11 +27,11 @@
 
 ## 5. Hook-convention adapter
 
-- [ ] 5.1 `agent-replay hook [event]`: dialect auto-detection from `hook_event_name`; mappings for Claude Code/Codex (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `SubagentStart`, `SubagentStop`, `Stop`, `SessionEnd`) and Gemini (`SessionStart`, `BeforeAgent`, `AfterAgent`, `BeforeTool`, `AfterTool`, `SessionEnd`); correlate by `session_id`; raw payload → step metadata; Codex `turn_id`/`model` → metadata
-- [ ] 5.2 Subagent nesting: SubagentStart/Stop anchor step; tool events parented by matching payload `agent_id` (fall back to ordering for dialects without it); `agent_id`/`agent_type`/`depth` in metadata; accept both `tool_output` (Claude Code) and `tool_response` (Codex/Gemini) result fields
-- [ ] 5.3 Capture mode always exits 0 and writes nothing to stdout (stdout JSON is a hook decision in all three dialects); `--no-input` drops prompt/tool-input content
-- [ ] 5.4 README: registration snippets — Claude Code `settings.json` `hooks` block, Codex `config.toml` `[[hooks.*]]` (note `/hooks` trust step and minimum version), Gemini `settings.json` `hooks` block (v0.26.0+)
-- [ ] 5.5 Test: replayed fixture payload sequences per dialect yield one coherent trace per session
+- [x] 5.1 `agent-replay hook [event]`: dialect auto-detection from `hook_event_name`; mappings for Claude Code/Codex (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `SubagentStart`, `SubagentStop`, `Stop`, `SessionEnd`) and Gemini (`SessionStart`, `BeforeAgent`, `AfterAgent`, `BeforeTool`, `AfterTool`, `SessionEnd`); correlate by `session_id`; raw payload → step metadata; Codex `turn_id`/`model` → metadata
+- [x] 5.2 Subagent nesting: SubagentStart/Stop anchor step; tool events parented by matching payload `agent_id` (fall back to ordering for dialects without it); `agent_id`/`agent_type`/`depth` in metadata; accept both `tool_output` (Claude Code) and `tool_response` (Codex/Gemini) result fields
+- [x] 5.3 Capture mode always exits 0 and writes nothing to stdout (stdout JSON is a hook decision in all three dialects); `--no-input` drops prompt/tool-input content
+- [x] 5.4 README: registration snippets — Claude Code `settings.json` `hooks` block, Codex `config.toml` `[[hooks.*]]` (note `/hooks` trust step and minimum version), Gemini `settings.json` `hooks` block (v0.26.0+)
+- [x] 5.5 Test: replayed fixture payload sequences per dialect yield one coherent trace per session
 
 ## 6. Session-log importers
 

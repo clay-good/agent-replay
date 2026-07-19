@@ -89,6 +89,50 @@ Each event is one JSON object on its own line carrying `v: 1`, a `type`, and (ex
 
 Unknown event types and fields are skipped with a warning, never a crash — a newer producer stays compatible. A trace left open when the stream ends is finalized as `timeout` unless `--leave-open`.
 
+#### Hook capture
+
+`agent-replay hook` plugs into the stdin-JSON hook convention shared by Claude Code, OpenAI Codex CLI, and Gemini CLI. It's stateless — each invocation correlates to a trace by the payload's `session_id` — and auto-detects the dialect, so no flag is needed. Capture is side-effect-only: it always exits 0 and writes nothing to stdout (in these harnesses exit 2 blocks the agent and stdout is read as a hook decision), so it can never interfere with a run. Add `--no-input` to drop prompt text and tool inputs on shared machines.
+
+**Claude Code** — `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "agent-replay hook" }] }],
+    "PreToolUse":  [{ "hooks": [{ "type": "command", "command": "agent-replay hook" }] }],
+    "PostToolUse": [{ "hooks": [{ "type": "command", "command": "agent-replay hook" }] }],
+    "SubagentStart": [{ "hooks": [{ "type": "command", "command": "agent-replay hook" }] }],
+    "SubagentStop":  [{ "hooks": [{ "type": "command", "command": "agent-replay hook" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "agent-replay hook" }] }]
+  }
+}
+```
+
+**Codex CLI** — `~/.codex/config.toml` (then trust the hooks via `/hooks`; requires a Codex build with hook support):
+
+```toml
+[[hooks.PreToolUse]]
+command = "agent-replay hook"
+[[hooks.PostToolUse]]
+command = "agent-replay hook"
+[[hooks.Stop]]
+command = "agent-replay hook"
+```
+
+**Gemini CLI** (v0.26.0+) — `~/.gemini/settings.json`:
+
+```json
+{
+  "hooks": {
+    "BeforeTool": [{ "hooks": [{ "type": "command", "command": "agent-replay hook" }] }],
+    "AfterTool":  [{ "hooks": [{ "type": "command", "command": "agent-replay hook" }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "agent-replay hook" }] }]
+  }
+}
+```
+
+Then watch a live session with [`agent-replay watch`](#explain-decisions).
+
 ### Browse
 
 ```bash

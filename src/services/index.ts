@@ -2,6 +2,7 @@ export * from './trace-service.js';
 export * from './decision-service.js';
 export * from './event-protocol.js';
 export * from './recorder.js';
+export * from './hook-adapter.js';
 export * from './diff-service.js';
 export * from './fork-service.js';
 export * from './eval-service.js';

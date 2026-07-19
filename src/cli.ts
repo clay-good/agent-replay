@@ -69,6 +69,17 @@ program
     await runRecord(opts);
   });
 
+// --- hook ---
+program
+  .command('hook [event]')
+  .description('Capture adapter for the stdin-JSON hook convention (Claude Code / Codex / Gemini)')
+  .option('--no-input', 'Drop prompt text and tool inputs before storing')
+  .option('--dir <path>', 'Custom data directory')
+  .action(async (event, opts) => {
+    const { runHook } = await import('./commands/hook.js');
+    await runHook(event, { noInput: opts.input === false, dir: opts.dir });
+  });
+
 // --- list ---
 program
   .command('list')
