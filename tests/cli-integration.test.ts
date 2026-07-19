@@ -32,6 +32,7 @@ function run(args: string[], input?: string): RunResult {
       encoding: 'utf8',
       input: input ?? '',
       stdio: input !== undefined ? ['pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'],
+      timeout: 20000, // a hung command (e.g. a watch that never exits) fails, not blocks
     });
     return { stdout, stderr: '', code: 0 };
   } catch (e) {
@@ -145,6 +146,22 @@ describe('CLI integration', () => {
     ].map((r) => JSON.stringify(r)).join('\n'));
     expect(run(['import', t, '--format', 'claude-transcript']).code).toBe(0);
     expect(JSON.parse(run(['list', '--session', 'imp1', '--json']).stdout).total).toBe(1);
+  });
+
+  it('watch on a completed trace renders it and exits (no hang)', () => {
+    // A regression that hangs (never detecting completion) or exits before
+    // polling would break live-tailing; this locks the exit-on-completion path.
+    const stream = [
+      '{"v":1,"type":"trace_start","trace_id":"tw","agent_name":"w"}',
+      '{"v":1,"type":"step","trace_id":"tw","step_number":1,"step_type":"tool_call","name":"go"}',
+      '{"v":1,"type":"trace_end","trace_id":"tw","status":"completed"}',
+    ].join('\n');
+    run(['record'], stream);
+    // Short poll so the first tick detects completion quickly; execFileSync would
+    // throw ETIMEDOUT (not exit 0) if watch hung.
+    const r = run(['watch', 'tw', '--interval', '50']);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/go|completed/i);
   });
 
   it('exits non-zero and reports on an unknown command', () => {
