@@ -203,6 +203,25 @@ describe('trace summarizer', () => {
     // Small budget should produce shorter text
     expect(small.text.length).toBeLessThanOrEqual(big.text.length);
   });
+
+  it('includes decision records so an AI evaluator can reason about choices', () => {
+    const db = createTestDb();
+    const trace = ingestTrace(db, {
+      agent_name: 'decider',
+      status: 'completed',
+      steps: [
+        {
+          step_number: 1,
+          step_type: 'decision',
+          name: 'pick_tool',
+          decision: { chosen: 'search_flights', rationale: 'destination is unambiguous', confidence: 0.9, decided_by: 'agent' },
+        },
+      ],
+    });
+    const summary = summarizeTrace(getTrace(db, trace.id)!);
+    expect(summary.text).toContain('chose: search_flights');
+    expect(summary.text).toContain('destination is unambiguous');
+  });
 });
 
 describe('cost estimation', () => {

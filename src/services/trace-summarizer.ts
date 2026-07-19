@@ -154,6 +154,16 @@ function summarizeSteps(steps: TraceStep[], charBudget: number): string[] {
       line += `\n   input: ${inStr}`;
     }
 
+    // Decision record — the chosen option and why, so an AI evaluator can reason
+    // about the agent's choices (root-cause / quality analysis).
+    if (step.decision) {
+      const d = step.decision;
+      const conf = d.confidence != null ? ` (confidence ${d.confidence})` : '';
+      const by = d.decided_by ? ` by ${d.decided_by}` : '';
+      line += `\n   chose: ${d.chosen}${conf}${by}`;
+      if (d.rationale) line += `\n   rationale: ${truncate(d.rationale, 150)}`;
+    }
+
     // Error detail
     if (step.error) {
       line += `\n   error: ${truncate(step.error, 150)}`;
