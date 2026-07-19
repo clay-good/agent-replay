@@ -76,7 +76,14 @@ my-agent --emit-events | agent-replay record --tags production
 my-agent --emit-events | agent-replay record --leave-open
 ```
 
-Each event is one JSON object on its own line carrying `v: 1`, a `type`, and (except `trace_start`) the `trace_id` the producer generated:
+`record` also speaks the major CLIs' own non-interactive streams directly, so you can pipe them in without instrumentation:
+
+```bash
+codex exec --json "fix the failing tests"      | agent-replay record --format codex-exec
+gemini -p "summarize" --output-format stream-json | agent-replay record --format gemini-stream
+```
+
+For the native protocol, each event is one JSON object on its own line carrying `v: 1`, a `type`, and (except `trace_start`) the `trace_id` the producer generated:
 
 | Event | Purpose |
 |-------|---------|

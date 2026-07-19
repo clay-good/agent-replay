@@ -2,6 +2,7 @@ export * from './trace-service.js';
 export * from './decision-service.js';
 export * from './event-protocol.js';
 export * from './recorder.js';
+export * from './stream-translators.js';
 export * from './hook-adapter.js';
 export * from './importers/claude-transcript.js';
 export * from './diff-service.js';

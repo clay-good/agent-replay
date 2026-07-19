@@ -20,10 +20,10 @@
 ## 4. `record` command
 
 - [x] 4.1 `agent-replay record` reading JSONL from stdin; `--tags`, `--leave-open`
-- [ ] 4.2 `--format codex-exec` translator: `thread.started`→trace (thread_id→session_id), `item.*` (`agent_message`, `reasoning`, `command_execution`, `mcp_tool_call`, `file_change`, `web_search`)→typed steps, `turn.completed` usage→totals, `turn.failed`/`error`→failed
-- [ ] 4.3 `--format gemini-stream` translator: `init`→trace, `tool_use`/`tool_result`→tool_call steps, `message`→output, `result`→finalize, exit codes 0/1/42/53 respected
+- [x] 4.2 `--format codex-exec` translator: `thread.started`→trace (thread_id→session_id), `item.*` (`agent_message`, `reasoning`, `command_execution`, `mcp_tool_call`, `file_change`, `web_search`)→typed steps, `turn.completed` usage→totals, `turn.failed`/`error`→failed
+- [x] 4.3 `--format gemini-stream` translator: `init`→trace, `tool_use`/`tool_result`→tool_call steps, `message`→output, `result`→finalize, exit codes 0/1/42/53 respected
 - [x] 4.4 Finalize still-open traces as `timeout` on EOF (unless `--leave-open`)
-- [ ] 4.5 Test: recorded fixture streams from `codex exec --json` and `gemini --output-format stream-json` produce correct traces; kill mid-stream → trace remains `running`
+- [x] 4.5 Test: recorded fixture streams from `codex exec --json` and `gemini --output-format stream-json` produce correct traces; kill mid-stream → trace remains `running`
 
 ## 5. Hook-convention adapter
 
@@ -37,7 +37,7 @@
 
 - [ ] 6.1 `agent-replay import <path> --format claude-transcript`: user/assistant/system records, `tool_use`/`tool_result` pairing by `tool_use_id`, `thinking` → thought steps, usage aggregation, subagent files under `<session>/subagents/`
 - [ ] 6.2 `--format codex-rollout`: `session_meta` → identity + git metadata, `response_item` `function_call`/`function_call_output` pairing by `call_id`, `reasoning` → thought, `compacted` → metadata
-- [ ] 6.3 Best-effort contract: skip-and-count unknown records, stamp `source_format`/`source_version`, report imported vs skipped
+- [x] 6.3 Best-effort contract: skip-and-count unknown records, stamp `source_format`/`source_version`, report imported vs skipped
 - [ ] 6.4 Test: fixture transcript and rollout files (pinned versions) import correctly; corrupted/newer records are skipped not fatal
 
 ## 7. `watch` command
@@ -48,5 +48,5 @@
 
 ## 8. Docs
 
-- [ ] 8.1 README: event protocol reference, SDK example, per-harness hook setup, `record`/`import`/`watch` usage, privacy notes (`--no-input`, harness-side content switches)
-- [ ] 8.2 `npm run verify` passes
+- [x] 8.1 README: event protocol reference, SDK example, per-harness hook setup, `record`/`import`/`watch` usage, privacy notes (`--no-input`, harness-side content switches)
+- [x] 8.2 `npm run verify` passes
