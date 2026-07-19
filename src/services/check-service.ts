@@ -71,8 +71,17 @@ export function checkGolden(
   if (unknown.length > 0) {
     throw new Error(`Unknown --fields value(s): ${unknown.join(', ')}. Known fields: ${KNOWN_FIELDS.join(', ')}`);
   }
-  const index = new Map<string, GoldenEntry>();
-  for (const g of golden) index.set(goldenKey(g.agent_name, g.input), g);
+  // Bucket golden entries by key: several can share one (repeated runs of the
+  // same agent with the same input, or a fork). A plain Map would keep only the
+  // last, so the others' candidates would match the wrong entry and falsely
+  // "regress".
+  const index = new Map<string, GoldenEntry[]>();
+  for (const g of golden) {
+    const key = goldenKey(g.agent_name, g.input);
+    const bucket = index.get(key);
+    if (bucket) bucket.push(g);
+    else index.set(key, [g]);
+  }
 
   const results: TraceCheckResult[] = [];
   let passed = 0;
@@ -80,14 +89,26 @@ export function checkGolden(
   let unmatched = 0;
 
   for (const trace of candidates) {
-    const match = index.get(goldenKey(trace.agent_name, trace.input));
-    if (!match) {
+    const bucket = index.get(goldenKey(trace.agent_name, trace.input));
+    if (!bucket || bucket.length === 0) {
       unmatched++;
       results.push({ trace_id: trace.id, agent_name: trace.agent_name, matched: false, passed: !opts.strict, divergences: [] });
       continue;
     }
 
-    const divergences = diffAgainstGolden(trace, match, fields);
+    // Pair the candidate with its closest golden entry in the bucket (fewest
+    // divergences), then consume it so distinct candidates don't collide.
+    let bestIdx = 0;
+    let divergences = diffAgainstGolden(trace, bucket[0], fields);
+    for (let i = 1; i < bucket.length && divergences.length > 0; i++) {
+      const div = diffAgainstGolden(trace, bucket[i], fields);
+      if (div.length < divergences.length) {
+        bestIdx = i;
+        divergences = div;
+      }
+    }
+    bucket.splice(bestIdx, 1);
+
     const ok = divergences.length === 0;
     if (ok) passed++;
     else failed++;

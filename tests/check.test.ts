@@ -59,6 +59,23 @@ describe('checkGolden', () => {
     expect(report.failed).toBe(0);
   });
 
+  it('pairs distinct candidates that share an agent+input key without false regressions', () => {
+    // Two runs of the same agent with the same input but different shapes — an
+    // original and its fork, say. A plain golden index kept only the last, so
+    // the other candidate matched the wrong entry and "regressed".
+    const shapeA: IngestTraceInput = { agent_name: 'dup', status: 'completed', input: { task: 't' }, steps: [{ step_number: 1, step_type: 'output', name: 'a' }] };
+    const shapeB: IngestTraceInput = { agent_name: 'dup', status: 'completed', input: { task: 't' }, steps: [{ step_number: 1, step_type: 'thought', name: 'x' }, { step_number: 2, step_type: 'output', name: 'b' }] };
+    ingestTrace(db, shapeA);
+    ingestTrace(db, shapeB);
+    const golden = JSON.parse(exportTraces(db, { agent_name: 'dup' }, 'golden')) as GoldenEntry[];
+    expect(golden).toHaveLength(2);
+
+    const report = checkGolden(golden, [candidate(shapeA), candidate(shapeB)]);
+    expect(report.ok).toBe(true); // each candidate matched its own counterpart
+    expect(report.passed).toBe(2);
+    expect(report.failed).toBe(0);
+  });
+
   it('fails and names the divergent field when a tool input changes', () => {
     const golden = makeGolden();
     const altered: IngestTraceInput = {
