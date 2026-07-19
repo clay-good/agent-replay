@@ -513,6 +513,11 @@ export function getTrace(
   db: Database.Database,
   traceId: string,
 ): TraceWithDetails | null {
+  // A blank id is never a valid trace. Without this guard the `id LIKE ?`
+  // prefix match below turns into `LIKE '%'`, which matches every row and
+  // resolves to an arbitrary trace instead of reporting "not found".
+  if (!traceId || !traceId.trim()) return null;
+
   // Support prefix-matching
   const traceRow = db
     .prepare('SELECT * FROM agent_traces WHERE id = ? OR id LIKE ? LIMIT 1')

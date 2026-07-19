@@ -103,6 +103,14 @@ describe('ingestTrace', () => {
     expect(full!.steps[2].step_type).toBe('output');
   });
 
+  it('treats a blank trace id as not found, not a wildcard match', () => {
+    // `id LIKE ''||'%'` would match every row; a blank id must resolve to null
+    // so commands report "not found" instead of an arbitrary trace.
+    ingestTrace(db, makeTrace());
+    expect(getTrace(db, '')).toBeNull();
+    expect(getTrace(db, '   ')).toBeNull();
+  });
+
   it('inserts snapshots for steps that have them', () => {
     const trace = ingestTrace(db, makeTrace());
     const snap = getStepSnapshot(db, trace.id, 2);
