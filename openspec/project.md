@@ -63,4 +63,4 @@
 ## External Dependencies
 
 - Anthropic / Google Gemini / OpenAI HTTP APIs (optional, for `eval --ai` and `diff --ai`)
-- Default eval model IDs live in `src/services/llm-client.ts`. As of 2026-07 the shipped defaults are partly stale: `claude-haiku-4-5-20251001` is still current ($1.00/$5.00 per MTok), but `gemini-2.0-flash` should move to `gemini-2.5-flash-lite` ($0.10/$0.40) and `gpt-4o-mini` to `gpt-5.4-nano` ($0.20/$1.25) or `gpt-5.4-mini`
+- Default eval model IDs live in `src/services/llm-client.ts` (mirrored in `src/services/config-service.ts`). As of 2026-07 the shipped defaults are current: `claude-haiku-4-5-20251001` ($1.00/$5.00 per MTok), `gemini-2.5-flash-lite` ($0.10/$0.40), and `gpt-5.4-nano` ($0.20/$1.25). `COST_TABLE` in `llm-client.ts` must carry a matching entry for any default

@@ -213,7 +213,8 @@ describe('cost estimation', () => {
   });
 
   it('estimates cost for gemini flash', () => {
-    const cost = estimateCost('gemini-2.0-flash', 1000, 500);
+    const cost = estimateCost('gemini-2.5-flash-lite', 1000, 500);
+    expect(cost).toBeGreaterThan(0);
     expect(cost).toBeLessThan(estimateCost('claude-haiku-4-5-20251001', 1000, 500));
   });
 

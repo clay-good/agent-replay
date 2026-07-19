@@ -31,8 +31,8 @@ export interface ResolvedProvider {
 
 const DEFAULT_MODELS: Record<string, string> = {
   anthropic: 'claude-haiku-4-5-20251001',
-  google: 'gemini-2.0-flash',
-  openai: 'gpt-4o-mini',
+  google: 'gemini-2.5-flash-lite',
+  openai: 'gpt-5.4-nano',
 };
 
 // ── Env var names ────────────────────────────────────────────────────────

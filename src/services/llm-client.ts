@@ -40,14 +40,14 @@ export class LlmError extends Error {
 
 export const COST_TABLE: Record<string, { input: number; output: number }> = {
   'claude-haiku-4-5-20251001': { input: 1.0, output: 5.0 },
-  'gemini-2.0-flash': { input: 0.1, output: 0.4 },
-  'gpt-4o-mini': { input: 0.15, output: 0.6 },
+  'gemini-2.5-flash-lite': { input: 0.1, output: 0.4 },
+  'gpt-5.4-nano': { input: 0.2, output: 1.25 },
 };
 
 const DEFAULT_MODELS: Record<string, string> = {
   anthropic: 'claude-haiku-4-5-20251001',
-  google: 'gemini-2.0-flash',
-  openai: 'gpt-4o-mini',
+  google: 'gemini-2.5-flash-lite',
+  openai: 'gpt-5.4-nano',
 };
 
 // ── Main entry ──────────────────────────────────────────────────────────

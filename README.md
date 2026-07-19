@@ -586,8 +586,8 @@ All fields are optional. When multiple fields are specified, all must match (AND
 `agent-replay` auto-detects your API key in this priority order:
 
 1. **Anthropic** (default model: `claude-haiku-4-5-20251001`)
-2. **Google Gemini** (default model: `gemini-2.0-flash`)
-3. **OpenAI** (default model: `gpt-4o-mini`)
+2. **Google Gemini** (default model: `gemini-2.5-flash-lite`)
+3. **OpenAI** (default model: `gpt-5.4-nano`)
 
 Set a key via environment variable or config:
 
