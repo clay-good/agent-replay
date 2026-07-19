@@ -131,6 +131,18 @@ describe('OTLP receiver', () => {
     expect(handleTracesExport(db, '{not json', stats).status).toBe(400);
   });
 
+  it('maps even an orphan span (no traceId) to a synthetic trace rather than rejecting it', () => {
+    // flattenSpans normalizes a missing traceId to '' and every group becomes a
+    // trace, so no counted span is ever dropped. (This is why the receiver's
+    // partial_success branch is currently unreachable.)
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    const payload = otlp([{ spanId: 'orphan', name: 'chat', startTimeUnixNano: '1', attributes: [] }]);
+    const res = handleTracesExport(db, JSON.stringify(payload), stats);
+    expect(res.status).toBe(200);
+    expect(res.payload).toEqual({}); // full success, not partial
+    expect(listTraces(db, {}).total).toBe(1);
+  });
+
   it('accepts a real OTLP/JSON POST over HTTP', async () => {
     const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
     const handle = await startOtelReceiver(db, 0, stats);
