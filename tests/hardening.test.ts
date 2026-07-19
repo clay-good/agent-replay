@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runMigrations } from '../src/db/migrations.js';
@@ -260,6 +260,24 @@ describe('default show view exposes v2 fields', () => {
       session_id: null, created_at: '2026-01-01T00:00:00Z',
     };
     expect(noAnsi(traceHeaderPanel(trace))).not.toContain('Session:');
+  });
+});
+
+// ── A corrupt database yields a clean error, not a raw SqliteError ─────────
+
+describe('corrupt database handling', () => {
+  it('throws a clear, actionable error instead of a raw SqliteError', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ar-corrupt-'));
+    const dbPath = join(root, '.agent-replay', 'traces.db');
+    try {
+      // A non-SQLite file at the path (interrupted write, disk issue, wrong file).
+      mkdirSync(join(root, '.agent-replay'), { recursive: true });
+      writeFileSync(dbPath, 'this is not a sqlite database');
+      expect(() => ensureDatabase(dbPath)).toThrow(/corrupted or not a valid SQLite file/i);
+    } finally {
+      resetConnection();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

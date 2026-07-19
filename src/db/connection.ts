@@ -31,17 +31,32 @@ export class DatabaseConnection {
       // Non-POSIX filesystem — leave as-is rather than fail.
     }
 
-    this.db = new Database(this.dbPath);
-
-    // Enable WAL mode for better concurrent read performance — one writer plus
-    // concurrent readers, which covers live capture (record/hook writers) and
-    // watch/dashboard readers against the same file.
-    this.db.pragma('journal_mode = WAL');
-    // Wait up to 3s for a competing writer's lock instead of failing fast with
-    // SQLITE_BUSY, so short-lived hook processes and readers can coexist.
-    this.db.pragma('busy_timeout = 3000');
-    // Enable foreign key enforcement
-    this.db.pragma('foreign_keys = ON');
+    try {
+      this.db = new Database(this.dbPath);
+      // Enable WAL mode for better concurrent read performance — one writer plus
+      // concurrent readers, which covers live capture (record/hook writers) and
+      // watch/dashboard readers against the same file. (This pragma is also the
+      // first real read of the file, so a corrupt DB surfaces here.)
+      this.db.pragma('journal_mode = WAL');
+      // Wait up to 3s for a competing writer's lock instead of failing fast with
+      // SQLITE_BUSY, so short-lived hook processes and readers can coexist.
+      this.db.pragma('busy_timeout = 3000');
+      // Enable foreign key enforcement
+      this.db.pragma('foreign_keys = ON');
+    } catch (err) {
+      // A corrupt or non-SQLite file at the path throws a raw SqliteError; turn
+      // it into a clear, actionable message instead of a stack trace.
+      try {
+        this.db?.close();
+      } catch {
+        // ignore — we're already failing
+      }
+      this.db = null;
+      throw new Error(
+        `Could not open the database at ${this.dbPath}. It may be corrupted or not a valid SQLite file. ` +
+          `(${(err as Error).message})`,
+      );
+    }
 
     return this.db;
   }

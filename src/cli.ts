@@ -393,4 +393,11 @@ configCmd
     await runConfigTestAi(opts);
   });
 
-program.parse(process.argv);
+// Parse asynchronously so a rejected command action (e.g. an unopenable/corrupt
+// database) is reported as a clean one-line error and a non-zero exit, rather
+// than an unhandled-rejection stack trace.
+program.parseAsync(process.argv).catch((err: unknown) => {
+  const message = err instanceof Error ? err.message : String(err);
+  process.stderr.write(`\n  ${message}\n\n`);
+  process.exitCode = 1;
+});
