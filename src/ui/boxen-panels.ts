@@ -42,6 +42,9 @@ export function traceHeaderPanel(trace: Trace): string {
   if (trace.parent_trace_id) {
     lines.push(`${label('Fork of:')}   ${chalk.dim(trace.parent_trace_id)} ${chalk.dim(`(step ${trace.forked_from_step})`)}`);
   }
+  if (trace.session_id) {
+    lines.push(`${label('Session:')}   ${chalk.white(trace.session_id)}`);
+  }
 
   return boxen(lines.join('\n'), {
     padding: 1,

@@ -89,6 +89,15 @@ export function renderTimeline(
       lines.push(`  ${chalk.dim(pipe)}      ${label('Output:')} ${chalk.dim(outputStr)}`);
     }
 
+    // Decision record (for decision steps)
+    if (step.decision) {
+      const conf = step.decision.confidence != null ? chalk.dim(` (confidence ${step.decision.confidence})`) : '';
+      lines.push(`  ${chalk.dim(pipe)}      ${label('Chose:')} ${chalk.greenBright(step.decision.chosen)}${conf}`);
+      if (step.decision.rationale) {
+        lines.push(`  ${chalk.dim(pipe)}      ${label('Because:')} ${chalk.dim(step.decision.rationale)}`);
+      }
+    }
+
     // Error
     if (step.error) {
       lines.push(`  ${chalk.dim(pipe)}      ${chalk.redBright('Error:')} ${chalk.red(step.error)}`);

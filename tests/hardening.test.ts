@@ -13,7 +13,9 @@ import { validateEvent } from '../src/services/event-protocol.js';
 import { applyEvent } from '../src/services/recorder.js';
 import { mapOtlpTraces } from '../src/services/otel/semconv.js';
 import { applyHookPayload } from '../src/services/hook-adapter.js';
-import { renderTree } from '../src/ui/timeline.js';
+import { renderTree, renderTimeline } from '../src/ui/timeline.js';
+import { traceHeaderPanel } from '../src/ui/boxen-panels.js';
+import type { Trace } from '../src/models/types.js';
 import { validateTraceInput } from '../src/utils/validators.js';
 import type { TraceStep } from '../src/models/types.js';
 import type { StepType } from '../src/models/enums.js';
@@ -189,6 +191,41 @@ describe('reference validation is wired into ingest', () => {
       ],
     });
     expect(r.valid).toBe(false);
+  });
+});
+
+// ── Default `show` surfaces v2 data (session + decision records) ───────────
+
+describe('default show view exposes v2 fields', () => {
+  it('renderTimeline shows a decision step\'s chosen option and rationale', () => {
+    const s = step({ step_number: 1, step_type: 'decision' as StepType, name: 'pick' });
+    s.decision = { id: 'd', step_id: '', options: [], chosen: 'A', rationale: 'A is faster', confidence: 0.9, decided_by: 'agent' };
+    const out = noAnsi(renderTimeline([s]));
+    expect(out).toContain('Chose:');
+    expect(out).toContain('A');
+    expect(out).toContain('A is faster');
+  });
+
+  it('traceHeaderPanel shows the session_id when present', () => {
+    const trace: Trace = {
+      id: 'trc_1', agent_name: 'bot', agent_version: null, trigger: 'manual', status: 'completed',
+      input: {}, output: null, started_at: '2026-01-01T00:00:00Z', ended_at: null,
+      total_duration_ms: null, total_tokens: null, total_cost_usd: null, error: null,
+      tags: [], metadata: {}, parent_trace_id: null, forked_from_step: null,
+      session_id: 'sess_abc', created_at: '2026-01-01T00:00:00Z',
+    };
+    expect(noAnsi(traceHeaderPanel(trace))).toContain('sess_abc');
+  });
+
+  it('omits the session line when there is no session', () => {
+    const trace: Trace = {
+      id: 'trc_2', agent_name: 'bot', agent_version: null, trigger: 'manual', status: 'completed',
+      input: {}, output: null, started_at: '2026-01-01T00:00:00Z', ended_at: null,
+      total_duration_ms: null, total_tokens: null, total_cost_usd: null, error: null,
+      tags: [], metadata: {}, parent_trace_id: null, forked_from_step: null,
+      session_id: null, created_at: '2026-01-01T00:00:00Z',
+    };
+    expect(noAnsi(traceHeaderPanel(trace))).not.toContain('Session:');
   });
 });
 
