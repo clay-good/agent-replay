@@ -4,6 +4,7 @@ import { gunzipSync } from 'node:zlib';
 import { ingestTrace } from '../trace-service.js';
 import { mapOtlpTraces } from './semconv.js';
 import { mapOtlpLogs } from './log-events.js';
+import { decodeTracesData } from './protobuf.js';
 
 /**
  * Minimal local OTLP/HTTP receiver. This slice accepts `POST /v1/traces` in the
@@ -57,7 +58,29 @@ export function handleTracesExport(
   } catch {
     return { status: 400, payload: { error: 'invalid JSON body' } };
   }
+  return ingestOtlpTraces(db, otlp, stats);
+}
 
+/** Handle one OTLP/protobuf traces export (decoded to the shared shape). */
+export function handleTracesExportProtobuf(
+  db: Database.Database,
+  body: Buffer,
+  stats: OtelStats,
+): { status: number; payload: Record<string, unknown> } {
+  let otlp: Record<string, unknown>;
+  try {
+    otlp = decodeTracesData(body);
+  } catch {
+    return { status: 400, payload: { error: 'invalid protobuf body' } };
+  }
+  return ingestOtlpTraces(db, otlp, stats);
+}
+
+function ingestOtlpTraces(
+  db: Database.Database,
+  otlp: Record<string, unknown>,
+  stats: OtelStats,
+): { status: number; payload: Record<string, unknown> } {
   const totalSpans = countSpans(otlp);
   const traces = mapOtlpTraces(otlp);
   let mappedSpans = 0;
@@ -119,13 +142,22 @@ export function startOtelReceiver(db: Database.Database, port: number, stats: Ot
       res.writeHead(404).end();
       return;
     }
-    if (contentType.includes('application/x-protobuf')) {
-      res.writeHead(415, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'protobuf encoding not supported in this build; use OTLP/JSON' }));
+    const isProtobuf = contentType.includes('application/x-protobuf');
+    if (isProtobuf && isLogs) {
+      res.writeHead(415, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'protobuf log ingest not supported; use OTLP/JSON for logs' }));
       return;
     }
 
     try {
-      const body = (await readBody(req)).toString('utf-8');
+      const raw = await readBody(req);
+      if (isProtobuf) {
+        // Traces over protobuf: decode, then respond with an empty protobuf
+        // ExportTraceServiceResponse (zero bytes) on success per the spec.
+        const { status } = handleTracesExportProtobuf(db, raw, stats);
+        res.writeHead(status, { 'content-type': 'application/x-protobuf' }).end(status === 200 ? Buffer.alloc(0) : undefined);
+        return;
+      }
+      const body = raw.toString('utf-8');
       const { status, payload } = isLogs ? handleLogsExport(db, body, stats) : handleTracesExport(db, body, stats);
       res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(payload));
     } catch (err) {

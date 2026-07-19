@@ -3,9 +3,9 @@
 ## 1. OTLP/HTTP receiver
 
 - [x] 1.1 `agent-replay otel serve [--port 4318] [--idle-timeout]`: HTTP server with `POST /v1/traces` and `POST /v1/logs`
-- [ ] 1.2 Decode `application/x-protobuf` (vendored OTLP descriptors) and `application/json` (honoring OTLP/JSON quirks: camelCase, hex traceId/spanId, integer enums, string int64s); gzip request bodies
+- [x] 1.2 Decode `application/x-protobuf` (vendored OTLP descriptors) and `application/json` (honoring OTLP/JSON quirks: camelCase, hex traceId/spanId, integer enums, string int64s); gzip request bodies
 - [x] 1.3 Respond per spec: 200 + empty object on success, 200 + `partial_success` with `rejected_spans`/`error_message` on partial acceptance, matching response encoding
-- [ ] 1.4 Test: fixture OTLP payloads in both encodings round-trip; malformed body → 400
+- [x] 1.4 Test: fixture OTLP payloads in both encodings round-trip; malformed body → 400
 
 ## 2. GenAI semconv span mapping
 
