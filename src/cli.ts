@@ -311,6 +311,19 @@ program
     await runCheck(opts);
   });
 
+// --- run ---
+program
+  .command('run')
+  .description('Run a child process under supervision, recording it as a trace (use: run [opts] -- <command>)')
+  .argument('[command...]', 'command and args to run (after --)')
+  .option('--agent-name <name>', 'Agent name for the recorded trace')
+  .option('--tags <tags>', 'Comma-separated tags for the trace')
+  .option('--dir <path>', 'Custom data directory')
+  .action(async (command, opts) => {
+    const { runRun } = await import('./commands/run.js');
+    await runRun(command, opts);
+  });
+
 // --- dashboard ---
 program
   .command('dashboard')

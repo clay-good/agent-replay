@@ -20,10 +20,10 @@
 
 ## 4. `run` wrapper
 
-- [ ] 4.1 `agent-replay run [--agent-name <n>] [--tags] -- <command>`: pre-create trace, export `AGENT_REPLAY_DIR` / `AGENT_REPLAY_TRACE_ID` / `AGENT_REPLAY_EVENTS`, read events from the FIFO, pass through stdio, finalize trace from child exit code, propagate exit status
-- [ ] 4.2 Uninstrumented child still yields a start/end trace with exit metadata
-- [ ] 4.3 Windows fallback: temp-file event channel instead of FIFO
-- [ ] 4.4 Test: instrumented script produces full trace; `exit 3` child → trace `failed`, harness exits 3
+- [x] 4.1 `agent-replay run [--agent-name <n>] [--tags] -- <command>`: pre-create trace, export `AGENT_REPLAY_DIR` / `AGENT_REPLAY_TRACE_ID` / `AGENT_REPLAY_EVENTS`, read events from the FIFO, pass through stdio, finalize trace from child exit code, propagate exit status
+- [x] 4.2 Uninstrumented child still yields a start/end trace with exit metadata
+- [x] 4.3 Windows fallback: temp-file event channel instead of FIFO
+- [x] 4.4 Test: instrumented script produces full trace; `exit 3` child → trace `failed`, harness exits 3
 
 ## 5. Golden regression runner
 
@@ -33,5 +33,5 @@
 
 ## 6. Docs
 
-- [ ] 6.1 README: harness quick start (`run`, enforce mode, CI golden check example)
-- [ ] 6.2 `npm run verify` passes
+- [x] 6.1 README: harness quick start (`run`, enforce mode, CI golden check example)
+- [x] 6.2 `npm run verify` passes

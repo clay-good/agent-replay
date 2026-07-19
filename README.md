@@ -251,6 +251,16 @@ agent-replay fork <trace-id> --from-step 2 --modify-input '{"task":"revised prom
 agent-replay fork <trace-id> --from-step 4 --tag experiment-1
 ```
 
+### Run under supervision
+
+Wrap any agent command to record it end-to-end and propagate its exit status — useful as a one-line harness around a run:
+
+```bash
+agent-replay run --agent-name my-bot -- node agent.js
+```
+
+The wrapper pre-creates a trace and hands the child a recording channel via environment variables (`AGENT_REPLAY_DIR`, `AGENT_REPLAY_TRACE_ID`, `AGENT_REPLAY_EVENTS`). An instrumented child (using the [`TraceRecorder` SDK](#programmatic-api) or writing JSONL events to `$AGENT_REPLAY_EVENTS`) records a full step-by-step trace; an uninstrumented child still gets a trace with timing and exit metadata. The child's stdio passes through untouched, and the trace is finalized from its exit — `0` → completed, non-zero → failed with the code recorded. `agent-replay run` exits with the child's own status, so it drops cleanly into scripts and CI.
+
 ### Regression check (CI)
 
 Turn known-good runs into a regression gate. Export a golden dataset once, then `check` new runs against it — the comparison is structural (step count, step types and names, tool-call inputs, final status) rather than raw output text, so non-deterministic wording never causes false failures. It exits non-zero on any regression, ready for CI.
