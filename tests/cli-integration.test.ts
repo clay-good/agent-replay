@@ -293,6 +293,12 @@ describe('CLI integration', () => {
     expect(view).toMatch(/Showing 3 of 8 steps/);
   });
 
+  it('config errors exit non-zero so scripts can detect them', () => {
+    expect(run(['config', 'set', 'ai.provider', 'anthropic']).code).toBe(0); // valid
+    expect(run(['config', 'set', 'ai.bogus', 'v']).code).toBe(2);            // unknown key
+    expect(run(['config', 'set', 'ai.provider', 'notreal']).code).toBe(2);   // invalid provider
+  });
+
   it('exits non-zero and reports on an unknown command', () => {
     const r = run(['definitely-not-a-command']);
     expect(r.code).not.toBe(0);

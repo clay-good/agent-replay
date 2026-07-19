@@ -62,6 +62,7 @@ export function runConfigGet(key: string, opts: ConfigOptions = {}): void {
   const config = loadConfig(opts.dir);
   if (!config) {
     console.error(chalk.yellow('  No configuration found. Run `agent-replay init` first.'));
+    process.exitCode = 2;
     return;
   }
 
@@ -87,6 +88,7 @@ export function runConfigSet(key: string, value: string, opts: ConfigOptions = {
   const config = loadConfig(opts.dir);
   if (!config) {
     console.error(chalk.yellow('  No configuration found. Run `agent-replay init` first.'));
+    process.exitCode = 2;
     return;
   }
 
@@ -97,6 +99,7 @@ export function runConfigSet(key: string, value: string, opts: ConfigOptions = {
   if (!isKnown) {
     console.error(chalk.yellow(`  Unknown key: ${key}`));
     console.error(chalk.dim('  Valid keys: ai.provider, ai.model, ai.max_tokens, ai.api_keys.anthropic, ai.api_keys.google, ai.api_keys.openai'));
+    process.exitCode = 2;
     return;
   }
 
@@ -105,6 +108,7 @@ export function runConfigSet(key: string, value: string, opts: ConfigOptions = {
     if (!valid.includes(value)) {
       console.error(chalk.red(`  Invalid provider: ${value}`));
       console.error(chalk.dim(`  Valid: ${valid.join(', ')}`));
+      process.exitCode = 2;
       return;
     }
   }
@@ -137,6 +141,7 @@ export async function runConfigTestAi(opts: ConfigOptions = {}): Promise<void> {
   const config = loadConfig(opts.dir);
   if (!config) {
     console.error(chalk.yellow('  No configuration found. Run `agent-replay init` first.'));
+    process.exitCode = 2;
     return;
   }
 
@@ -145,6 +150,7 @@ export async function runConfigTestAi(opts: ConfigOptions = {}): Promise<void> {
     console.error(chalk.red('  No AI provider configured.'));
     console.error(chalk.dim('  Set an API key: agent-replay config set ai.api_keys.anthropic <key>'));
     console.error(chalk.dim('  Or set env var: ANTHROPIC_API_KEY, GOOGLE_API_KEY, or OPENAI_API_KEY'));
+    process.exitCode = 2;
     return;
   }
 
