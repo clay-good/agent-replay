@@ -42,7 +42,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "verify": "npm run typecheck && npm run build && npm test"
+    "verify": "npm run typecheck && npm run build && npm test",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "better-sqlite3": "^11.0.0",
