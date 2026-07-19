@@ -96,6 +96,33 @@ function nextStepNumber(db: Database.Database, traceId: string): number {
   return (row.m ?? 0) + 1;
 }
 
+/**
+ * Append a step, choosing MAX(step_number)+1 and retrying on a uniqueness
+ * conflict. Each hook fires as its own process, so two concurrent tool calls on
+ * one session can read the same MAX; the loser retries with a fresh number
+ * instead of losing its step. Returns the step number actually used.
+ */
+function appendStepRetrying(
+  db: Database.Database,
+  traceId: string,
+  build: (stepNumber: number) => Parameters<typeof appendStep>[2],
+): number {
+  const MAX_ATTEMPTS = 6;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const n = nextStepNumber(db, traceId);
+    try {
+      appendStep(db, traceId, build(n));
+      return n;
+    } catch (err) {
+      const msg = (err as Error).message ?? '';
+      if (attempt < MAX_ATTEMPTS - 1 && /UNIQUE|constraint/i.test(msg)) continue;
+      throw err;
+    }
+  }
+  // Unreachable: the loop either returns or throws.
+  throw new Error('appendStepRetrying: exhausted attempts');
+}
+
 /** Find (or create) the open trace for a session. */
 function ensureTrace(
   db: Database.Database,
@@ -207,16 +234,15 @@ export function applyHookPayload(
       const toolName = str(payload.tool_name) ?? 'tool';
       const parentStep = agentId ? findAnchor(db, traceId, agentId) : undefined;
       const toolInput = noInput ? {} : ((payload.tool_input as Record<string, unknown>) ?? {});
-      const toolStepNumber = nextStepNumber(db, traceId);
-      appendStep(db, traceId, {
-        step_number: toolStepNumber,
+      const toolStepNumber = appendStepRetrying(db, traceId, (n) => ({
+        step_number: n,
         step_type: 'tool_call',
         name: toolName,
         input: toolInput,
         started_at: isoNow(),
         parent_step: parentStep ?? null,
         metadata: { ...rawMeta(payload, noInput), agent_id: agentId, agent_type: str(payload.agent_type) },
-      });
+      }));
 
       if (!opts.enforce) {
         return { action, dialect, traceId, note: `opened tool_call "${toolName}"` };
@@ -230,14 +256,14 @@ export function applyHookPayload(
         return { action, dialect, traceId, note: `allowed tool_call "${toolName}"` };
       }
 
-      appendStep(db, traceId, {
-        step_number: nextStepNumber(db, traceId),
+      appendStepRetrying(db, traceId, (n) => ({
+        step_number: n,
         step_type: 'guard_check',
         name: `guard:${verdict.policy ?? 'policy'}`,
         output: { action: verdict.action, policy: verdict.policy, reason: verdict.reason },
         caused_by_step: toolStepNumber,
         metadata: { policy: verdict.policy, action: verdict.action, reason: verdict.reason },
-      });
+      }));
 
       return {
         action,
@@ -267,8 +293,8 @@ export function applyHookPayload(
 
     case 'subagent_start': {
       const agentType = str(payload.agent_type) ?? 'subagent';
-      appendStep(db, traceId, {
-        step_number: nextStepNumber(db, traceId),
+      appendStepRetrying(db, traceId, (n) => ({
+        step_number: n,
         step_type: 'thought',
         name: `subagent:${agentType}`,
         started_at: isoNow(),
@@ -279,7 +305,7 @@ export function applyHookPayload(
           depth: payload.depth,
           parent_session_id: str(payload.parent_session_id),
         },
-      });
+      }));
       return { action, dialect, traceId, note: `opened subagent anchor "${agentType}"` };
     }
 

@@ -1,4 +1,5 @@
 import type { IngestDecisionInput, IngestSnapshotInput } from '../models/types.js';
+import { STEP_TYPES } from '../models/enums.js';
 
 /**
  * Versioned JSONL event protocol for incremental trace capture.
@@ -188,8 +189,15 @@ export function validateEvent(obj: unknown): ParseResult {
     }
   }
 
-  if ((type === 'step_start' || type === 'step') && (typeof e.step_type !== 'string' || typeof e.name !== 'string')) {
-    return { event: null, warning: `skipped: ${type} requires step_type and name` };
+  if (type === 'step_start' || type === 'step') {
+    if (typeof e.step_type !== 'string' || typeof e.name !== 'string') {
+      return { event: null, warning: `skipped: ${type} requires step_type and name` };
+    }
+    // Reject an unknown step_type here — it would otherwise fail the DB CHECK
+    // constraint inside appendStep and (in a batch ingest) abort the trace.
+    if (!(STEP_TYPES as readonly string[]).includes(e.step_type)) {
+      return { event: null, warning: `skipped: ${type} has invalid step_type "${e.step_type}"` };
+    }
   }
   if (type === 'decision' && (typeof e.chosen !== 'string' || !e.chosen)) {
     return { event: null, warning: 'skipped: decision requires chosen' };

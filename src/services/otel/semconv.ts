@@ -164,9 +164,13 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
     group.sort((a, b) => a.start - b.start);
 
     const roots = group.filter((s) => classify(s.name, s.attrs).role === 'root');
-    const stepSpans = group.filter((s) => classify(s.name, s.attrs).role === 'step');
 
+    // The first root span defines the trace identity; every other span — including
+    // nested agent/workflow roots — becomes a step, so nothing is dropped and
+    // children keep a resolvable parent. (Orphan traces have no root, so all
+    // spans are steps.)
     const root = roots[0];
+    const stepSpans = group.filter((s) => s !== root);
     const anyConversation = group.map((s) => str(s.attrs['gen_ai.conversation.id'])).find(Boolean);
     const agentName =
       str(root?.attrs['gen_ai.agent.name']) ??
@@ -181,7 +185,9 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
     const anyError = group.some((s) => s.errorMessage);
 
     const steps: IngestStepInput[] = stepSpans.map((s, i) => {
-      const { stepType } = classify(s.name, s.attrs);
+      // A nested root (invoke_agent/workflow that isn't the identity root) has
+      // no step type of its own — anchor it as a thought so children can nest.
+      const stepType = classify(s.name, s.attrs).stepType ?? 'thought';
       const tokens = inputTokens(s.attrs) + outputTokens(s.attrs);
       totalTokens += tokens;
       const parent = s.parentSpanId ? stepNumberOf.get(s.parentSpanId) : undefined;
@@ -189,7 +195,7 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
 
       return {
         step_number: i + 1,
-        step_type: stepType!,
+        step_type: stepType,
         name: str(s.attrs['gen_ai.tool.name']) ?? str(s.attrs['traceloop.entity.name']) ?? s.name,
         input: messageContent(s.attrs, 'input'),
         output: messageContent(s.attrs, 'output'),

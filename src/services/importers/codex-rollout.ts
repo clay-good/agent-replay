@@ -104,7 +104,9 @@ export function importCodexRollout(
         break;
       }
       case 'function_call': {
-        const callId = str(it.call_id);
+        // Coerce like the first pass (outputs.set(String(call_id))) so a
+        // non-string call_id still pairs with its function_call_output.
+        const callId = it.call_id != null ? String(it.call_id) : undefined;
         const result = callId ? outputs.get(callId) : undefined;
         steps.push({
           step_number: stepNumber++,

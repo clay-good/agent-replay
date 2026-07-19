@@ -16,8 +16,23 @@ import type {
   CreateEvalInput,
   ListTracesFilter,
 } from '../models/types.js';
+import { DECIDED_BY } from '../models/enums.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
+
+/**
+ * Parse a snapshot's context_window, which may hold arbitrary JSON or an
+ * unparseable raw string (the field type is `unknown`). Fall back to the raw
+ * value rather than throwing on the read path.
+ */
+function parseContextWindow(raw: string | null): unknown {
+  if (raw == null) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
 
 function generateId(prefix: string): string {
   return `${prefix}_${nanoid(12)}`;
@@ -124,6 +139,11 @@ function insertDecision(
   stepId: string,
   decision: IngestDecisionInput,
 ): void {
+  // Coerce decided_by to a valid enum value so an out-of-range value from an
+  // untrusted producer can't violate the CHECK constraint and abort the write.
+  const decidedBy = (DECIDED_BY as readonly string[]).includes(decision.decided_by ?? '')
+    ? decision.decided_by
+    : 'agent';
   db.prepare(
     `INSERT INTO agent_trace_decisions
       (id, step_id, options, chosen, rationale, confidence, decided_by)
@@ -135,7 +155,7 @@ function insertDecision(
     decision.chosen,
     decision.rationale ?? null,
     decision.confidence ?? null,
-    decision.decided_by ?? 'agent',
+    decidedBy,
   );
 }
 
@@ -156,7 +176,7 @@ function rowToSnapshot(row: Record<string, unknown>): TraceSnapshot {
   return {
     id: row.id as string,
     step_id: row.step_id as string,
-    context_window: row.context_window ? JSON.parse(row.context_window as string) : null,
+    context_window: parseContextWindow(row.context_window as string | null),
     environment: parseJson(row.environment as string) ?? {},
     tool_state: parseJson(row.tool_state as string) ?? {},
     token_count: row.token_count as number,
@@ -457,8 +477,11 @@ export function attachDecision(
   decision: IngestDecisionInput,
 ): void {
   const stepId = resolveStepId(db, traceId, stepNumber);
-  db.prepare('DELETE FROM agent_trace_decisions WHERE step_id = ?').run(stepId);
-  insertDecision(db, stepId, decision);
+  // Replace atomically so a failed insert can't leave the step with no record.
+  db.transaction(() => {
+    db.prepare('DELETE FROM agent_trace_decisions WHERE step_id = ?').run(stepId);
+    insertDecision(db, stepId, decision);
+  })();
 }
 
 /** Attach (or replace) a snapshot on an existing step. */
