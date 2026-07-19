@@ -103,6 +103,19 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
 
   // AI-powered evaluation
   if (opts.ai || isAiPreset) {
+    // --max-cost is the spend cap for paid AI calls, so a malformed value must
+    // fail loudly rather than fall back to Infinity (an unlimited budget). A
+    // typo like "0.O5" would otherwise silently disable the cap. Validate before
+    // touching the provider so the message is about the actual mistake.
+    if (opts.maxCost != null) {
+      const c = Number(opts.maxCost);
+      if (!Number.isFinite(c) || c < 0) {
+        console.error(chalk.red(`  Invalid --max-cost: ${opts.maxCost} (must be a non-negative number in USD).`));
+        process.exitCode = 2;
+        return;
+      }
+    }
+
     const config = loadConfig(opts.dir);
     const resolved = resolveProvider(config);
     if (!resolved) {

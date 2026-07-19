@@ -220,6 +220,12 @@ describe('CLI integration', () => {
     const results = Array.isArray(parsed) ? parsed : parsed.results ?? parsed.evals ?? [];
     expect(results.length).toBeGreaterThan(0);
     expect(typeof results[0].score).toBe('number');
+
+    // A malformed --max-cost must fail loudly (exit 2) rather than silently
+    // fall back to an unlimited AI budget. Validated before any provider lookup,
+    // so no API key is needed; "0.O5" has a letter O, a realistic typo.
+    expect(run(['eval', id, '--ai', '--max-cost', '0.O5']).code).toBe(2);
+    expect(run(['eval', id, '--ai', '--max-cost', '-1']).code).toBe(2);
   });
 
   it('translates a codex exec --json stream via record --format codex-exec', () => {
