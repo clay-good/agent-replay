@@ -9,6 +9,7 @@ import {
   extractJson,
 } from '../src/services/eval-service.js';
 import { summarizeTrace, summarizeDiffForLlm } from '../src/services/trace-summarizer.js';
+import { diffTraces } from '../src/services/diff-service.js';
 import { estimateCost, COST_TABLE, LlmError } from '../src/services/llm-client.js';
 import type { IngestTraceInput } from '../src/models/types.js';
 
@@ -221,6 +222,28 @@ describe('trace summarizer', () => {
     const summary = summarizeTrace(getTrace(db, trace.id)!);
     expect(summary.text).toContain('chose: search_flights');
     expect(summary.text).toContain('destination is unambiguous');
+  });
+
+  it('summarizeDiffForLlm renders both traces, the divergence, and the differences', () => {
+    const db = createTestDb();
+    const base = { agent_version: undefined, error: undefined, status: 'completed' as const };
+    const a = getTrace(db, ingestTrace(db, makeTrace({ ...base, agent_name: 'agent-a' })).id)!;
+    const b = getTrace(db, ingestTrace(db, makeTrace({
+      ...base,
+      agent_name: 'agent-b',
+      steps: [
+        { step_number: 1, step_type: 'thought', name: 'plan' },
+        { step_number: 2, step_type: 'tool_call', name: 'read_file', input: { path: '/DIFFERENT.ts' } },
+        { step_number: 3, step_type: 'tool_call', name: 'write_file', input: { path: '/tsconfig.json' } },
+        { step_number: 4, step_type: 'output', name: 'done' },
+      ],
+    })).id)!;
+
+    const summary = summarizeDiffForLlm(diffTraces(db, a.id, b.id), a, b);
+    expect(summary.text).toContain('TRACE A: agent-a');
+    expect(summary.text).toContain('TRACE B: agent-b');
+    expect(summary.text).toMatch(/DIVERGES AT STEP|DIFFERENCES/);
+    expect(summary.estimated_tokens).toBeGreaterThan(0);
   });
 });
 
