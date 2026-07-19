@@ -263,6 +263,18 @@ guardCmd
     await runGuardTest(traceId, opts);
   });
 
+guardCmd
+  .command('check')
+  .description(
+    'Evaluate one proposed step (JSON on stdin) against policies; exit 0 allow/warn, 2 deny. ' +
+      'A guardrail, not a complete boundary — use OS sandboxing for hard isolation.',
+  )
+  .option('--dir <path>', 'Custom data directory')
+  .action(async (opts) => {
+    const { runGuardCheck } = await import('./commands/guard.js');
+    await runGuardCheck(opts);
+  });
+
 // --- export ---
 program
   .command('export')

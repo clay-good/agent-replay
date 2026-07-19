@@ -108,6 +108,32 @@ export interface StepPolicyResult {
   matches: PolicyMatch[];
 }
 
+/** Load enabled policies, highest priority first. */
+function loadEnabledPolicies(db: Database.Database): GuardrailPolicy[] {
+  const rows = db
+    .prepare('SELECT * FROM guardrail_policies WHERE enabled = 1 ORDER BY priority DESC')
+    .all() as Record<string, unknown>[];
+  return rows.map(rowToPolicy);
+}
+
+/** Evaluate one step against a preloaded policy set. */
+function evaluateStepWithPolicies(step: TraceStep, policies: GuardrailPolicy[]): PolicyMatch[] {
+  const matches: PolicyMatch[] = [];
+  for (const policy of policies) {
+    const reason = matchesPolicy(step, policy);
+    if (reason) matches.push({ policy, action: policy.action, reason });
+  }
+  return matches;
+}
+
+/**
+ * Evaluate a single proposed step against all enabled policies. Used by
+ * `guard check` and hook enforcement to decide before a step runs.
+ */
+export function evaluateStep(db: Database.Database, step: TraceStep): PolicyMatch[] {
+  return evaluateStepWithPolicies(step, loadEnabledPolicies(db));
+}
+
 /**
  * Test all enabled guardrail policies against each step of a trace.
  * Returns which policies would trigger on which steps.
@@ -116,9 +142,7 @@ export function testPolicies(
   db: Database.Database,
   traceId: string,
 ): StepPolicyResult[] {
-  const policies = db
-    .prepare('SELECT * FROM guardrail_policies WHERE enabled = 1 ORDER BY priority DESC')
-    .all() as Record<string, unknown>[];
+  const parsedPolicies = loadEnabledPolicies(db);
 
   const steps = db
     .prepare(
@@ -130,29 +154,70 @@ export function testPolicies(
     throw new Error(`Trace ${traceId} not found or has no steps`);
   }
 
-  const parsedPolicies = policies.map(rowToPolicy);
-
   const results: StepPolicyResult[] = [];
-
   for (const rawStep of steps) {
     const step = rowToStep(rawStep);
-    const matches: PolicyMatch[] = [];
-
-    for (const policy of parsedPolicies) {
-      const match = matchesPolicy(step, policy);
-      if (match) {
-        matches.push({
-          policy,
-          action: policy.action,
-          reason: match,
-        });
-      }
-    }
-
-    results.push({ step, matches });
+    results.push({ step, matches: evaluateStepWithPolicies(step, parsedPolicies) });
   }
-
   return results;
+}
+
+// ── Verdicts ───────────────────────────────────────────────────────────────
+
+export interface GuardVerdict {
+  /** The effective action: the most restrictive of all matching policies. */
+  action: GuardAction;
+  policy: string | null;
+  reason: string | null;
+  matches: PolicyMatch[];
+}
+
+// Restrictiveness order — a guard fails toward blocking, so the most
+// restrictive matching policy wins; ties break by policy priority (matches are
+// already ordered priority-descending).
+const RESTRICTIVENESS: Record<GuardAction, number> = {
+  deny: 3,
+  require_review: 2,
+  warn: 1,
+  allow: 0,
+};
+
+/** Reduce a step's policy matches to a single effective verdict. */
+export function verdictForMatches(matches: PolicyMatch[]): GuardVerdict {
+  if (matches.length === 0) {
+    return { action: 'allow', policy: null, reason: null, matches };
+  }
+  let top = matches[0];
+  for (const m of matches) {
+    if (RESTRICTIVENESS[m.action as GuardAction] > RESTRICTIVENESS[top.action as GuardAction]) {
+      top = m;
+    }
+  }
+  return { action: top.action as GuardAction, policy: top.policy.name, reason: top.reason, matches };
+}
+
+/**
+ * Resolve a verdict action to a process exit code for `guard check`:
+ * allow/warn → 0, deny → 2 (the harness "block" convention). `require_review`
+ * prompts when a TTY is present (via `confirmed`) and fails closed (deny) when
+ * none is.
+ */
+export function resolveGuardExit(
+  action: GuardAction,
+  opts: { isTty: boolean; confirmed?: boolean },
+): { final: GuardAction; exitCode: 0 | 2 } {
+  switch (action) {
+    case 'deny':
+      return { final: 'deny', exitCode: 2 };
+    case 'require_review':
+      if (!opts.isTty) return { final: 'deny', exitCode: 2 };
+      return opts.confirmed ? { final: 'allow', exitCode: 0 } : { final: 'deny', exitCode: 2 };
+    case 'warn':
+      return { final: 'warn', exitCode: 0 };
+    case 'allow':
+    default:
+      return { final: 'allow', exitCode: 0 };
+  }
 }
 
 // ── Matching logic ────────────────────────────────────────────────────────

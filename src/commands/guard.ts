@@ -6,12 +6,18 @@ import {
   listPolicies,
   removePolicy,
   testPolicies,
+  evaluateStep,
+  verdictForMatches,
+  resolveGuardExit,
 } from '../services/guard-service.js';
 import type { StepPolicyResult } from '../services/guard-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { policyTable } from '../ui/table.js';
 import { heading, separator, guardActionBadge, stepIcon, colors } from '../ui/theme.js';
 import type { StepType } from '../models/enums.js';
+import type { TraceStep } from '../models/types.js';
+import { isValidStepType } from '../utils/validators.js';
+import { openSync, readSync, closeSync } from 'node:fs';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage, safeParseInt } from '../utils/json.js';
 
@@ -199,4 +205,106 @@ export function runGuardTest(traceId: string, opts: GuardTestOptions = {}): void
     console.log(chalk.yellow(`  ${warns} WARN action(s) would generate alerts.`));
   }
   console.log('');
+}
+
+// ── guard check ────────────────────────────────────────────────────────────
+
+export interface GuardCheckOptions {
+  json?: boolean;
+  dir?: string;
+}
+
+/**
+ * `agent-replay guard check` — evaluate a single proposed step (JSON on stdin)
+ * against enabled policies and answer by exit code: 0 for allow/warn, 2 for
+ * deny. `require_review` prompts when a TTY is present and fails closed (deny)
+ * otherwise. This is a guardrail, not a complete security boundary — a
+ * determined agent may reach equivalent effects by another tool path; use OS
+ * sandboxing (Claude Code sandbox, Codex sandbox_mode, Gemini sandbox) for hard
+ * isolation.
+ */
+export async function runGuardCheck(opts: GuardCheckOptions = {}): Promise<void> {
+  let raw = '';
+  try {
+    for await (const chunk of process.stdin) raw += chunk;
+  } catch (err) {
+    console.error(chalk.red(`  Failed to read stdin: ${errorMessage(err)}`));
+    process.exitCode = 1;
+    return;
+  }
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(raw.trim());
+  } catch {
+    console.error(chalk.red('  Invalid JSON on stdin — expected a single step object.'));
+    process.exitCode = 1;
+    return;
+  }
+
+  if (typeof parsed.step_type !== 'string' || !isValidStepType(parsed.step_type)) {
+    console.error(chalk.red('  Step must include a valid "step_type".'));
+    process.exitCode = 1;
+    return;
+  }
+
+  const step: TraceStep = {
+    id: '',
+    trace_id: '',
+    step_number: typeof parsed.step_number === 'number' ? parsed.step_number : 1,
+    step_type: parsed.step_type as StepType,
+    name: typeof parsed.name === 'string' ? parsed.name : '',
+    input: (parsed.input as Record<string, unknown>) ?? {},
+    output: (parsed.output as Record<string, unknown>) ?? null,
+    started_at: '',
+    ended_at: null,
+    duration_ms: null,
+    tokens_used: null,
+    model: null,
+    error: null,
+    metadata: {},
+    parent_step_number: null,
+    caused_by_step_number: null,
+  };
+
+  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const db = ensureDatabase(dbPath);
+
+  const verdict = verdictForMatches(evaluateStep(db, step));
+
+  // require_review needs a human; prompt via /dev/tty when interactive.
+  const isTty = process.stdout.isTTY === true;
+  let confirmed: boolean | undefined;
+  if (verdict.action === 'require_review' && isTty) {
+    confirmed = confirmReviewViaTty(verdict.reason ?? 'review required');
+  }
+  const { final, exitCode } = resolveGuardExit(verdict.action, { isTty, confirmed });
+
+  // JSON verdict to stdout (the reason also goes to stderr for deny/warn).
+  console.log(JSON.stringify({ action: final, policy: verdict.policy, reason: verdict.reason }));
+
+  if (final === 'deny') {
+    const why = verdict.action === 'require_review'
+      ? `review required${isTty ? ' (declined)' : ' (no TTY — failed closed)'}: ${verdict.reason ?? ''}`
+      : verdict.reason ?? 'blocked by policy';
+    console.error(chalk.redBright(`  DENY [${verdict.policy ?? 'policy'}]: ${why}`));
+  } else if (final === 'warn') {
+    console.error(chalk.yellow(`  WARN [${verdict.policy ?? 'policy'}]: ${verdict.reason ?? ''}`));
+  }
+
+  process.exitCode = exitCode;
+}
+
+function confirmReviewViaTty(reason: string): boolean {
+  try {
+    const fd = openSync('/dev/tty', 'rs');
+    process.stderr.write(`\n  ⚠ require_review: ${reason}\n  Allow this step? [y/N] `);
+    const buf = Buffer.alloc(64);
+    const n = readSync(fd, buf, 0, 64, null);
+    closeSync(fd);
+    const ans = buf.toString('utf-8', 0, n).trim().toLowerCase();
+    return ans === 'y' || ans === 'yes';
+  } catch {
+    return false;
+  }
 }

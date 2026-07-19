@@ -2,9 +2,9 @@
 
 ## 1. Single-step guard evaluation
 
-- [ ] 1.1 Extract single-step policy evaluation from `testPolicies` in `guard-service.ts` (no behavior change to `guard test`)
-- [ ] 1.2 `agent-replay guard check`: step JSON on stdin → verdict JSON on stdout, exit 0/2; `require_review` fails closed without a TTY, prompts with one
-- [ ] 1.3 Test: allow, warn, deny, require_review (TTY and non-TTY) paths and exit codes
+- [x] 1.1 Extract single-step policy evaluation from `testPolicies` in `guard-service.ts` (no behavior change to `guard test`)
+- [x] 1.2 `agent-replay guard check`: step JSON on stdin → verdict JSON on stdout, exit 0/2; `require_review` fails closed without a TTY, prompts with one
+- [x] 1.3 Test: allow, warn, deny, require_review (TTY and non-TTY) paths and exit codes
 
 ## 2. Enforcement recording
 
