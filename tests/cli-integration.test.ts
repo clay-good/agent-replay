@@ -244,6 +244,16 @@ describe('CLI integration', () => {
     expect(run(['record', '--format', 'nonsense'], '{}').code).toBe(2);
   });
 
+  it('rejects bad filter/format input instead of silently misbehaving', () => {
+    const f = join(dir, '..', 't.json');
+    writeFileSync(f, JSON.stringify([{ agent_name: 'x', status: 'completed' }]));
+    // These once silently returned nothing / mis-parsed; now they error (exit 2).
+    expect(run(['ingest', f, '--format', 'xml']).code).toBe(2);
+    expect(run(['list', '--status', 'faield']).code).toBe(2);
+    expect(run(['list', '--since', 'notaduration']).code).toBe(2);
+    expect(run(['list', '--sort', 'nope']).code).toBe(2);
+  });
+
   it('survives an adversarial event stream and still records the valid events', () => {
     // Malformed/hostile lines mixed with valid ones: the recorder must skip the
     // junk (warn), never crash, and still apply the good events.

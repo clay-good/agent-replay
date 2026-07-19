@@ -37,6 +37,14 @@ export function runIngest(filePath: string, opts: IngestOptions = {}): void {
     return;
   }
 
+  // Reject an unknown --format rather than silently parsing as JSONL (which
+  // surfaces as a confusing "validation failed" instead of naming the problem).
+  if (opts.format && opts.format !== 'json' && opts.format !== 'jsonl') {
+    failSpinner(spinner, `Invalid --format "${opts.format}". Valid: json, jsonl.`);
+    process.exitCode = 2;
+    return;
+  }
+
   // Auto-detect format
   const format = opts.format ?? detectFormat(raw, absPath);
   spinner.text = `Parsing as ${format.toUpperCase()}...`;
