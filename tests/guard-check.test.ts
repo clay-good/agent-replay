@@ -58,6 +58,35 @@ describe('single-step evaluation', () => {
     expect(v.action).toBe('warn');
   });
 
+  it('matches a destructive command in the tool input via input_contains (case-insensitive)', () => {
+    addPolicy(db, { name: 'no-rm-rf', action: 'deny', match_pattern: { input_contains: 'rm -rf' } });
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'shell', input: { cmd: 'RM -RF /data' } })));
+    expect(v.action).toBe('deny');
+  });
+
+  it('matches on step output via output_contains (case-insensitive)', () => {
+    addPolicy(db, { name: 'no-urls', action: 'deny', match_pattern: { output_contains: 'http' } });
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'fetch', output: { body: 'go to HTTP://evil.example' } })));
+    expect(v.action).toBe('deny');
+  });
+
+  it('matches by name_regex and lets non-matching names through', () => {
+    addPolicy(db, { name: 'destructive', action: 'deny', match_pattern: { name_regex: '^(delete|drop|truncate)_' } });
+    expect(verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'drop_table' }))).action).toBe('deny');
+    expect(verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'read_table' }))).action).toBe('allow');
+  });
+
+  it('requires every pattern field to match (AND semantics)', () => {
+    addPolicy(db, { name: 'combo', action: 'deny', match_pattern: { step_type: 'tool_call', name_contains: 'delete' } });
+    // Right name but wrong step_type → the policy does not fire.
+    expect(verdictForMatches(evaluateStep(db, makeStep({ step_type: 'llm_call', name: 'delete_it' }))).action).toBe('allow');
+  });
+
+  it('treats an empty match pattern as inert (a misconfigured policy blocks nothing)', () => {
+    addPolicy(db, { name: 'empty', action: 'deny', match_pattern: {} });
+    expect(verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'anything' }))).action).toBe('allow');
+  });
+
   it('picks the most restrictive action when several match, regardless of priority', () => {
     // A high-priority warn and a low-priority deny both match the same step.
     addPolicy(db, { name: 'warn-high', action: 'warn', priority: 100, match_pattern: { step_type: 'tool_call' } });
