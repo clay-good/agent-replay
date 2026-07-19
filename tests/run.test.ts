@@ -65,6 +65,25 @@ describe('runWrapped', () => {
     expect(trace.total_duration_ms).not.toBeNull();
   }, 15000);
 
+  it('captures many events written across poll cycles (incremental drain)', async () => {
+    // Write a batch, sleep past the 200ms poll interval so a mid-run poll reads
+    // incrementally, then write another batch and exit — exercising the
+    // byte-offset read across a poll boundary and the final drain together.
+    const script = `
+      const fs = require('fs');
+      const f = process.env.AGENT_REPLAY_EVENTS, t = process.env.AGENT_REPLAY_TRACE_ID;
+      const ev = (n) => fs.appendFileSync(f, JSON.stringify({ v: 1, type: 'step', trace_id: t, step_number: n, step_type: 'thought', name: 'n' + n }) + '\\n');
+      for (let i = 1; i <= 120; i++) ev(i);
+      setTimeout(() => { for (let i = 121; i <= 240; i++) ev(i); process.exit(0); }, 320);
+    `;
+    const res = await runWrapped(db, { command: process.execPath, args: ['-e', script] });
+    expect(res.eventsApplied).toBe(240);
+    const trace = getTrace(db, res.traceId)!;
+    expect(trace.steps).toHaveLength(240);
+    // Steps are distinct and complete (no partial-line corruption at boundaries).
+    expect(new Set(trace.steps.map((s) => s.step_number)).size).toBe(240);
+  }, 15000);
+
   it('honors an explicit trace_end emitted by the child', async () => {
     const script = `
       const fs = require('fs');

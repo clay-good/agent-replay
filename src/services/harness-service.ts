@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { spawn } from 'node:child_process';
-import { writeFileSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { writeFileSync, mkdtempSync, rmSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startTrace, updateTrace } from './trace-service.js';
@@ -46,32 +46,55 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
   writeFileSync(eventsPath, '');
 
   let applied = 0;
-  let appliedLines = 0;
+  // Read the events file incrementally from a byte offset so a long run
+  // (real sessions emit thousands of events) doesn't re-read the whole growing
+  // file on every 200ms poll. Only complete, newline-terminated lines are
+  // applied; a trailing partial line is buffered until the rest arrives.
+  let bytesRead = 0;
+  let partial = '';
+
+  const applyLine = (line: string): void => {
+    const { event, warning } = parseEventLine(line);
+    if (warning) process.stderr.write(`agent-replay run: ${warning}\n`);
+    if (!event) return;
+    // The wrapper owns the trace; ignore child trace_start, and stamp our id.
+    if (event.type === 'trace_start') return;
+    if (!event.trace_id) event.trace_id = trace.id;
+    try {
+      applyEvent(db, event);
+      applied++;
+    } catch (err) {
+      process.stderr.write(`agent-replay run: skipped ${event.type}: ${(err as Error).message}\n`);
+    }
+  };
 
   const drain = (final: boolean): void => {
-    let content: string;
+    let size: number;
     try {
-      content = readFileSync(eventsPath, 'utf-8');
+      size = statSync(eventsPath).size;
     } catch {
       return;
     }
-    const arr = content.split('\n');
-    const upto = final ? arr.length : Math.max(0, arr.length - 1);
-    for (let i = appliedLines; i < upto; i++) {
-      const { event, warning } = parseEventLine(arr[i]);
-      if (warning) process.stderr.write(`agent-replay run: ${warning}\n`);
-      if (!event) continue;
-      // The wrapper owns the trace; ignore child trace_start, and stamp our id.
-      if (event.type === 'trace_start') continue;
-      if (!event.trace_id) event.trace_id = trace.id;
+    if (size > bytesRead) {
+      const fd = openSync(eventsPath, 'r');
       try {
-        applyEvent(db, event);
-        applied++;
-      } catch (err) {
-        process.stderr.write(`agent-replay run: skipped ${event.type}: ${(err as Error).message}\n`);
+        const buf = Buffer.alloc(size - bytesRead);
+        const n = readSync(fd, buf, 0, buf.length, bytesRead);
+        bytesRead += n;
+        partial += buf.toString('utf-8', 0, n);
+      } finally {
+        closeSync(fd);
       }
     }
-    appliedLines = upto;
+    const lines = partial.split('\n');
+    if (final) {
+      // Apply everything, including any trailing line with no final newline.
+      partial = '';
+    } else {
+      // Buffer the trailing (possibly incomplete) line until more arrives.
+      partial = lines.pop() ?? '';
+    }
+    for (const line of lines) applyLine(line);
   };
 
   const exitCode = await new Promise<number>((resolvePromise) => {
