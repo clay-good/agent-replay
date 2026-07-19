@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { traceTable, evalTable, policyTable } from '../src/ui/table.js';
 import { renderTimeline } from '../src/ui/timeline.js';
-import type { Trace, TraceStep, EvalResult, GuardrailPolicy } from '../src/models/types.js';
+import { renderDiff } from '../src/ui/diff-renderer.js';
+import type { Trace, TraceStep, EvalResult, GuardrailPolicy, TraceDiffResult } from '../src/models/types.js';
 import type { StepType } from '../src/models/enums.js';
 
 /**
@@ -88,5 +89,41 @@ describe('renderTimeline edge cases', () => {
     const out = renderTimeline([step({ step_type: 'output', name: 'o', output: { text: big } })]);
     expect(out).toContain('...');
     expect(out.length).toBeLessThan(big.length); // truncated, not the full blob
+  });
+});
+
+describe('renderDiff', () => {
+  const diffResult = (over: Partial<TraceDiffResult> = {}): TraceDiffResult => ({
+    left_trace_id: 'trc_l', right_trace_id: 'trc_r', divergence_step: null,
+    left_step_count: 2, right_step_count: 2, diffs: [], ...over,
+  });
+
+  it('reports identical traces', () => {
+    const out = noAnsi(renderDiff(diffResult(), trace(), trace()));
+    expect(out).toMatch(/identical/i);
+  });
+
+  it('renders divergences with null, object, and model values without crashing', () => {
+    const diff = diffResult({
+      divergence_step: 1,
+      diffs: [
+        { step_number: 1, field: 'output', left_value: null, right_value: { text: 'x' } },
+        { step_number: 1, field: 'model', left_value: 'gpt-4', right_value: 'gpt-5.4-nano' },
+        { step_number: 2, field: 'input', left_value: { a: 1 }, right_value: null },
+      ],
+    });
+    let out = '';
+    expect(() => { out = noAnsi(renderDiff(diff, trace({ agent_name: 'L' }), trace({ agent_name: 'R' }))); }).not.toThrow();
+    expect(out).toContain('3 difference');
+    expect(out).toContain('model');
+    expect(out).toContain('gpt-5.4-nano');
+  });
+
+  it('handles differing step counts (a missing-step divergence)', () => {
+    const diff = diffResult({
+      divergence_step: 2, left_step_count: 3, right_step_count: 1,
+      diffs: [{ step_number: 2, field: 'missing_right', left_value: 'b', right_value: null }],
+    });
+    expect(() => renderDiff(diff, trace(), trace())).not.toThrow();
   });
 });
