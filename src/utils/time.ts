@@ -17,6 +17,26 @@ export function formatDuration(ms: number): string {
 }
 
 /**
+ * The trace's measured duration in ms, or one derived from its start/end
+ * timestamps when the explicit total wasn't recorded (e.g. an ingested trace
+ * that carries timestamps but no total_duration_ms). Display-only — it never
+ * changes stored data. Returns null when nothing usable is available.
+ */
+export function effectiveDurationMs(t: {
+  total_duration_ms?: number | null;
+  started_at?: string | null;
+  ended_at?: string | null;
+}): number | null {
+  if (t.total_duration_ms != null) return t.total_duration_ms;
+  if (t.started_at && t.ended_at) {
+    const start = new Date(t.started_at).getTime();
+    const end = new Date(t.ended_at).getTime();
+    if (!Number.isNaN(start) && !Number.isNaN(end) && end >= start) return end - start;
+  }
+  return null;
+}
+
+/**
  * Format an ISO 8601 timestamp as a relative time string.
  * Examples: "just now", "3m ago", "2h ago", "5d ago"
  */

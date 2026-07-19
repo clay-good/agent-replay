@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import type { Trace } from '../models/types.js';
 import type { TraceStatus } from '../models/enums.js';
 import { statusBadge, colors, label } from './theme.js';
+import { effectiveDurationMs } from '../utils/time.js';
 
 /**
  * Trace metadata header panel (shown at top of `show` command).
@@ -17,8 +18,9 @@ export function traceHeaderPanel(trace: Trace): string {
   lines.push(`${label('Status:')}    ${statusBadge(trace.status as TraceStatus)}`);
   lines.push(`${label('Trigger:')}   ${chalk.white(trace.trigger)}`);
 
-  if (trace.total_duration_ms != null) {
-    lines.push(`${label('Duration:')}  ${chalk.white(formatDuration(trace.total_duration_ms))}`);
+  const durationMs = effectiveDurationMs(trace);
+  if (durationMs != null) {
+    lines.push(`${label('Duration:')}  ${chalk.white(formatDuration(durationMs))}`);
   }
   if (trace.total_tokens != null) {
     lines.push(`${label('Tokens:')}    ${chalk.white(trace.total_tokens.toLocaleString())}`);

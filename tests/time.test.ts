@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseDurationString, parseSinceToIso, formatDuration } from '../src/utils/time.js';
+import { parseDurationString, parseSinceToIso, formatDuration, effectiveDurationMs } from '../src/utils/time.js';
 
 describe('parseDurationString', () => {
   it('parses units to milliseconds', () => {
@@ -39,5 +39,19 @@ describe('formatDuration', () => {
     expect(formatDuration(500)).toMatch(/ms/);
     expect(formatDuration(1500)).toMatch(/s/);
     expect(formatDuration(90000)).toMatch(/m/);
+  });
+});
+
+describe('effectiveDurationMs', () => {
+  it('prefers the recorded total when present', () => {
+    expect(effectiveDurationMs({ total_duration_ms: 1234, started_at: '2026-01-01T00:00:00Z', ended_at: '2026-01-01T00:01:00Z' })).toBe(1234);
+  });
+  it('derives from start/end timestamps when the total is absent', () => {
+    expect(effectiveDurationMs({ total_duration_ms: null, started_at: '2026-01-01T00:00:00.000Z', ended_at: '2026-01-01T00:00:12.500Z' })).toBe(12_500);
+  });
+  it('returns null when there is nothing to measure or the range is inverted', () => {
+    expect(effectiveDurationMs({ total_duration_ms: null, started_at: '2026-01-01T00:00:00Z', ended_at: null })).toBeNull();
+    expect(effectiveDurationMs({ total_duration_ms: null, started_at: '2026-01-01T00:01:00Z', ended_at: '2026-01-01T00:00:00Z' })).toBeNull();
+    expect(effectiveDurationMs({})).toBeNull();
   });
 });

@@ -4,6 +4,7 @@ import type { Trace, EvalResult, GuardrailPolicy } from '../models/types.js';
 import type { TraceStatus } from '../models/enums.js';
 import { statusBadge, scoreBadge, passBadge, guardActionBadge, colors } from './theme.js';
 import { isPossiblyAbandoned } from '../services/trace-service.js';
+import { effectiveDurationMs } from '../utils/time.js';
 
 // ── Generic table factory ─────────────────────────────────────────────────
 
@@ -46,7 +47,7 @@ export function traceTable(traces: Trace[]): string {
       chalk.white(t.agent_name),
       status,
       chalk.white(stepCountStr(t)),
-      formatDurationShort(t.total_duration_ms),
+      formatDurationShort(effectiveDurationMs(t)),
       t.total_tokens != null ? chalk.white(t.total_tokens.toLocaleString()) : chalk.dim('-'),
       formatRelative(t.started_at),
     ]);
