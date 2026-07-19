@@ -210,6 +210,12 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
       };
     });
 
+    // The trace spans from the earliest span start (group is sorted by start)
+    // to the latest span end; derive the trace-level end time and duration so
+    // OTel-ingested traces show a duration instead of "-".
+    const spanEnds = group.map((s) => s.end).filter((e): e is number => e != null);
+    const maxEnd = spanEnds.length ? Math.max(...spanEnds) : undefined;
+
     traces.push({
       agent_name: agentName,
       trigger: 'api',
@@ -219,6 +225,8 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
       input: root ? messageContent(root.attrs, 'input') ?? {} : {},
       output: root ? messageContent(root.attrs, 'output') ?? null : null,
       started_at: isoFromNanos(group[0].start),
+      ended_at: maxEnd != null ? isoFromNanos(maxEnd) : null,
+      total_duration_ms: maxEnd != null ? Math.round((maxEnd - group[0].start) / 1e6) : null,
       total_tokens: totalTokens || null,
       metadata: { source_format: 'otel-genai', otel_trace_id: group[0].traceId, ...(root ? {} : { synthetic_trace: true }) },
       steps,

@@ -57,6 +57,10 @@ describe('mapOtlpTraces (GenAI semconv)', () => {
     expect(trace.agent_name).toBe('planner');
     expect(trace.session_id).toBe('conv-1');
     expect(trace.total_tokens).toBe(120);
+    // The trace spans the earliest start (1ms) to the latest end (5ms), so it
+    // carries a derived end time and duration rather than leaving them null.
+    expect(trace.total_duration_ms).toBe(4);
+    expect(trace.ended_at).toBe('1970-01-01T00:00:00.005Z');
     expect(trace.steps).toHaveLength(2);
 
     const [chat, tool] = trace.steps!;
