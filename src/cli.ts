@@ -125,6 +125,17 @@ program
     await runDecisions(traceId, opts);
   });
 
+// --- watch ---
+program
+  .command('watch [trace-id]')
+  .description('Live-tail a running trace (defaults to the most recent running trace)')
+  .option('--interval <ms>', 'Poll interval in milliseconds (default 500)')
+  .option('--dir <path>', 'Custom data directory')
+  .action(async (traceId, opts) => {
+    const { runWatch } = await import('./commands/watch.js');
+    await runWatch(traceId, opts);
+  });
+
 // --- replay ---
 program
   .command('replay <trace-id>')

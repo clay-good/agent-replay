@@ -539,6 +539,48 @@ export function getTrace(
   };
 }
 
+// ── 3b. Live tail helpers (watch) ──────────────────────────────────────────
+
+/** Steps of a trace with `step_number` greater than `afterStepNumber`, in order. */
+export function getStepsAfter(
+  db: Database.Database,
+  traceId: string,
+  afterStepNumber: number,
+): TraceStep[] {
+  const rows = db
+    .prepare(
+      'SELECT * FROM agent_trace_steps WHERE trace_id = ? AND step_number > ? ORDER BY step_number',
+    )
+    .all(traceId, afterStepNumber) as Record<string, unknown>[];
+  return rows.map(rowToStep);
+}
+
+/** The most recently started trace still in status `running`, or null. */
+export function getMostRecentRunningTrace(db: Database.Database): Trace | null {
+  const row = db
+    .prepare("SELECT * FROM agent_traces WHERE status = 'running' ORDER BY started_at DESC LIMIT 1")
+    .get() as Record<string, unknown> | undefined;
+  return row ? rowToTrace(row) : null;
+}
+
+/** How long a trace may stay `running` before `list` flags it as possibly abandoned. */
+export const ABANDONED_THRESHOLD_MS = 30 * 60 * 1000;
+
+/**
+ * Whether a trace looks abandoned: still `running` and started longer ago than
+ * the staleness threshold. `nowMs` is injectable for testing.
+ */
+export function isPossiblyAbandoned(
+  trace: Pick<Trace, 'status' | 'started_at'>,
+  thresholdMs: number = ABANDONED_THRESHOLD_MS,
+  nowMs: number = Date.now(),
+): boolean {
+  if (trace.status !== 'running') return false;
+  const started = Date.parse(trace.started_at);
+  if (Number.isNaN(started)) return false;
+  return nowMs - started > thresholdMs;
+}
+
 // ── 4. listTraces ─────────────────────────────────────────────────────────
 
 export function listTraces(

@@ -42,9 +42,9 @@
 
 ## 7. `watch` command
 
-- [ ] 7.1 `agent-replay watch [trace-id]` live-tails new steps (500ms poll); with no ID, follows the most recently started running trace
-- [ ] 7.2 Flag long-running `running` traces in `list` output as possibly abandoned
-- [ ] 7.3 Test: steps inserted while watching are rendered in order
+- [x] 7.1 `agent-replay watch [trace-id]` live-tails new steps (500ms poll); with no ID, follows the most recently started running trace
+- [x] 7.2 Flag long-running `running` traces in `list` output as possibly abandoned
+- [x] 7.3 Test: steps inserted while watching are rendered in order
 
 ## 8. Docs
 

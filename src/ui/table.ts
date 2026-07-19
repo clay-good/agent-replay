@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import type { Trace, EvalResult, GuardrailPolicy } from '../models/types.js';
 import type { TraceStatus } from '../models/enums.js';
 import { statusBadge, scoreBadge, passBadge, guardActionBadge, colors } from './theme.js';
+import { isPossiblyAbandoned } from '../services/trace-service.js';
 
 // ── Generic table factory ─────────────────────────────────────────────────
 
@@ -37,10 +38,13 @@ export function traceTable(traces: Trace[]): string {
   });
 
   for (const t of traces) {
+    const status = isPossiblyAbandoned(t)
+      ? `${statusBadge(t.status as TraceStatus)} ${chalk.yellow('⚠ abandoned?')}`
+      : statusBadge(t.status as TraceStatus);
     table.push([
       chalk.dim(t.id.slice(0, 12)),
       chalk.white(t.agent_name),
-      statusBadge(t.status as TraceStatus),
+      status,
       chalk.white(stepCountStr(t)),
       formatDurationShort(t.total_duration_ms),
       t.total_tokens != null ? chalk.white(t.total_tokens.toLocaleString()) : chalk.dim('-'),
