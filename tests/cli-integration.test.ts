@@ -306,6 +306,14 @@ describe('CLI integration', () => {
     expect(run(['show', 'tbig', '--from-step', '5', '--to-step', '2']).code).toBe(2);
     // An in-range-but-empty window (valid numbers past the end) is still a success.
     expect(run(['show', 'tbig', '--from-step', '999']).code).toBe(0);
+
+    // replay shares the window flags and adds --speed; same validation applies
+    // (--speed 0 keeps the run instant).
+    expect(run(['replay', 'tbig', '--speed', '0', '--from-step', 'abc']).code).toBe(2);
+    expect(run(['replay', 'tbig', '--speed', '0', '--from-step', '5', '--to-step', '2']).code).toBe(2);
+    expect(run(['replay', 'tbig', '--speed', 'abc']).code).toBe(2);
+    expect(run(['replay', 'tbig', '--speed', '-5']).code).toBe(2);
+    expect(run(['replay', 'tbig', '--speed', '0', '--from-step', '2', '--to-step', '4']).code).toBe(0);
   });
 
   it('config errors exit non-zero so scripts can detect them', () => {

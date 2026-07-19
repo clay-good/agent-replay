@@ -36,9 +36,35 @@ export async function runReplay(
     return;
   }
 
+  // Validate numeric args so a typo is a clear usage error rather than a silent
+  // fallback (matches `show`'s window validation).
+  if (opts.speed != null) {
+    const s = Number(opts.speed);
+    if (!Number.isFinite(s) || s < 0) {
+      console.error(chalk.red(`  Invalid --speed: ${opts.speed} (must be a non-negative number).`));
+      process.exitCode = 2;
+      return;
+    }
+  }
+  const fromStep = opts.fromStep != null ? safeParseInt(opts.fromStep, 0) : 1;
+  if (opts.fromStep != null && fromStep < 1) {
+    console.error(chalk.red(`  Invalid --from-step: ${opts.fromStep} (must be a positive integer).`));
+    process.exitCode = 2;
+    return;
+  }
+  const toStep = opts.toStep != null ? safeParseInt(opts.toStep, 0) : Infinity;
+  if (opts.toStep != null && toStep < 1) {
+    console.error(chalk.red(`  Invalid --to-step: ${opts.toStep} (must be a positive integer).`));
+    process.exitCode = 2;
+    return;
+  }
+  if (fromStep > toStep) {
+    console.error(chalk.red(`  --from-step (${fromStep}) cannot be greater than --to-step (${toStep}).`));
+    process.exitCode = 2;
+    return;
+  }
+
   const speed = safeParseFloat(opts.speed, 5);
-  const fromStep = safeParseInt(opts.fromStep, 1);
-  const toStep = opts.toStep ? safeParseInt(opts.toStep, Infinity) : Infinity;
 
   // Filter steps to the requested range
   const steps = trace.steps.filter(
