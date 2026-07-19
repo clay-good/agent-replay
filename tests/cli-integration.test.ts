@@ -154,6 +154,14 @@ describe('CLI integration', () => {
     ].map((r) => JSON.stringify(r)).join('\n'));
     expect(run(['import', t, '--format', 'claude-transcript']).code).toBe(0);
     expect(JSON.parse(run(['list', '--session', 'imp1', '--json']).stdout).total).toBe(1);
+
+    // A file with nothing importable produces no trace, which is a failure, not
+    // a no-op success — otherwise `import X && use-trace` would proceed on empty.
+    const junk = join(dir, '..', 'junk.jsonl');
+    writeFileSync(junk, 'this is not a transcript\n{ broken');
+    const res = run(['import', junk, '--format', 'claude-transcript']);
+    expect(res.code).toBe(1);
+    expect(res.stdout.trim()).toBe('');
   });
 
   it('watch on a completed trace renders it and exits (no hang)', () => {

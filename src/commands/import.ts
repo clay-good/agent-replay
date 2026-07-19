@@ -44,7 +44,10 @@ export function runImport(filePath: string, opts: ImportOptions = {}): void {
   }
 
   if (!report.trace) {
+    // Producing no trace is a failed import (wrong/corrupt/empty file), not a
+    // no-op success — exit non-zero so `import X && use-trace` doesn't proceed.
     console.error(chalk.yellow(`  Nothing importable found in ${absPath} (${report.skipped} record(s) skipped).`));
+    process.exitCode = 1;
     return;
   }
 
