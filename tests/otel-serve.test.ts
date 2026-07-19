@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
+import { gzipSync } from 'node:zlib';
 import Database from 'better-sqlite3';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -82,25 +83,25 @@ afterEach(() => {
   rmSync(join(dir, '..'), { recursive: true, force: true });
 });
 
+// Spawn the receiver and resolve its /v1/traces URL once it's listening.
+async function startReceiver(): Promise<string> {
+  const port = await freePort();
+  server = spawn(process.execPath, [CLI, 'otel', 'serve', '--port', String(port), '--dir', dir], { stdio: 'ignore' });
+  const url = `http://localhost:${port}/v1/traces`;
+  for (let i = 0; i < 50; i++) {
+    try {
+      const probe = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+      if (probe.ok) return url;
+    } catch {
+      await sleep(100);
+    }
+  }
+  throw new Error('otel receiver did not start');
+}
+
 describe('otel serve (end-to-end)', () => {
   it('accepts an OTLP/JSON export over HTTP and records it as a trace', async () => {
-    const port = await freePort();
-    server = spawn(process.execPath, [CLI, 'otel', 'serve', '--port', String(port), '--dir', dir], {
-      stdio: 'ignore',
-    });
-
-    // Wait until the receiver is listening (poll with a small OTLP POST).
-    const url = `http://localhost:${port}/v1/traces`;
-    let ready = false;
-    for (let i = 0; i < 50 && !ready; i++) {
-      try {
-        const probe = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
-        if (probe.ok) ready = true;
-      } catch {
-        await sleep(100);
-      }
-    }
-    expect(ready).toBe(true);
+    const url = await startReceiver();
 
     const res = await fetch(url, {
       method: 'POST',
@@ -118,6 +119,26 @@ describe('otel serve (end-to-end)', () => {
       expect(trace?.agent_name).toBe('otel-e2e-bot');
       const steps = db.prepare("SELECT COUNT(*) c FROM agent_trace_steps WHERE step_type = 'llm_call'").get() as { c: number };
       expect(steps.c).toBe(1); // the chat span became an llm_call step
+    } finally {
+      db.close();
+    }
+  }, 20000);
+
+  it('accepts a gzip-compressed OTLP export (as real exporters send)', async () => {
+    const url = await startReceiver();
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'content-encoding': 'gzip' },
+      body: gzipSync(Buffer.from(OTLP_PAYLOAD)),
+    });
+    expect(res.status).toBe(200);
+
+    const db = new Database(join(dir, 'traces.db'), { readonly: true });
+    try {
+      const trace = db.prepare('SELECT agent_name FROM agent_traces WHERE session_id = ?').get('conv-e2e') as
+        | { agent_name: string }
+        | undefined;
+      expect(trace?.agent_name).toBe('otel-e2e-bot'); // decompressed and mapped
     } finally {
       db.close();
     }
