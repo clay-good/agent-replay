@@ -171,3 +171,10 @@ test-results/
 # --------------------
 .fastembed_cache/
 */.fastembed_cache/
+
+# --------------------
+# agent-replay runtime data
+# --------------------
+# `agent-replay init` generates this per-user local directory (SQLite store +
+# machine-specific config). It must not be committed.
+.agent-replay/
