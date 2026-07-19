@@ -153,6 +153,10 @@ export interface IngestStepInput {
   snapshot?: IngestSnapshotInput;
   parent_step?: number | null;
   caused_by_step?: number | null;
+  // Aliases matching the persisted/exported model shape, so a trace produced by
+  // `show --json` / `export` re-ingests with its hierarchy and causality intact.
+  parent_step_number?: number | null;
+  caused_by_step_number?: number | null;
   decision?: IngestDecisionInput | null;
 }
 

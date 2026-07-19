@@ -8,6 +8,7 @@ import {
   attachSnapshot,
   getStepSnapshot,
   getTrace,
+  ingestTrace,
 } from '../src/services/trace-service.js';
 import { validateEvent } from '../src/services/event-protocol.js';
 import { applyEvent } from '../src/services/recorder.js';
@@ -176,6 +177,35 @@ describe('renderTree cycle safety', () => {
     // tree mode uses a #N prefix and never emits ┌.
     expect(out).toContain('┌');
     expect(out).not.toContain('#1');
+  });
+});
+
+// ── Export → re-ingest round-trip preserves hierarchy/causality (spec 3.3) ──
+
+describe('ingest accepts the model-shaped _number aliases', () => {
+  it('re-ingesting an exported trace keeps parent/causal links', () => {
+    // getTrace / export emit parent_step_number & caused_by_step_number; ingest
+    // must accept those (not only the short parent_step/caused_by_step) so a
+    // show --json / export round-trips.
+    const t = ingestTrace(db, {
+      agent_name: 'roundtrip',
+      status: 'completed',
+      steps: [
+        { step_number: 1, step_type: 'decision', name: 'd', decision: { chosen: 'A', decided_by: 'agent' } },
+        { step_number: 2, step_type: 'tool_call', name: 't', parent_step_number: 1, caused_by_step_number: 1 },
+      ],
+    });
+    const s2 = getTrace(db, t.id)!.steps[1];
+    expect(s2.parent_step_number).toBe(1);
+    expect(s2.caused_by_step_number).toBe(1);
+  });
+
+  it('still rejects a forward/self reference via the _number alias', () => {
+    const r = validateTraceInput({
+      agent_name: 'x',
+      steps: [{ step_number: 1, step_type: 'thought', name: 'a', parent_step_number: 1 }],
+    });
+    expect(r.valid).toBe(false); // self-parent rejected regardless of field name
   });
 });
 

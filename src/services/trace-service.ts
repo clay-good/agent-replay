@@ -260,8 +260,8 @@ export function ingestTrace(
         step.model ?? null,
         step.error ?? null,
         jsonStr(step.metadata),
-        step.parent_step ?? null,
-        step.caused_by_step ?? null,
+        step.parent_step ?? step.parent_step_number ?? null,
+        step.caused_by_step ?? step.caused_by_step_number ?? null,
       );
 
       if (step.decision) {
@@ -359,8 +359,8 @@ export function appendStep(
       input.model ?? null,
       input.error ?? null,
       jsonStr(input.metadata),
-      input.parent_step ?? null,
-      input.caused_by_step ?? null,
+      input.parent_step ?? input.parent_step_number ?? null,
+      input.caused_by_step ?? input.caused_by_step_number ?? null,
     );
 
     if (input.decision) {

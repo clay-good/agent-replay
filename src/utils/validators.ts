@@ -119,8 +119,11 @@ export function validateTraceInput(input: unknown): ValidationResult {
         // Cross-step existence: a parent/causal reference must point at a
         // step number that actually exists in this trace.
         const s = data.steps[i] as Record<string, unknown>;
-        for (const refField of ['parent_step', 'caused_by_step'] as const) {
-          const ref = s?.[refField];
+        const crossRefs: { field: string; value: unknown }[] = [
+          { field: 'parent_step', value: s?.parent_step ?? s?.parent_step_number },
+          { field: 'caused_by_step', value: s?.caused_by_step ?? s?.caused_by_step_number },
+        ];
+        for (const { field: refField, value: ref } of crossRefs) {
           if (typeof ref === 'number' && Number.isInteger(ref) && ref >= 1 && !stepNumbers.has(ref)) {
             errors.push({
               field: `steps[${i}].${refField}`,
@@ -184,8 +187,11 @@ export function validateStepInput(input: unknown, index?: number): ValidationRes
     typeof data.step_number === 'number' && Number.isInteger(data.step_number)
       ? data.step_number
       : null;
-  for (const refField of ['parent_step', 'caused_by_step'] as const) {
-    const ref = data[refField];
+  const refs: { field: string; value: unknown }[] = [
+    { field: 'parent_step', value: data.parent_step ?? data.parent_step_number },
+    { field: 'caused_by_step', value: data.caused_by_step ?? data.caused_by_step_number },
+  ];
+  for (const { field: refField, value: ref } of refs) {
     if (ref == null) continue;
     if (typeof ref !== 'number' || !Number.isInteger(ref) || ref < 1) {
       errors.push({ field: `${prefix}${refField}`, message: `${refField} must be a positive integer step number` });
