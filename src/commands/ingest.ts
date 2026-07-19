@@ -153,9 +153,17 @@ export function runIngest(filePath: string, opts: IngestOptions = {}): void {
 
 function detectFormat(raw: string, path: string): 'json' | 'jsonl' {
   if (path.endsWith('.jsonl') || path.endsWith('.ndjson')) return 'jsonl';
-  const trimmed = raw.trimStart();
-  if (trimmed.startsWith('[')) return 'json';
-  return 'jsonl';
+  // Anything whose entire contents parse as a single JSON value is `json` — a
+  // pretty-printed object spans many lines but is still one value. Only fall
+  // back to line-delimited when the whole-file parse fails (real JSONL, where
+  // each line is its own object). The old "starts with [" check misdetected a
+  // multi-line object as JSONL and then failed on "line 1".
+  try {
+    JSON.parse(raw);
+    return 'json';
+  } catch {
+    return 'jsonl';
+  }
 }
 
 function parseTraces(raw: string, format: 'json' | 'jsonl'): unknown[] {

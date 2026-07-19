@@ -70,6 +70,18 @@ describe('CLI integration', () => {
     expect(run(['list']).stdout).toContain('cli-bot');
   });
 
+  it('ingests a pretty-printed single JSON object (not misdetected as JSONL)', () => {
+    // A multi-line object is one JSON value; the old detector saw it didn't
+    // start with "[" and parsed it line-by-line, failing on "line 1".
+    const file = join(dir, '..', 'pretty.json');
+    writeFileSync(file, JSON.stringify(
+      { agent_name: 'pretty-bot', status: 'completed', steps: [{ step_number: 1, step_type: 'output', name: 'done' }] },
+      null, 2,
+    ));
+    expect(run(['ingest', file]).code).toBe(0);
+    expect(JSON.parse(run(['list', '--json']).stdout).total).toBe(1);
+  });
+
   it('records a decision trace and explains it via decisions/why', () => {
     const stream = [
       '{"v":1,"type":"trace_start","trace_id":"tcli","agent_name":"b","session_id":"scli"}',
