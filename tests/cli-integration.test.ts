@@ -112,6 +112,41 @@ describe('CLI integration', () => {
     expect(run(['run', '--', process.execPath, '-e', 'process.exit(5)']).code).toBe(5);
   });
 
+  it('hook capture ALWAYS exits 0 with empty stdout (never interferes with the agent)', () => {
+    // Safety contract: a non-zero exit or stdout JSON would block/mislead the
+    // host agent, so capture mode must emit neither — even on odd input.
+    const payloads = [
+      '{"hook_event_name":"PreToolUse","session_id":"h","tool_name":"Bash","tool_input":{}}',
+      '{"hook_event_name":"Stop","session_id":"h"}',
+      '{"hook_event_name":"UnknownEvent","session_id":"h"}',
+      'not even json',
+      '',
+    ];
+    for (const p of payloads) {
+      const r = run(['hook'], p);
+      expect(r.code).toBe(0);
+      expect(r.stdout).toBe('');
+    }
+  });
+
+  it('hook --enforce returns a structured deny decision and still exits 0', () => {
+    run(['guard', 'add', '--name', 'blk', '--action', 'deny', '--pattern', '{"name_contains":"delete"}']);
+    const r = run(['hook', '--enforce'], '{"hook_event_name":"PreToolUse","session_id":"e","tool_name":"delete_all","tool_input":{}}');
+    expect(r.code).toBe(0); // blocking happens via the JSON, not the exit code (Claude Code dialect)
+    const decision = JSON.parse(r.stdout.trim());
+    expect(decision.hookSpecificOutput.permissionDecision).toBe('deny');
+  });
+
+  it('imports a Claude Code transcript', () => {
+    const t = join(dir, '..', 'transcript.jsonl');
+    writeFileSync(t, [
+      { type: 'user', sessionId: 'imp1', message: { role: 'user', content: 'hi' } },
+      { type: 'assistant', sessionId: 'imp1', message: { role: 'assistant', content: [{ type: 'text', text: 'hello' }] } },
+    ].map((r) => JSON.stringify(r)).join('\n'));
+    expect(run(['import', t, '--format', 'claude-transcript']).code).toBe(0);
+    expect(JSON.parse(run(['list', '--session', 'imp1', '--json']).stdout).total).toBe(1);
+  });
+
   it('exits non-zero and reports on an unknown command', () => {
     const r = run(['definitely-not-a-command']);
     expect(r.code).not.toBe(0);
