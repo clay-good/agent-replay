@@ -244,6 +244,30 @@ describe('CLI integration', () => {
     expect(run(['record', '--format', 'nonsense'], '{}').code).toBe(2);
   });
 
+  it('survives an adversarial event stream and still records the valid events', () => {
+    // Malformed/hostile lines mixed with valid ones: the recorder must skip the
+    // junk (warn), never crash, and still apply the good events.
+    const stream = [
+      'null',                                                                       // non-object JSON
+      '[1,2,3]',                                                                    // array, not an event
+      '{ truncated',                                                               // invalid JSON
+      '{"v":999,"type":"trace_start","agent_name":"x"}',                            // unsupported version
+      '{"v":1,"type":"trace_start","trace_id":"tadv","agent_name":"survivor"}',     // valid
+      '{"v":1,"type":"step_end","trace_id":"tadv","step_number":42}',               // step_end for a missing step
+      '{"v":1,"type":"step","trace_id":"tadv","step_number":1,"step_type":"bogus","name":"n"}', // invalid step_type
+      '{"v":1,"type":"step","trace_id":"tadv","step_number":1,"step_type":"output","name":"ok"}', // valid
+      '{"v":1,"type":"trace_end","trace_id":"tadv","status":"completed"}',          // valid
+    ].join('\n');
+    const r = run(['record'], stream);
+    expect(r.code).toBe(0); // never crashes on hostile input
+    const t = JSON.parse(run(['list', '--json']).stdout).items.find((x: { agent_name: string }) => x.agent_name === 'survivor');
+    expect(t).toBeTruthy();
+    const full = JSON.parse(run(['show', t.id, '--json']).stdout);
+    expect(full.status).toBe('completed');
+    expect(full.steps).toHaveLength(1); // only the one valid step
+    expect(full.steps[0].name).toBe('ok');
+  });
+
   it('exits non-zero and reports on an unknown command', () => {
     const r = run(['definitely-not-a-command']);
     expect(r.code).not.toBe(0);
