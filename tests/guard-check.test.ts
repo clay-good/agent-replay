@@ -44,6 +44,14 @@ describe('single-step evaluation', () => {
     expect(v.reason).toContain('delete');
   });
 
+  it('matches name_contains case-insensitively, so casing cannot bypass a policy', () => {
+    addPolicy(db, { name: 'no-delete', action: 'deny', match_pattern: { step_type: 'tool_call', name_contains: 'delete' } });
+    for (const name of ['DELETE_USER', 'Delete_User', 'deLeTe_records']) {
+      const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name })));
+      expect(v.action, name).toBe('deny');
+    }
+  });
+
   it('warns without blocking', () => {
     addPolicy(db, { name: 'token-warn', action: 'warn', match_pattern: { step_type: 'llm_call' } });
     const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'llm_call', name: 'generate' })));
