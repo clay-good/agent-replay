@@ -294,6 +294,23 @@ program
     await runExport(opts);
   });
 
+// --- check ---
+program
+  .command('check')
+  .description('Compare traces against a golden dataset; exits non-zero on regression (CI-ready)')
+  .requiredOption('--golden <file>', 'Golden dataset file (from "export --format golden")')
+  .option('--trace <id>', 'Check a single trace by ID')
+  .option('--agent <name>', 'Check traces from this agent')
+  .option('--since <duration>', 'Only check traces since this window (e.g. 1d)')
+  .option('--fields <list>', 'Comma-separated field allowlist (default: step_count,step_types,step_names,tool_inputs,status)')
+  .option('--strict', 'Treat unmatched candidate traces as failures')
+  .option('--json', 'Output the report as JSON')
+  .option('--dir <path>', 'Custom data directory')
+  .action(async (opts) => {
+    const { runCheck } = await import('./commands/check.js');
+    await runCheck(opts);
+  });
+
 // --- dashboard ---
 program
   .command('dashboard')

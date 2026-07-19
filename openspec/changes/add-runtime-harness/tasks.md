@@ -27,9 +27,9 @@
 
 ## 5. Golden regression runner
 
-- [ ] 5.1 `agent-replay check --golden <file> [--trace <id> | --agent <n> --since <d>] [--fields <list>]`: match by agent name + input hash, diff on the structural field allowlist, non-zero exit on divergence
-- [ ] 5.2 Human-readable divergence report plus `--json`
-- [ ] 5.3 Test: matching run passes; altered tool input fails with the divergent field named
+- [x] 5.1 `agent-replay check --golden <file> [--trace <id> | --agent <n> --since <d>] [--fields <list>]`: match by agent name + input hash, diff on the structural field allowlist, non-zero exit on divergence
+- [x] 5.2 Human-readable divergence report plus `--json`
+- [x] 5.3 Test: matching run passes; altered tool input fails with the divergent field named
 
 ## 6. Docs
 

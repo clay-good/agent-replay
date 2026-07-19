@@ -5,6 +5,7 @@ export * from './recorder.js';
 export * from './hook-adapter.js';
 export * from './importers/claude-transcript.js';
 export * from './diff-service.js';
+export * from './check-service.js';
 export * from './fork-service.js';
 export * from './eval-service.js';
 export * from './guard-service.js';

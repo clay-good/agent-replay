@@ -251,6 +251,24 @@ agent-replay fork <trace-id> --from-step 2 --modify-input '{"task":"revised prom
 agent-replay fork <trace-id> --from-step 4 --tag experiment-1
 ```
 
+### Regression check (CI)
+
+Turn known-good runs into a regression gate. Export a golden dataset once, then `check` new runs against it — the comparison is structural (step count, step types and names, tool-call inputs, final status) rather than raw output text, so non-deterministic wording never causes false failures. It exits non-zero on any regression, ready for CI.
+
+```bash
+# Capture a golden dataset from passing runs
+agent-replay export --format golden --tag known-good --output golden.json
+
+# Fail the build if recent runs diverge from golden
+agent-replay check --golden golden.json --agent travel-bot --since 1d
+
+# Narrow the comparison, or treat unmatched runs as failures
+agent-replay check --golden golden.json --fields step_types,tool_inputs
+agent-replay check --golden golden.json --strict --json
+```
+
+Matches are made by agent name and a hash of the input, so each run is compared to its own golden counterpart. A divergence report names the trace, the step, and the differing field.
+
 ### Evaluate
 
 ```bash

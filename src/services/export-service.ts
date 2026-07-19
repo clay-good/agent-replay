@@ -18,12 +18,20 @@ export interface ExportOptions {
   withSnapshots?: boolean;
 }
 
+export interface GoldenStepSummary {
+  step_number: number;
+  step_type: string;
+  name: string;
+  /** Present for tool_call steps so regression checks can diff tool inputs. */
+  input?: Record<string, unknown>;
+}
+
 export interface GoldenEntry {
   id: string;
   agent_name: string;
   input: Record<string, unknown>;
   expected_output: Record<string, unknown> | null;
-  steps_summary: Array<{ step_number: number; step_type: string; name: string }>;
+  steps_summary: GoldenStepSummary[];
   eval_criteria: Array<{ evaluator_name: string; score: number; passed: boolean }>;
   metadata: Record<string, unknown>;
 }
@@ -105,6 +113,7 @@ function exportGolden(db: Database.Database, items: Trace[]): string {
         step_number: s.step_number,
         step_type: s.step_type,
         name: s.name,
+        ...(s.step_type === 'tool_call' ? { input: s.input } : {}),
       })),
       eval_criteria: evals.map((e) => ({
         evaluator_name: e.evaluator_name,
