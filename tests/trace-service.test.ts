@@ -118,6 +118,21 @@ describe('ingestTrace', () => {
     expect(trace.status).toBe('running');
   });
 
+  it('rejects a duplicate step_number and stores nothing (transaction rollback)', () => {
+    // Spec: the UNIQUE(trace_id, step_number) constraint fails the insert; the
+    // whole ingest transaction rolls back so no partial trace is left behind.
+    expect(() =>
+      ingestTrace(db, {
+        agent_name: 'dupe',
+        steps: [
+          { step_number: 1, step_type: 'thought', name: 'a' },
+          { step_number: 1, step_type: 'output', name: 'b' },
+        ],
+      }),
+    ).toThrow();
+    expect(listTraces(db, {}).total).toBe(0);
+  });
+
   it('defaults status to completed when ended_at present', () => {
     const trace = ingestTrace(db, makeTrace({ status: undefined, ended_at: new Date().toISOString() }));
     expect(trace.status).toBe('completed');
