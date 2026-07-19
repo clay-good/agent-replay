@@ -268,6 +268,21 @@ describe('CLI integration', () => {
     expect(full.steps[0].name).toBe('ok');
   });
 
+  it('windows a large trace with show --from-step/--to-step', () => {
+    const lines = ['{"v":1,"type":"trace_start","trace_id":"tbig","agent_name":"big"}'];
+    for (let i = 1; i <= 8; i++) lines.push(`{"v":1,"type":"step","trace_id":"tbig","step_number":${i},"step_type":"thought","name":"s${i}"}`);
+    lines.push('{"v":1,"type":"trace_end","trace_id":"tbig","status":"completed"}');
+    run(['record'], lines.join('\n'));
+
+    // JSON output respects the window.
+    const windowed = JSON.parse(run(['show', 'tbig', '--from-step', '3', '--to-step', '5', '--json']).stdout);
+    expect(windowed.steps.map((s: { step_number: number }) => s.step_number)).toEqual([3, 4, 5]);
+
+    // The human view notes how many steps were omitted.
+    const view = run(['show', 'tbig', '--from-step', '3', '--to-step', '5', '--steps-only']).stdout;
+    expect(view).toMatch(/Showing 3 of 8 steps/);
+  });
+
   it('exits non-zero and reports on an unknown command', () => {
     const r = run(['definitely-not-a-command']);
     expect(r.code).not.toBe(0);

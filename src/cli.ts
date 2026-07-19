@@ -118,6 +118,8 @@ program
   .option('--json', 'Output raw JSON')
   .option('--steps-only', 'Only show the step timeline')
   .option('--tree', 'Render steps as a hierarchy (parent/child + causal links)')
+  .option('--from-step <n>', 'Only show steps from this step number (for large traces)')
+  .option('--to-step <n>', 'Only show steps up to this step number')
   .option('--evals', 'Include evaluation results')
   .option('--snapshots', 'Show full snapshot data for each step')
   .option('--dir <path>', 'Custom data directory')

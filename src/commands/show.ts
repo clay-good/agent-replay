@@ -6,7 +6,7 @@ import type { StepType } from '../models/enums.js';
 import { getTrace, getStepSnapshot } from '../services/trace-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { traceHeaderPanel } from '../ui/boxen-panels.js';
-import { truncate } from '../utils/json.js';
+import { truncate, safeParseInt } from '../utils/json.js';
 import { renderTimeline, renderTree } from '../ui/timeline.js';
 import { evalTable } from '../ui/table.js';
 import { heading, separator } from '../ui/theme.js';
@@ -17,6 +17,8 @@ export interface ShowOptions {
   tree?: boolean;
   evals?: boolean;
   snapshots?: boolean;
+  fromStep?: string;
+  toStep?: string;
   dir?: string;
 }
 
@@ -35,12 +37,28 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
     return;
   }
 
-  // Raw JSON output
+  // Optional step window (--from-step/--to-step), so large traces — real
+  // sessions can run to thousands of steps — stay inspectable. Matches replay.
+  const fromStep = opts.fromStep != null ? safeParseInt(opts.fromStep, 1) : undefined;
+  const toStep = opts.toStep != null ? safeParseInt(opts.toStep, Number.MAX_SAFE_INTEGER) : undefined;
+  const windowed = fromStep == null && toStep == null
+    ? trace.steps
+    : trace.steps.filter((s) => (fromStep == null || s.step_number >= fromStep) && (toStep == null || s.step_number <= toStep));
+  const omitted = trace.steps.length - windowed.length;
+  trace.steps = windowed;
+
+  // Raw JSON output (respects the window)
   if (opts.json) {
     console.log(JSON.stringify(trace, null, 2));
     return;
   }
 
+  const windowNote = () => {
+    if (omitted > 0) {
+      console.log(chalk.dim(`  Showing ${windowed.length} of ${windowed.length + omitted} steps (${omitted} outside the --from-step/--to-step window).`));
+      console.log('');
+    }
+  };
   const renderSteps = () => (opts.tree ? renderTree(trace.steps) : renderTimeline(trace.steps));
 
   // Steps-only mode
@@ -48,6 +66,7 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
     console.log('');
     console.log(heading('  Steps'));
     console.log('');
+    windowNote();
     console.log(renderSteps());
     console.log('');
     return;
@@ -61,6 +80,7 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
   // Timeline
   console.log(heading(opts.tree ? '  Step tree' : '  Steps'));
   console.log('');
+  windowNote();
   console.log(renderSteps());
   console.log('');
 

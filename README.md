@@ -221,6 +221,9 @@ agent-replay show <trace-id> --evals --snapshots
 
 # Render steps as a hierarchy (subagents/nested calls) with causal links
 agent-replay show <trace-id> --tree
+
+# Window a large trace (real sessions can run to thousands of steps)
+agent-replay show <trace-id> --from-step 100 --to-step 150
 ```
 
 Trace IDs support prefix matching — just type the first few characters.
