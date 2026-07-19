@@ -131,6 +131,15 @@ async function replayStep(step: TraceStep, speed: number): Promise<void> {
     successSpinner(spinner, resultText);
   }
 
+  // Reveal the decision made at this step, mirroring `show`.
+  if (step.decision) {
+    console.log(
+      chalk.dim('       Chose: ') +
+        chalk.greenBright(step.decision.chosen) +
+        (step.decision.rationale ? chalk.dim(` — ${step.decision.rationale}`) : ''),
+    );
+  }
+
   // Show output summary if present
   if (step.output && Object.keys(step.output).length > 0) {
     let outputStr: string;
