@@ -69,6 +69,18 @@ program
     await runRecord(opts);
   });
 
+// --- import ---
+program
+  .command('import <path>')
+  .description('Import an on-disk session log (Claude Code transcript JSONL) as a trace')
+  .option('--format <format>', 'Log format: claude-transcript (default)', 'claude-transcript')
+  .option('--tags <tags>', 'Comma-separated tags to add to the imported trace')
+  .option('--dir <path>', 'Custom data directory')
+  .action(async (path, opts) => {
+    const { runImport } = await import('./commands/import.js');
+    await runImport(path, opts);
+  });
+
 // --- hook ---
 program
   .command('hook [event]')

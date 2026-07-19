@@ -133,6 +133,16 @@ command = "agent-replay hook"
 
 Then watch a live session with [`agent-replay watch`](#explain-decisions).
 
+#### Import existing session logs
+
+To pull in history that already exists on disk, `import` converts a Claude Code transcript into a trace. It's best-effort: unrecognized records are skipped and counted (the vendor format is internal and version-unstable), and the source format/version is stamped in the trace metadata.
+
+```bash
+agent-replay import ~/.claude/projects/my-project/<session-uuid>.jsonl --format claude-transcript
+```
+
+`tool_use`/`tool_result` blocks become paired `tool_call` steps, `thinking` blocks become `thought` steps, and `usage` counts aggregate into token totals.
+
 ### Browse
 
 ```bash
