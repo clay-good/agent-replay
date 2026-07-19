@@ -222,6 +222,10 @@ describe('CLI integration', () => {
     const full = JSON.parse(run(['show', forked.id, '--json']).stdout);
     expect(full.steps).toHaveLength(2); // steps 1..2 copied
     expect(full.forked_from_step).toBe(2);
+
+    // Malformed --modify-context/--modify-input is a usage error, not a crash.
+    expect(run(['fork', 'tfk', '--from-step', '2', '--modify-context', 'not json{']).code).toBe(2);
+    expect(run(['fork', 'tfk', '--from-step', '2', '--modify-input', '[oops']).code).toBe(2);
   });
 
   it('runs deterministic evaluations offline via eval --all', () => {
