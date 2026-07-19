@@ -73,6 +73,16 @@ function classify(name: string, attrs: Record<string, unknown>): Classified {
     if (upper === 'AGENT' || upper === 'CHAIN') return { role: 'root' };
     if (OPENINFERENCE_KIND[upper]) return { role: 'step', stepType: OPENINFERENCE_KIND[upper] };
   }
+  // OpenLLMetry (traceloop.*): workflow/agent anchor a trace; tool → tool_call;
+  // task → thought; an llm.request.type marks an inference span.
+  const tlKind = str(attrs['traceloop.span.kind']);
+  if (tlKind) {
+    const lower = tlKind.toLowerCase();
+    if (lower === 'workflow' || lower === 'agent') return { role: 'root' };
+    if (lower === 'tool') return { role: 'step', stepType: 'tool_call' };
+    if (lower === 'task') return { role: 'step', stepType: 'thought' };
+  }
+  if (attrs['llm.request.type'] != null) return { role: 'step', stepType: 'llm_call' };
   // Fall back to the span name's leading verb.
   const first = name.trim().split(/\s+/)[0];
   if (GENAI_OP_ROOT.has(first)) return { role: 'root' };
@@ -180,7 +190,7 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
       return {
         step_number: i + 1,
         step_type: stepType!,
-        name: str(s.attrs['gen_ai.tool.name']) ?? s.name,
+        name: str(s.attrs['gen_ai.tool.name']) ?? str(s.attrs['traceloop.entity.name']) ?? s.name,
         input: messageContent(s.attrs, 'input'),
         output: messageContent(s.attrs, 'output'),
         started_at: isoFromNanos(s.start),

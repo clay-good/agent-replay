@@ -143,3 +143,19 @@ describe('OTLP receiver', () => {
     expect(listTraces(db, {}).total).toBe(1);
   }, 15000);
 });
+
+// ── OpenLLMetry (traceloop.*) fallback ─────────────────────────────────────
+
+describe('mapOtlpTraces (OpenLLMetry traceloop.*)', () => {
+  it('maps traceloop span kinds and llm.request.type', () => {
+    const payload = otlp([
+      span({ traceId: 'tl', spanId: 'root', name: 'my_workflow', start: 1 * MS, end: 5 * MS, attrs: { 'traceloop.span.kind': 'workflow', 'traceloop.entity.name': 'agent' } }),
+      span({ traceId: 'tl', spanId: 's1', parentSpanId: 'root', name: 'search.tool', start: 2 * MS, end: 3 * MS, attrs: { 'traceloop.span.kind': 'tool', 'traceloop.entity.name': 'search' } }),
+      span({ traceId: 'tl', spanId: 's2', parentSpanId: 'root', name: 'openai.chat', start: 3 * MS, end: 4 * MS, attrs: { 'llm.request.type': 'chat', 'gen_ai.usage.prompt_tokens': 40, 'gen_ai.usage.completion_tokens': 8 } }),
+    ]);
+    const [trace] = mapOtlpTraces(payload);
+    expect(trace.steps!.map((s) => s.step_type)).toEqual(['tool_call', 'llm_call']);
+    expect(trace.steps![0].name).toBe('search');
+    expect(trace.total_tokens).toBe(48);
+  });
+});

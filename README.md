@@ -108,9 +108,15 @@ It accepts `POST /v1/traces` and `POST /v1/logs` in OTLP/JSON. Spans map onto th
 
 Log events from the two CLIs that emit richer signal as logs are mapped too: Gemini CLI (`gemini_cli.user_prompt`, `gemini_cli.tool_call` — including its `decision` as a decision record attributed to user or policy, `gemini_cli.api_response` tokens) and Claude Code (`claude_code.*`), correlated by `session.id`.
 
-Point an exporter at it over HTTP/JSON — e.g. Gemini CLI `telemetry: { enabled: true, target: "local", otlpEndpoint: "http://localhost:4318", otlpProtocol: "http" }`. Most emitters default to gRPC on port 4317, so switch them to HTTP.
+Point an exporter at it over HTTP/JSON. Most emitters default to gRPC on port 4317, so switch them to HTTP:
 
-> This build ingests OTLP/JSON. Protobuf encoding and the OpenLLMetry (`traceloop.*`) dialect are not yet wired up.
+- **Gemini CLI** — `telemetry: { enabled: true, target: "local", otlpEndpoint: "http://localhost:4318", otlpProtocol: "http" }`
+- **Claude Code** — `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/json`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` (opt into content with `OTEL_LOG_USER_PROMPTS=1`)
+- **Goose / OpenHands** — `OTEL_EXPORTER_OTLP_PROTOCOL=http/json`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318`
+
+Both CLIs redact prompt/response content unless you opt in on their side (Gemini `telemetry.logPrompts`, Claude Code `OTEL_LOG_USER_PROMPTS=1`); `agent-replay` records whatever they send.
+
+> This build ingests OTLP/JSON. Protobuf encoding and the OpenLLMetry (`traceloop.*`) span dialect for LLM-token attributes are partially wired — protobuf is the main gap.
 
 #### Hook capture
 

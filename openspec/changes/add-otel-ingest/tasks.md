@@ -18,8 +18,8 @@
 ## 3. Dialect fallbacks
 
 - [x] 3.1 OpenInference: `openinference.span.kind` (AGENT/CHAIN → trace anchors; TOOL → tool_call; LLM → llm_call; RETRIEVER/EMBEDDING → retrieval; GUARDRAIL → guard_check) with its input/output value attributes
-- [ ] 3.2 OpenLLMetry: `traceloop.*` span attributes mapped equivalently
-- [ ] 3.3 Test: fixture payloads from OpenInference- and OpenLLMetry-instrumented runs ingest correctly
+- [x] 3.2 OpenLLMetry: `traceloop.*` span attributes mapped equivalently
+- [x] 3.3 Test: fixture payloads from OpenInference- and OpenLLMetry-instrumented runs ingest correctly
 
 ## 4. Known-emitter log-event mappers
 
@@ -29,5 +29,5 @@
 
 ## 5. Docs
 
-- [ ] 5.1 README: per-harness two-line setup (Gemini CLI `telemetry: {enabled, target: "local", otlpEndpoint: "http://localhost:4318", otlpProtocol: "http"}`; Claude Code `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318`, beta traces flag; Goose/OpenHands `OTEL_EXPORTER_OTLP_*`); call out the gRPC/4317-default pitfall and content-capture opt-ins
-- [ ] 5.2 `npm run verify` passes
+- [x] 5.1 README: per-harness two-line setup (Gemini CLI `telemetry: {enabled, target: "local", otlpEndpoint: "http://localhost:4318", otlpProtocol: "http"}`; Claude Code `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318`, beta traces flag; Goose/OpenHands `OTEL_EXPORTER_OTLP_*`); call out the gRPC/4317-default pitfall and content-capture opt-ins
+- [x] 5.2 `npm run verify` passes
