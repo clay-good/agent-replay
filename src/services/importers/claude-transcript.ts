@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { dirname, join, basename } from 'node:path';
 import { ingestTrace } from '../trace-service.js';
 import type { IngestTraceInput, IngestStepInput, Trace } from '../../models/types.js';
 
@@ -158,6 +159,43 @@ export function importClaudeTranscript(
     if (contributed) imported++;
   }
 
+  // Subagent transcripts live under `<session>/subagents/agent-<id>.jsonl`
+  // next to the main transcript. Import each as an anchor step with the
+  // subagent's own steps nested beneath it (best-effort — absent dir is fine).
+  const subDir = join(dirname(filePath), basename(filePath, '.jsonl'), 'subagents');
+  if (existsSync(subDir)) {
+    let subFiles: string[] = [];
+    try {
+      subFiles = readdirSync(subDir).filter((f) => f.endsWith('.jsonl')).sort();
+    } catch {
+      subFiles = [];
+    }
+    for (const f of subFiles) {
+      const agentId = basename(f, '.jsonl').replace(/^agent-/, '');
+      const anchor = stepNumber++;
+      steps.push({
+        step_number: anchor,
+        step_type: 'thought',
+        name: `subagent:${agentId}`,
+        metadata: { hook_anchor: 1, agent_id: agentId, source: 'subagent-transcript' },
+      });
+      let subRecords: Record<string, unknown>[] = [];
+      try {
+        subRecords = readFileSync(join(subDir, f), 'utf-8')
+          .split('\n').map((l) => l.trim()).filter(Boolean)
+          .map((l) => JSON.parse(l));
+      } catch {
+        skipped++;
+        continue;
+      }
+      const built = buildSubagentSteps(subRecords, stepNumber, anchor);
+      steps.push(...built.steps);
+      stepNumber += built.steps.length;
+      totalTokens += built.tokens;
+      imported += built.steps.length;
+    }
+  }
+
   if (steps.length === 0 && !sessionId) {
     return { trace: null, imported, skipped, steps: 0 };
   }
@@ -178,6 +216,61 @@ export function importClaudeTranscript(
 
   const trace = ingestTrace(db, traceInput);
   return { trace, imported, skipped, steps: steps.length };
+}
+
+/** Build steps for one subagent transcript, nested under `parentStep`. */
+function buildSubagentSteps(
+  records: Record<string, unknown>[],
+  startNumber: number,
+  parentStep: number,
+): { steps: IngestStepInput[]; tokens: number } {
+  const toolResults = new Map<string, unknown>();
+  for (const rec of records) {
+    const content = (rec.message as { content?: unknown } | undefined)?.content;
+    if (Array.isArray(content)) {
+      for (const block of content as Block[]) {
+        if (block?.type === 'tool_result' && block.tool_use_id) toolResults.set(block.tool_use_id, block.content);
+      }
+    }
+  }
+
+  const steps: IngestStepInput[] = [];
+  let n = startNumber;
+  let tokens = 0;
+
+  for (const rec of records) {
+    const type = rec.type as string | undefined;
+    if (type !== 'user' && type !== 'assistant') continue;
+    const message = rec.message as { content?: unknown; usage?: Record<string, number> } | undefined;
+    if (message?.usage) tokens += (message.usage.input_tokens ?? 0) + (message.usage.output_tokens ?? 0);
+    const content = message?.content;
+    if (!Array.isArray(content)) {
+      if (typeof content === 'string' && type === 'assistant') {
+        steps.push({ step_number: n++, step_type: 'output', name: 'assistant_message', output: { text: content }, parent_step: parentStep });
+      }
+      continue;
+    }
+    for (const block of content as Block[]) {
+      if (block?.type === 'thinking') {
+        steps.push({ step_number: n++, step_type: 'thought', name: 'thinking', output: { text: block.thinking ?? block.text ?? '' }, parent_step: parentStep });
+      } else if (block?.type === 'text' && type === 'assistant' && block.text) {
+        steps.push({ step_number: n++, step_type: 'output', name: 'assistant_message', output: { text: block.text }, parent_step: parentStep });
+      } else if (block?.type === 'tool_use') {
+        const result = block.id ? toolResults.get(block.id) : undefined;
+        steps.push({
+          step_number: n++,
+          step_type: 'tool_call',
+          name: block.name ?? 'tool',
+          input: block.input ?? {},
+          output: result !== undefined ? { result: normalizeResult(result) } : null,
+          parent_step: parentStep,
+          metadata: { tool_use_id: block.id },
+        });
+      }
+    }
+  }
+
+  return { steps, tokens };
 }
 
 function normalizeResult(content: unknown): string {

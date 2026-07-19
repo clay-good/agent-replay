@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runMigrations } from '../src/db/migrations.js';
@@ -84,5 +84,36 @@ describe('importClaudeTranscript', () => {
     expect(report.skipped).toBe(2);
     const trace = getTrace(db, report.trace!.id)!;
     expect(trace.output).toEqual({ text: 'hello' });
+  });
+});
+
+describe('importClaudeTranscript — subagents', () => {
+  it('imports subagent transcript files as nested steps under an anchor', () => {
+    // Main transcript
+    const path = fixture([
+      { type: 'user', sessionId: 'sess-sub', message: { role: 'user', content: 'research this' } },
+      { type: 'assistant', sessionId: 'sess-sub', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Task', input: { agent: 'Explore' } }] } },
+      { type: 'user', sessionId: 'sess-sub', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'done' }] } },
+    ]);
+    // Subagent transcript under <session>/subagents/agent-a1.jsonl
+    const subDir = join(dir, 'transcript', 'subagents');
+    mkdirSync(subDir, { recursive: true });
+    writeFileSync(
+      join(subDir, 'agent-a1.jsonl'),
+      [
+        { type: 'assistant', message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'searching' }, { type: 'tool_use', id: 'st1', name: 'Grep', input: { pattern: 'x' } }] } },
+        { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'st1', content: '3 matches' }] } },
+      ].map((r) => JSON.stringify(r)).join('\n'),
+    );
+
+    const report = importClaudeTranscript(db, path);
+    const trace = getTrace(db, report.trace!.id)!;
+
+    const anchor = trace.steps.find((s) => s.name === 'subagent:a1')!;
+    expect(anchor).toBeTruthy();
+    expect(anchor.metadata.agent_id).toBe('a1');
+    const grep = trace.steps.find((s) => s.name === 'Grep')!;
+    expect(grep.parent_step_number).toBe(anchor.step_number);
+    expect(grep.output).toEqual({ result: '3 matches' });
   });
 });
