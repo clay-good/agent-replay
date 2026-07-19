@@ -622,6 +622,10 @@ To record a run live from TypeScript, use the `TraceRecorder` SDK — the same i
 import { ensureDatabase, TraceRecorder } from 'agent-replay';
 
 const db = ensureDatabase('.agent-replay/traces.db');
+// Or bring your own better-sqlite3 handle (e.g. in-memory) and init the schema:
+//   import Database from 'better-sqlite3';
+//   import { runMigrations } from 'agent-replay';
+//   const db = new Database(':memory:'); runMigrations(db);
 const rec = new TraceRecorder(db);
 
 rec.startTrace({ agent_name: 'my-agent', session_id: conversationId, input: { task } });
