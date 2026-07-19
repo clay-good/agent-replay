@@ -268,6 +268,13 @@ describe('listTraces', () => {
   it('rejects an unknown sort field instead of silently defaulting', () => {
     expect(() => listTraces(db, { sort_by: 'nonsense' })).toThrow(/Invalid sort field/);
   });
+
+  it('rejects an unknown status instead of silently matching nothing', () => {
+    ingestTrace(db, makeTrace({ status: 'failed' }));
+    expect(() => listTraces(db, { status: 'faield' })).toThrow(/Invalid status/);
+    // Valid statuses still filter.
+    expect(listTraces(db, { status: 'failed' }).total).toBe(1);
+  });
 });
 
 // ── updateTrace ───────────────────────────────────────────────────────────

@@ -16,7 +16,7 @@ import type {
   CreateEvalInput,
   ListTracesFilter,
 } from '../models/types.js';
-import { DECIDED_BY } from '../models/enums.js';
+import { DECIDED_BY, TRACE_STATUSES } from '../models/enums.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -614,6 +614,11 @@ export function listTraces(
   const params: unknown[] = [];
 
   if (filter.status) {
+    // Reject an unknown status rather than silently matching nothing (a typo'd
+    // `--status faield` shouldn't read as "no failed traces").
+    if (!(TRACE_STATUSES as readonly string[]).includes(filter.status)) {
+      throw new Error(`Invalid status '${filter.status}'. Valid: ${TRACE_STATUSES.join(', ')}`);
+    }
     conditions.push('status = ?');
     params.push(filter.status);
   }
