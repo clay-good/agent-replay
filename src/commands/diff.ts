@@ -47,7 +47,15 @@ export async function runDiff(
 
   // Optionally filter by fields
   if (opts.fields) {
-    const allowedFields = opts.fields.split(',').map((f) => f.trim());
+    const allowedFields = opts.fields.split(',').map((f) => f.trim()).filter(Boolean);
+    // Reject unknown field names so a typo doesn't silently hide real diffs and
+    // imply the traces are more similar than they are.
+    const comparable = ['step_type', 'name', 'input', 'output', 'model'];
+    const unknown = allowedFields.filter((f) => !comparable.includes(f));
+    if (unknown.length > 0) {
+      console.error(chalk.red(`  Unknown --fields value(s): ${unknown.join(', ')}. Comparable fields: ${comparable.join(', ')}`));
+      return;
+    }
     diff.diffs = diff.diffs.filter(
       (d) =>
         allowedFields.includes(d.field) ||
