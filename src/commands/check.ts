@@ -68,7 +68,14 @@ export function runCheck(opts: CheckOptions = {}): void {
   }
 
   const fields = opts.fields ? opts.fields.split(',').map((s) => s.trim()).filter(Boolean) : undefined;
-  const report = checkGolden(golden, candidates, { fields, strict: opts.strict });
+  let report;
+  try {
+    report = checkGolden(golden, candidates, { fields, strict: opts.strict });
+  } catch (err) {
+    console.error(chalk.red(`  ${errorMessage(err)}`));
+    process.exitCode = 2;
+    return;
+  }
 
   if (opts.json) {
     console.log(JSON.stringify(report, null, 2));

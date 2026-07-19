@@ -306,7 +306,12 @@ agent-replay check --golden golden.json --agent travel-bot --since 1d
 # Narrow the comparison, or treat unmatched runs as failures
 agent-replay check --golden golden.json --fields step_types,tool_inputs
 agent-replay check --golden golden.json --strict --json
+
+# Opt into catching model swaps (ignored by default, since upgrades are common)
+agent-replay check --golden golden.json --fields model
 ```
+
+Comparable fields: `step_count`, `step_types`, `step_names`, `tool_inputs`, `status` (the default set), plus opt-in `model`. An unrecognized `--fields` value is rejected rather than silently comparing nothing.
 
 Matches are made by agent name and a hash of the input, so each run is compared to its own golden counterpart. A divergence report names the trace, the step, and the differing field.
 

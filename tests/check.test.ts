@@ -112,4 +112,28 @@ describe('checkGolden', () => {
     const report = checkGolden(golden, [failed], { fields: ['step_count', 'step_names'] });
     expect(report.ok).toBe(true);
   });
+
+  it('catches a model change only when model is opted into via --fields', () => {
+    const withModel: IngestTraceInput = {
+      agent_name: 'travel-bot',
+      status: 'completed',
+      input: { task: 'book a flight', dest: 'JFK' },
+      steps: [{ step_number: 1, step_type: 'llm_call', name: 'gen', model: 'gpt-4' }],
+    };
+    ingestTrace(db, withModel);
+    const golden = JSON.parse(exportTraces(db, { agent_name: 'travel-bot' }, 'golden')) as GoldenEntry[];
+    const swapped = candidate({ ...withModel, steps: [{ ...withModel.steps![0], model: 'gpt-5.4-nano' }] });
+
+    // Default fields ignore model → passes despite the swap.
+    expect(checkGolden(golden, [swapped]).ok).toBe(true);
+    // Opt in → the swap is a divergence.
+    const report = checkGolden(golden, [swapped], { fields: ['model'] });
+    expect(report.ok).toBe(false);
+    expect(report.results[0].divergences[0].field).toBe('model');
+  });
+
+  it('rejects an unknown --fields value instead of silently passing', () => {
+    const golden = makeGolden();
+    expect(() => checkGolden(golden, [candidate(baseline)], { fields: ['bogus'] })).toThrow(/Unknown --fields/);
+  });
 });

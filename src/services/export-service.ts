@@ -24,6 +24,8 @@ export interface GoldenStepSummary {
   name: string;
   /** Present for tool_call steps so regression checks can diff tool inputs. */
   input?: Record<string, unknown>;
+  /** Present when the step recorded a model, so checks can opt into diffing it. */
+  model?: string | null;
 }
 
 export interface GoldenEntry {
@@ -114,6 +116,7 @@ function exportGolden(db: Database.Database, items: Trace[]): string {
         step_type: s.step_type,
         name: s.name,
         ...(s.step_type === 'tool_call' ? { input: s.input } : {}),
+        ...(s.model != null ? { model: s.model } : {}),
       })),
       eval_criteria: evals.map((e) => ({
         evaluator_name: e.evaluator_name,

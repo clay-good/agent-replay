@@ -9,8 +9,11 @@ import type { GoldenEntry, GoldenStepSummary } from './export-service.js';
  * than raw output text, so non-deterministic wording never trips the check.
  */
 
+// Compared by default. `model` is opt-in via --fields (model swaps are often
+// intentional, so it shouldn't fail a default regression check).
 export const DEFAULT_FIELDS = ['step_count', 'step_types', 'step_names', 'tool_inputs', 'status'] as const;
-export type CheckField = (typeof DEFAULT_FIELDS)[number];
+export const KNOWN_FIELDS = [...DEFAULT_FIELDS, 'model'] as const;
+export type CheckField = (typeof KNOWN_FIELDS)[number];
 
 export interface Divergence {
   field: string;
@@ -62,6 +65,12 @@ export function checkGolden(
   opts: { fields?: string[]; strict?: boolean } = {},
 ): GoldenCheckReport {
   const fields = opts.fields && opts.fields.length ? opts.fields : [...DEFAULT_FIELDS];
+  // Reject unknown field names so a typo (or an unsupported field) can't silently
+  // compare nothing and report a false pass.
+  const unknown = fields.filter((f) => !(KNOWN_FIELDS as readonly string[]).includes(f));
+  if (unknown.length > 0) {
+    throw new Error(`Unknown --fields value(s): ${unknown.join(', ')}. Known fields: ${KNOWN_FIELDS.join(', ')}`);
+  }
   const index = new Map<string, GoldenEntry>();
   for (const g of golden) index.set(goldenKey(g.agent_name, g.input), g);
 
@@ -135,6 +144,20 @@ function diffAgainstGolden(trace: TraceWithDetails, golden: GoldenEntry, fields:
     const goldenStatus = (golden.metadata as { status?: string })?.status;
     if (goldenStatus != null && goldenStatus !== trace.status) {
       divergences.push({ field: 'status', golden: goldenStatus, candidate: trace.status });
+    }
+  }
+
+  // Opt-in: catch a per-step model change (only where the golden recorded one).
+  if (fields.includes('model')) {
+    const byNumber = new Map<number, GoldenStepSummary>();
+    for (const g of gSteps) byNumber.set(g.step_number, g);
+    for (const step of cSteps) {
+      const g = byNumber.get(step.step_number);
+      if (!g || g.model == null) continue;
+      if (g.model !== (step.model ?? null)) {
+        divergences.push({ field: 'model', step_number: step.step_number, golden: g.model, candidate: step.model ?? null });
+        break;
+      }
     }
   }
 
