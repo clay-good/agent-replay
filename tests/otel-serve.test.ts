@@ -7,6 +7,7 @@ import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { anyStr, keyValue, span, tracesData } from './helpers/otlp-protobuf.js';
 
 /**
  * End-to-end test of the `otel serve` command: spawn the real OTLP/HTTP
@@ -139,6 +140,39 @@ describe('otel serve (end-to-end)', () => {
         | { agent_name: string }
         | undefined;
       expect(trace?.agent_name).toBe('otel-e2e-bot'); // decompressed and mapped
+    } finally {
+      db.close();
+    }
+  }, 20000);
+
+  it('accepts an OTLP/protobuf export over HTTP (the exporter default)', async () => {
+    const url = await startReceiver();
+    // invoke_agent root carries agent.name/conversation.id; a chat child becomes
+    // an llm_call step — the same shape as the JSON test, encoded as protobuf.
+    const body = tracesData([
+      span({ traceId: 'aabb', spanId: '01', name: 'invoke_agent', start: 1_000_000n, end: 5_000_000n, attrs: [
+        keyValue('gen_ai.operation.name', anyStr('invoke_agent')),
+        keyValue('gen_ai.agent.name', anyStr('proto-e2e-bot')),
+        keyValue('gen_ai.conversation.id', anyStr('proto-conv')),
+      ] }),
+      span({ traceId: 'aabb', spanId: '02', parentSpanId: '01', name: 'chat', start: 2_000_000n, end: 3_000_000n, attrs: [
+        keyValue('gen_ai.operation.name', anyStr('chat')),
+      ] }),
+    ]);
+    const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/x-protobuf' }, body });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('application/x-protobuf');
+    // Success is an empty ExportTraceServiceResponse (zero bytes) per the spec.
+    expect((await res.arrayBuffer()).byteLength).toBe(0);
+
+    const db = new Database(join(dir, 'traces.db'), { readonly: true });
+    try {
+      const trace = db.prepare('SELECT agent_name FROM agent_traces WHERE session_id = ?').get('proto-conv') as
+        | { agent_name: string }
+        | undefined;
+      expect(trace?.agent_name).toBe('proto-e2e-bot'); // decoded from protobuf and mapped
+      const steps = db.prepare("SELECT COUNT(*) c FROM agent_trace_steps WHERE step_type = 'llm_call'").get() as { c: number };
+      expect(steps.c).toBe(1);
     } finally {
       db.close();
     }
