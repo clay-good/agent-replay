@@ -158,6 +158,23 @@ describe('renderTree cycle safety', () => {
     const kidLine = out.split('\n').find((l) => l.includes('"kid"'))!;
     expect(kidLine.indexOf('#2')).toBeGreaterThan(rootLine.indexOf('#1')); // kid indented deeper
   });
+
+  it('reports no steps for an empty trace', () => {
+    expect(noAnsi(renderTree([]))).toContain('No steps recorded');
+  });
+
+  it('falls back to the flat timeline when no step declares a parent (spec scenario)', () => {
+    const out = noAnsi(renderTree([
+      step({ step_number: 1, name: 'one' }),
+      step({ step_number: 2, name: 'two' }),
+    ]));
+    expect(out).toContain('"one"');
+    expect(out).toContain('"two"');
+    // Flat fallback goes through renderTimeline, whose first-step connector is ┌;
+    // tree mode uses a #N prefix and never emits ┌.
+    expect(out).toContain('┌');
+    expect(out).not.toContain('#1');
+  });
 });
 
 // ── Cyclic references are rejected at the ingest validation layer ───────────
