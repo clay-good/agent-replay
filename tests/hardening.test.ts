@@ -13,6 +13,20 @@ import { validateEvent } from '../src/services/event-protocol.js';
 import { applyEvent } from '../src/services/recorder.js';
 import { mapOtlpTraces } from '../src/services/otel/semconv.js';
 import { applyHookPayload } from '../src/services/hook-adapter.js';
+import { renderTree } from '../src/ui/timeline.js';
+import { validateTraceInput } from '../src/utils/validators.js';
+import type { TraceStep } from '../src/models/types.js';
+import type { StepType } from '../src/models/enums.js';
+
+function step(over: Partial<TraceStep> & { step_number: number }): TraceStep {
+  return {
+    id: '', trace_id: '', step_type: 'thought' as StepType, name: `s${over.step_number}`,
+    input: {}, output: null, started_at: '', ended_at: null, duration_ms: null,
+    tokens_used: null, model: null, error: null, metadata: {},
+    parent_step_number: null, caused_by_step_number: null, ...over,
+  };
+}
+const noAnsi = (s: string) => s.replace(/\x1B\[[0-9;]*m/g, '');
 
 let db: Database.Database;
 
@@ -109,6 +123,55 @@ describe('snapshot read robustness', () => {
     expect(() => { snap = getStepSnapshot(db, t.id, 1); }).not.toThrow();
     expect(snap!.context_window).toBe('raw unparseable text');
     expect(snap!.token_count).toBe(5);
+  });
+});
+
+// ── renderTree never drops steps in a parent cycle / self-loop ─────────────
+
+describe('renderTree cycle safety', () => {
+  it('renders every step even when parents form a 2-cycle', () => {
+    // step 1's parent is 2 and step 2's parent is 1 — no resolvable root.
+    const out = noAnsi(renderTree([
+      step({ step_number: 1, name: 'alpha', parent_step_number: 2 }),
+      step({ step_number: 2, name: 'beta', parent_step_number: 1 }),
+    ]));
+    expect(out).toContain('"alpha"');
+    expect(out).toContain('"beta"');
+  });
+
+  it('renders a self-parented step exactly once', () => {
+    const out = noAnsi(renderTree([
+      step({ step_number: 1, name: 'solo', parent_step_number: 1 }),
+      step({ step_number: 2, name: 'child', parent_step_number: 1 }),
+    ]));
+    expect(out).toContain('"solo"');
+    expect(out).toContain('"child"');
+    expect(out.match(/"solo"/g)).toHaveLength(1); // not duplicated by the cycle guard
+  });
+
+  it('still nests a normal hierarchy correctly', () => {
+    const out = noAnsi(renderTree([
+      step({ step_number: 1, name: 'root' }),
+      step({ step_number: 2, name: 'kid', parent_step_number: 1 }),
+    ]));
+    const rootLine = out.split('\n').find((l) => l.includes('"root"'))!;
+    const kidLine = out.split('\n').find((l) => l.includes('"kid"'))!;
+    expect(kidLine.indexOf('#2')).toBeGreaterThan(rootLine.indexOf('#1')); // kid indented deeper
+  });
+});
+
+// ── Cyclic references are rejected at the ingest validation layer ───────────
+
+describe('reference validation is wired into ingest', () => {
+  it('rejects a trace whose steps form a parent cycle', () => {
+    const r = validateTraceInput({
+      agent_name: 'x',
+      steps: [
+        { step_number: 1, step_type: 'thought', name: 'a', parent_step: 2 },
+        { step_number: 2, step_type: 'thought', name: 'b', parent_step: 1 },
+      ],
+    });
+    expect(r.valid).toBe(false);
   });
 });
 

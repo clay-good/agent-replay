@@ -142,28 +142,46 @@ export function renderTree(steps: TraceStep[], options: TimelineOptions = {}): s
   for (const list of childrenOf.values()) list.sort((a, b) => a.step_number - b.step_number);
 
   const lines: string[] = [];
-  const walk = (parentKey: number | null, indent: string): void => {
-    const children = childrenOf.get(parentKey) ?? [];
-    for (const step of children) {
-      const icon = stepIcon(step.step_type as StepType);
-      const typeLabel = stepLabel(step.step_type as StepType);
-      const name = chalk.white.bold(`"${step.name}"`);
-      const causal =
-        step.caused_by_step_number != null
-          ? chalk.dim(` ⟵ caused by #${step.caused_by_step_number}`)
-          : '';
-      const dur = step.duration_ms != null ? chalk.dim(`  ${formatDuration(step.duration_ms)}`) : '';
-      const branch = indent ? chalk.dim('└─ ') : '';
-      lines.push(`  ${indent}${branch}${chalk.dim(`#${step.step_number}`)} ${icon} ${typeLabel}  ${name}${causal}${dur}`);
+  const visited = new Set<number>();
 
-      if (step.decision) {
-        lines.push(`  ${indent}   ${label('chose')} ${chalk.greenBright(step.decision.chosen)}`);
-      }
+  const emit = (step: TraceStep, indent: string): void => {
+    const icon = stepIcon(step.step_type as StepType);
+    const typeLabel = stepLabel(step.step_type as StepType);
+    const name = chalk.white.bold(`"${step.name}"`);
+    const causal =
+      step.caused_by_step_number != null
+        ? chalk.dim(` ⟵ caused by #${step.caused_by_step_number}`)
+        : '';
+    const dur = step.duration_ms != null ? chalk.dim(`  ${formatDuration(step.duration_ms)}`) : '';
+    const branch = indent ? chalk.dim('└─ ') : '';
+    lines.push(`  ${indent}${branch}${chalk.dim(`#${step.step_number}`)} ${icon} ${typeLabel}  ${name}${causal}${dur}`);
+    if (step.decision) {
+      lines.push(`  ${indent}   ${label('chose')} ${chalk.greenBright(step.decision.chosen)}`);
+    }
+  };
+
+  // The visited set guards against parent cycles / self-parents (possible if a
+  // producer bypassed validation): a step is rendered at most once and can't
+  // recurse forever.
+  const walk = (parentKey: number | null, indent: string): void => {
+    for (const step of childrenOf.get(parentKey) ?? []) {
+      if (visited.has(step.step_number)) continue;
+      visited.add(step.step_number);
+      emit(step, indent);
       walk(step.step_number, indent + '   ');
     }
   };
 
   walk(null, '');
+  // Any step not reached from a real root (its parent chain forms a cycle) is
+  // rendered as a top-level root so no step is ever dropped.
+  for (const step of steps) {
+    if (visited.has(step.step_number)) continue;
+    visited.add(step.step_number);
+    emit(step, '');
+    walk(step.step_number, '   ');
+  }
+
   return lines.join('\n');
 }
 

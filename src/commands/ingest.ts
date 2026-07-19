@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import chalk from 'chalk';
 import type Database from 'better-sqlite3';
 import type { IngestTraceInput } from '../models/types.js';
-import { TRACE_STATUSES, STEP_TYPES, TRIGGER_TYPES } from '../models/enums.js';
+import { validateTraceInput } from '../utils/validators.js';
 import { ingestTrace } from '../services/trace-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { summaryPanel } from '../ui/boxen-panels.js';
@@ -164,39 +164,10 @@ function parseTraces(raw: string, format: 'json' | 'jsonl'): unknown[] {
 }
 
 function validateTrace(t: Record<string, unknown>, index: number): string[] {
-  const errors: string[] = [];
-  const prefix = `Trace[${index}]`;
-
-  if (!t.agent_name || typeof t.agent_name !== 'string') {
-    errors.push(`${prefix}: missing or invalid 'agent_name' (string required)`);
-  }
-
-  if (t.status && !TRACE_STATUSES.includes(t.status as typeof TRACE_STATUSES[number])) {
-    errors.push(`${prefix}: invalid status '${t.status}'`);
-  }
-
-  if (t.trigger && !TRIGGER_TYPES.includes(t.trigger as typeof TRIGGER_TYPES[number])) {
-    errors.push(`${prefix}: invalid trigger '${t.trigger}'`);
-  }
-
-  if (t.steps != null) {
-    if (!Array.isArray(t.steps)) {
-      errors.push(`${prefix}: 'steps' must be an array`);
-    } else {
-      for (let j = 0; j < t.steps.length; j++) {
-        const s = t.steps[j] as Record<string, unknown>;
-        if (!s.step_type || !STEP_TYPES.includes(s.step_type as typeof STEP_TYPES[number])) {
-          errors.push(`${prefix}.steps[${j}]: invalid step_type '${s.step_type}'`);
-        }
-        if (!s.name || typeof s.name !== 'string') {
-          errors.push(`${prefix}.steps[${j}]: missing or invalid 'name'`);
-        }
-        if (s.step_number == null || typeof s.step_number !== 'number') {
-          errors.push(`${prefix}.steps[${j}]: missing or invalid 'step_number'`);
-        }
-      }
-    }
-  }
-
-  return errors;
+  // Delegate to the canonical validator, which additionally enforces
+  // parent_step/caused_by_step references (must exist and point strictly
+  // earlier — so cycles and self-parents are rejected), decision-record shape,
+  // and session_id, on top of the basic identity/enum checks.
+  const result = validateTraceInput(t);
+  return result.errors.map((e) => `Trace[${index}].${e.field}: ${e.message}`);
 }
