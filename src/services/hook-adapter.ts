@@ -1,5 +1,8 @@
 import type Database from 'better-sqlite3';
 import { startTrace, appendStep, updateStep, updateTrace } from './trace-service.js';
+import { evaluateStep, verdictForMatches } from './guard-service.js';
+import type { TraceStep } from '../models/types.js';
+import type { GuardAction } from '../models/enums.js';
 
 /**
  * Stateless adapter for the stdin-JSON hook convention shared by Claude Code,
@@ -50,6 +53,15 @@ export interface ApplyHookOptions {
   noInput?: boolean;
   /** Fallback event name when the payload omits `hook_event_name`. */
   eventArg?: string;
+  /** Evaluate pre-tool events against policies and return an enforcement verdict. */
+  enforce?: boolean;
+}
+
+/** A guard verdict on a pre-tool event, when `enforce` is set and a policy matched. */
+export interface EnforcementDecision {
+  action: GuardAction;
+  policy: string | null;
+  reason: string | null;
 }
 
 export interface ApplyHookResult {
@@ -57,6 +69,8 @@ export interface ApplyHookResult {
   dialect: HookDialect;
   traceId: string | null;
   note: string;
+  /** Present only in enforce mode when a pre-tool step matched a policy. */
+  enforcement?: EnforcementDecision;
 }
 
 function isoNow(): string {
@@ -192,16 +206,46 @@ export function applyHookPayload(
     case 'pre_tool': {
       const toolName = str(payload.tool_name) ?? 'tool';
       const parentStep = agentId ? findAnchor(db, traceId, agentId) : undefined;
+      const toolInput = noInput ? {} : ((payload.tool_input as Record<string, unknown>) ?? {});
+      const toolStepNumber = nextStepNumber(db, traceId);
       appendStep(db, traceId, {
-        step_number: nextStepNumber(db, traceId),
+        step_number: toolStepNumber,
         step_type: 'tool_call',
         name: toolName,
-        input: noInput ? {} : (payload.tool_input as Record<string, unknown>) ?? {},
+        input: toolInput,
         started_at: isoNow(),
         parent_step: parentStep ?? null,
         metadata: { ...rawMeta(payload, noInput), agent_id: agentId, agent_type: str(payload.agent_type) },
       });
-      return { action, dialect, traceId, note: `opened tool_call "${toolName}"` };
+
+      if (!opts.enforce) {
+        return { action, dialect, traceId, note: `opened tool_call "${toolName}"` };
+      }
+
+      // Enforce: evaluate the proposed tool call and, on a match, record a
+      // guard_check step linked to the attempt and return the verdict.
+      const proposed = proposedToolStep(toolStepNumber, toolName, toolInput);
+      const verdict = verdictForMatches(evaluateStep(db, proposed));
+      if (verdict.action === 'allow') {
+        return { action, dialect, traceId, note: `allowed tool_call "${toolName}"` };
+      }
+
+      appendStep(db, traceId, {
+        step_number: nextStepNumber(db, traceId),
+        step_type: 'guard_check',
+        name: `guard:${verdict.policy ?? 'policy'}`,
+        output: { action: verdict.action, policy: verdict.policy, reason: verdict.reason },
+        caused_by_step: toolStepNumber,
+        metadata: { policy: verdict.policy, action: verdict.action, reason: verdict.reason },
+      });
+
+      return {
+        action,
+        dialect,
+        traceId,
+        note: `${verdict.action} tool_call "${toolName}" [${verdict.policy}]`,
+        enforcement: { action: verdict.action, policy: verdict.policy, reason: verdict.reason },
+      };
     }
 
     case 'post_tool':
@@ -249,4 +293,80 @@ export function applyHookPayload(
   }
 
   return { action, dialect, traceId, note: 'no-op' };
+}
+
+/** Build an in-memory tool_call step for policy evaluation (not persisted). */
+function proposedToolStep(stepNumber: number, name: string, input: Record<string, unknown>): TraceStep {
+  return {
+    id: '', trace_id: '', step_number: stepNumber, step_type: 'tool_call', name,
+    input, output: null, started_at: '', ended_at: null, duration_ms: null,
+    tokens_used: null, model: null, error: null, metadata: {},
+    parent_step_number: null, caused_by_step_number: null,
+  };
+}
+
+// ── Enforcement response formatting ─────────────────────────────────────────
+
+export interface EnforcementResponse {
+  /** Structured JSON to print to stdout (the harness's decision), if any. */
+  stdout: Record<string, unknown> | null;
+  /** Reason to print to stderr (for the exit-2 fallback), if any. */
+  stderrReason: string | null;
+  /** 0 for structured dialects (blocking is in the JSON); 2 for the fallback. */
+  exitCode: 0 | 2;
+}
+
+/**
+ * Format an enforcement verdict into the response the calling harness
+ * understands. Claude Code and Codex CLI use `hookSpecificOutput.permissionDecision`
+ * (`deny`/`ask`), Gemini CLI uses `{decision: "deny"}`, and dialects without
+ * structured output (e.g. Crush) fall back to exit 2 with the reason on stderr.
+ * `warn` never blocks — it surfaces a message and allows the call.
+ */
+export function formatEnforcementResponse(
+  dialect: HookDialect,
+  decision: EnforcementDecision,
+  hookEventName: string,
+): EnforcementResponse {
+  const reason = decision.reason ?? `blocked by policy ${decision.policy ?? ''}`.trim();
+
+  if (decision.action === 'warn') {
+    // Never blocks; surface a message where the dialect supports one.
+    if (dialect === 'claude-code' || dialect === 'codex') {
+      return { stdout: { systemMessage: `agent-replay: ${reason}` }, stderrReason: null, exitCode: 0 };
+    }
+    return { stdout: null, stderrReason: null, exitCode: 0 };
+  }
+
+  // deny or require_review — a blocking-class verdict.
+  switch (dialect) {
+    case 'claude-code':
+    case 'codex': {
+      const permissionDecision = decision.action === 'require_review' ? 'ask' : 'deny';
+      return {
+        stdout: {
+          hookSpecificOutput: {
+            hookEventName,
+            permissionDecision,
+            permissionDecisionReason: reason,
+          },
+        },
+        stderrReason: null,
+        exitCode: 0,
+      };
+    }
+    case 'gemini':
+      // Gemini hooks are allow/deny only; require_review maps to deny-with-reason.
+      return {
+        stdout: {
+          decision: 'deny',
+          reason: decision.action === 'require_review' ? `review required: ${reason}` : reason,
+        },
+        stderrReason: null,
+        exitCode: 0,
+      };
+    default:
+      // Crush / unknown: no structured output — block via exit 2.
+      return { stdout: null, stderrReason: reason, exitCode: 2 };
+  }
 }

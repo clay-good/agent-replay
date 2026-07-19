@@ -8,15 +8,15 @@
 
 ## 2. Enforcement recording
 
-- [ ] 2.1 Append a `guard_check` step (with policy, action, reason, and `caused_by_step`) to the trace for every matched evaluation
-- [ ] 2.2 Test: a blocked tool call appears in `show` as tool_call attempt + guard_check deny
+- [x] 2.1 Append a `guard_check` step (with policy, action, reason, and `caused_by_step`) to the trace for every matched evaluation
+- [x] 2.2 Test: a blocked tool call appears in `show` as tool_call attempt + guard_check deny
 
 ## 3. Hook enforcement mode
 
-- [ ] 3.1 `agent-replay hook --enforce` on pre-tool events: structured decisions for Claude Code/Codex (`hookSpecificOutput.permissionDecision: "deny" | "ask"` + reason, exit 0) and Gemini (`decision: "deny"` + reason); exit-2 fallback for dialects without structured output (Crush)
-- [ ] 3.2 Map policy actions: `deny` → deny; `require_review` → `"ask"` on Claude Code/Codex, deny-with-reason on Gemini; `warn` → capture + `systemMessage` where supported, never blocks
-- [ ] 3.3 README: enforce-mode setup per harness — Claude Code settings.json, Codex config.toml plus the `/hooks` trust step, Gemini settings.json; state the guardrail-not-boundary limitation and point to harness sandboxing
-- [ ] 3.4 Test: per-dialect fixture payloads matching deny/require_review policies produce the correct structured response or exit code, and the attempt is recorded as a guard_check step
+- [x] 3.1 `agent-replay hook --enforce` on pre-tool events: structured decisions for Claude Code/Codex (`hookSpecificOutput.permissionDecision: "deny" | "ask"` + reason, exit 0) and Gemini (`decision: "deny"` + reason); exit-2 fallback for dialects without structured output (Crush)
+- [x] 3.2 Map policy actions: `deny` → deny; `require_review` → `"ask"` on Claude Code/Codex, deny-with-reason on Gemini; `warn` → capture + `systemMessage` where supported, never blocks
+- [x] 3.3 README: enforce-mode setup per harness — Claude Code settings.json, Codex config.toml plus the `/hooks` trust step, Gemini settings.json; state the guardrail-not-boundary limitation and point to harness sandboxing
+- [x] 3.4 Test: per-dialect fixture payloads matching deny/require_review policies produce the correct structured response or exit code, and the attempt is recorded as a guard_check step
 
 ## 4. `run` wrapper
 

@@ -86,10 +86,11 @@ program
   .command('hook [event]')
   .description('Capture adapter for the stdin-JSON hook convention (Claude Code / Codex / Gemini)')
   .option('--no-input', 'Drop prompt text and tool inputs before storing')
+  .option('--enforce', 'Evaluate pre-tool events against policies and block denied calls (guardrail, not a boundary)')
   .option('--dir <path>', 'Custom data directory')
   .action(async (event, opts) => {
     const { runHook } = await import('./commands/hook.js');
-    await runHook(event, { noInput: opts.input === false, dir: opts.dir });
+    await runHook(event, { noInput: opts.input === false, enforce: opts.enforce === true, dir: opts.dir });
   });
 
 // --- list ---

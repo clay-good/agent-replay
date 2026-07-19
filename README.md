@@ -143,6 +143,24 @@ agent-replay import ~/.claude/projects/my-project/<session-uuid>.jsonl --format 
 
 `tool_use`/`tool_result` blocks become paired `tool_call` steps, `thinking` blocks become `thought` steps, and `usage` counts aggregate into token totals.
 
+#### Enforcement (block dangerous tool calls live)
+
+Add `--enforce` to the hook to evaluate each proposed tool call against your [guardrail policies](#guardrails) before it runs, and block denied calls in the harness's own dialect — no extra wiring beyond the same hook registration on the pre-tool event:
+
+- **Claude Code / Codex CLI**: emits `{"hookSpecificOutput": {"permissionDecision": "deny" | "ask", ...}}` — `deny` policies block, `require_review` policies defer to the harness's own approval prompt (`"ask"`).
+- **Gemini CLI**: emits `{"decision": "deny", "reason": ...}` (its hooks are allow/deny only, so `require_review` denies with a "review required" reason).
+- **Crush / others without structured output**: exits 2 with the reason on stderr.
+
+`warn` policies never block — they surface a message and allow the call. Every enforcement decision that matches a policy is recorded as a `guard_check` step in the session's trace, linked to the attempted `tool_call`, so blocked attempts show up in [`show`](#inspect) and [`why`](#explain-decisions).
+
+You can also evaluate a single step out of band:
+
+```bash
+echo '{"step_type":"tool_call","name":"delete_user"}' | agent-replay guard check   # exit 2 if denied
+```
+
+> **Guardrail, not a boundary.** Hook-level enforcement is a guardrail, not a complete security boundary — the harness vendors say so themselves (a determined agent can often reach equivalent effects through another tool path). For hard isolation, use OS-level sandboxing: Claude Code's sandbox, Codex `sandbox_mode`, or Gemini CLI's sandbox.
+
 ### Browse
 
 ```bash

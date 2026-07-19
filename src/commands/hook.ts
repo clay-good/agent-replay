@@ -1,10 +1,11 @@
 import { resolve } from 'node:path';
 import { ensureDatabase } from '../db/index.js';
-import { applyHookPayload } from '../services/hook-adapter.js';
+import { applyHookPayload, formatEnforcementResponse } from '../services/hook-adapter.js';
 import { errorMessage } from '../utils/json.js';
 
 export interface HookOptions {
   noInput?: boolean;
+  enforce?: boolean;
   dir?: string;
 }
 
@@ -36,13 +37,23 @@ export async function runHook(eventArg: string | undefined, opts: HookOptions = 
     const payload = JSON.parse(trimmed) as Record<string, unknown>;
     const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
     const db = ensureDatabase(dbPath);
-    const result = applyHookPayload(db, payload, { noInput: opts.noInput, eventArg });
+    const result = applyHookPayload(db, payload, { noInput: opts.noInput, enforce: opts.enforce, eventArg });
     // Progress goes to stderr only (stdout is reserved for hook decisions).
     console.error(`agent-replay hook: ${result.action} [${result.dialect}] — ${result.note}`);
+
+    // Enforce mode: answer the harness in its documented dialect.
+    if (opts.enforce && result.enforcement) {
+      const hookEventName = (typeof payload.hook_event_name === 'string' ? payload.hook_event_name : eventArg) ?? 'PreToolUse';
+      const resp = formatEnforcementResponse(result.dialect, result.enforcement, hookEventName);
+      if (resp.stdout) process.stdout.write(`${JSON.stringify(resp.stdout)}\n`);
+      if (resp.stderrReason) console.error(`agent-replay hook: BLOCK — ${resp.stderrReason}`);
+      process.exitCode = resp.exitCode;
+      return;
+    }
   } catch (err) {
     console.error(`agent-replay hook: ${errorMessage(err)}`);
   }
 
-  // Capture must never block or signal the host agent.
+  // Capture (and allow) must never block or signal the host agent.
   process.exitCode = 0;
 }
