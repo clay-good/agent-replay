@@ -3,9 +3,9 @@ import contrib from 'blessed-contrib';
 import type Database from 'better-sqlite3';
 import type { Trace, EvalResult } from '../models/types.js';
 import type { TraceStatus } from '../models/enums.js';
-import { TRACE_STATUSES } from '../models/enums.js';
 import { formatDuration, formatRelativeTime } from '../utils/time.js';
 import { truncate } from '../utils/json.js';
+import { dashboardStats, statusCounts, recentTraces, recentEvalScores } from './dashboard-data.js';
 
 /**
  * Full-screen blessed TUI dashboard.
@@ -171,83 +171,27 @@ export class DashboardView {
   // ── Data Queries ─────────────────────────────────────────────────────
 
   private updateStatusBar(): void {
-    const counts: Record<string, number> = {};
-    for (const status of TRACE_STATUSES) {
-      const row = this.db
-        .prepare('SELECT COUNT(*) as cnt FROM agent_traces WHERE status = ?')
-        .get(status) as { cnt: number } | undefined;
-      counts[status] = row?.cnt ?? 0;
-    }
-
-    const titles = Object.keys(counts);
-    const data = Object.values(counts);
-
-    this.barChart.setData({
-      titles,
-      data,
-    });
+    this.barChart.setData(statusCounts(this.db));
   }
 
   private updateStats(): void {
-    const totalRow = this.db
-      .prepare('SELECT COUNT(*) as cnt FROM agent_traces')
-      .get() as { cnt: number };
-    const stepRow = this.db
-      .prepare('SELECT COUNT(*) as cnt FROM agent_trace_steps')
-      .get() as { cnt: number };
-    const evalRow = this.db
-      .prepare('SELECT COUNT(*) as cnt FROM agent_trace_evals')
-      .get() as { cnt: number };
-    const policyRow = this.db
-      .prepare('SELECT COUNT(*) as cnt FROM guardrail_policies WHERE enabled = 1')
-      .get() as { cnt: number };
-
-    const avgDur = this.db
-      .prepare(
-        'SELECT AVG(total_duration_ms) as avg_dur FROM agent_traces WHERE total_duration_ms IS NOT NULL',
-      )
-      .get() as { avg_dur: number | null };
-
-    const totalTokens = this.db
-      .prepare(
-        'SELECT SUM(total_tokens) as total FROM agent_traces WHERE total_tokens IS NOT NULL',
-      )
-      .get() as { total: number | null };
-
-    const totalCost = this.db
-      .prepare(
-        'SELECT SUM(total_cost_usd) as total FROM agent_traces WHERE total_cost_usd IS NOT NULL',
-      )
-      .get() as { total: number | null };
-
+    const s = dashboardStats(this.db);
     const lines = [
-      `{cyan-fg}Traces:{/cyan-fg}       ${totalRow.cnt}`,
-      `{cyan-fg}Steps:{/cyan-fg}        ${stepRow.cnt}`,
-      `{cyan-fg}Evaluations:{/cyan-fg}  ${evalRow.cnt}`,
-      `{cyan-fg}Policies:{/cyan-fg}     ${policyRow.cnt}`,
+      `{cyan-fg}Traces:{/cyan-fg}       ${s.traces}`,
+      `{cyan-fg}Steps:{/cyan-fg}        ${s.steps}`,
+      `{cyan-fg}Evaluations:{/cyan-fg}  ${s.evals}`,
+      `{cyan-fg}Policies:{/cyan-fg}     ${s.policies}`,
       '',
-      `{cyan-fg}Avg Duration:{/cyan-fg} ${avgDur.avg_dur != null ? formatDuration(avgDur.avg_dur) : '-'}`,
-      `{cyan-fg}Total Tokens:{/cyan-fg} ${totalTokens.total != null ? totalTokens.total.toLocaleString() : '-'}`,
-      `{cyan-fg}Total Cost:{/cyan-fg}   ${totalCost.total != null ? '$' + totalCost.total.toFixed(4) : '-'}`,
+      `{cyan-fg}Avg Duration:{/cyan-fg} ${s.avgDurationMs != null ? formatDuration(s.avgDurationMs) : '-'}`,
+      `{cyan-fg}Total Tokens:{/cyan-fg} ${s.totalTokens != null ? s.totalTokens.toLocaleString() : '-'}`,
+      `{cyan-fg}Total Cost:{/cyan-fg}   ${s.totalCost != null ? '$' + s.totalCost.toFixed(4) : '-'}`,
     ];
 
     this.statsBox.setContent(lines.join('\n'));
   }
 
   private updateTraceList(): void {
-    const rows = this.db
-      .prepare(
-        `SELECT id, agent_name, status, started_at
-         FROM agent_traces
-         ORDER BY started_at DESC
-         LIMIT 30`,
-      )
-      .all() as Array<{
-      id: string;
-      agent_name: string;
-      status: string;
-      started_at: string;
-    }>;
+    const rows = recentTraces(this.db);
 
     const headers = ['ID', 'Agent', 'Status', 'Started'];
     const data = rows.map((r) => [
@@ -264,14 +208,7 @@ export class DashboardView {
   }
 
   private updateEvalChart(): void {
-    const rows = this.db
-      .prepare(
-        `SELECT e.score, e.evaluated_at
-         FROM agent_trace_evals e
-         ORDER BY e.evaluated_at DESC
-         LIMIT 20`,
-      )
-      .all() as Array<{ score: number; evaluated_at: string }>;
+    const rows = recentEvalScores(this.db);
 
     if (rows.length === 0) {
       this.lineChart.setData([
@@ -285,9 +222,7 @@ export class DashboardView {
       return;
     }
 
-    // Reverse so oldest is on the left
-    rows.reverse();
-
+    // recentEvalScores already returns oldest-first, so time reads left→right.
     const x = rows.map((r) => {
       const d = new Date(r.evaluated_at);
       return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
