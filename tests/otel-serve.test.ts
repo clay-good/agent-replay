@@ -143,4 +143,25 @@ describe('otel serve (end-to-end)', () => {
       db.close();
     }
   }, 20000);
+
+  it('answers client-malformed payloads with 4xx, not 5xx (no retry storms)', async () => {
+    const url = await startReceiver();
+    const post = (headers: Record<string, string>, body: BodyInit) =>
+      fetch(url, { method: 'POST', headers, body });
+    const json = { 'content-type': 'application/json' };
+
+    // Valid JSON that isn't an OTLP object must be 400, not a 500 from a
+    // downstream property access. OTLP exporters retry 5xx but not 4xx, so a
+    // 500 on un-processable input would loop the same bad batch forever.
+    expect((await post(json, 'null')).status).toBe(400);
+    expect((await post(json, '[1,2,3]')).status).toBe(400);
+    expect((await post(json, '42')).status).toBe(400);
+    // A body that claims gzip but isn't decompresses with an error → 400.
+    expect((await post({ ...json, 'content-encoding': 'gzip' }, 'not-actually-gzip')).status).toBe(400);
+    // The logs endpoint shares the guard.
+    expect((await post(json, 'null').then(() => fetch(url.replace('/v1/traces', '/v1/logs'), { method: 'POST', headers: json, body: 'null' }))).status).toBe(400);
+
+    // An empty OTLP object is still a valid (empty) batch → 200.
+    expect((await post(json, '{}')).status).toBe(200);
+  }, 20000);
 });

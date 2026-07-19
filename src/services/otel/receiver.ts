@@ -23,6 +23,18 @@ export interface OtelReceiverHandle {
   close: () => Promise<void>;
 }
 
+/** A request-level failure that maps to a specific HTTP status (client errors). */
+class HttpError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+  }
+}
+
+/** True for a plain JSON object — the only shape a valid OTLP request can take. */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
 export interface OtelStats {
   acceptedSpans: number;
   acceptedTraces: number;
@@ -32,7 +44,15 @@ async function readBody(req: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];
   for await (const c of req) chunks.push(c as Buffer);
   let buf = Buffer.concat(chunks);
-  if ((req.headers['content-encoding'] ?? '').includes('gzip')) buf = gunzipSync(buf);
+  if ((req.headers['content-encoding'] ?? '').includes('gzip')) {
+    // A body that claims gzip but isn't is a client mistake (400), not a server
+    // fault (500) — a 500 would make OTLP exporters retry the bad payload.
+    try {
+      buf = gunzipSync(buf);
+    } catch {
+      throw new HttpError(400, 'malformed gzip body');
+    }
+  }
   return buf;
 }
 
@@ -52,11 +72,16 @@ export function handleTracesExport(
   body: string,
   stats: OtelStats,
 ): { status: number; payload: Record<string, unknown> } {
-  let otlp: Record<string, unknown>;
+  let otlp: unknown;
   try {
     otlp = JSON.parse(body);
   } catch {
     return { status: 400, payload: { error: 'invalid JSON body' } };
+  }
+  // `null`, arrays, and primitives are valid JSON but not a valid OTLP request;
+  // reject them as 400 rather than letting a property access throw a 500.
+  if (!isPlainObject(otlp)) {
+    return { status: 400, payload: { error: 'invalid OTLP body: expected a JSON object' } };
   }
   return ingestOtlpTraces(db, otlp, stats);
 }
@@ -107,11 +132,14 @@ export function handleLogsExport(
   body: string,
   stats: OtelStats,
 ): { status: number; payload: Record<string, unknown> } {
-  let otlp: Record<string, unknown>;
+  let otlp: unknown;
   try {
     otlp = JSON.parse(body);
   } catch {
     return { status: 400, payload: { error: 'invalid JSON body' } };
+  }
+  if (!isPlainObject(otlp)) {
+    return { status: 400, payload: { error: 'invalid OTLP body: expected a JSON object' } };
   }
   const traces = mapOtlpLogs(otlp);
   for (const t of traces) {
@@ -161,7 +189,8 @@ export function startOtelReceiver(db: Database.Database, port: number, stats: Ot
       const { status, payload } = isLogs ? handleLogsExport(db, body, stats) : handleTracesExport(db, body, stats);
       res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(payload));
     } catch (err) {
-      res.writeHead(500, { 'content-type': 'application/json' }).end(JSON.stringify({ error: (err as Error).message }));
+      const status = err instanceof HttpError ? err.status : 500;
+      res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify({ error: (err as Error).message }));
     }
   }
 
