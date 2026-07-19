@@ -94,8 +94,11 @@ export function importClaudeTranscript(
     if (typeof rec.sessionId === 'string' && !sessionId) sessionId = rec.sessionId;
 
     if (type !== 'user' && type !== 'assistant') {
-      // system/summary/other: not turned into steps, but not an error either.
-      if (type !== 'system' && type !== 'summary') skipped++;
+      // Any record we don't turn into a step (system/summary and the various
+      // metadata records real transcripts carry — attachment, file-history-
+      // snapshot, queue-operation, ai-title, …) counts toward `skipped`, so the
+      // imported-vs-skipped report accounts for every record.
+      skipped++;
       continue;
     }
 
