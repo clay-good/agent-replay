@@ -610,10 +610,15 @@ All AI presets use the cheapest available model. A typical evaluation costs less
 You can also use `agent-replay` as a library:
 
 ```typescript
-import { openDatabase, createTrace, getTraceById } from 'agent-replay';
+import { ensureDatabase, ingestTrace, getTrace } from 'agent-replay';
 
-const db = openDatabase('.agent-replay/traces.db');
-const trace = createTrace(db, { agent_name: 'my-agent', status: 'completed' });
+const db = ensureDatabase('.agent-replay/traces.db');
+const trace = ingestTrace(db, {
+  agent_name: 'my-agent',
+  status: 'completed',
+  steps: [{ step_number: 1, step_type: 'output', name: 'answer', output: { text: 'done' } }],
+});
+const full = getTrace(db, trace.id); // trace with its steps, evals, and decisions
 ```
 
 To record a run live from TypeScript, use the `TraceRecorder` SDK — the same incremental engine the `record` command uses, no files or subprocess required:
