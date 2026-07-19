@@ -391,4 +391,22 @@ describe('CLI integration', () => {
     const r = run(['definitely-not-a-command']);
     expect(r.code).not.toBe(0);
   });
+
+  it('demo --reset refuses to delete a directory that is not an agent-replay store', () => {
+    // Safety guard: --reset must never rm a directory whose name isn't an
+    // agent-replay data dir. Spawned directly since it needs a custom --dir that
+    // the run() helper would override.
+    const stranger = mkdtempSync(join(tmpdir(), 'not-agent-data-'));
+    const keep = join(stranger, 'important.txt');
+    writeFileSync(keep, 'do not delete me');
+    let code = 0;
+    try {
+      execFileSync(process.execPath, [CLI, 'demo', '--reset', '--no-interactive', '--dir', stranger], { encoding: 'utf8', stdio: 'pipe' });
+    } catch (e) {
+      code = (e as { status?: number }).status ?? 1;
+    }
+    expect(code).toBe(1); // refused
+    expect(existsSync(keep)).toBe(true); // and nothing was deleted
+    rmSync(stranger, { recursive: true, force: true });
+  });
 });
