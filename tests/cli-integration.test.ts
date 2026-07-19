@@ -85,6 +85,14 @@ describe('CLI integration', () => {
     const why = run(['why', 'tcli', '--step', '2', '--json']);
     expect(JSON.parse(why.stdout).chain.map((h: { step_number: number }) => h.step_number)).toEqual([2, 1]);
 
+    // A non-existent step is a failure, not a silent success: exit 1, message
+    // on stderr, nothing on stdout — even in --json mode.
+    const missingStep = run(['why', 'tcli', '--step', '999']);
+    expect(missingStep.code).toBe(1);
+    expect(missingStep.stdout.trim()).toBe('');
+    expect(missingStep.stderr).toMatch(/not found/i);
+    expect(run(['why', 'tcli', '--step', '999', '--json']).code).toBe(1);
+
     // Default show surfaces session + decision.
     expect(run(['show', 'tcli']).stdout).toMatch(/scli|Chose/);
   });

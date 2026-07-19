@@ -45,6 +45,16 @@ export function runWhy(traceId: string, opts: WhyOptions = {}): void {
 
   const { trace, chain } = result;
 
+  // A real step always yields at least its own origin hop, so an empty chain
+  // means the requested step number doesn't exist. Treat it like trace-not-found
+  // above (stderr + exit 1) rather than printing to stdout and succeeding.
+  if (chain.length === 0) {
+    console.error(chalk.red(`  Step ${stepNumber} not found in trace ${trace.id}.`));
+    console.error(chalk.dim(`  This trace has ${trace.steps.length} step(s).`));
+    process.exitCode = 1;
+    return;
+  }
+
   if (opts.json) {
     console.log(
       JSON.stringify(
@@ -63,13 +73,6 @@ export function runWhy(traceId: string, opts: WhyOptions = {}): void {
         2,
       ),
     );
-    return;
-  }
-
-  if (chain.length === 0) {
-    console.log('');
-    console.log(chalk.yellow(`  Step ${stepNumber} not found in trace ${trace.id}.`));
-    console.log('');
     return;
   }
 
