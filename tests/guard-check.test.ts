@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
 import { addPolicy, evaluateStep, verdictForMatches, resolveGuardExit, testPolicies } from '../src/services/guard-service.js';
-import { startTrace } from '../src/services/trace-service.js';
+import { startTrace, ingestTrace } from '../src/services/trace-service.js';
 import type { TraceStep } from '../src/models/types.js';
 import type { StepType } from '../src/models/enums.js';
 
@@ -126,5 +126,30 @@ describe('testPolicies messages', () => {
     const empty = startTrace(db, { agent_name: 'e' }); // real trace, no steps
     expect(() => testPolicies(db, empty.id)).toThrow(/has no steps to test/);
     expect(() => testPolicies(db, 'trc_missing')).toThrow(/not found/);
+  });
+});
+
+describe('testPolicies pre-flight matching', () => {
+  it('reports the deny/warn matches per step, leaving safe steps unflagged', () => {
+    addPolicy(db, { name: 'no-del', action: 'deny', match_pattern: { step_type: 'tool_call', name_contains: 'delete' } });
+    addPolicy(db, { name: 'llm-warn', action: 'warn', match_pattern: { step_type: 'llm_call' } });
+    const t = ingestTrace(db, {
+      agent_name: 'mix',
+      status: 'completed',
+      steps: [
+        { step_number: 1, step_type: 'tool_call', name: 'search', input: { q: 'x' } },
+        { step_number: 2, step_type: 'tool_call', name: 'delete_records', input: { table: 'logs' } },
+        { step_number: 3, step_type: 'llm_call', name: 'generate' },
+        { step_number: 4, step_type: 'output', name: 'done' },
+      ],
+    });
+
+    const results = testPolicies(db, t.id);
+    const byStep = (n: number) => results.find((r) => r.step.step_number === n)!;
+    expect(byStep(1).matches).toHaveLength(0); // safe tool call
+    expect(byStep(2).matches.map((m) => m.action)).toEqual(['deny']);
+    expect(byStep(2).matches[0].policy.name).toBe('no-del');
+    expect(byStep(3).matches.map((m) => m.action)).toEqual(['warn']);
+    expect(byStep(4).matches).toHaveLength(0); // output step
   });
 });
