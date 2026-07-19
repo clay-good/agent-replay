@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
-import { addPolicy, evaluateStep, verdictForMatches, resolveGuardExit, testPolicies } from '../src/services/guard-service.js';
+import { addPolicy, evaluateStep, verdictForMatches, resolveGuardExit, testPolicies, removePolicy } from '../src/services/guard-service.js';
 import { startTrace, ingestTrace } from '../src/services/trace-service.js';
 import type { TraceStep } from '../src/models/types.js';
 import type { StepType } from '../src/models/enums.js';
@@ -126,6 +126,26 @@ describe('testPolicies messages', () => {
     const empty = startTrace(db, { agent_name: 'e' }); // real trace, no steps
     expect(() => testPolicies(db, empty.id)).toThrow(/has no steps to test/);
     expect(() => testPolicies(db, 'trc_missing')).toThrow(/not found/);
+  });
+});
+
+describe('removePolicy', () => {
+  const count = () => (db.prepare('SELECT COUNT(*) as c FROM guardrail_policies').get() as { c: number }).c;
+
+  it('removes a policy by name or by id and leaves the others intact', () => {
+    addPolicy(db, { name: 'a', action: 'deny', match_pattern: { name_contains: 'x' } });
+    const b = addPolicy(db, { name: 'b', action: 'deny', match_pattern: { name_contains: 'y' } });
+    expect(count()).toBe(2);
+
+    removePolicy(db, 'a'); // by name
+    expect(count()).toBe(1);
+
+    removePolicy(db, b.id); // by id
+    expect(count()).toBe(0);
+  });
+
+  it('throws when the policy does not exist', () => {
+    expect(() => removePolicy(db, 'nope')).toThrow(/not found/);
   });
 });
 
