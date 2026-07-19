@@ -23,9 +23,9 @@
 
 ## 4. Known-emitter log-event mappers
 
-- [ ] 4.1 Gemini CLI: `gemini_cli.user_prompt` → trace input; `gemini_cli.tool_call` (`function_name`, `function_args`, `duration_ms`, `success`, `decision`) → tool_call step + decision record (`decided_by` user/policy); `gemini_cli.api_response` token counts → totals; `session.id` → session_id
-- [ ] 4.2 Claude Code: `claude_code.user_prompt`, `claude_code.tool_result`, `claude_code.tool_decision`, `claude_code.api_request`/`api_response` → steps and totals; `session.id` → session_id
-- [ ] 4.3 Test: fixture log-event batches from both CLIs produce coherent traces without spans present
+- [x] 4.1 Gemini CLI: `gemini_cli.user_prompt` → trace input; `gemini_cli.tool_call` (`function_name`, `function_args`, `duration_ms`, `success`, `decision`) → tool_call step + decision record (`decided_by` user/policy); `gemini_cli.api_response` token counts → totals; `session.id` → session_id
+- [x] 4.2 Claude Code: `claude_code.user_prompt`, `claude_code.tool_result`, `claude_code.tool_decision`, `claude_code.api_request`/`api_response` → steps and totals; `session.id` → session_id
+- [x] 4.3 Test: fixture log-event batches from both CLIs produce coherent traces without spans present
 
 ## 5. Docs
 

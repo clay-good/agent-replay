@@ -10,6 +10,7 @@ export * from './diff-service.js';
 export * from './check-service.js';
 export * from './harness-service.js';
 export * from './otel/semconv.js';
+export * from './otel/log-events.js';
 export * from './otel/receiver.js';
 export * from './fork-service.js';
 export * from './eval-service.js';

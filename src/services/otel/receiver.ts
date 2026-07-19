@@ -3,6 +3,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import { gunzipSync } from 'node:zlib';
 import { ingestTrace } from '../trace-service.js';
 import { mapOtlpTraces } from './semconv.js';
+import { mapOtlpLogs } from './log-events.js';
 
 /**
  * Minimal local OTLP/HTTP receiver. This slice accepts `POST /v1/traces` in the
@@ -77,6 +78,27 @@ export function handleTracesExport(
   return { status: 200, payload: {} };
 }
 
+/** Handle one OTLP/JSON logs export (Gemini CLI / Claude Code log events). */
+export function handleLogsExport(
+  db: Database.Database,
+  body: string,
+  stats: OtelStats,
+): { status: number; payload: Record<string, unknown> } {
+  let otlp: Record<string, unknown>;
+  try {
+    otlp = JSON.parse(body);
+  } catch {
+    return { status: 400, payload: { error: 'invalid JSON body' } };
+  }
+  const traces = mapOtlpLogs(otlp);
+  for (const t of traces) {
+    ingestTrace(db, t);
+    stats.acceptedSpans += t.steps?.length ?? 0;
+    stats.acceptedTraces++;
+  }
+  return { status: 200, payload: {} };
+}
+
 /** Start the OTLP/HTTP receiver. Resolves once listening. */
 export function startOtelReceiver(db: Database.Database, port: number, stats: OtelStats): Promise<OtelReceiverHandle> {
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
@@ -91,11 +113,9 @@ export function startOtelReceiver(db: Database.Database, port: number, stats: Ot
       res.writeHead(405).end();
       return;
     }
-    if (url.startsWith('/v1/logs')) {
-      res.writeHead(501, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'log ingest not supported in this build' }));
-      return;
-    }
-    if (!url.startsWith('/v1/traces')) {
+    const isTraces = url.startsWith('/v1/traces');
+    const isLogs = url.startsWith('/v1/logs');
+    if (!isTraces && !isLogs) {
       res.writeHead(404).end();
       return;
     }
@@ -106,7 +126,7 @@ export function startOtelReceiver(db: Database.Database, port: number, stats: Ot
 
     try {
       const body = (await readBody(req)).toString('utf-8');
-      const { status, payload } = handleTracesExport(db, body, stats);
+      const { status, payload } = isLogs ? handleLogsExport(db, body, stats) : handleTracesExport(db, body, stats);
       res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(payload));
     } catch (err) {
       res.writeHead(500, { 'content-type': 'application/json' }).end(JSON.stringify({ error: (err as Error).message }));

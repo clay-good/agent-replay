@@ -104,11 +104,13 @@ Many agent stacks already emit OpenTelemetry with the GenAI semantic conventions
 agent-replay otel serve --port 4318
 ```
 
-It accepts `POST /v1/traces` in OTLP/JSON and maps spans onto the trace model: `invoke_agent`/`invoke_workflow` roots become traces (`gen_ai.agent.name` → agent, `gen_ai.conversation.id` → session), `execute_tool` → `tool_call`, `chat`/`generate_content`/`text_completion` → `llm_call`, `embeddings`/`retrieval` → `retrieval`, span parentage → step hierarchy, and `gen_ai.usage.*` → token totals. Deprecated attribute forms (`gen_ai.system`, `prompt_tokens`/`completion_tokens`) are normalized, and OpenInference's `openinference.span.kind` is accepted when GenAI attributes are absent. Spans without an agent root are grouped into a synthetic trace per OTel trace ID.
+It accepts `POST /v1/traces` and `POST /v1/logs` in OTLP/JSON. Spans map onto the trace model: `invoke_agent`/`invoke_workflow` roots become traces (`gen_ai.agent.name` → agent, `gen_ai.conversation.id` → session), `execute_tool` → `tool_call`, `chat`/`generate_content`/`text_completion` → `llm_call`, `embeddings`/`retrieval` → `retrieval`, span parentage → step hierarchy, and `gen_ai.usage.*` → token totals. Deprecated attribute forms (`gen_ai.system`, `prompt_tokens`/`completion_tokens`) are normalized, and OpenInference's `openinference.span.kind` is accepted when GenAI attributes are absent. Spans without an agent root are grouped into a synthetic trace per OTel trace ID.
+
+Log events from the two CLIs that emit richer signal as logs are mapped too: Gemini CLI (`gemini_cli.user_prompt`, `gemini_cli.tool_call` — including its `decision` as a decision record attributed to user or policy, `gemini_cli.api_response` tokens) and Claude Code (`claude_code.*`), correlated by `session.id`.
 
 Point an exporter at it over HTTP/JSON — e.g. Gemini CLI `telemetry: { enabled: true, target: "local", otlpEndpoint: "http://localhost:4318", otlpProtocol: "http" }`. Most emitters default to gRPC on port 4317, so switch them to HTTP.
 
-> This build ingests OTLP/JSON traces. Protobuf encoding, `/v1/logs` log-event mappers, and the OpenLLMetry (`traceloop.*`) dialect are not yet wired up.
+> This build ingests OTLP/JSON. Protobuf encoding and the OpenLLMetry (`traceloop.*`) dialect are not yet wired up.
 
 #### Hook capture
 
