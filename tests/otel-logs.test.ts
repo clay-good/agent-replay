@@ -4,6 +4,7 @@ import { runMigrations } from '../src/db/migrations.js';
 import { getTrace, listTraces } from '../src/services/trace-service.js';
 import { mapOtlpLogs } from '../src/services/otel/log-events.js';
 import { ingestTrace } from '../src/services/trace-service.js';
+import { handleLogsExport, type OtelStats } from '../src/services/otel/receiver.js';
 
 let db: Database.Database;
 
@@ -93,5 +94,28 @@ describe('mapOtlpLogs — Claude Code', () => {
     const traces = mapOtlpLogs(payload);
     for (const t of traces) ingestTrace(db, t);
     expect(listTraces(db, {}).total).toBe(2);
+  });
+});
+
+describe('handleLogsExport (/v1/logs ingest)', () => {
+  it('parses a JSON log batch, maps and ingests it, and answers 200', () => {
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    const body = JSON.stringify(otlpLogs([
+      logRecord('gemini_cli.user_prompt', { 'session.id': 'lg1', prompt: 'hi' }, 1_000_000),
+      logRecord('gemini_cli.tool_call', { 'session.id': 'lg1', function_name: 'run_shell', function_args: '{"cmd":"ls"}', success: true }, 2_000_000),
+    ]));
+    const res = handleLogsExport(db, body, stats);
+    expect(res.status).toBe(200);
+
+    const traces = listTraces(db, { session_id: 'lg1' });
+    expect(traces.total).toBe(1);
+    const t = getTrace(db, traces.items[0].id)!;
+    expect(t.agent_name).toBe('gemini');
+    expect(t.steps.some((s) => s.step_type === 'tool_call')).toBe(true);
+  });
+
+  it('rejects a malformed log body with 400', () => {
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    expect(handleLogsExport(db, '{bad json', stats).status).toBe(400);
   });
 });
