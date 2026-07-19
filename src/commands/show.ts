@@ -40,8 +40,25 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
 
   // Optional step window (--from-step/--to-step), so large traces — real
   // sessions can run to thousands of steps — stay inspectable. Matches replay.
-  const fromStep = opts.fromStep != null ? safeParseInt(opts.fromStep, 1) : undefined;
-  const toStep = opts.toStep != null ? safeParseInt(opts.toStep, Number.MAX_SAFE_INTEGER) : undefined;
+  // Validate the bounds so a typo (non-numeric, or an inverted range) is a
+  // clear usage error rather than silently falling back to "no steps in window".
+  const fromStep = opts.fromStep != null ? safeParseInt(opts.fromStep, 0) : undefined;
+  const toStep = opts.toStep != null ? safeParseInt(opts.toStep, 0) : undefined;
+  if (fromStep != null && fromStep < 1) {
+    console.error(chalk.red(`  Invalid --from-step: ${opts.fromStep} (must be a positive integer).`));
+    process.exitCode = 2;
+    return;
+  }
+  if (toStep != null && toStep < 1) {
+    console.error(chalk.red(`  Invalid --to-step: ${opts.toStep} (must be a positive integer).`));
+    process.exitCode = 2;
+    return;
+  }
+  if (fromStep != null && toStep != null && fromStep > toStep) {
+    console.error(chalk.red(`  --from-step (${fromStep}) cannot be greater than --to-step (${toStep}).`));
+    process.exitCode = 2;
+    return;
+  }
   const windowed = fromStep == null && toStep == null
     ? trace.steps
     : trace.steps.filter((s) => (fromStep == null || s.step_number >= fromStep) && (toStep == null || s.step_number <= toStep));

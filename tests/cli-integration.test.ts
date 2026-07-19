@@ -299,6 +299,13 @@ describe('CLI integration', () => {
     // The human view notes how many steps were omitted.
     const view = run(['show', 'tbig', '--from-step', '3', '--to-step', '5', '--steps-only']).stdout;
     expect(view).toMatch(/Showing 3 of 8 steps/);
+
+    // Invalid window bounds are a usage error (exit 2), not a silent empty view.
+    expect(run(['show', 'tbig', '--from-step', 'abc']).code).toBe(2);
+    expect(run(['show', 'tbig', '--from-step', '0']).code).toBe(2);
+    expect(run(['show', 'tbig', '--from-step', '5', '--to-step', '2']).code).toBe(2);
+    // An in-range-but-empty window (valid numbers past the end) is still a success.
+    expect(run(['show', 'tbig', '--from-step', '999']).code).toBe(0);
   });
 
   it('config errors exit non-zero so scripts can detect them', () => {
