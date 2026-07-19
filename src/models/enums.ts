@@ -32,6 +32,13 @@ export type TriggerType = (typeof TRIGGER_TYPES)[number];
 export const GUARD_ACTIONS = ['allow', 'deny', 'warn', 'require_review'] as const;
 export type GuardAction = (typeof GUARD_ACTIONS)[number];
 
+// ── Decision Attribution ──────────────────────────────────────────────────
+// Who made a decision: the model, the human at a permission prompt, or a
+// policy engine. Real harnesses record all three distinctly.
+
+export const DECIDED_BY = ['agent', 'user', 'policy'] as const;
+export type DecidedBy = (typeof DECIDED_BY)[number];
+
 // ── Step Type Icons ───────────────────────────────────────────────────────
 // Unicode symbols for cross-platform terminal display
 

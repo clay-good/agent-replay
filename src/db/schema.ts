@@ -14,7 +14,7 @@ import type Database from 'better-sqlite3';
  *   - Added guardrail_policies table (adapted from 002_policies.sql policy_rules)
  */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 const SCHEMA_V1 = `
 -- ============================================================================
@@ -135,10 +135,46 @@ CREATE INDEX IF NOT EXISTS idx_guardrail_policies_action ON guardrail_policies(a
 CREATE INDEX IF NOT EXISTS idx_guardrail_policies_enabled ON guardrail_policies(enabled);
 `;
 
-/** Apply schema v1 to the database. */
+// ============================================================================
+// Schema v2 — decision-trace model
+//   - step hierarchy (parent_step_number) and causality (caused_by_step_number)
+//   - session_id correlation key on traces
+//   - agent_trace_decisions table (options/chosen/rationale/confidence/decided_by)
+// Applied as an in-place migration over v1 tables so opening a v1 database
+// upgrades it while preserving every existing row (see migrations.ts).
+// ============================================================================
+const SCHEMA_V2 = `
+ALTER TABLE agent_trace_steps ADD COLUMN parent_step_number INTEGER;
+ALTER TABLE agent_trace_steps ADD COLUMN caused_by_step_number INTEGER;
+
+ALTER TABLE agent_traces ADD COLUMN session_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_agent_traces_session ON agent_traces(session_id);
+
+CREATE TABLE IF NOT EXISTS agent_trace_decisions (
+    id TEXT PRIMARY KEY,
+    step_id TEXT NOT NULL REFERENCES agent_trace_steps(id) ON DELETE CASCADE,
+    options TEXT NOT NULL DEFAULT '[]',
+    chosen TEXT NOT NULL,
+    rationale TEXT,
+    confidence REAL,
+    decided_by TEXT NOT NULL DEFAULT 'agent'
+        CHECK (decided_by IN ('agent', 'user', 'policy')),
+    UNIQUE(step_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_trace_decisions_step ON agent_trace_decisions(step_id);
+`;
+
+/** Apply schema v1 to the database (records schema version 1). */
 export function applySchemaV1(db: Database.Database): void {
   db.exec(SCHEMA_V1);
-  db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(SCHEMA_VERSION);
+  db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(1);
+}
+
+/** Migrate a v1 database in place to v2 (records schema version 2). */
+export function applySchemaV2(db: Database.Database): void {
+  db.exec(SCHEMA_V2);
+  db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(2);
 }
 
 /** Get the current schema version, or 0 if no schema exists. */

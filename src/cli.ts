@@ -63,6 +63,7 @@ program
   .option('--status <status>', 'Filter by status: running, completed, failed, timeout')
   .option('--agent <name>', 'Filter by agent name')
   .option('--tag <tag>', 'Filter by tag')
+  .option('--session <id>', 'Filter by session ID (prefix matching)')
   .option('--since <duration>', 'Filter by time window (e.g. 1h, 7d, 30m)')
   .option('--sort <field>', 'Sort by: started_at, duration, tokens, cost')
   .option('--limit <n>', 'Max results (default 25)', '25')
@@ -79,12 +80,36 @@ program
   .description('Show detailed view of a trace with steps, evals, and snapshots')
   .option('--json', 'Output raw JSON')
   .option('--steps-only', 'Only show the step timeline')
+  .option('--tree', 'Render steps as a hierarchy (parent/child + causal links)')
   .option('--evals', 'Include evaluation results')
   .option('--snapshots', 'Show full snapshot data for each step')
   .option('--dir <path>', 'Custom data directory')
   .action(async (traceId, opts) => {
     const { runShow } = await import('./commands/show.js');
     await runShow(traceId, opts);
+  });
+
+// --- why ---
+program
+  .command('why <trace-id>')
+  .description('Explain a step by walking its causal chain back to the root')
+  .requiredOption('--step <n>', 'Step number to explain')
+  .option('--json', 'Output raw JSON')
+  .option('--dir <path>', 'Custom data directory')
+  .action(async (traceId, opts) => {
+    const { runWhy } = await import('./commands/why.js');
+    await runWhy(traceId, opts);
+  });
+
+// --- decisions ---
+program
+  .command('decisions <trace-id>')
+  .description('List every decision point in a trace with its options and rationale')
+  .option('--json', 'Output raw JSON')
+  .option('--dir <path>', 'Custom data directory')
+  .action(async (traceId, opts) => {
+    const { runDecisions } = await import('./commands/decisions.js');
+    await runDecisions(traceId, opts);
   });
 
 // --- replay ---

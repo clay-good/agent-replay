@@ -90,9 +90,29 @@ agent-replay show <trace-id> --steps-only
 
 # Include eval results and state snapshots
 agent-replay show <trace-id> --evals --snapshots
+
+# Render steps as a hierarchy (subagents/nested calls) with causal links
+agent-replay show <trace-id> --tree
 ```
 
 Trace IDs support prefix matching — just type the first few characters.
+
+### Explain decisions
+
+When a trace records *why* it acted — decision alternatives, causal links between steps, and step hierarchy — you can inspect that structure directly.
+
+```bash
+# Walk the causal chain backward from a step to the decision that triggered it
+agent-replay why <trace-id> --step 9
+
+# List every decision point with its options, chosen option, and rationale
+agent-replay decisions <trace-id>
+
+# Group traces from one harness session/conversation
+agent-replay list --session <session-id>
+```
+
+`why` follows each step's `caused_by_step`, falling back to `parent_step` and then to the nearest earlier decision, printing the chosen option and rationale at each decision hop. Both commands accept `--json`.
 
 ### Replay
 
@@ -329,6 +349,42 @@ To ingest your agent's execution data, export it as JSON matching this structure
 ```
 
 Only `agent_name` is required. Everything else is optional.
+
+### Decision & structure fields
+
+Traces and steps carry optional fields that record *why* an agent acted, not just *what* it did. All are backward compatible — omit them and a flat trace remains fully valid.
+
+| Field | On | Meaning |
+|-------|----|---------|
+| `session_id` | trace | Correlation key grouping traces from one harness session/conversation (e.g. a Claude Code / Codex `session_id`, a Gemini `session.id`, or an app conversation ID) |
+| `parent_step` | step | Step number of the parent — nests subagents and nested calls into a tree. Must reference an earlier step |
+| `caused_by_step` | step | Step number that triggered this step. Must reference a strictly earlier step (chains are acyclic) |
+| `decision` | step | Structured decision record, valid only on `decision` steps (see below) |
+
+A `decision` block:
+
+```json
+{
+  "step_number": 4,
+  "step_type": "decision",
+  "name": "rank_options",
+  "caused_by_step": 3,
+  "decision": {
+    "options": [
+      { "option": "fl_1", "rationale": "nonstop, lowest price", "score": 0.92 },
+      { "option": "fl_2", "rationale": "nonstop but pricier", "score": 0.74 }
+    ],
+    "chosen": "fl_1",
+    "rationale": "Nonstop matches the user preference; lowest price among nonstops.",
+    "confidence": 0.92,
+    "decided_by": "agent"
+  }
+}
+```
+
+`decided_by` is one of `agent` (the model chose), `user` (a human at a permission prompt), or `policy` (a policy engine). `confidence` is between 0 and 1. Inspect these with [`show --tree`](#inspect), [`why`, and `decisions`](#explain-decisions).
+
+> **Schema migration:** these fields arrived in schema v2. Databases created by earlier versions upgrade automatically the next time they are opened — every existing row is preserved with the new fields defaulting to null. The upgrade is one-way (there is no down-migration).
 
 ### Step Types
 

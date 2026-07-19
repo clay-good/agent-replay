@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { applySchemaV1 } from '../src/db/schema.js';
+import { runMigrations } from '../src/db/migrations.js';
 import { seedDemoData } from '../src/demo/seed-data.js';
 import { listTraces, getTrace } from '../src/services/trace-service.js';
 import { listPolicies } from '../src/services/guard-service.js';
@@ -17,7 +17,7 @@ const now = new Date();
 beforeEach(() => {
   db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
-  applySchemaV1(db);
+  runMigrations(db);
 });
 
 afterEach(() => {

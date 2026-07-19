@@ -12,6 +12,7 @@ export interface ListOptions {
   status?: string;
   agent?: string;
   tag?: string;
+  session?: string;
   since?: string;
   sort?: string;
   limit?: string;
@@ -31,6 +32,7 @@ export function runList(opts: ListOptions = {}): void {
   if (opts.status) filter.status = opts.status;
   if (opts.agent) filter.agent_name = opts.agent;
   if (opts.tag) filter.tag = opts.tag;
+  if (opts.session) filter.session_id = opts.session;
   if (opts.since) filter.since = parseSinceToIso(opts.since);
   if (opts.sort) {
     const desc = opts.sort.startsWith('-');

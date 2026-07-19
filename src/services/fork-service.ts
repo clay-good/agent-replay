@@ -60,8 +60,8 @@ export function forkTrace(
     db.prepare(
       `INSERT INTO agent_traces
         (id, agent_name, agent_version, trigger, status, input,
-         started_at, tags, metadata, parent_trace_id, forked_from_step, created_at)
-       VALUES (?, ?, ?, 'manual', 'running', ?, ?, ?, ?, ?, ?, ?)`,
+         started_at, tags, metadata, parent_trace_id, forked_from_step, session_id, created_at)
+       VALUES (?, ?, ?, 'manual', 'running', ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       forkedId,
       original.agent_name,
@@ -72,6 +72,7 @@ export function forkTrace(
       metadata,
       traceId,
       fromStep,
+      original.session_id ?? null,
       now,
     );
 
@@ -92,8 +93,9 @@ export function forkTrace(
       db.prepare(
         `INSERT INTO agent_trace_steps
           (id, trace_id, step_number, step_type, name, input, output,
-           started_at, ended_at, duration_ms, tokens_used, model, error, metadata)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           started_at, ended_at, duration_ms, tokens_used, model, error, metadata,
+           parent_step_number, caused_by_step_number)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         newStepId,
         forkedId,
@@ -109,7 +111,31 @@ export function forkTrace(
         step.model,
         step.error,
         step.metadata,
+        step.parent_step_number ?? null,
+        step.caused_by_step_number ?? null,
       );
+
+      // Copy the decision record for this step, if any (step numbers are
+      // preserved across the fork, so causal/parent references stay valid).
+      const decision = db
+        .prepare('SELECT * FROM agent_trace_decisions WHERE step_id = ?')
+        .get(oldStepId) as Record<string, unknown> | undefined;
+
+      if (decision) {
+        db.prepare(
+          `INSERT INTO agent_trace_decisions
+            (id, step_id, options, chosen, rationale, confidence, decided_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          generateId('dec'),
+          newStepId,
+          decision.options,
+          decision.chosen,
+          decision.rationale,
+          decision.confidence,
+          decision.decided_by,
+        );
+      }
 
       // Copy snapshot if one exists for this step
       const snapshot = db

@@ -41,6 +41,7 @@ export function successfulBooking(baseTime: Date): IngestTraceInput {
     total_cost_usd: 0.018,
     error: null,
     tags: ['travel', 'booking', 'success'],
+    session_id: 'sess_demo_travel_01',
     metadata: { environment: 'production', channel: 'mobile_app' },
     steps: [
       {
@@ -105,12 +106,26 @@ export function successfulBooking(baseTime: Date): IngestTraceInput {
         started_at: t(900_000 - 600),
         duration_ms: 80,
         tokens_used: 300,
+        caused_by_step: 3,
+        decision: {
+          options: [
+            { option: 'fl_1', rationale: 'United UA 456 — nonstop, $342.50, early departure', score: 0.92 },
+            { option: 'fl_2', rationale: 'Delta DL 890 — nonstop but $35 more', score: 0.74 },
+            { option: 'fl_3', rationale: 'JetBlue B6 212 — cheapest but has a stop', score: 0.51 },
+          ],
+          chosen: 'fl_1',
+          rationale: 'Nonstop matches the user preference; lowest price among nonstops.',
+          confidence: 0.92,
+          decided_by: 'agent',
+        },
         metadata: {},
       },
       {
         step_number: 5,
         step_type: 'llm_call',
         name: 'format_options_message',
+        parent_step: 4,
+        caused_by_step: 4,
         input: { ranked_flights: ['fl_1', 'fl_2', 'fl_3'], recommended: 'fl_1' },
         output: {
           text: "I found 3 flights for you:\n\n✈ **Recommended:** UA 456 — SFO 08:30→JFK 17:05 — $342.50 (nonstop)\n  DL 890 — SFO 10:15→JFK 19:00 — $378.00 (nonstop)\n  B6 212 — SFO 14:00→JFK 22:30 — $299.00 (1 stop)\n\nShall I book UA 456?",
@@ -125,6 +140,7 @@ export function successfulBooking(baseTime: Date): IngestTraceInput {
         step_number: 6,
         step_type: 'output',
         name: 'present_options',
+        parent_step: 4,
         input: { message_type: 'flight_options', options_count: 3 },
         output: { delivered: true, message_id: 'msg_8891' },
         started_at: t(900_000 - 1280),
@@ -147,6 +163,7 @@ export function successfulBooking(baseTime: Date): IngestTraceInput {
         step_number: 8,
         step_type: 'tool_call',
         name: 'create_booking',
+        caused_by_step: 7,
         input: {
           flight_id: 'fl_1',
           passenger: { name: 'John Doe', user_id: 'usr_7823' },
@@ -174,6 +191,8 @@ export function successfulBooking(baseTime: Date): IngestTraceInput {
         step_number: 9,
         step_type: 'llm_call',
         name: 'generate_confirmation',
+        parent_step: 8,
+        caused_by_step: 8,
         input: { pnr: 'ABC123', flight: 'UA 456', price: 342.50 },
         output: {
           text: 'Your flight has been booked! Confirmation: ABC123, UA 456 SFO→JFK departing 08:30. Total: $342.50.',

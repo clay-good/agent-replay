@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { applySchemaV1 } from '../src/db/schema.js';
+import { runMigrations } from '../src/db/migrations.js';
 import {
   ingestTrace,
   appendStep,
@@ -75,7 +75,7 @@ function makeTrace(overrides: Partial<IngestTraceInput> = {}): IngestTraceInput 
 beforeEach(() => {
   db = new Database(':memory:');
   db.pragma('foreign_keys = ON');
-  applySchemaV1(db);
+  runMigrations(db);
 });
 
 afterEach(() => {

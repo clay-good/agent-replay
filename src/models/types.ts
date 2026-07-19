@@ -4,6 +4,7 @@ import type {
   EvalType,
   TriggerType,
   GuardAction,
+  DecidedBy,
 } from './enums.js';
 
 // ── Core Entities ─────────────────────────────────────────────────────────
@@ -27,7 +28,28 @@ export interface Trace {
   metadata: Record<string, unknown>;
   parent_trace_id: string | null;
   forked_from_step: number | null;
+  session_id: string | null;
   created_at: string;
+}
+
+// ── Decision records ──────────────────────────────────────────────────────
+
+/** One alternative considered at a decision point. */
+export interface DecisionOption {
+  option: string;
+  rationale?: string;
+  score?: number;
+}
+
+/** A structured decision record attached to a `decision` step. */
+export interface DecisionRecord {
+  id: string;
+  step_id: string;
+  options: DecisionOption[];
+  chosen: string;
+  rationale: string | null;
+  confidence: number | null;
+  decided_by: DecidedBy;
 }
 
 /** A single step within a trace. */
@@ -46,6 +68,10 @@ export interface TraceStep {
   model: string | null;
   error: string | null;
   metadata: Record<string, unknown>;
+  parent_step_number: number | null;
+  caused_by_step_number: number | null;
+  /** Present only for `decision` steps that carry a record. */
+  decision?: DecisionRecord | null;
 }
 
 /** Frozen state snapshot at a specific step. */
@@ -102,6 +128,15 @@ export interface IngestSnapshotInput {
   token_count?: number;
 }
 
+/** Decision block accepted on ingest for a `decision` step. */
+export interface IngestDecisionInput {
+  options?: DecisionOption[];
+  chosen: string;
+  rationale?: string | null;
+  confidence?: number | null;
+  decided_by?: string;
+}
+
 export interface IngestStepInput {
   step_number: number;
   step_type: string;
@@ -116,6 +151,9 @@ export interface IngestStepInput {
   error?: string | null;
   metadata?: Record<string, unknown>;
   snapshot?: IngestSnapshotInput;
+  parent_step?: number | null;
+  caused_by_step?: number | null;
+  decision?: IngestDecisionInput | null;
 }
 
 export interface IngestTraceInput {
@@ -133,6 +171,7 @@ export interface IngestTraceInput {
   error?: string | null;
   tags?: string[];
   metadata?: Record<string, unknown>;
+  session_id?: string | null;
   steps?: IngestStepInput[];
 }
 
@@ -189,6 +228,7 @@ export interface ListTracesFilter {
   status?: string;
   agent_name?: string;
   tag?: string;
+  session_id?: string;
   since?: string;
   sort_by?: string;
   sort_order?: 'asc' | 'desc';

@@ -7,13 +7,14 @@ import { getTrace, getStepSnapshot } from '../services/trace-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { traceHeaderPanel } from '../ui/boxen-panels.js';
 import { truncate } from '../utils/json.js';
-import { renderTimeline } from '../ui/timeline.js';
+import { renderTimeline, renderTree } from '../ui/timeline.js';
 import { evalTable } from '../ui/table.js';
 import { heading, separator } from '../ui/theme.js';
 
 export interface ShowOptions {
   json?: boolean;
   stepsOnly?: boolean;
+  tree?: boolean;
   evals?: boolean;
   snapshots?: boolean;
   dir?: string;
@@ -40,12 +41,14 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
     return;
   }
 
+  const renderSteps = () => (opts.tree ? renderTree(trace.steps) : renderTimeline(trace.steps));
+
   // Steps-only mode
   if (opts.stepsOnly) {
     console.log('');
     console.log(heading('  Steps'));
     console.log('');
-    console.log(renderTimeline(trace.steps));
+    console.log(renderSteps());
     console.log('');
     return;
   }
@@ -56,9 +59,9 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
   console.log('');
 
   // Timeline
-  console.log(heading('  Steps'));
+  console.log(heading(opts.tree ? '  Step tree' : '  Steps'));
   console.log('');
-  console.log(renderTimeline(trace.steps));
+  console.log(renderSteps());
   console.log('');
 
   // Evaluations

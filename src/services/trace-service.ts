@@ -8,6 +8,9 @@ import type {
   TraceWithDetails,
   IngestTraceInput,
   IngestStepInput,
+  IngestDecisionInput,
+  DecisionRecord,
+  DecisionOption,
   UpdateTraceInput,
   CreateEvalInput,
   ListTracesFilter,
@@ -74,6 +77,7 @@ function rowToTrace(row: Record<string, unknown>): Trace {
     metadata: parseJson(row.metadata as string) ?? {},
     parent_trace_id: (row.parent_trace_id as string) ?? null,
     forked_from_step: (row.forked_from_step as number) ?? null,
+    session_id: (row.session_id as string) ?? null,
     created_at: row.created_at as string,
   };
 }
@@ -94,7 +98,44 @@ export function rowToStep(row: Record<string, unknown>): TraceStep {
     model: (row.model as string) ?? null,
     error: (row.error as string) ?? null,
     metadata: parseJson(row.metadata as string) ?? {},
+    parent_step_number: (row.parent_step_number as number) ?? null,
+    caused_by_step_number: (row.caused_by_step_number as number) ?? null,
   };
+}
+
+export function rowToDecision(row: Record<string, unknown>): DecisionRecord {
+  const rawOptions = parseJson(row.options as string | null);
+  const options = Array.isArray(rawOptions) ? (rawOptions as DecisionOption[]) : [];
+  return {
+    id: row.id as string,
+    step_id: row.step_id as string,
+    options,
+    chosen: row.chosen as string,
+    rationale: (row.rationale as string) ?? null,
+    confidence: (row.confidence as number) ?? null,
+    decided_by: (row.decided_by as DecisionRecord['decided_by']) ?? 'agent',
+  };
+}
+
+/** Insert a decision record for a step. Assumes the step is type `decision`. */
+function insertDecision(
+  db: Database.Database,
+  stepId: string,
+  decision: IngestDecisionInput,
+): void {
+  db.prepare(
+    `INSERT INTO agent_trace_decisions
+      (id, step_id, options, chosen, rationale, confidence, decided_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    generateId('dec'),
+    stepId,
+    JSON.stringify(decision.options ?? []),
+    decision.chosen,
+    decision.rationale ?? null,
+    decision.confidence ?? null,
+    decision.decided_by ?? 'agent',
+  );
 }
 
 function rowToEval(row: Record<string, unknown>): EvalResult {
@@ -139,8 +180,8 @@ export function ingestTrace(
       `INSERT INTO agent_traces
         (id, agent_name, agent_version, trigger, status, input, output,
          started_at, ended_at, total_duration_ms, total_tokens, total_cost_usd,
-         error, tags, metadata, parent_trace_id, forked_from_step, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         error, tags, metadata, parent_trace_id, forked_from_step, session_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       traceId,
       input.agent_name,
@@ -159,6 +200,7 @@ export function ingestTrace(
       jsonStr(input.metadata),
       null, // parent_trace_id
       null, // forked_from_step
+      input.session_id ?? null,
       timestamp,
     );
 
@@ -168,8 +210,9 @@ export function ingestTrace(
       db.prepare(
         `INSERT INTO agent_trace_steps
           (id, trace_id, step_number, step_type, name, input, output,
-           started_at, ended_at, duration_ms, tokens_used, model, error, metadata)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           started_at, ended_at, duration_ms, tokens_used, model, error, metadata,
+           parent_step_number, caused_by_step_number)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         stepId,
         traceId,
@@ -185,7 +228,13 @@ export function ingestTrace(
         step.model ?? null,
         step.error ?? null,
         jsonStr(step.metadata),
+        step.parent_step ?? null,
+        step.caused_by_step ?? null,
       );
+
+      if (step.decision) {
+        insertDecision(db, stepId, step.decision);
+      }
 
       if (step.snapshot) {
         const snapId = generateId('snp');
@@ -240,8 +289,9 @@ export function appendStep(
     db.prepare(
       `INSERT INTO agent_trace_steps
         (id, trace_id, step_number, step_type, name, input, output,
-         started_at, ended_at, duration_ms, tokens_used, model, error, metadata)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         started_at, ended_at, duration_ms, tokens_used, model, error, metadata,
+         parent_step_number, caused_by_step_number)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       stepId,
       traceId,
@@ -257,7 +307,13 @@ export function appendStep(
       input.model ?? null,
       input.error ?? null,
       jsonStr(input.metadata),
+      input.parent_step ?? null,
+      input.caused_by_step ?? null,
     );
+
+    if (input.decision) {
+      insertDecision(db, stepId, input.decision);
+    }
 
     if (input.snapshot) {
       const snapId = generateId('snp');
@@ -310,10 +366,30 @@ export function getTrace(
     )
     .all(resolvedId) as Record<string, unknown>[];
 
+  // Decision records for this trace's steps, keyed by step_id
+  const decisionRows = db
+    .prepare(
+      `SELECT d.* FROM agent_trace_decisions d
+       JOIN agent_trace_steps s ON d.step_id = s.id
+       WHERE s.trace_id = ?`,
+    )
+    .all(resolvedId) as Record<string, unknown>[];
+  const decisionsByStep = new Map<string, DecisionRecord>();
+  for (const row of decisionRows) {
+    decisionsByStep.set(row.step_id as string, rowToDecision(row));
+  }
+
+  const steps = stepRows.map((row) => {
+    const step = rowToStep(row);
+    const decision = decisionsByStep.get(step.id);
+    if (decision) step.decision = decision;
+    return step;
+  });
+
   const trace = rowToTrace(traceRow);
   return {
     ...trace,
-    steps: stepRows.map(rowToStep),
+    steps,
     evals: evalRows.map(rowToEval),
   };
 }
@@ -339,6 +415,11 @@ export function listTraces(
     // SQLite JSON: check if the tags array contains the tag
     conditions.push("EXISTS (SELECT 1 FROM json_each(tags) WHERE json_each.value = ?)");
     params.push(filter.tag);
+  }
+  if (filter.session_id) {
+    // Session correlation key — prefix matching, like trace IDs
+    conditions.push('(session_id = ? OR session_id LIKE ?)');
+    params.push(filter.session_id, `${filter.session_id}%`);
   }
   if (filter.since) {
     // since is an ISO string or relative duration — callers should resolve to ISO

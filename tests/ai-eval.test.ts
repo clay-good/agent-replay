@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import BetterSqlite3 from 'better-sqlite3';
-import { applySchemaV1 } from '../src/db/schema.js';
+import { runMigrations } from '../src/db/migrations.js';
 import { ingestTrace, createEval, getTrace } from '../src/services/trace-service.js';
 import {
   AI_PRESETS,
@@ -16,7 +16,7 @@ function createTestDb() {
   const db = new BetterSqlite3(':memory:');
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
-  applySchemaV1(db);
+  runMigrations(db);
   return db;
 }
 

@@ -110,6 +110,63 @@ export function renderTimeline(
   return lines.join('\n');
 }
 
+/**
+ * Render steps as a hierarchy, nesting children under their `parent_step`
+ * and annotating causal links. Falls back to the flat timeline when no step
+ * declares a parent.
+ */
+export function renderTree(steps: TraceStep[], options: TimelineOptions = {}): string {
+  if (steps.length === 0) {
+    return chalk.dim('  No steps recorded.');
+  }
+
+  const hasHierarchy = steps.some((s) => s.parent_step_number != null);
+  if (!hasHierarchy) {
+    return renderTimeline(steps, options);
+  }
+
+  // Build parent → children index by step number.
+  const byNumber = new Map<number, TraceStep>();
+  for (const s of steps) byNumber.set(s.step_number, s);
+
+  const childrenOf = new Map<number | null, TraceStep[]>();
+  for (const s of steps) {
+    // Treat a parent that doesn't resolve as a root, so no step is dropped.
+    const key = s.parent_step_number != null && byNumber.has(s.parent_step_number)
+      ? s.parent_step_number
+      : null;
+    const list = childrenOf.get(key) ?? [];
+    list.push(s);
+    childrenOf.set(key, list);
+  }
+  for (const list of childrenOf.values()) list.sort((a, b) => a.step_number - b.step_number);
+
+  const lines: string[] = [];
+  const walk = (parentKey: number | null, indent: string): void => {
+    const children = childrenOf.get(parentKey) ?? [];
+    for (const step of children) {
+      const icon = stepIcon(step.step_type as StepType);
+      const typeLabel = stepLabel(step.step_type as StepType);
+      const name = chalk.white.bold(`"${step.name}"`);
+      const causal =
+        step.caused_by_step_number != null
+          ? chalk.dim(` ⟵ caused by #${step.caused_by_step_number}`)
+          : '';
+      const dur = step.duration_ms != null ? chalk.dim(`  ${formatDuration(step.duration_ms)}`) : '';
+      const branch = indent ? chalk.dim('└─ ') : '';
+      lines.push(`  ${indent}${branch}${chalk.dim(`#${step.step_number}`)} ${icon} ${typeLabel}  ${name}${causal}${dur}`);
+
+      if (step.decision) {
+        lines.push(`  ${indent}   ${label('chose')} ${chalk.greenBright(step.decision.chosen)}`);
+      }
+      walk(step.step_number, indent + '   ');
+    }
+  };
+
+  walk(null, '');
+  return lines.join('\n');
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 function formatDuration(ms: number): string {
