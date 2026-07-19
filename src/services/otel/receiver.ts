@@ -7,14 +7,17 @@ import { mapOtlpLogs } from './log-events.js';
 import { decodeTracesData } from './protobuf.js';
 
 /**
- * Minimal local OTLP/HTTP receiver. This slice accepts `POST /v1/traces` in the
- * `application/json` (OTLP/JSON) encoding, maps GenAI-semconv spans to traces,
- * and stores them live. Per the OTLP spec it answers 200 with an empty object
- * on success and 200 with `partial_success` when some spans could not be mapped.
+ * Local OTLP/HTTP receiver. Accepts `POST /v1/traces` in both OTLP/JSON and
+ * OTLP/protobuf, and `POST /v1/logs` in JSON (log-event mappers), decoding gzip
+ * when present. GenAI-semconv spans map to traces, with OpenInference and
+ * OpenLLMetry fallbacks, and are stored live.
  *
- * Not yet implemented in this slice: protobuf encoding and `POST /v1/logs`
- * (log-event mappers) — those return a clear 415/501 rather than silently
- * dropping data.
+ * Per the OTLP spec, success answers 200 with an empty body; client-malformed
+ * input answers 4xx (not 5xx, which the spec makes retryable). The spec's
+ * `partial_success` response is scaffolded but currently unreachable: every
+ * span the receiver counts maps to at least a synthetic trace, so a batch never
+ * resolves to zero traces. `POST /v1/logs` over protobuf is not supported and
+ * returns 415.
  */
 
 export interface OtelReceiverHandle {
