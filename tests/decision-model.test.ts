@@ -5,6 +5,7 @@ import { runMigrations } from '../src/db/migrations.js';
 import { getSchemaVersion } from '../src/db/schema.js';
 import { ingestTrace, getTrace, listTraces } from '../src/services/trace-service.js';
 import { forkTrace } from '../src/services/fork-service.js';
+import { exportTraces } from '../src/services/export-service.js';
 import { listDecisions, causalWalk } from '../src/services/decision-service.js';
 import { validateTraceInput } from '../src/utils/validators.js';
 import type { IngestTraceInput } from '../src/models/types.js';
@@ -205,6 +206,40 @@ describe('ingest / getTrace round-trip', () => {
 
     // Steps that are not decisions carry no record.
     expect(full.steps.find((s) => s.step_number === 1)!.decision ?? null).toBeNull();
+  });
+
+  it('survives a real exportTraces → ingest round-trip with decisions, causality, and snapshots', () => {
+    ingestTrace(db, {
+      agent_name: 'rt',
+      session_id: 'rt1',
+      status: 'completed',
+      total_tokens: 250,
+      steps: [
+        { step_number: 1, step_type: 'thought', name: 'plan' },
+        { step_number: 2, step_type: 'decision', name: 'pick', caused_by_step: 1, decision: { chosen: 'fast', rationale: 'deadline', confidence: 0.9, decided_by: 'agent', options: [{ option: 'fast', score: 0.9 }, { option: 'slow' }] } },
+        { step_number: 3, step_type: 'llm_call', name: 'gen', parent_step: 2, caused_by_step: 2, model: 'gpt-4', tokens_used: 250, snapshot: { context_window: { messages: 5 }, token_count: 300 } },
+      ],
+    });
+
+    // Round-trip through the real exporter's output, not a hand-built shape.
+    const exported = JSON.parse(exportTraces(db, {}, 'json', { withSnapshots: true })) as IngestTraceInput[];
+    const db2 = new Database(':memory:');
+    db2.pragma('foreign_keys = ON');
+    runMigrations(db2);
+    const re = getTrace(db2, ingestTrace(db2, exported[0]).id)!;
+    db2.close();
+
+    expect(re.session_id).toBe('rt1');
+    expect(re.total_tokens).toBe(250);
+    const dec = re.steps.find((s) => s.step_type === 'decision')!;
+    expect(dec.decision!.chosen).toBe('fast');
+    expect(dec.decision!.decided_by).toBe('agent');
+    expect(dec.decision!.options).toHaveLength(2);
+    expect(dec.caused_by_step_number).toBe(1);
+    const llm = re.steps.find((s) => s.step_type === 'llm_call')!;
+    expect(llm.parent_step_number).toBe(2);
+    expect(llm.caused_by_step_number).toBe(2);
+    expect(llm.model).toBe('gpt-4');
   });
 
   it('fork preserves step references and decision records', () => {
