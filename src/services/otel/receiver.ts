@@ -18,6 +18,13 @@ import { decodeTracesData } from './protobuf.js';
  * span the receiver counts maps to at least a synthetic trace, so a batch never
  * resolves to zero traces. `POST /v1/logs` over protobuf is not supported and
  * returns 415.
+ *
+ * Known limitation: each export batch is mapped independently, so a single OTel
+ * trace whose spans arrive across multiple batches (e.g. a BatchSpanProcessor
+ * flushing completed child spans before the root span ends) becomes several
+ * agent-replay traces rather than one — batches without the root span map to a
+ * synthetic `otel-agent` trace. Cross-batch assembly by otel_trace_id would need
+ * stateful span buffering and is not yet implemented.
  */
 
 export interface OtelReceiverHandle {

@@ -143,6 +143,23 @@ describe('OTLP receiver', () => {
     expect(listTraces(db, {}).total).toBe(1);
   });
 
+  it('maps each export batch independently (split traces are not reassembled — known limitation)', () => {
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    // Batch 1: root + child for OTel trace "t7".
+    handleTracesExport(db, JSON.stringify(otlp([
+      span({ traceId: 't7', spanId: 'r', name: 'invoke_agent', start: 1 * MS, end: 9 * MS, attrs: { 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'batchbot' } }),
+      span({ traceId: 't7', spanId: 'c1', parentSpanId: 'r', name: 'chat', start: 2 * MS, end: 3 * MS, attrs: { 'gen_ai.operation.name': 'chat' } }),
+    ])), stats);
+    // Batch 2: a later child of the SAME OTel trace whose root isn't in this batch.
+    handleTracesExport(db, JSON.stringify(otlp([
+      span({ traceId: 't7', spanId: 'c2', parentSpanId: 'r', name: 'execute_tool', start: 4 * MS, end: 5 * MS, attrs: { 'gen_ai.operation.name': 'execute_tool', 'gen_ai.tool.name': 'search' } }),
+    ])), stats);
+
+    // Two batches → two agent-replay traces today (no cross-batch assembly). If
+    // that limitation is ever lifted, this expectation should change to 1.
+    expect(listTraces(db, {}).total).toBe(2);
+  });
+
   it('accepts a real OTLP/JSON POST over HTTP', async () => {
     const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
     const handle = await startOtelReceiver(db, 0, stats);
