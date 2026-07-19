@@ -31,6 +31,10 @@ the OpenTelemetry receiver. The recorded trace schema is unchanged.
 
 ### Fixed
 
+- `check --golden` no longer reports spurious regressions when several traces
+  share an agent name and input (repeated runs of the same agent, or a fork):
+  golden entries are bucketed and each candidate is paired with its closest
+  entry instead of colliding on one.
 - `ingest` recognizes a pretty-printed (multi-line) single JSON object instead
   of misparsing it as JSONL and failing on "line 1"; the format is now detected
   by a whole-file parse.
