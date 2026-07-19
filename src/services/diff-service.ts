@@ -82,6 +82,18 @@ export function diffTraces(
           right_value: safeParseJson(right.output as string | null) ?? null,
         });
       }
+
+      // Model — surfaces the "swapped a model and it broke" case directly, not
+      // just via its downstream effects.
+      if (left.model !== right.model) {
+        if (divergence_step === null) divergence_step = stepNum;
+        diffs.push({
+          step_number: stepNum,
+          field: 'model',
+          left_value: (left.model as string | null) ?? null,
+          right_value: (right.model as string | null) ?? null,
+        });
+      }
     } else if (left && !right) {
       const stepNum = left.step_number as number;
       if (divergence_step === null) divergence_step = stepNum;

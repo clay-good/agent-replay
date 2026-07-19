@@ -332,6 +332,18 @@ describe('diffTraces', () => {
     expect(result.right_step_count).toBe(1);
     expect(result.diffs.some(d => d.field === 'missing_right')).toBe(true);
   });
+
+  it('flags a swapped model (the "changed the model and it broke" case)', () => {
+    const steps = [{ step_number: 1, step_type: 'llm_call', name: 'gen', input: {}, output: {}, model: 'gpt-4' }];
+    const a = ingestTrace(db, makeTrace({ steps }));
+    const b = ingestTrace(db, makeTrace({ steps: [{ ...steps[0], model: 'gpt-5.4-nano' }] }));
+    const result = diffTraces(db, a.id, b.id);
+    const modelDiff = result.diffs.find((d) => d.field === 'model');
+    expect(modelDiff).toBeTruthy();
+    expect(modelDiff!.left_value).toBe('gpt-4');
+    expect(modelDiff!.right_value).toBe('gpt-5.4-nano');
+    expect(result.divergence_step).toBe(1);
+  });
 });
 
 // ── forkTrace ─────────────────────────────────────────────────────────────
