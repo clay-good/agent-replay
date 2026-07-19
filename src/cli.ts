@@ -102,7 +102,7 @@ program
   .option('--tag <tag>', 'Filter by tag')
   .option('--session <id>', 'Filter by session ID (prefix matching)')
   .option('--since <duration>', 'Filter by time window (e.g. 1h, 7d, 30m)')
-  .option('--sort <field>', 'Sort by: started_at, duration, tokens, cost')
+  .option('--sort <field>', 'Sort by: started_at, duration, tokens, cost, agent_name (ascending; prefix with - for descending)')
   .option('--limit <n>', 'Max results (default 25)', '25')
   .option('--json', 'Output raw JSON')
   .option('--dir <path>', 'Custom data directory')
