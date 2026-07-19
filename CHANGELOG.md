@@ -42,6 +42,8 @@ the OpenTelemetry receiver. The recorded trace schema is unchanged.
   retryable per the OTLP spec, 4xx is not).
 - OTel-ingested traces carry a trace-level end time and duration derived from
   their span times, instead of showing `-` for duration.
+- `list` and `show` display a trace's duration derived from its start/end
+  timestamps when an explicit total wasn't recorded, instead of showing `-`.
 - `show` and `replay` validate their `--from-step`/`--to-step` window (and
   `replay --speed`): a non-numeric, `< 1`, or inverted range is a usage error
   instead of a silently empty view.
