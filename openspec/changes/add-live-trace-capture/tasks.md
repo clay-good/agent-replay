@@ -2,27 +2,27 @@
 
 ## 1. Storage concurrency
 
-- [ ] 1.1 Enable WAL mode and `busy_timeout` in `src/db/connection.ts`
-- [ ] 1.2 Test: two processes (writer + reader) operate concurrently without `SQLITE_BUSY` failures
+- [x] 1.1 Enable WAL mode and `busy_timeout` in `src/db/connection.ts`
+- [x] 1.2 Test: two processes (writer + reader) operate concurrently without `SQLITE_BUSY` failures
 
 ## 2. Event protocol
 
-- [ ] 2.1 Define event types and validators in `src/services/event-protocol.ts` (versioned, `v: 1`)
-- [ ] 2.2 Unknown event types/fields are skipped with a stderr warning, not a crash
-- [ ] 2.3 Test: valid/invalid/unknown event fixtures
+- [x] 2.1 Define event types and validators in `src/services/event-protocol.ts` (versioned, `v: 1`)
+- [x] 2.2 Unknown event types/fields are skipped with a stderr warning, not a crash
+- [x] 2.3 Test: valid/invalid/unknown event fixtures
 
 ## 3. Recorder service & SDK
 
-- [ ] 3.1 `src/services/recorder.ts`: apply events incrementally (open trace, upsert steps, match step_start/step_end, attach decisions/snapshots, finalize)
-- [ ] 3.2 `TraceRecorder` class exported from `src/index.ts` wrapping the recorder for programmatic use
-- [ ] 3.3 Test: full event stream produces a trace identical to the equivalent batch `ingest`
+- [x] 3.1 `src/services/recorder.ts`: apply events incrementally (open trace, upsert steps, match step_start/step_end, attach decisions/snapshots, finalize)
+- [x] 3.2 `TraceRecorder` class exported from `src/index.ts` wrapping the recorder for programmatic use
+- [x] 3.3 Test: full event stream produces a trace identical to the equivalent batch `ingest`
 
 ## 4. `record` command
 
-- [ ] 4.1 `agent-replay record` reading JSONL from stdin; `--tags`, `--leave-open`
+- [x] 4.1 `agent-replay record` reading JSONL from stdin; `--tags`, `--leave-open`
 - [ ] 4.2 `--format codex-exec` translator: `thread.started`→trace (thread_id→session_id), `item.*` (`agent_message`, `reasoning`, `command_execution`, `mcp_tool_call`, `file_change`, `web_search`)→typed steps, `turn.completed` usage→totals, `turn.failed`/`error`→failed
 - [ ] 4.3 `--format gemini-stream` translator: `init`→trace, `tool_use`/`tool_result`→tool_call steps, `message`→output, `result`→finalize, exit codes 0/1/42/53 respected
-- [ ] 4.4 Finalize still-open traces as `timeout` on EOF (unless `--leave-open`)
+- [x] 4.4 Finalize still-open traces as `timeout` on EOF (unless `--leave-open`)
 - [ ] 4.5 Test: recorded fixture streams from `codex exec --json` and `gemini --output-format stream-json` produce correct traces; kill mid-stream → trace remains `running`
 
 ## 5. Hook-convention adapter

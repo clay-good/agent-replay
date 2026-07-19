@@ -56,6 +56,19 @@ program
     await runIngest(file, opts);
   });
 
+// --- record ---
+program
+  .command('record')
+  .description('Record a trace incrementally from a JSONL capture-event stream on stdin')
+  .option('--format <format>', 'Stream format: native (default)', 'native')
+  .option('--tags <tags>', 'Comma-separated tags to add to recorded traces')
+  .option('--leave-open', 'Do not finalize still-running traces as timeout on EOF')
+  .option('--dir <path>', 'Custom data directory')
+  .action(async (opts) => {
+    const { runRecord } = await import('./commands/record.js');
+    await runRecord(opts);
+  });
+
 // --- list ---
 program
   .command('list')

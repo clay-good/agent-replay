@@ -24,8 +24,13 @@ export class DatabaseConnection {
 
     this.db = new Database(this.dbPath);
 
-    // Enable WAL mode for better concurrent read performance
+    // Enable WAL mode for better concurrent read performance — one writer plus
+    // concurrent readers, which covers live capture (record/hook writers) and
+    // watch/dashboard readers against the same file.
     this.db.pragma('journal_mode = WAL');
+    // Wait up to 3s for a competing writer's lock instead of failing fast with
+    // SQLITE_BUSY, so short-lived hook processes and readers can coexist.
+    this.db.pragma('busy_timeout = 3000');
     // Enable foreign key enforcement
     this.db.pragma('foreign_keys = ON');
 

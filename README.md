@@ -64,6 +64,31 @@ agent-replay ingest trace.json --tags production,v2
 agent-replay ingest trace.json --dry-run
 ```
 
+#### Live capture
+
+`ingest` loads a complete trace after the fact. To capture a run **as it happens**, stream newline-delimited capture events into `record` — the trace grows step by step and stays `running` until a `trace_end` event arrives.
+
+```bash
+# Pipe a JSONL event stream into the recorder
+my-agent --emit-events | agent-replay record --tags production
+
+# Keep the trace open (don't finalize as timeout) when the stream ends
+my-agent --emit-events | agent-replay record --leave-open
+```
+
+Each event is one JSON object on its own line carrying `v: 1`, a `type`, and (except `trace_start`) the `trace_id` the producer generated:
+
+| Event | Purpose |
+|-------|---------|
+| `trace_start` | Open a trace (`agent_name` required; optional `trace_id`, `session_id`, `input`, `tags`) |
+| `step_start` / `step_end` | Open a step, then close it with output/error/timing/tokens |
+| `step` | A complete step in one event (may include a `decision` and `snapshot`) |
+| `decision` | Attach a decision record to a `decision` step |
+| `snapshot` | Freeze context/environment/tool state at a step |
+| `trace_end` | Finalize the trace (`status`, `output`, token/cost totals) |
+
+Unknown event types and fields are skipped with a warning, never a crash — a newer producer stays compatible. A trace left open when the stream ends is finalized as `timeout` unless `--leave-open`.
+
 ### Browse
 
 ```bash
@@ -458,6 +483,20 @@ import { openDatabase, createTrace, getTraceById } from 'agent-replay';
 
 const db = openDatabase('.agent-replay/traces.db');
 const trace = createTrace(db, { agent_name: 'my-agent', status: 'completed' });
+```
+
+To record a run live from TypeScript, use the `TraceRecorder` SDK — the same incremental engine the `record` command uses, no files or subprocess required:
+
+```typescript
+import { ensureDatabase, TraceRecorder } from 'agent-replay';
+
+const db = ensureDatabase('.agent-replay/traces.db');
+const rec = new TraceRecorder(db);
+
+rec.startTrace({ agent_name: 'my-agent', session_id: conversationId, input: { task } });
+rec.startStep({ step_number: 1, step_type: 'tool_call', name: 'search' });
+rec.endStep(1, { output: results, tokens_used: 120 });
+rec.endTrace({ status: 'completed', output: answer, total_tokens: 120 });
 ```
 
 ## Development

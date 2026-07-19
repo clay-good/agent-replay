@@ -8,6 +8,7 @@ import type {
   TraceWithDetails,
   IngestTraceInput,
   IngestStepInput,
+  IngestSnapshotInput,
   IngestDecisionInput,
   DecisionRecord,
   DecisionOption,
@@ -164,6 +165,43 @@ function rowToSnapshot(row: Record<string, unknown>): TraceSnapshot {
 
 // ── 1. ingestTrace ────────────────────────────────────────────────────────
 
+/** Insert the trace row (no steps). Shared by ingestTrace and startTrace. */
+function insertTraceRow(
+  db: Database.Database,
+  traceId: string,
+  input: IngestTraceInput,
+  status: string,
+  timestamp: string,
+): void {
+  db.prepare(
+    `INSERT INTO agent_traces
+      (id, agent_name, agent_version, trigger, status, input, output,
+       started_at, ended_at, total_duration_ms, total_tokens, total_cost_usd,
+       error, tags, metadata, parent_trace_id, forked_from_step, session_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    traceId,
+    input.agent_name,
+    input.agent_version ?? null,
+    input.trigger ?? 'manual',
+    status,
+    jsonStr(input.input),
+    jsonOrNull(input.output),
+    input.started_at ?? timestamp,
+    input.ended_at ?? null,
+    input.total_duration_ms ?? null,
+    input.total_tokens ?? null,
+    input.total_cost_usd ?? null,
+    input.error ?? null,
+    JSON.stringify(input.tags ?? []),
+    jsonStr(input.metadata),
+    null, // parent_trace_id
+    null, // forked_from_step
+    input.session_id ?? null,
+    timestamp,
+  );
+}
+
 export function ingestTrace(
   db: Database.Database,
   input: IngestTraceInput,
@@ -176,33 +214,7 @@ export function ingestTrace(
     (input.ended_at ? 'completed' : 'running');
 
   const ingest = db.transaction(() => {
-    db.prepare(
-      `INSERT INTO agent_traces
-        (id, agent_name, agent_version, trigger, status, input, output,
-         started_at, ended_at, total_duration_ms, total_tokens, total_cost_usd,
-         error, tags, metadata, parent_trace_id, forked_from_step, session_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      traceId,
-      input.agent_name,
-      input.agent_version ?? null,
-      input.trigger ?? 'manual',
-      status,
-      jsonStr(input.input),
-      jsonOrNull(input.output),
-      input.started_at ?? timestamp,
-      input.ended_at ?? null,
-      input.total_duration_ms ?? null,
-      input.total_tokens ?? null,
-      input.total_cost_usd ?? null,
-      input.error ?? null,
-      JSON.stringify(input.tags ?? []),
-      jsonStr(input.metadata),
-      null, // parent_trace_id
-      null, // forked_from_step
-      input.session_id ?? null,
-      timestamp,
-    );
+    insertTraceRow(db, traceId, input, status, timestamp);
 
     // Insert steps and snapshots
     for (const step of input.steps ?? []) {
@@ -259,6 +271,26 @@ export function ingestTrace(
   });
 
   return rowToTrace(ingest());
+}
+
+/**
+ * Open a new trace with no steps, defaulting to status `running`. Used by the
+ * live recorder for `trace_start` events; honors a client-supplied `id` so the
+ * producer can stamp the same `trace_id` on every subsequent event.
+ */
+export function startTrace(
+  db: Database.Database,
+  input: IngestTraceInput,
+  opts: { id?: string } = {},
+): Trace {
+  const traceId = opts.id ?? generateId('trc');
+  const timestamp = now();
+  const status = input.status ?? (input.ended_at ? 'completed' : 'running');
+  insertTraceRow(db, traceId, input, status, timestamp);
+  const row = db
+    .prepare('SELECT * FROM agent_traces WHERE id = ?')
+    .get(traceId) as Record<string, unknown>;
+  return rowToTrace(row);
 }
 
 // ── 2. appendStep ─────────────────────────────────────────────────────────
@@ -337,6 +369,119 @@ export function appendStep(
   });
 
   return rowToStep(insert());
+}
+
+// ── 2b. updateStep / attachDecision / attachSnapshot (live capture) ────────
+
+export interface UpdateStepInput {
+  output?: Record<string, unknown> | null;
+  ended_at?: string | null;
+  duration_ms?: number | null;
+  tokens_used?: number | null;
+  model?: string | null;
+  error?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Patch an already-open step, matched by (trace_id, step_number). Used by the
+ * recorder to close a step opened by a `step_start` event.
+ */
+export function updateStep(
+  db: Database.Database,
+  traceId: string,
+  stepNumber: number,
+  patch: UpdateStepInput,
+): void {
+  const sets: string[] = [];
+  const params: unknown[] = [];
+
+  if (patch.output !== undefined) {
+    sets.push('output = ?');
+    params.push(jsonOrNull(patch.output));
+  }
+  if (patch.ended_at !== undefined) {
+    sets.push('ended_at = ?');
+    params.push(patch.ended_at);
+  }
+  if (patch.duration_ms !== undefined) {
+    sets.push('duration_ms = ?');
+    params.push(patch.duration_ms);
+  }
+  if (patch.tokens_used !== undefined) {
+    sets.push('tokens_used = ?');
+    params.push(patch.tokens_used);
+  }
+  if (patch.model !== undefined) {
+    sets.push('model = ?');
+    params.push(patch.model);
+  }
+  if (patch.error !== undefined) {
+    sets.push('error = ?');
+    params.push(patch.error);
+  }
+  if (patch.metadata !== undefined) {
+    sets.push('metadata = ?');
+    params.push(jsonStr(patch.metadata));
+  }
+
+  if (sets.length === 0) return;
+
+  params.push(traceId, stepNumber);
+  const result = db
+    .prepare(`UPDATE agent_trace_steps SET ${sets.join(', ')} WHERE trace_id = ? AND step_number = ?`)
+    .run(...params);
+  if (result.changes === 0) {
+    throw new Error(`Step ${stepNumber} not found in trace ${traceId}`);
+  }
+}
+
+/** Look up a step's row id within a trace, by step number. */
+function resolveStepId(
+  db: Database.Database,
+  traceId: string,
+  stepNumber: number,
+): string {
+  const row = db
+    .prepare('SELECT id FROM agent_trace_steps WHERE trace_id = ? AND step_number = ?')
+    .get(traceId, stepNumber) as { id: string } | undefined;
+  if (!row) throw new Error(`Step ${stepNumber} not found in trace ${traceId}`);
+  return row.id;
+}
+
+/** Attach (or replace) a decision record on an existing step. */
+export function attachDecision(
+  db: Database.Database,
+  traceId: string,
+  stepNumber: number,
+  decision: IngestDecisionInput,
+): void {
+  const stepId = resolveStepId(db, traceId, stepNumber);
+  db.prepare('DELETE FROM agent_trace_decisions WHERE step_id = ?').run(stepId);
+  insertDecision(db, stepId, decision);
+}
+
+/** Attach (or replace) a snapshot on an existing step. */
+export function attachSnapshot(
+  db: Database.Database,
+  traceId: string,
+  stepNumber: number,
+  snapshot: IngestSnapshotInput,
+): void {
+  const stepId = resolveStepId(db, traceId, stepNumber);
+  db.prepare('DELETE FROM agent_trace_snapshots WHERE step_id = ?').run(stepId);
+  db.prepare(
+    `INSERT INTO agent_trace_snapshots
+      (id, step_id, context_window, environment, tool_state, token_count)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(
+    generateId('snp'),
+    stepId,
+    jsonStr(snapshot.context_window),
+    jsonStr(snapshot.environment),
+    jsonStr(snapshot.tool_state),
+    snapshot.token_count ?? 0,
+  );
 }
 
 // ── 3. getTrace ───────────────────────────────────────────────────────────
