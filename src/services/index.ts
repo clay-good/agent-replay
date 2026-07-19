@@ -9,6 +9,8 @@ export * from './importers/codex-rollout.js';
 export * from './diff-service.js';
 export * from './check-service.js';
 export * from './harness-service.js';
+export * from './otel/semconv.js';
+export * from './otel/receiver.js';
 export * from './fork-service.js';
 export * from './eval-service.js';
 export * from './guard-service.js';

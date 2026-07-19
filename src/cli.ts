@@ -324,6 +324,21 @@ program
     await runRun(command, opts);
   });
 
+// --- otel ---
+const otelCmd = program
+  .command('otel')
+  .description('OpenTelemetry ingest');
+
+otelCmd
+  .command('serve')
+  .description('Run a local OTLP/HTTP receiver mapping GenAI semconv spans (OTLP/JSON) into traces')
+  .option('--port <port>', 'Port to listen on (default 4318)', '4318')
+  .option('--dir <path>', 'Custom data directory')
+  .action(async (opts) => {
+    const { runOtelServe } = await import('./commands/otel.js');
+    await runOtelServe(opts);
+  });
+
 // --- dashboard ---
 program
   .command('dashboard')

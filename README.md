@@ -96,6 +96,20 @@ For the native protocol, each event is one JSON object on its own line carrying 
 
 Unknown event types and fields are skipped with a warning, never a crash — a newer producer stays compatible. A trace left open when the stream ends is finalized as `timeout` unless `--leave-open`.
 
+#### OpenTelemetry ingest
+
+Many agent stacks already emit OpenTelemetry with the GenAI semantic conventions (`gen_ai.*`) — Gemini CLI, Claude Code, OpenHands, Goose, AutoGen, and most Python frameworks via OpenInference/OpenLLMetry. Run a local OTLP receiver and point them at it, no per-framework adapter needed:
+
+```bash
+agent-replay otel serve --port 4318
+```
+
+It accepts `POST /v1/traces` in OTLP/JSON and maps spans onto the trace model: `invoke_agent`/`invoke_workflow` roots become traces (`gen_ai.agent.name` → agent, `gen_ai.conversation.id` → session), `execute_tool` → `tool_call`, `chat`/`generate_content`/`text_completion` → `llm_call`, `embeddings`/`retrieval` → `retrieval`, span parentage → step hierarchy, and `gen_ai.usage.*` → token totals. Deprecated attribute forms (`gen_ai.system`, `prompt_tokens`/`completion_tokens`) are normalized, and OpenInference's `openinference.span.kind` is accepted when GenAI attributes are absent. Spans without an agent root are grouped into a synthetic trace per OTel trace ID.
+
+Point an exporter at it over HTTP/JSON — e.g. Gemini CLI `telemetry: { enabled: true, target: "local", otlpEndpoint: "http://localhost:4318", otlpProtocol: "http" }`. Most emitters default to gRPC on port 4317, so switch them to HTTP.
+
+> This build ingests OTLP/JSON traces. Protobuf encoding, `/v1/logs` log-event mappers, and the OpenLLMetry (`traceloop.*`) dialect are not yet wired up.
+
 #### Hook capture
 
 `agent-replay hook` plugs into the stdin-JSON hook convention shared by Claude Code, OpenAI Codex CLI, and Gemini CLI. It's stateless — each invocation correlates to a trace by the payload's `session_id` — and auto-detects the dialect, so no flag is needed. Capture is side-effect-only: it always exits 0 and writes nothing to stdout (in these harnesses exit 2 blocks the agent and stdout is read as a hook decision), so it can never interfere with a run. Add `--no-input` to drop prompt text and tool inputs on shared machines.
