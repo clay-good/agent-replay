@@ -214,6 +214,36 @@ describe('CLI integration', () => {
     expect(typeof results[0].score).toBe('number');
   });
 
+  it('translates a codex exec --json stream via record --format codex-exec', () => {
+    const stream = [
+      '{"type":"thread.started","thread_id":"th_ci"}',
+      '{"type":"item.completed","item":{"item_type":"command_execution","command":"ls"}}',
+      '{"type":"turn.completed","usage":{"input_tokens":40,"output_tokens":8}}',
+    ].join('\n');
+    expect(run(['record', '--format', 'codex-exec'], stream).code).toBe(0);
+    const t = JSON.parse(run(['list', '--session', 'th_ci', '--json']).stdout);
+    expect(t.total).toBe(1);
+    expect(t.items[0].agent_name).toBe('codex');
+  });
+
+  it('translates a gemini stream-json stream via record --format gemini-stream', () => {
+    const stream = [
+      '{"type":"init","session_id":"g_ci"}',
+      '{"type":"tool_use","id":"t1","name":"read_file","input":{"path":"a"}}',
+      '{"type":"tool_result","id":"t1","output":{"content":"hi"}}',
+      '{"type":"result","exit_code":0}',
+    ].join('\n');
+    expect(run(['record', '--format', 'gemini-stream'], stream).code).toBe(0);
+    const id = JSON.parse(run(['list', '--session', 'g_ci', '--json']).stdout).items[0].id;
+    const full = JSON.parse(run(['show', id, '--json']).stdout);
+    expect(full.status).toBe('completed');
+    expect(full.steps.some((s: { step_type: string }) => s.step_type === 'tool_call')).toBe(true);
+  });
+
+  it('rejects an unsupported record --format', () => {
+    expect(run(['record', '--format', 'nonsense'], '{}').code).toBe(2);
+  });
+
   it('exits non-zero and reports on an unknown command', () => {
     const r = run(['definitely-not-a-command']);
     expect(r.code).not.toBe(0);
