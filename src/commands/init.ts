@@ -45,7 +45,8 @@ export function runInit(opts: InitOptions = {}): void {
       provider: 'auto' as const,
     },
   };
-  writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+  // Owner-only: the config will hold API keys once the user sets them.
+  writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
 
   // Show welcome
   console.log('');

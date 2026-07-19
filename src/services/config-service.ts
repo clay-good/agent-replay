@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -63,6 +63,19 @@ export function loadConfig(dir?: string): AgentReplayConfig | null {
 export function saveConfig(config: AgentReplayConfig, dir?: string): void {
   const path = configPath(dir);
   writeFileSync(path, JSON.stringify(config, null, 2) + '\n');
+  // The config can hold API keys — restrict to owner read/write so other users
+  // on a shared machine can't read them. (writeFileSync's mode doesn't apply to
+  // an existing file, so chmod explicitly; a no-op on Windows.)
+  restrictConfigPermissions(path);
+}
+
+/** Best-effort chmod 0600 on the config file (secrets). Ignores failure. */
+function restrictConfigPermissions(path: string): void {
+  try {
+    chmodSync(path, 0o600);
+  } catch {
+    // Non-POSIX filesystem or permission quirk — leave as-is rather than fail.
+  }
 }
 
 // ── Dot-notation config access ───────────────────────────────────────────

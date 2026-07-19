@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -48,6 +48,13 @@ describe('config-service', () => {
       saveConfig(config, TEST_DIR);
       const loaded = loadConfig(TEST_DIR);
       expect(loaded).toEqual(config);
+    });
+
+    it('writes the config owner-only (it can hold API keys)', () => {
+      if (process.platform === 'win32') return; // POSIX permissions only
+      saveConfig(makeConfig({ ai: { provider: 'anthropic', api_keys: { anthropic: 'sk-secret' } } }), TEST_DIR);
+      const mode = statSync(join(TEST_DIR, 'config.json')).mode & 0o777;
+      expect(mode).toBe(0o600); // -rw------- : not group/world readable
     });
 
     it('loads config with ai section', () => {
