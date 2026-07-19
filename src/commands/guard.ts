@@ -104,6 +104,7 @@ export function runGuardAdd(opts: GuardAddOptions): void {
     console.log('');
   } catch (err) {
     failSpinner(spinner, `Failed: ${errorMessage(err)}`);
+    process.exitCode = 1;
   }
 }
 
@@ -123,6 +124,7 @@ export function runGuardRemove(policyId: string, opts: GuardRemoveOptions = {}):
     console.log('');
   } catch (err) {
     console.error(chalk.red(`  ${errorMessage(err)}`));
+    process.exitCode = 1;
   }
 }
 
@@ -140,6 +142,7 @@ export function runGuardTest(traceId: string, opts: GuardTestOptions = {}): void
   const trace = getTrace(db, traceId);
   if (!trace) {
     console.error(chalk.red(`  Trace not found: ${traceId}`));
+    process.exitCode = 1;
     return;
   }
 
@@ -150,6 +153,7 @@ export function runGuardTest(traceId: string, opts: GuardTestOptions = {}): void
     results = testPolicies(db, trace.id);
   } catch (err) {
     failSpinner(spinner, `Test failed: ${errorMessage(err)}`);
+    process.exitCode = 1;
     return;
   }
 

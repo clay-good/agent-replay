@@ -32,6 +32,7 @@ export async function runReplay(
   const trace = getTrace(db, traceId);
   if (!trace) {
     console.error(chalk.red(`  Trace not found: ${traceId}`));
+    process.exitCode = 1;
     return;
   }
 

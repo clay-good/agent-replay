@@ -34,6 +34,7 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
   if (!trace) {
     console.error(chalk.red(`  Trace not found: ${traceId}`));
     console.error(chalk.dim('  Use "agent-replay list" to see available traces.'));
+    process.exitCode = 1;
     return;
   }
 

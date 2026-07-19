@@ -34,6 +34,7 @@ export function runIngest(filePath: string, opts: IngestOptions = {}): void {
   } catch (err) {
     failSpinner(spinner, `Failed to read file: ${absPath}`);
     console.error(chalk.red(errorMessage(err)));
+    process.exitCode = 1;
     return;
   }
 
@@ -55,11 +56,13 @@ export function runIngest(filePath: string, opts: IngestOptions = {}): void {
     traces = parseTraces(raw, format);
   } catch (err) {
     failSpinner(spinner, `Parse error: ${errorMessage(err)}`);
+    process.exitCode = 1;
     return;
   }
 
   if (traces.length === 0) {
     failSpinner(spinner, 'No traces found in file.');
+    process.exitCode = 1;
     return;
   }
 
@@ -93,7 +96,10 @@ export function runIngest(filePath: string, opts: IngestOptions = {}): void {
     if (errors.length > 10) {
       console.error(chalk.dim(`  ... and ${errors.length - 10} more`));
     }
-    if (valid.length === 0) return;
+    if (valid.length === 0) {
+      process.exitCode = 1;
+      return;
+    }
     console.log(chalk.yellow(`  Continuing with ${valid.length} valid trace(s).`));
   }
 
@@ -121,10 +127,11 @@ export function runIngest(filePath: string, opts: IngestOptions = {}): void {
   }
 
   if (failedIds.length > 0) {
-    successSpinner(
+    failSpinner(
       spinner,
       `Ingested ${inserted}/${valid.length} traces (${failedIds.length} failed).`,
     );
+    process.exitCode = 1;
   } else {
     successSpinner(spinner, `Ingested ${inserted} trace(s) successfully.`);
   }

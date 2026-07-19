@@ -299,6 +299,34 @@ describe('CLI integration', () => {
     expect(run(['config', 'set', 'ai.provider', 'notreal']).code).toBe(2);   // invalid provider
   });
 
+  it('every command exits non-zero when the trace is missing (scriptability)', () => {
+    // `agent-replay <cmd> <id> && next` must not proceed when <id> is absent.
+    for (const args of [
+      ['show', 'missing'],
+      ['replay', 'missing', '--speed', '0'],
+      ['why', 'missing', '--step', '1'],
+      ['decisions', 'missing'],
+      ['fork', 'missing', '--from-step', '1'],
+      ['eval', 'missing', '--preset', 'safety-check'],
+      ['diff', 'missingA', 'missingB'],
+      ['guard', 'test', 'missing'],
+      ['guard', 'remove', 'missing'],
+    ]) {
+      expect(run(args).code, args.join(' ')).not.toBe(0);
+    }
+  });
+
+  it('ingest exits non-zero on unreadable or all-invalid input', () => {
+    expect(run(['ingest', '/no/such/file.json']).code).not.toBe(0);
+    const bad = join(dir, '..', 'bad.jsonl');
+    writeFileSync(bad, '{"no_agent_name":true}');
+    expect(run(['ingest', bad]).code).not.toBe(0);
+    // A valid file still exits 0.
+    const ok = join(dir, '..', 'ok.jsonl');
+    writeFileSync(ok, '{"agent_name":"ok","status":"completed"}');
+    expect(run(['ingest', ok]).code).toBe(0);
+  });
+
   it('exits non-zero and reports on an unknown command', () => {
     const r = run(['definitely-not-a-command']);
     expect(r.code).not.toBe(0);

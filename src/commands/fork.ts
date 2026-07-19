@@ -27,12 +27,14 @@ export function runFork(traceId: string, opts: ForkOptions): void {
   const trace = getTrace(db, traceId);
   if (!trace) {
     console.error(chalk.red(`  Trace not found: ${traceId}`));
+    process.exitCode = 1;
     return;
   }
 
   const fromStep = parseInt(opts.fromStep, 10);
   if (isNaN(fromStep) || fromStep < 1) {
     console.error(chalk.red(`  Invalid step number: ${opts.fromStep}`));
+    process.exitCode = 2;
     return;
   }
 
@@ -44,6 +46,7 @@ export function runFork(traceId: string, opts: ForkOptions): void {
     console.error(
       chalk.red(`  Step ${fromStep} doesn't exist. Trace has ${maxStep} steps.`),
     );
+    process.exitCode = 1;
     return;
   }
 
@@ -56,6 +59,7 @@ export function runFork(traceId: string, opts: ForkOptions): void {
       modifiedInput = JSON.parse(opts.modifyInput);
     } catch {
       console.error(chalk.red('  Invalid JSON for --modify-input'));
+      process.exitCode = 2;
       return;
     }
   }
@@ -65,6 +69,7 @@ export function runFork(traceId: string, opts: ForkOptions): void {
       modifiedContext = JSON.parse(opts.modifyContext);
     } catch {
       console.error(chalk.red('  Invalid JSON for --modify-context'));
+      process.exitCode = 2;
       return;
     }
   }

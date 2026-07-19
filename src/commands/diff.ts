@@ -33,12 +33,14 @@ export async function runDiff(
   const traceA = getTrace(db, traceIdA);
   if (!traceA) {
     console.error(chalk.red(`  Left trace not found: ${traceIdA}`));
+    process.exitCode = 1;
     return;
   }
 
   const traceB = getTrace(db, traceIdB);
   if (!traceB) {
     console.error(chalk.red(`  Right trace not found: ${traceIdB}`));
+    process.exitCode = 1;
     return;
   }
 
@@ -54,6 +56,7 @@ export async function runDiff(
     const unknown = allowedFields.filter((f) => !comparable.includes(f));
     if (unknown.length > 0) {
       console.error(chalk.red(`  Unknown --fields value(s): ${unknown.join(', ')}. Comparable fields: ${comparable.join(', ')}`));
+      process.exitCode = 2;
       return;
     }
     diff.diffs = diff.diffs.filter(

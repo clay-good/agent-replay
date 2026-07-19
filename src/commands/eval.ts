@@ -41,6 +41,7 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
   const trace = getTrace(db, traceId);
   if (!trace) {
     console.error(chalk.red(`  Trace not found: ${traceId}`));
+    process.exitCode = 1;
     return;
   }
 
@@ -84,6 +85,7 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
       console.error(chalk.red(`  Unknown preset: ${opts.preset}`));
       console.error(chalk.dim(`  Deterministic: ${PRESET_NAMES.join(', ')}`));
       console.error(chalk.dim(`  AI-powered:    ${AI_PRESET_NAMES.join(', ')}`));
+      process.exitCode = 2;
       return;
     }
 
@@ -107,6 +109,7 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
       console.error(chalk.red('  No AI provider configured.'));
       console.error(chalk.dim('  Set an API key: agent-replay config set ai.api_keys.anthropic <key>'));
       console.error(chalk.dim('  Or set env var: ANTHROPIC_API_KEY, GOOGLE_API_KEY, or OPENAI_API_KEY'));
+      process.exitCode = 1;
       return;
     }
 
@@ -134,6 +137,7 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
 
     if (estimate.total_estimated_usd > maxCost) {
       console.error(chalk.red(`  Estimated cost $${estimate.total_estimated_usd.toFixed(4)} exceeds budget $${maxCost.toFixed(4)}`));
+      process.exitCode = 1;
       return;
     }
 

@@ -21,6 +21,7 @@ export function runDecisions(traceId: string, opts: DecisionsOptions = {}): void
   if (!result) {
     console.error(chalk.red(`  Trace not found: ${traceId}`));
     console.error(chalk.dim('  Use "agent-replay list" to see available traces.'));
+    process.exitCode = 1;
     return;
   }
 

@@ -31,6 +31,7 @@ export function runWhy(traceId: string, opts: WhyOptions = {}): void {
   const stepNumber = safeParseInt(opts.step, 0);
   if (!stepNumber || stepNumber < 1) {
     console.error(chalk.red('  --step <N> is required and must be a positive integer.'));
+    process.exitCode = 2;
     return;
   }
 
@@ -38,6 +39,7 @@ export function runWhy(traceId: string, opts: WhyOptions = {}): void {
   if (!result) {
     console.error(chalk.red(`  Trace not found: ${traceId}`));
     console.error(chalk.dim('  Use "agent-replay list" to see available traces.'));
+    process.exitCode = 1;
     return;
   }
 
