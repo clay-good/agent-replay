@@ -1,0 +1,125 @@
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { createServer } from 'node:net';
+import Database from 'better-sqlite3';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/**
+ * End-to-end test of the `otel serve` command: spawn the real OTLP/HTTP
+ * receiver, POST an OTLP/JSON payload over the network, and confirm it lands as
+ * a trace. Covers the command wiring (port parsing, server startup, live write)
+ * that the receiver unit tests don't exercise.
+ */
+
+const CLI = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
+let dir: string;
+let server: ChildProcess | undefined;
+
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.once('error', reject);
+    srv.listen(0, () => {
+      const addr = srv.address();
+      const port = typeof addr === 'object' && addr ? addr.port : 0;
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+const OTLP_PAYLOAD = JSON.stringify({
+  resourceSpans: [
+    {
+      resource: { attributes: [] },
+      scopeSpans: [
+        {
+          spans: [
+            {
+              traceId: 'aa',
+              spanId: 'b1',
+              name: 'invoke_agent',
+              startTimeUnixNano: '1000000',
+              endTimeUnixNano: '5000000',
+              attributes: [
+                { key: 'gen_ai.operation.name', value: { stringValue: 'invoke_agent' } },
+                { key: 'gen_ai.agent.name', value: { stringValue: 'otel-e2e-bot' } },
+                { key: 'gen_ai.conversation.id', value: { stringValue: 'conv-e2e' } },
+              ],
+            },
+            {
+              traceId: 'aa',
+              spanId: 'b2',
+              parentSpanId: 'b1',
+              name: 'chat',
+              startTimeUnixNano: '2000000',
+              endTimeUnixNano: '3000000',
+              attributes: [{ key: 'gen_ai.operation.name', value: { stringValue: 'chat' } }],
+            },
+          ],
+        },
+      ],
+    },
+  ],
+});
+
+beforeAll(() => {
+  if (!existsSync(CLI)) throw new Error(`built CLI not found at ${CLI}; run "npm run build" first`);
+});
+
+beforeEach(() => {
+  dir = join(mkdtempSync(join(tmpdir(), 'ar-otel-')), '.agent-replay');
+  execFileSync(process.execPath, [CLI, 'init', '--dir', dir], { encoding: 'utf8' });
+});
+
+afterEach(() => {
+  server?.kill('SIGTERM');
+  server = undefined;
+  rmSync(join(dir, '..'), { recursive: true, force: true });
+});
+
+describe('otel serve (end-to-end)', () => {
+  it('accepts an OTLP/JSON export over HTTP and records it as a trace', async () => {
+    const port = await freePort();
+    server = spawn(process.execPath, [CLI, 'otel', 'serve', '--port', String(port), '--dir', dir], {
+      stdio: 'ignore',
+    });
+
+    // Wait until the receiver is listening (poll with a small OTLP POST).
+    const url = `http://localhost:${port}/v1/traces`;
+    let ready = false;
+    for (let i = 0; i < 50 && !ready; i++) {
+      try {
+        const probe = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+        if (probe.ok) ready = true;
+      } catch {
+        await sleep(100);
+      }
+    }
+    expect(ready).toBe(true);
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: OTLP_PAYLOAD,
+    });
+    expect(res.status).toBe(200);
+
+    // The span tree is committed synchronously before the 200, so a reader sees it.
+    const db = new Database(join(dir, 'traces.db'), { readonly: true });
+    try {
+      const trace = db.prepare('SELECT agent_name, session_id FROM agent_traces WHERE session_id = ?').get('conv-e2e') as
+        | { agent_name: string; session_id: string }
+        | undefined;
+      expect(trace?.agent_name).toBe('otel-e2e-bot');
+      const steps = db.prepare("SELECT COUNT(*) c FROM agent_trace_steps WHERE step_type = 'llm_call'").get() as { c: number };
+      expect(steps.c).toBe(1); // the chat span became an llm_call step
+    } finally {
+      db.close();
+    }
+  }, 20000);
+});
