@@ -31,6 +31,7 @@ export async function runDemo(opts: DemoOptions = {}): Promise<void> {
     const baseName = basename(baseDir);
     if (!baseName.startsWith('.agent-replay') && !baseName.startsWith('agent-replay')) {
       console.error(chalk.red(`  Refusing to delete "${baseDir}" — expected an agent-replay data directory.`));
+      process.exitCode = 1;
       return;
     }
     rmSync(baseDir, { recursive: true });

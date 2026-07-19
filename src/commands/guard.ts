@@ -77,6 +77,7 @@ export function runGuardAdd(opts: GuardAddOptions): void {
         '  Example: \'{"step_type":"tool_call","name_contains":"delete"}\'',
       ),
     );
+    process.exitCode = 2;
     return;
   }
 
@@ -85,6 +86,7 @@ export function runGuardAdd(opts: GuardAddOptions): void {
   if (!validActions.includes(opts.action)) {
     console.error(chalk.red(`  Invalid action: ${opts.action}`));
     console.error(chalk.dim(`  Valid actions: ${validActions.join(', ')}`));
+    process.exitCode = 2;
     return;
   }
 

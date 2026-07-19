@@ -26,7 +26,10 @@ export function runWatch(traceId: string | undefined, opts: WatchOptions = {}): 
   const resolved = traceId ? getTrace(db, traceId) : getMostRecentRunningTrace(db);
   if (!resolved) {
     if (traceId) {
+      // An explicitly named trace that doesn't exist is an error; the auto case
+      // (nothing running) is a normal empty state, so leave its exit code at 0.
       console.error(chalk.red(`  Trace not found: ${traceId}`));
+      process.exitCode = 1;
     } else {
       console.error(chalk.dim('  No running trace to watch. Start one with "agent-replay record".'));
     }

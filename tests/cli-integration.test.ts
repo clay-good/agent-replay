@@ -348,6 +348,17 @@ describe('CLI integration', () => {
     expect(run(['config', 'set', 'ai.provider', 'notreal']).code).toBe(2);   // invalid provider
   });
 
+  it('reports failures via exit code, not just a stderr message', () => {
+    // Usage errors → 2.
+    expect(run(['export', '--format', 'bogus']).code).toBe(2);
+    expect(run(['guard', 'add', '--name', 'x', '--pattern', 'not json', '--action', 'deny']).code).toBe(2);
+    expect(run(['guard', 'add', '--name', 'x', '--pattern', '{}', '--action', 'bogus']).code).toBe(2);
+    // Runtime failure → 1: watching a named trace that doesn't exist. (diff's
+    // no-provider exit-1 path is env-dependent — a machine with an API key would
+    // resolve one — so it's verified manually rather than in this hermetic test.)
+    expect(run(['watch', 'no-such-trace']).code).toBe(1);
+  });
+
   it('every command exits non-zero when the trace is missing (scriptability)', () => {
     // `agent-replay <cmd> <id> && next` must not proceed when <id> is absent.
     for (const args of [

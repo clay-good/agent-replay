@@ -100,6 +100,7 @@ export async function runDiff(
     if (!resolved) {
       console.error(chalk.red('  No AI provider configured for --ai flag.'));
       console.error(chalk.dim('  Set an API key: agent-replay config set ai.api_keys.anthropic <key>'));
+      process.exitCode = 1;
       return;
     }
 

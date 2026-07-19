@@ -47,6 +47,7 @@ export function runExport(opts: ExportOptions = {}): void {
   if (!validFormats.includes(format)) {
     console.error(chalk.red(`  Invalid format: ${format}`));
     console.error(chalk.dim(`  Valid formats: ${validFormats.join(', ')}`));
+    process.exitCode = 2;
     return;
   }
 
