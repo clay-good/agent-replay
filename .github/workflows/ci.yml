@@ -18,8 +18,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Test the engines floor (>=18) and the current active LTS.
-        node-version: ['18.x', '20.x']
+        # Vitest 4 (the test runner) requires Node's util.styleText, added in
+        # 20.12, so the dev/test toolchain floor is 20 — test on active + next LTS.
+        node-version: ['20.x', '22.x']
     steps:
       - uses: actions/checkout@v4
       - name: Use Node.js ${{ matrix.node-version }}
