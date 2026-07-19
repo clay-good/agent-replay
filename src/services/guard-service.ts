@@ -151,7 +151,10 @@ export function testPolicies(
     .all(traceId) as Record<string, unknown>[];
 
   if (steps.length === 0) {
-    throw new Error(`Trace ${traceId} not found or has no steps`);
+    // Distinguish a missing trace from an empty one so the message isn't
+    // misleading (a real trace can legitimately have zero steps).
+    const exists = db.prepare('SELECT 1 FROM agent_traces WHERE id = ?').get(traceId);
+    throw new Error(exists ? `Trace ${traceId} has no steps to test` : `Trace ${traceId} not found`);
   }
 
   const results: StepPolicyResult[] = [];

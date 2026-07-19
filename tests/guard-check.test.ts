@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
-import { addPolicy, evaluateStep, verdictForMatches, resolveGuardExit } from '../src/services/guard-service.js';
+import { addPolicy, evaluateStep, verdictForMatches, resolveGuardExit, testPolicies } from '../src/services/guard-service.js';
+import { startTrace } from '../src/services/trace-service.js';
 import type { TraceStep } from '../src/models/types.js';
 import type { StepType } from '../src/models/enums.js';
 
@@ -78,5 +79,15 @@ describe('resolveGuardExit', () => {
   it('require_review honors the confirmation when a TTY is present', () => {
     expect(resolveGuardExit('require_review', { isTty: true, confirmed: true })).toEqual({ final: 'allow', exitCode: 0 });
     expect(resolveGuardExit('require_review', { isTty: true, confirmed: false })).toEqual({ final: 'deny', exitCode: 2 });
+  });
+});
+
+// ── testPolicies error-message accuracy ────────────────────────────────────
+
+describe('testPolicies messages', () => {
+  it('distinguishes a missing trace from an empty one', () => {
+    const empty = startTrace(db, { agent_name: 'e' }); // real trace, no steps
+    expect(() => testPolicies(db, empty.id)).toThrow(/has no steps to test/);
+    expect(() => testPolicies(db, 'trc_missing')).toThrow(/not found/);
   });
 });
