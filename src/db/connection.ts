@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { mkdirSync, existsSync } from 'node:fs';
+import { mkdirSync, existsSync, chmodSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 let instance: DatabaseConnection | null = null;
@@ -16,10 +16,19 @@ export class DatabaseConnection {
   open(): Database.Database {
     if (this.db) return this.db;
 
-    // Ensure the parent directory exists
+    // Ensure the parent directory exists and is owner-only: the trace store can
+    // contain sensitive agent data (prompts, tool inputs/outputs) and the config
+    // holds API keys, so on a shared machine other users must not read them.
+    // Restricting the directory covers the DB, its WAL/SHM sidecars, and config
+    // in one place. Best-effort; a no-op on Windows.
     const dir = dirname(this.dbPath);
     if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+    }
+    try {
+      chmodSync(dir, 0o700);
+    } catch {
+      // Non-POSIX filesystem — leave as-is rather than fail.
     }
 
     this.db = new Database(this.dbPath);

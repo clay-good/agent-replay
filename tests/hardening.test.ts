@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
+import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { runMigrations } from '../src/db/migrations.js';
+import { ensureDatabase, resetConnection } from '../src/db/index.js';
 import {
   startTrace,
   appendStep,
@@ -256,6 +260,24 @@ describe('default show view exposes v2 fields', () => {
       session_id: null, created_at: '2026-01-01T00:00:00Z',
     };
     expect(noAnsi(traceHeaderPanel(trace))).not.toContain('Session:');
+  });
+});
+
+// ── The local data directory is owner-only (privacy / secrets on disk) ─────
+
+describe('data directory permissions', () => {
+  it('creates the .agent-replay directory owner-only (0700)', () => {
+    if (process.platform === 'win32') return; // POSIX permissions only
+    const root = mkdtempSync(join(tmpdir(), 'ar-perm-'));
+    const dataDir = join(root, '.agent-replay');
+    try {
+      const d = ensureDatabase(join(dataDir, 'traces.db'));
+      d.prepare('SELECT 1').get(); // usable by the owner
+      expect(statSync(dataDir).mode & 0o777).toBe(0o700); // no group/world access
+    } finally {
+      resetConnection();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
