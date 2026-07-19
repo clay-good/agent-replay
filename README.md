@@ -142,13 +142,14 @@ Then watch a live session with [`agent-replay watch`](#explain-decisions).
 
 #### Import existing session logs
 
-To pull in history that already exists on disk, `import` converts a Claude Code transcript into a trace. It's best-effort: unrecognized records are skipped and counted (the vendor format is internal and version-unstable), and the source format/version is stamped in the trace metadata.
+To pull in history that already exists on disk, `import` converts a Claude Code transcript or a Codex CLI rollout into a trace. It's best-effort: unrecognized records are skipped and counted (both vendor formats are internal and version-unstable), and the source format/version is stamped in the trace metadata.
 
 ```bash
 agent-replay import ~/.claude/projects/my-project/<session-uuid>.jsonl --format claude-transcript
+agent-replay import ~/.codex/sessions/2026/07/02/rollout-abc.jsonl      --format codex-rollout
 ```
 
-`tool_use`/`tool_result` blocks become paired `tool_call` steps, `thinking` blocks become `thought` steps, and `usage` counts aggregate into token totals.
+For Claude Code, `tool_use`/`tool_result` blocks become paired `tool_call` steps, `thinking` blocks become `thought` steps, and `usage` counts aggregate into token totals. For Codex, `session_meta` supplies identity and git metadata, `function_call`/`function_call_output` pairs (by `call_id`) become `tool_call` steps, and `reasoning` becomes `thought` steps.
 
 #### Enforcement (block dangerous tool calls live)
 

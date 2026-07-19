@@ -36,9 +36,9 @@
 ## 6. Session-log importers
 
 - [ ] 6.1 `agent-replay import <path> --format claude-transcript`: user/assistant/system records, `tool_use`/`tool_result` pairing by `tool_use_id`, `thinking` → thought steps, usage aggregation, subagent files under `<session>/subagents/`
-- [ ] 6.2 `--format codex-rollout`: `session_meta` → identity + git metadata, `response_item` `function_call`/`function_call_output` pairing by `call_id`, `reasoning` → thought, `compacted` → metadata
+- [x] 6.2 `--format codex-rollout`: `session_meta` → identity + git metadata, `response_item` `function_call`/`function_call_output` pairing by `call_id`, `reasoning` → thought, `compacted` → metadata
 - [x] 6.3 Best-effort contract: skip-and-count unknown records, stamp `source_format`/`source_version`, report imported vs skipped
-- [ ] 6.4 Test: fixture transcript and rollout files (pinned versions) import correctly; corrupted/newer records are skipped not fatal
+- [x] 6.4 Test: fixture transcript and rollout files (pinned versions) import correctly; corrupted/newer records are skipped not fatal
 
 ## 7. `watch` command
 

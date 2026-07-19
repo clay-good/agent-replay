@@ -72,8 +72,8 @@ program
 // --- import ---
 program
   .command('import <path>')
-  .description('Import an on-disk session log (Claude Code transcript JSONL) as a trace')
-  .option('--format <format>', 'Log format: claude-transcript (default)', 'claude-transcript')
+  .description('Import an on-disk session log (Claude Code transcript or Codex rollout JSONL) as a trace')
+  .option('--format <format>', 'Log format: claude-transcript (default), codex-rollout', 'claude-transcript')
   .option('--tags <tags>', 'Comma-separated tags to add to the imported trace')
   .option('--dir <path>', 'Custom data directory')
   .action(async (path, opts) => {

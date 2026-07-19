@@ -5,6 +5,7 @@ export * from './recorder.js';
 export * from './stream-translators.js';
 export * from './hook-adapter.js';
 export * from './importers/claude-transcript.js';
+export * from './importers/codex-rollout.js';
 export * from './diff-service.js';
 export * from './check-service.js';
 export * from './harness-service.js';

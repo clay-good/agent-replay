@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import chalk from 'chalk';
 import { ensureDatabase } from '../db/index.js';
 import { importClaudeTranscript } from '../services/importers/claude-transcript.js';
+import { importCodexRollout } from '../services/importers/codex-rollout.js';
 import { summaryPanel } from '../ui/boxen-panels.js';
 import { errorMessage } from '../utils/json.js';
 
@@ -11,7 +12,7 @@ export interface ImportOptions {
   dir?: string;
 }
 
-const SUPPORTED = ['claude-transcript'];
+const SUPPORTED = ['claude-transcript', 'codex-rollout'];
 
 /**
  * `agent-replay import <path> --format <fmt>` — best-effort conversion of an
@@ -34,7 +35,8 @@ export function runImport(filePath: string, opts: ImportOptions = {}): void {
 
   let report;
   try {
-    report = importClaudeTranscript(db, absPath, { tags: tags.length ? tags : undefined });
+    const importer = format === 'codex-rollout' ? importCodexRollout : importClaudeTranscript;
+    report = importer(db, absPath, { tags: tags.length ? tags : undefined });
   } catch (err) {
     console.error(chalk.red(`  Import failed: ${errorMessage(err)}`));
     process.exitCode = 1;
