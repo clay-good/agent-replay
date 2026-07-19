@@ -109,6 +109,21 @@ describe('CLI integration', () => {
     expect(run(['show', 'tcli']).stdout).toMatch(/scli|Chose/);
   });
 
+  it('finalizes a still-running trace as timeout on EOF, unless --leave-open', () => {
+    const noEnd = (id: string) => [
+      `{"v":1,"type":"trace_start","trace_id":"${id}","agent_name":"b"}`,
+      `{"v":1,"type":"step","trace_id":"${id}","step_number":1,"step_type":"thought","name":"x"}`,
+    ].join('\n');
+    // A stream that never emits trace_end leaves the trace running; on EOF the
+    // recorder finalizes it as timeout so it doesn't linger forever...
+    run(['record'], noEnd('eof1'));
+    expect(JSON.parse(run(['show', 'eof1', '--json']).stdout).status).toBe('timeout');
+    // ...but --leave-open preserves the running state (e.g. a trace continued by
+    // a later process).
+    run(['record', '--leave-open'], noEnd('eof2'));
+    expect(JSON.parse(run(['show', 'eof2', '--json']).stdout).status).toBe('running');
+  });
+
   it('enforces guard check exit codes', () => {
     run(['guard', 'add', '--name', 'blk', '--action', 'deny', '--pattern', '{"name_contains":"delete"}']);
     expect(run(['guard', 'check'], '{"step_type":"tool_call","name":"delete_x"}').code).toBe(2);
