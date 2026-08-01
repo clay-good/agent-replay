@@ -5,7 +5,7 @@ Beyond hooks and session files, the third capture surface the ecosystem has stan
 ## Requirements
 ### Requirement: Local OTLP/HTTP receiver
 
-The system SHALL provide `agent-replay otel serve [--port 4318]`, a local OTLP/HTTP receiver accepting `POST /v1/traces` and `POST /v1/logs` in both `application/x-protobuf` and `application/json` encodings (responding in the encoding received, honoring the OTLP/JSON deviations: lowerCamelCase fields, hex-encoded `traceId`/`spanId`, integer enums, string-encoded int64s) with gzip support, returning 200 with an empty response on full success and 200 with `partial_success` details when records are rejected. Received telemetry SHALL be written to the trace store live.
+The system SHALL provide `agent-replay otel serve [--port 4318]`, a local OTLP/HTTP receiver accepting `POST /v1/traces` and `POST /v1/logs` in both `application/x-protobuf` and `application/json` encodings (responding in the encoding received, honoring the OTLP/JSON deviations: lowerCamelCase fields, hex-encoded `traceId`/`spanId`, integer enums, string-encoded int64s) with gzip support, returning 200 with an empty response on full success and 200 with `partial_success` details when records are rejected. Received telemetry SHALL be written to the trace store live. When the spans or log events of one logical trace arrive across multiple export batches (as a `BatchSpanProcessor` flushes completed child spans before the root span ends), the receiver SHALL assemble them into a single trace — merging later batches into the existing trace by OTel trace id (or, for log events, by emitter session id) rather than opening a new trace per batch — while still storing each batch immediately so the trace stays queryable mid-session. A rootless synthetic trace SHALL be upgraded in place (agent name, input/output, synthetic flag cleared) once the batch carrying the agent root arrives.
 
 #### Scenario: Gemini CLI exports to agent-replay
 
@@ -16,6 +16,11 @@ The system SHALL provide `agent-replay otel serve [--port 4318]`, a local OTLP/H
 
 - **WHEN** an export batch contains some undecodable spans
 - **THEN** the receiver stores the valid spans and responds 200 with `partial_success.rejected_spans` and an `error_message`, so compliant SDK clients do not retry the batch
+
+#### Scenario: Spans split across export batches assemble into one trace
+
+- **WHEN** a long-running agent's `BatchSpanProcessor` flushes some child spans in one export batch and the root span (plus later children) in a subsequent batch
+- **THEN** the receiver merges every batch of the same OTel trace id into one agent-replay trace — re-linking a child to a parent stored by an earlier batch, recomputing the time window and token totals, and upgrading the initially rootless synthetic trace to the real agent once the root arrives — rather than fragmenting the run into one trace per batch
 
 ### Requirement: GenAI semconv span mapping
 

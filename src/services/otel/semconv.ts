@@ -206,7 +206,7 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
         model: str(s.attrs['gen_ai.request.model']) ?? str(s.attrs['gen_ai.response.model']) ?? str(s.attrs['llm.model_name']) ?? null,
         error: s.errorMessage,
         parent_step: parent ?? null,
-        metadata: stepMetadata(s.attrs, s.spanId),
+        metadata: stepMetadata(s.attrs, s.spanId, s.parentSpanId),
       };
     });
 
@@ -248,8 +248,11 @@ function messageContent(a: Record<string, unknown>, dir: 'input' | 'output'): Re
   return out;
 }
 
-function stepMetadata(a: Record<string, unknown>, spanId: string): Record<string, unknown> {
+function stepMetadata(a: Record<string, unknown>, spanId: string, parentSpanId?: string): Record<string, unknown> {
   const meta: Record<string, unknown> = { otel_span_id: spanId };
+  // Preserve the OTel parent span id so a child arriving in a later export batch
+  // can be re-linked to a parent step already stored from an earlier batch.
+  if (parentSpanId) meta.otel_parent_span_id = parentSpanId;
   const provider = str(a['gen_ai.provider.name']) ?? str(a['gen_ai.system']);
   if (provider) meta.provider = provider;
   // Preserve any gen_ai.* attributes we didn't explicitly map.

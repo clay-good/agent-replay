@@ -1,7 +1,8 @@
 import type Database from 'better-sqlite3';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import { gunzipSync } from 'node:zlib';
-import { ingestTrace } from '../trace-service.js';
+import { ingestTrace, mergeBatchIntoTrace } from '../trace-service.js';
+import type { IngestTraceInput } from '../../models/types.js';
 import { mapOtlpTraces } from './semconv.js';
 import { mapOtlpLogs } from './log-events.js';
 import { decodeTracesData } from './protobuf.js';
@@ -19,12 +20,14 @@ import { decodeTracesData } from './protobuf.js';
  * resolves to zero traces. `POST /v1/logs` over protobuf is not supported and
  * returns 415.
  *
- * Known limitation: each export batch is mapped independently, so a single OTel
- * trace whose spans arrive across multiple batches (e.g. a BatchSpanProcessor
- * flushing completed child spans before the root span ends) becomes several
- * agent-replay traces rather than one — batches without the root span map to a
- * synthetic `otel-agent` trace. Cross-batch assembly by otel_trace_id would need
- * stateful span buffering and is not yet implemented.
+ * Cross-batch assembly: a single OTel trace (or emitter session) whose spans or
+ * log events arrive across multiple export batches — the common
+ * `BatchSpanProcessor` case, where completed child spans flush before the root
+ * span ends — is assembled into one agent-replay trace. Each batch is still
+ * stored immediately (so a trace stays queryable while the session is live);
+ * later batches merge into the existing trace by OTel trace id, or by session id
+ * for log events, rather than opening a new one. A rootless synthetic trace is
+ * upgraded in place once the batch carrying the agent root arrives.
  */
 
 export interface OtelReceiverHandle {
@@ -111,6 +114,45 @@ export function handleTracesExportProtobuf(
   return ingestOtlpTraces(db, otlp, stats);
 }
 
+/**
+ * Find an existing trace this batch belongs to, so spans/log-events arriving
+ * across batches assemble into one trace. Span batches merge by OTel trace id;
+ * log-event batches merge by (session id, source format). Returns the target
+ * trace id, or undefined when this is the first batch (open a new trace).
+ */
+function findMergeTarget(db: Database.Database, input: IngestTraceInput): string | undefined {
+  const meta = input.metadata ?? {};
+  const otelTraceId = meta.otel_trace_id;
+  if (typeof otelTraceId === 'string' && otelTraceId) {
+    const row = db
+      .prepare("SELECT id FROM agent_traces WHERE json_extract(metadata, '$.otel_trace_id') = ? LIMIT 1")
+      .get(otelTraceId) as { id: string } | undefined;
+    return row?.id;
+  }
+  const sourceFormat = meta.source_format;
+  if (input.session_id && typeof sourceFormat === 'string') {
+    const row = db
+      .prepare(
+        "SELECT id FROM agent_traces WHERE session_id = ? AND json_extract(metadata, '$.source_format') = ? LIMIT 1",
+      )
+      .get(input.session_id, sourceFormat) as { id: string } | undefined;
+    return row?.id;
+  }
+  return undefined;
+}
+
+/** Merge a mapped batch into its existing trace, or open a new one. */
+function upsertOtelTrace(db: Database.Database, input: IngestTraceInput, stats: OtelStats): void {
+  const target = findMergeTarget(db, input);
+  if (target) {
+    mergeBatchIntoTrace(db, target, input);
+  } else {
+    ingestTrace(db, input);
+    stats.acceptedTraces++;
+  }
+  stats.acceptedSpans += input.steps?.length ?? 0;
+}
+
 function ingestOtlpTraces(
   db: Database.Database,
   otlp: Record<string, unknown>,
@@ -118,13 +160,9 @@ function ingestOtlpTraces(
 ): { status: number; payload: Record<string, unknown> } {
   const totalSpans = countSpans(otlp);
   const traces = mapOtlpTraces(otlp);
-  let mappedSpans = 0;
   for (const t of traces) {
-    ingestTrace(db, t);
-    mappedSpans += (t.steps?.length ?? 0);
-    stats.acceptedTraces++;
+    upsertOtelTrace(db, t, stats);
   }
-  stats.acceptedSpans += mappedSpans;
 
   // Root/agent spans define traces rather than steps, so mappedSpans can be
   // fewer than totalSpans without any rejection. Only report partial_success
@@ -153,9 +191,7 @@ export function handleLogsExport(
   }
   const traces = mapOtlpLogs(otlp);
   for (const t of traces) {
-    ingestTrace(db, t);
-    stats.acceptedSpans += t.steps?.length ?? 0;
-    stats.acceptedTraces++;
+    upsertOtelTrace(db, t, stats);
   }
   return { status: 200, payload: {} };
 }

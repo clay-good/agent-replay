@@ -143,20 +143,68 @@ describe('OTLP receiver', () => {
     expect(listTraces(db, {}).total).toBe(1);
   });
 
-  it('maps each export batch independently (split traces are not reassembled — known limitation)', () => {
+  it('assembles spans of one OTel trace arriving across batches into a single trace', () => {
     const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
-    // Batch 1: root + child for OTel trace "t7".
+    // Batch 1: root + first child for OTel trace "t7".
     handleTracesExport(db, JSON.stringify(otlp([
       span({ traceId: 't7', spanId: 'r', name: 'invoke_agent', start: 1 * MS, end: 9 * MS, attrs: { 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'batchbot' } }),
-      span({ traceId: 't7', spanId: 'c1', parentSpanId: 'r', name: 'chat', start: 2 * MS, end: 3 * MS, attrs: { 'gen_ai.operation.name': 'chat' } }),
+      span({ traceId: 't7', spanId: 'c1', parentSpanId: 'r', name: 'chat', start: 2 * MS, end: 3 * MS, attrs: { 'gen_ai.operation.name': 'chat', 'gen_ai.usage.input_tokens': 100, 'gen_ai.usage.output_tokens': 20 } }),
     ])), stats);
-    // Batch 2: a later child of the SAME OTel trace whose root isn't in this batch.
+    // Batch 2: a later child of the SAME OTel trace whose parent (c1) shipped in
+    // batch 1, and whose root is likewise absent from this batch.
     handleTracesExport(db, JSON.stringify(otlp([
-      span({ traceId: 't7', spanId: 'c2', parentSpanId: 'r', name: 'execute_tool', start: 4 * MS, end: 5 * MS, attrs: { 'gen_ai.operation.name': 'execute_tool', 'gen_ai.tool.name': 'search' } }),
+      span({ traceId: 't7', spanId: 'c2', parentSpanId: 'c1', name: 'execute_tool', start: 4 * MS, end: 5 * MS, attrs: { 'gen_ai.operation.name': 'execute_tool', 'gen_ai.tool.name': 'search', 'gen_ai.usage.input_tokens': 40, 'gen_ai.usage.output_tokens': 20 } }),
     ])), stats);
 
-    // Two batches → two agent-replay traces today (no cross-batch assembly). If
-    // that limitation is ever lifted, this expectation should change to 1.
+    // One logical OTel trace → one agent-replay trace, not one per batch.
+    expect(listTraces(db, {}).total).toBe(1);
+    const trace = getTrace(db, listTraces(db, {}).items[0].id)!;
+    expect(trace.agent_name).toBe('batchbot');
+    expect(trace.steps).toHaveLength(2);
+    const [c1, c2] = trace.steps;
+    // c2 arrived in a later batch but is re-linked to its parent c1 by span id.
+    expect(c2.name).toBe('search');
+    expect(c2.parent_step_number).toBe(c1.step_number);
+    // Aggregates recompute over both batches: full window and summed tokens.
+    expect(trace.total_tokens).toBe(180);
+    expect(trace.started_at).toBe('1970-01-01T00:00:00.001Z');
+    expect(trace.ended_at).toBe('1970-01-01T00:00:00.009Z');
+  });
+
+  it('upgrades a rootless synthetic trace in place when the root batch arrives last', () => {
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    // Batch 1: two children flush before the root ends → a synthetic trace.
+    handleTracesExport(db, JSON.stringify(otlp([
+      span({ traceId: 't8', spanId: 'c1', parentSpanId: 'r', name: 'chat', start: 2 * MS, end: 3 * MS, attrs: { 'gen_ai.operation.name': 'chat' } }),
+      span({ traceId: 't8', spanId: 'c2', parentSpanId: 'c1', name: 'execute_tool', start: 4 * MS, end: 5 * MS, attrs: { 'gen_ai.operation.name': 'execute_tool', 'gen_ai.tool.name': 'search' } }),
+    ])), stats);
+    let trace = getTrace(db, listTraces(db, {}).items[0].id)!;
+    expect(trace.agent_name).toBe('otel-agent');
+    expect(trace.metadata.synthetic_trace).toBe(true);
+
+    // Batch 2: the root span finally ends and exports.
+    handleTracesExport(db, JSON.stringify(otlp([
+      span({ traceId: 't8', spanId: 'r', name: 'invoke_agent', start: 1 * MS, end: 9 * MS, attrs: { 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'latebot', 'gen_ai.conversation.id': 'conv-8' } }),
+    ])), stats);
+
+    expect(listTraces(db, {}).total).toBe(1);
+    trace = getTrace(db, listTraces(db, {}).items[0].id)!;
+    expect(trace.agent_name).toBe('latebot'); // upgraded from otel-agent
+    expect(trace.session_id).toBe('conv-8');
+    expect(trace.metadata.synthetic_trace).toBeUndefined(); // no longer synthetic
+    expect(trace.steps).toHaveLength(2);
+    expect(trace.started_at).toBe('1970-01-01T00:00:00.001Z'); // widened to root start
+    expect(trace.steps[1].parent_step_number).toBe(trace.steps[0].step_number);
+  });
+
+  it('keeps distinct OTel traces separate across batches', () => {
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    handleTracesExport(db, JSON.stringify(otlp([
+      span({ traceId: 'ta', spanId: 's1', name: 'chat', start: 1 * MS, end: 2 * MS, attrs: { 'gen_ai.operation.name': 'chat' } }),
+    ])), stats);
+    handleTracesExport(db, JSON.stringify(otlp([
+      span({ traceId: 'tb', spanId: 's1', name: 'chat', start: 1 * MS, end: 2 * MS, attrs: { 'gen_ai.operation.name': 'chat' } }),
+    ])), stats);
     expect(listTraces(db, {}).total).toBe(2);
   });
 

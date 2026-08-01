@@ -293,6 +293,157 @@ export function ingestTrace(
   return rowToTrace(ingest());
 }
 
+// ── 1b. mergeBatchIntoTrace (cross-batch OTLP assembly) ────────────────────
+
+/**
+ * Append a further OTLP export batch (already mapped to an `IngestTraceInput`)
+ * into an existing trace that shares its merge key — the OTel trace id, or the
+ * emitter's session id for log-event batches. This assembles a single logical
+ * trace whose spans or log events arrive across several export batches (the
+ * common `BatchSpanProcessor` case, where completed child spans flush before
+ * the root span ends) into one agent-replay trace instead of fragmenting it
+ * into one trace per batch.
+ *
+ * New steps are renumbered after the existing steps, and their intra-batch
+ * parent/caused-by references are offset to match; a step whose parent lives in
+ * an earlier batch is re-linked by OTel span id. Trace-level aggregates (time
+ * window, tokens, status) are recomputed, and a rootless synthetic trace is
+ * upgraded in place (agent name, input/output, `synthetic_trace` flag cleared)
+ * once the batch carrying the agent root finally arrives. Duplicate deliveries
+ * of the same span are not de-duplicated — localhost OTLP delivery is
+ * effectively exactly-once, and dedup would complicate cross-batch parentage.
+ */
+export function mergeBatchIntoTrace(
+  db: Database.Database,
+  traceId: string,
+  input: IngestTraceInput,
+): Trace {
+  const timestamp = now();
+
+  const run = db.transaction(() => {
+    const existing = rowToTrace(
+      db.prepare('SELECT * FROM agent_traces WHERE id = ?').get(traceId) as Record<string, unknown>,
+    );
+
+    const existingSteps = db
+      .prepare('SELECT step_number, metadata FROM agent_trace_steps WHERE trace_id = ?')
+      .all(traceId) as { step_number: number; metadata: string | null }[];
+
+    let maxStep = 0;
+    const stepBySpan = new Map<string, number>();
+    for (const s of existingSteps) {
+      if (s.step_number > maxStep) maxStep = s.step_number;
+      const spanId = parseJson(s.metadata)?.otel_span_id;
+      if (typeof spanId === 'string') stepBySpan.set(spanId, s.step_number);
+    }
+
+    for (const step of input.steps ?? []) {
+      const newNumber = maxStep + step.step_number;
+      const rawParent = step.parent_step ?? step.parent_step_number ?? null;
+      const meta = step.metadata ?? {};
+      const parentSpan = meta.otel_parent_span_id;
+      const parent =
+        rawParent != null
+          ? maxStep + rawParent
+          : typeof parentSpan === 'string' && stepBySpan.has(parentSpan)
+            ? (stepBySpan.get(parentSpan) as number)
+            : null;
+      const rawCaused = step.caused_by_step ?? step.caused_by_step_number ?? null;
+      const caused = rawCaused != null ? maxStep + rawCaused : null;
+
+      const stepId = generateId('stp');
+      db.prepare(
+        `INSERT INTO agent_trace_steps
+          (id, trace_id, step_number, step_type, name, input, output,
+           started_at, ended_at, duration_ms, tokens_used, model, error, metadata,
+           parent_step_number, caused_by_step_number)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        stepId,
+        traceId,
+        newNumber,
+        step.step_type,
+        step.name,
+        jsonStr(step.input),
+        jsonOrNull(step.output),
+        step.started_at ?? timestamp,
+        step.ended_at ?? null,
+        step.duration_ms ?? null,
+        step.tokens_used ?? null,
+        step.model ?? null,
+        step.error ?? null,
+        jsonStr(step.metadata),
+        parent,
+        caused,
+      );
+
+      if (step.decision) insertDecision(db, stepId, step.decision);
+
+      // Register this span so a later step (this batch or the next) can parent
+      // onto it by span id.
+      const spanId = meta.otel_span_id;
+      if (typeof spanId === 'string') stepBySpan.set(spanId, newNumber);
+    }
+
+    // Recompute trace-level aggregates over both the existing trace and the
+    // incoming batch: widest time window, summed tokens, failure-dominant status.
+    const earliest = (a: string, b: string) => (Date.parse(b) < Date.parse(a) ? b : a);
+    const latest = (a: string, b: string) => (Date.parse(b) > Date.parse(a) ? b : a);
+    const startedAt = [existing.started_at, input.started_at]
+      .filter((v): v is string => !!v)
+      .reduce(earliest);
+    const endCandidates = [existing.ended_at, input.ended_at].filter((v): v is string => !!v);
+    const endedAt = endCandidates.length ? endCandidates.reduce(latest) : null;
+    const duration = endedAt
+      ? Math.round(Date.parse(endedAt) - Date.parse(startedAt))
+      : existing.total_duration_ms;
+    const totalTokens = (existing.total_tokens ?? 0) + (input.total_tokens ?? 0);
+    const status =
+      existing.status === 'failed' || input.status === 'failed' ? 'failed' : existing.status;
+
+    // Upgrade a rootless synthetic trace in place once the batch that carries
+    // the agent root arrives (a real root batch is not flagged synthetic).
+    const mergedMeta = { ...existing.metadata };
+    const wasSynthetic = existing.metadata.synthetic_trace === true;
+    const incomingHasRoot = input.metadata?.synthetic_trace !== true;
+    let agentName = existing.agent_name;
+    let traceInput = existing.input;
+    let traceOutput = existing.output;
+    if (wasSynthetic && incomingHasRoot) {
+      agentName = input.agent_name;
+      traceInput = input.input ?? existing.input;
+      traceOutput = input.output ?? existing.output;
+      delete mergedMeta.synthetic_trace;
+    } else if (existing.output == null && input.output != null) {
+      traceOutput = input.output;
+    }
+
+    db.prepare(
+      `UPDATE agent_traces SET
+         agent_name = ?, status = ?, input = ?, output = ?, started_at = ?,
+         ended_at = ?, total_duration_ms = ?, total_tokens = ?, metadata = ?,
+         session_id = ?
+       WHERE id = ?`,
+    ).run(
+      agentName,
+      status,
+      jsonStr(traceInput),
+      jsonOrNull(traceOutput),
+      startedAt,
+      endedAt,
+      duration ?? null,
+      totalTokens || null,
+      jsonStr(mergedMeta),
+      existing.session_id ?? input.session_id ?? null,
+      traceId,
+    );
+
+    return db.prepare('SELECT * FROM agent_traces WHERE id = ?').get(traceId) as Record<string, unknown>;
+  });
+
+  return rowToTrace(run());
+}
+
 /**
  * Open a new trace with no steps, defaulting to status `running`. Used by the
  * live recorder for `trace_start` events; honors a client-supplied `id` so the

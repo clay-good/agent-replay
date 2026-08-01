@@ -118,4 +118,23 @@ describe('handleLogsExport (/v1/logs ingest)', () => {
     const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
     expect(handleLogsExport(db, '{bad json', stats).status).toBe(400);
   });
+
+  it('assembles one session arriving across log batches into a single trace', () => {
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    // Batch 1: the prompt and the first tool call for session "s9".
+    handleLogsExport(db, JSON.stringify(otlpLogs([
+      logRecord('gemini_cli.user_prompt', { 'session.id': 's9', prompt: 'go' }, 1_000_000),
+      logRecord('gemini_cli.tool_call', { 'session.id': 's9', function_name: 'first', function_args: '{}', success: true }, 2_000_000),
+    ])), stats);
+    // Batch 2: a later tool call for the SAME session.
+    handleLogsExport(db, JSON.stringify(otlpLogs([
+      logRecord('gemini_cli.tool_call', { 'session.id': 's9', function_name: 'second', function_args: '{}', success: true }, 3_000_000),
+    ])), stats);
+
+    const traces = listTraces(db, { session_id: 's9' });
+    expect(traces.total).toBe(1); // one session → one trace, not one per batch
+    const t = getTrace(db, traces.items[0].id)!;
+    const toolNames = t.steps.filter((s) => s.step_type === 'tool_call').map((s) => s.name);
+    expect(toolNames).toEqual(['first', 'second']);
+  });
 });

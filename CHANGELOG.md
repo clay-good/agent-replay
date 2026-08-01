@@ -44,6 +44,15 @@ the OpenTelemetry receiver. The recorded trace schema is unchanged.
   or primitive JSON body, or a body that claims gzip but isn't) with `400`
   rather than `500`, so exporters don't retry an un-processable batch (5xx is
   retryable per the OTLP spec, 4xx is not).
+- The `otel serve` receiver now assembles a logical trace whose spans arrive
+  across several export batches into one agent-replay trace, instead of emitting
+  one trace per batch. A `BatchSpanProcessor` routinely flushes completed child
+  spans before the root span ends, so later batches now merge into the existing
+  trace by OTel trace id (log events merge by session id) — re-linking a child
+  to a parent stored earlier, recomputing the window and token totals, and
+  upgrading the initially rootless synthetic trace to the real agent once the
+  root arrives. Each batch is still stored immediately, so a trace stays
+  queryable mid-session.
 - OTel-ingested traces carry a trace-level end time and duration derived from
   their span times, instead of showing `-` for duration.
 - `list` and `show` display a trace's duration derived from its start/end
