@@ -2,10 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
 import { listTraces, getTrace } from '../src/services/trace-service.js';
-import { decodeTracesData } from '../src/services/otel/protobuf.js';
+import { decodeTracesData, decodeLogsData } from '../src/services/otel/protobuf.js';
 import { mapOtlpTraces } from '../src/services/otel/semconv.js';
-import { handleTracesExportProtobuf, type OtelStats } from '../src/services/otel/receiver.js';
-import { lenField, anyStr, anyInt, keyValue, span, tracesData } from './helpers/otlp-protobuf.js';
+import { mapOtlpLogs } from '../src/services/otel/log-events.js';
+import { handleTracesExportProtobuf, handleLogsExportProtobuf, type OtelStats } from '../src/services/otel/receiver.js';
+import { lenField, anyStr, anyInt, keyValue, span, tracesData, logRecord, logsData } from './helpers/otlp-protobuf.js';
 
 let db: Database.Database;
 
@@ -81,6 +82,68 @@ describe('decodeTracesData → mapOtlpTraces', () => {
     const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
     // A length-delimited field claiming more bytes than present.
     const res = handleTracesExportProtobuf(db, Buffer.from([0x0a, 0x7f, 0x01]), stats);
+    expect(res.status).toBe(400);
+  });
+});
+
+// ── Round-trip encoded log events through decode → map ─────────────────────
+
+describe('decodeLogsData → mapOtlpLogs', () => {
+  it('decodes a Gemini log batch equivalently to the JSON path', () => {
+    const buf = logsData([
+      logRecord({ eventName: 'gemini_cli.user_prompt', time: 1_000_000n, body: anyStr('list files'), attrs: [
+        keyValue('session.id', anyStr('pg1')),
+        keyValue('prompt', anyStr('list files')),
+      ] }),
+      logRecord({ eventName: 'gemini_cli.tool_call', time: 2_000_000n, attrs: [
+        keyValue('session.id', anyStr('pg1')),
+        keyValue('function_name', anyStr('run_shell')),
+        keyValue('function_args', anyStr('{"cmd":"ls"}')),
+        keyValue('decision', anyStr('reject')),
+      ] }),
+      logRecord({ eventName: 'gemini_cli.api_response', time: 3_000_000n, attrs: [
+        keyValue('session.id', anyStr('pg1')),
+        keyValue('input_token_count', anyInt(100)),
+        keyValue('output_token_count', anyInt(20)),
+      ] }),
+    ]);
+
+    const [t] = mapOtlpLogs(decodeLogsData(buf));
+    expect(t.agent_name).toBe('gemini');
+    expect(t.session_id).toBe('pg1');
+    expect(t.input).toEqual({ prompt: 'list files' });
+    expect(t.total_tokens).toBe(120);
+    const tool = t.steps!.find((s) => s.step_type === 'tool_call')!;
+    expect(tool.name).toBe('run_shell');
+    expect(tool.input).toEqual({ cmd: 'ls' });
+    const decision = t.steps!.find((s) => s.step_type === 'decision')!;
+    expect(decision.decision!.chosen).toBe('reject');
+  });
+
+  it('ingests a protobuf logs export through the receiver', () => {
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    const buf = logsData([
+      logRecord({ eventName: 'claude_code.user_prompt', time: 1_000_000n, attrs: [
+        keyValue('session.id', anyStr('pc1')),
+        keyValue('prompt', anyStr('fix it')),
+      ] }),
+      logRecord({ eventName: 'claude_code.tool_result', time: 2_000_000n, attrs: [
+        keyValue('session.id', anyStr('pc1')),
+        keyValue('tool_name', anyStr('Bash')),
+      ] }),
+    ]);
+    const res = handleLogsExportProtobuf(db, buf, stats);
+    expect(res.status).toBe(200);
+    const traces = listTraces(db, { session_id: 'pc1' });
+    expect(traces.total).toBe(1);
+    const t = getTrace(db, traces.items[0].id)!;
+    expect(t.agent_name).toBe('claude-code');
+    expect(t.steps.some((s) => s.step_type === 'tool_call' && s.name === 'Bash')).toBe(true);
+  });
+
+  it('rejects a truncated protobuf logs body', () => {
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    const res = handleLogsExportProtobuf(db, Buffer.from([0x0a, 0x7f, 0x01]), stats);
     expect(res.status).toBe(400);
   });
 });

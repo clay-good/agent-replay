@@ -5,20 +5,20 @@ import { ingestTrace, mergeBatchIntoTrace } from '../trace-service.js';
 import type { IngestTraceInput } from '../../models/types.js';
 import { mapOtlpTraces } from './semconv.js';
 import { mapOtlpLogs } from './log-events.js';
-import { decodeTracesData } from './protobuf.js';
+import { decodeTracesData, decodeLogsData } from './protobuf.js';
 
 /**
- * Local OTLP/HTTP receiver. Accepts `POST /v1/traces` in both OTLP/JSON and
- * OTLP/protobuf, and `POST /v1/logs` in JSON (log-event mappers), decoding gzip
- * when present. GenAI-semconv spans map to traces, with OpenInference and
- * OpenLLMetry fallbacks, and are stored live.
+ * Local OTLP/HTTP receiver. Accepts `POST /v1/traces` and `POST /v1/logs` in
+ * both OTLP/JSON and OTLP/protobuf, decoding gzip when present. GenAI-semconv
+ * spans map to traces, with OpenInference and OpenLLMetry fallbacks; Gemini CLI
+ * and Claude Code log events map through the log-event mappers. All are stored
+ * live.
  *
  * Per the OTLP spec, success answers 200 with an empty body; client-malformed
  * input answers 4xx (not 5xx, which the spec makes retryable). The spec's
  * `partial_success` response is scaffolded but currently unreachable: every
  * span the receiver counts maps to at least a synthetic trace, so a batch never
- * resolves to zero traces. `POST /v1/logs` over protobuf is not supported and
- * returns 415.
+ * resolves to zero traces.
  *
  * Cross-batch assembly: a single OTel trace (or emitter session) whose spans or
  * log events arrive across multiple export batches — the common
@@ -189,6 +189,29 @@ export function handleLogsExport(
   if (!isPlainObject(otlp)) {
     return { status: 400, payload: { error: 'invalid OTLP body: expected a JSON object' } };
   }
+  return ingestOtlpLogs(db, otlp, stats);
+}
+
+/** Handle one OTLP/protobuf logs export (Gemini CLI / Claude Code log events). */
+export function handleLogsExportProtobuf(
+  db: Database.Database,
+  body: Buffer,
+  stats: OtelStats,
+): { status: number; payload: Record<string, unknown> } {
+  let otlp: Record<string, unknown>;
+  try {
+    otlp = decodeLogsData(body);
+  } catch {
+    return { status: 400, payload: { error: 'invalid protobuf body' } };
+  }
+  return ingestOtlpLogs(db, otlp, stats);
+}
+
+function ingestOtlpLogs(
+  db: Database.Database,
+  otlp: Record<string, unknown>,
+  stats: OtelStats,
+): { status: number; payload: Record<string, unknown> } {
   const traces = mapOtlpLogs(otlp);
   for (const t of traces) {
     upsertOtelTrace(db, t, stats);
@@ -217,17 +240,15 @@ export function startOtelReceiver(db: Database.Database, port: number, stats: Ot
       return;
     }
     const isProtobuf = contentType.includes('application/x-protobuf');
-    if (isProtobuf && isLogs) {
-      res.writeHead(415, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'protobuf log ingest not supported; use OTLP/JSON for logs' }));
-      return;
-    }
 
     try {
       const raw = await readBody(req);
       if (isProtobuf) {
-        // Traces over protobuf: decode, then respond with an empty protobuf
-        // ExportTraceServiceResponse (zero bytes) on success per the spec.
-        const { status } = handleTracesExportProtobuf(db, raw, stats);
+        // Over protobuf: decode, then respond with an empty ExportServiceResponse
+        // (zero bytes) on success per the spec, in the encoding received.
+        const { status } = isLogs
+          ? handleLogsExportProtobuf(db, raw, stats)
+          : handleTracesExportProtobuf(db, raw, stats);
         res.writeHead(status, { 'content-type': 'application/x-protobuf' }).end(status === 200 ? Buffer.alloc(0) : undefined);
         return;
       }

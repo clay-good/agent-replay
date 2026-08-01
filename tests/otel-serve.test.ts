@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { anyStr, keyValue, span, tracesData } from './helpers/otlp-protobuf.js';
+import { anyStr, keyValue, span, tracesData, logRecord, logsData } from './helpers/otlp-protobuf.js';
 
 /**
  * End-to-end test of the `otel serve` command: spawn the real OTLP/HTTP
@@ -172,6 +172,38 @@ describe('otel serve (end-to-end)', () => {
         | undefined;
       expect(trace?.agent_name).toBe('proto-e2e-bot'); // decoded from protobuf and mapped
       const steps = db.prepare("SELECT COUNT(*) c FROM agent_trace_steps WHERE step_type = 'llm_call'").get() as { c: number };
+      expect(steps.c).toBe(1);
+    } finally {
+      db.close();
+    }
+  }, 20000);
+
+  it('accepts an OTLP/protobuf logs export over HTTP', async () => {
+    const url = await startReceiver();
+    const logsUrl = url.replace('/v1/traces', '/v1/logs');
+    const body = logsData([
+      logRecord({ eventName: 'gemini_cli.user_prompt', time: 1_000_000n, body: anyStr('hi'), attrs: [
+        keyValue('session.id', anyStr('proto-log-sess')),
+        keyValue('prompt', anyStr('hi')),
+      ] }),
+      logRecord({ eventName: 'gemini_cli.tool_call', time: 2_000_000n, attrs: [
+        keyValue('session.id', anyStr('proto-log-sess')),
+        keyValue('function_name', anyStr('run_shell')),
+        keyValue('function_args', anyStr('{}')),
+      ] }),
+    ]);
+    const res = await fetch(logsUrl, { method: 'POST', headers: { 'content-type': 'application/x-protobuf' }, body });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('application/x-protobuf');
+    expect((await res.arrayBuffer()).byteLength).toBe(0);
+
+    const db = new Database(join(dir, 'traces.db'), { readonly: true });
+    try {
+      const trace = db.prepare('SELECT agent_name FROM agent_traces WHERE session_id = ?').get('proto-log-sess') as
+        | { agent_name: string }
+        | undefined;
+      expect(trace?.agent_name).toBe('gemini'); // decoded from protobuf logs and mapped
+      const steps = db.prepare("SELECT COUNT(*) c FROM agent_trace_steps WHERE step_type = 'tool_call'").get() as { c: number };
       expect(steps.c).toBe(1);
     } finally {
       db.close();

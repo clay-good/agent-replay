@@ -1,9 +1,10 @@
 /**
- * Minimal decoder for OTLP/protobuf `TracesData` (opentelemetry-proto v1, the
- * field numbers frozen since the 1.0 release). It decodes only the fields the
- * GenAI mapping needs and emits the exact OTLP/JSON-equivalent object shape that
- * {@link mapOtlpTraces} already consumes — so the protobuf and JSON paths share
- * one mapping. Unknown fields are skipped by wire type, per protobuf's own
+ * Minimal decoder for OTLP/protobuf `TracesData` and `LogsData`
+ * (opentelemetry-proto v1, the field numbers frozen since the 1.0 release). It
+ * decodes only the fields the GenAI / log-event mappings need and emits the
+ * exact OTLP/JSON-equivalent object shape that {@link mapOtlpTraces} and
+ * {@link mapOtlpLogs} already consume — so the protobuf and JSON paths share one
+ * mapping. Unknown fields are skipped by wire type, per protobuf's own
  * forward-compatibility rules.
  */
 
@@ -190,4 +191,59 @@ export function decodeTracesData(buf: Buffer): Record<string, unknown> {
     return false;
   });
   return { resourceSpans };
+}
+
+// ── Logs ────────────────────────────────────────────────────────────────────
+
+// LogRecord: time_unix_nano=1 (fixed64), body=5 (AnyValue), attributes=6,
+// event_name=12. Severity, flags, and trace/span ids aren't used by the
+// log-event mapper, so they're skipped. (Field 4 is reserved — the removed
+// legacy `name`; log emitters now carry the event name in event_name or an
+// `event.name` attribute, both of which the mapper already checks.)
+function decodeLogRecord(buf: Buffer): Record<string, unknown> {
+  const rec: Record<string, unknown> = {};
+  const attributes: unknown[] = [];
+  eachField(buf, (field, wire, r) => {
+    switch (field) {
+      case 1: rec.timeUnixNano = r.fixed64Str(); return true;
+      case 5: rec.body = decodeAnyValue(r.bytes()); return true;
+      case 6: attributes.push(decodeKeyValue(r.bytes())); return true;
+      case 12: rec.eventName = r.string(); return true;
+      default: return false;
+    }
+  });
+  rec.attributes = attributes;
+  return rec;
+}
+
+// ScopeLogs: log_records=2
+function decodeScopeLogs(buf: Buffer): Record<string, unknown> {
+  const logRecords: unknown[] = [];
+  eachField(buf, (field, wire, r) => {
+    if (field === 2) { logRecords.push(decodeLogRecord(r.bytes())); return true; }
+    return false;
+  });
+  return { logRecords };
+}
+
+// ResourceLogs: resource=1, scope_logs=2
+function decodeResourceLogs(buf: Buffer): Record<string, unknown> {
+  let resource: Record<string, unknown> = { attributes: [] };
+  const scopeLogs: unknown[] = [];
+  eachField(buf, (field, wire, r) => {
+    if (field === 1) { resource = decodeResource(r.bytes()); return true; }
+    if (field === 2) { scopeLogs.push(decodeScopeLogs(r.bytes())); return true; }
+    return false;
+  });
+  return { resource, scopeLogs };
+}
+
+/** Decode an OTLP/protobuf LogsData message (resource_logs = 1). */
+export function decodeLogsData(buf: Buffer): Record<string, unknown> {
+  const resourceLogs: unknown[] = [];
+  eachField(buf, (field, wire, r) => {
+    if (field === 1) { resourceLogs.push(decodeResourceLogs(r.bytes())); return true; }
+    return false;
+  });
+  return { resourceLogs };
 }

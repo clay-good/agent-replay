@@ -58,3 +58,25 @@ export function tracesData(spans: Buffer[]): Buffer {
   const resourceSpans = lenField(2, scopeSpans);
   return lenField(1, resourceSpans);
 }
+
+// LogRecord: time_unix_nano=1 (fixed64), body=5 (AnyValue), attributes=6,
+// event_name=12. `body` is an AnyValue buffer (e.g. anyStr('...')).
+export function logRecord(opts: {
+  eventName: string;
+  time: bigint;
+  attrs: Buffer[];
+  body?: Buffer;
+}): Buffer {
+  return Buffer.concat([
+    fixed64Field(1, opts.time),
+    ...(opts.body ? [lenField(5, opts.body)] : []),
+    ...opts.attrs.map((a) => lenField(6, a)),
+    strField(12, opts.eventName),
+  ]);
+}
+
+export function logsData(records: Buffer[]): Buffer {
+  const scopeLogs = Buffer.concat(records.map((r) => lenField(2, r)));
+  const resourceLogs = lenField(2, scopeLogs);
+  return lenField(1, resourceLogs);
+}

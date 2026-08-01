@@ -9,6 +9,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 A hardening pass focused on scriptability, input validation, and robustness of
 the OpenTelemetry receiver. The recorded trace schema is unchanged.
 
+### Added
+
+- The `otel serve` receiver now accepts `POST /v1/logs` in OTLP/protobuf as well
+  as OTLP/JSON (it already accepted both on `/v1/traces`). OTLP exporters default
+  to protobuf, so a Gemini CLI or Claude Code session left on the default
+  protocol now has its log events ingested without switching the exporter to
+  JSON. Malformed protobuf log bodies answer `400`, matching the traces path.
+
 ### Security
 
 - Pinned transitive dependencies (`lodash`, `xml2js`, `esbuild`) to patched
