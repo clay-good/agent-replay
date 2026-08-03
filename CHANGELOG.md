@@ -55,6 +55,9 @@ The recorded trace schema is unchanged.
 
 ### Fixed
 
+- `config set ai.max_tokens` rejects a non-positive-integer value instead of
+  silently coercing it: `abc` and `0` used to become 1024 (while still printing
+  "= abc"), and a negative was stored as-is and would break API calls.
 - `agent-replay run` no longer corrupts non-ASCII event data. The incremental
   reader decoded raw byte slices with `Buffer.toString('utf-8')`, so a multi-byte
   UTF-8 character straddling a 200ms poll boundary (or a partial child write)

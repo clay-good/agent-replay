@@ -115,7 +115,15 @@ export function runConfigSet(key: string, value: string, opts: ConfigOptions = {
   // For numeric keys, set the value as a number directly instead of going
   // through setConfigValue (which always stores strings)
   if (key === 'ai.max_tokens') {
-    const numValue = parseInt(value, 10) || 1024;
+    // Reject a non-positive-integer rather than silently rewriting it: the old
+    // `parseInt(value) || 1024` turned `abc` and `0` into 1024 (while still
+    // printing "= abc") and let a negative through to break API calls.
+    const numValue = Number(value);
+    if (!Number.isInteger(numValue) || numValue < 1) {
+      console.error(chalk.red(`  Invalid ai.max_tokens: ${value} (must be a positive integer).`));
+      process.exitCode = 2;
+      return;
+    }
     if (!config.ai) {
       (config as unknown as Record<string, unknown>).ai = {};
     }

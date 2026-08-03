@@ -451,6 +451,11 @@ describe('CLI integration', () => {
     expect(run(['config', 'set', 'ai.provider', 'anthropic']).code).toBe(0); // valid
     expect(run(['config', 'set', 'ai.bogus', 'v']).code).toBe(2);            // unknown key
     expect(run(['config', 'set', 'ai.provider', 'notreal']).code).toBe(2);   // invalid provider
+    // ai.max_tokens must be a positive integer, not silently coerced.
+    expect(run(['config', 'set', 'ai.max_tokens', 'abc']).code).toBe(2);
+    expect(run(['config', 'set', 'ai.max_tokens', '0']).code).toBe(2);
+    expect(run(['config', 'set', 'ai.max_tokens', '-5']).code).toBe(2);
+    expect(run(['config', 'set', 'ai.max_tokens', '2048']).code).toBe(0);    // valid
   });
 
   it('config get never prints an API key in plaintext, even for an object path', () => {
