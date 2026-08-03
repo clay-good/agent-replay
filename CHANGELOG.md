@@ -104,6 +104,12 @@ The recorded trace schema is unchanged.
   by a whole-file parse.
 - `eval --max-cost` rejects a malformed value instead of silently falling back
   to an unlimited budget — a typo like `0.O5` no longer disables the spend cap.
+- `eval --ai` cost estimation no longer bills a preset that won't run. A preset
+  gated by applicability (`ai-root-cause` only runs on a failed trace) is
+  skipped at run time for $0, but the estimate charged it anyway — so the
+  `--max-cost` pre-gate could abort a run over a successful trace even when the
+  actual spend would have fit the budget. The estimate now charges $0 for a
+  non-applicable preset, matching what runs.
 - `getTrace` (and every command that resolves a trace id) now prefers an exact
   id match and resolves prefix collisions deterministically, rather than letting
   `LIMIT 1` return an arbitrary row. This only affects custom/short trace ids

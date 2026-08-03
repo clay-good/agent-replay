@@ -288,6 +288,27 @@ describe('cost estimation', () => {
     expect(estimate.breakdown).toHaveLength(1);
     expect(estimate.breakdown[0].preset).toBe('ai-root-cause');
   });
+
+  it('estimateAiEvalCost charges $0 for a preset not applicable to the trace', () => {
+    const db = createTestDb();
+    // A clean, successful trace: ai-root-cause (which only runs on a failure)
+    // is skipped at run time for $0, so the estimate must not bill it —
+    // otherwise the --max-cost pre-gate could abort a run that fits the budget.
+    const clean = ingestTrace(db, makeTrace({
+      status: 'completed', error: undefined, output: { result: 'ok' },
+      steps: [{ step_number: 1, step_type: 'output', name: 'done', output: { result: 'ok' } }],
+    }));
+    const full = getTrace(db, clean.id)!;
+
+    const estimate = estimateAiEvalCost(full, AI_PRESET_NAMES, 'claude-haiku-4-5-20251001');
+    const rootCause = estimate.breakdown.find((b) => b.preset === 'ai-root-cause')!;
+    expect(rootCause.estimated_usd).toBe(0);
+    expect(rootCause.estimated_tokens).toBe(0);
+    // The applicable presets are still billed, and the total is just their sum.
+    const others = estimate.breakdown.filter((b) => b.preset !== 'ai-root-cause');
+    expect(others.every((b) => b.estimated_usd > 0)).toBe(true);
+    expect(estimate.total_estimated_usd).toBeCloseTo(others.reduce((s, b) => s + b.estimated_usd, 0), 10);
+  });
 });
 
 describe('createEval with llm_judge type', () => {

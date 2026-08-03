@@ -643,7 +643,22 @@ export function estimateAiEvalCost(
   model: string,
 ): { total_estimated_usd: number; breakdown: Array<{ preset: string; estimated_tokens: number; estimated_usd: number }> } {
   const summary = summarizeTrace(trace);
+  const ctx: EvalContext = {
+    input: trace.input,
+    output: trace.output,
+    steps: trace.steps,
+    error: trace.error,
+  };
   const breakdown = presetNames.map((name) => {
+    // A preset that isn't applicable to this trace is skipped at run time for
+    // $0 (see runAiEval), so charging it here would inflate the estimate — and
+    // the --max-cost pre-gate would then abort a run that actually fits the
+    // budget. e.g. ai-root-cause only runs on a failed trace, so estimating
+    // `--ai` over a successful trace must not bill it.
+    const preset = AI_PRESETS[name];
+    if (preset?.applicable && !preset.applicable(ctx)) {
+      return { preset: name, estimated_tokens: 0, estimated_usd: 0 };
+    }
     const inputTokens = summary.estimated_tokens + 200; // ~200 tokens for system prompt
     const cost = estimateCost(model, inputTokens, 1024);
     return { preset: name, estimated_tokens: inputTokens, estimated_usd: cost };
