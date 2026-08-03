@@ -17,6 +17,17 @@ export interface OtelServeOptions {
  * switched to http/json.
  */
 export async function runOtelServe(opts: OtelServeOptions = {}): Promise<void> {
+  // A malformed --port must be a usage error, not a silent fall-back to 4318 —
+  // otherwise a typo'd port binds the default and the user's exporter, pointed
+  // at the intended port, silently connects to nothing.
+  if (opts.port != null) {
+    const p = Number(opts.port);
+    if (!Number.isInteger(p) || p < 1 || p > 65535) {
+      console.error(chalk.red(`  Invalid --port: ${opts.port} (must be an integer between 1 and 65535).`));
+      process.exitCode = 2;
+      return;
+    }
+  }
   const port = safeParseInt(opts.port, 4318);
   const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
   const db = ensureDatabase(dbPath);

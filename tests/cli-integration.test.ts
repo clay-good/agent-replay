@@ -186,6 +186,25 @@ describe('CLI integration', () => {
     expect(run(['export', 'trc_does_not_exist']).code).toBe(1);
   });
 
+  it('rejects malformed numeric options instead of silently falling back', () => {
+    // --limit: a typo used to fall back to the default (hiding the mistake) and
+    // a negative slipped through to SQL `LIMIT` (which SQLite reads as no limit).
+    expect(run(['list', '--limit', 'abc']).code).toBe(2);
+    expect(run(['list', '--limit', '-5']).code).toBe(2);
+    expect(run(['list', '--limit', '0']).code).toBe(2);
+    expect(run(['list', '--limit', '2.5']).code).toBe(2);
+    expect(run(['list', '--limit', '3']).code).toBe(0); // valid
+
+    // --port: a typo used to silently bind the default 4318. These exit before
+    // binding, so they don't leave a server running.
+    expect(run(['otel', 'serve', '--port', 'abc']).code).toBe(2);
+    expect(run(['otel', 'serve', '--port', '99999']).code).toBe(2);
+
+    // --refresh: exits before launching the (headless-unfriendly) TUI.
+    expect(run(['dashboard', '--refresh', 'abc']).code).toBe(2);
+    expect(run(['dashboard', '--refresh', '-1']).code).toBe(2);
+  });
+
   it('propagates the wrapped child exit status via run', () => {
     expect(run(['run', '--', process.execPath, '-e', 'process.exit(0)']).code).toBe(0);
     expect(run(['run', '--', process.execPath, '-e', 'process.exit(5)']).code).toBe(5);

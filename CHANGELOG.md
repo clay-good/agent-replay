@@ -62,6 +62,12 @@ the OpenTelemetry receiver. The recorded trace schema is unchanged.
   by a whole-file parse.
 - `eval --max-cost` rejects a malformed value instead of silently falling back
   to an unlimited budget — a typo like `0.O5` no longer disables the spend cap.
+- `list --limit`, `otel serve --port`, and `dashboard --refresh` reject a
+  malformed value (non-integer, out of range) with a usage error instead of
+  silently falling back to the default or, for a negative `--limit`, passing it
+  to SQL `LIMIT` where SQLite reads it as "no limit". Previously `list --limit
+  abc` quietly returned the default page and `otel serve --port abc` bound the
+  default 4318, so an exporter pointed at the intended port connected to nothing.
 - The `otel serve` receiver answers client-malformed payloads (a `null`, array,
   or primitive JSON body, or a body that claims gzip but isn't) with `400`
   rather than `500`, so exporters don't retry an un-processable batch (5xx is

@@ -38,6 +38,17 @@ export function runList(opts: ListOptions = {}): void {
     filter.sort_by = desc ? opts.sort.slice(1) : opts.sort;
     filter.sort_order = desc ? 'desc' : 'asc';
   }
+  // A malformed --limit must be a usage error, not a silent fall-back to the
+  // default (which would hide a typo) or a negative passed through to SQL
+  // `LIMIT` (which SQLite reads as "no limit" — the opposite of the intent).
+  if (opts.limit != null) {
+    const n = Number(opts.limit);
+    if (!Number.isInteger(n) || n < 1) {
+      console.error(chalk.red(`  Invalid --limit: ${opts.limit} (must be a positive integer).`));
+      process.exitCode = 2;
+      return;
+    }
+  }
   filter.limit = safeParseInt(opts.limit, 25);
 
   let traces, total;
