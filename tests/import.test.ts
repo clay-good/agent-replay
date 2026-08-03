@@ -88,6 +88,18 @@ describe('importClaudeTranscript', () => {
 });
 
 describe('importClaudeTranscript — subagents', () => {
+  it('counts a content-less user/assistant record as skipped (every record accounted for)', () => {
+    const path = fixture([
+      { type: 'user', sessionId: 's3', message: { role: 'user', content: 'start' } },
+      { type: 'assistant', sessionId: 's3', message: { role: 'assistant' } }, // no content → no step
+      { type: 'assistant', sessionId: 's3', message: { role: 'assistant', content: [{ type: 'text', text: 'answer' }] } },
+    ]);
+    const report = importClaudeTranscript(db, path);
+    // 3 records in: user (imported), content-less assistant (skipped), assistant text (imported).
+    expect(report.imported + report.skipped).toBe(3);
+    expect(report.skipped).toBe(1);
+  });
+
   it('imports subagent transcript files as nested steps under an anchor', () => {
     // Main transcript
     const path = fixture([

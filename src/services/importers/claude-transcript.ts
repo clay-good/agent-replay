@@ -159,7 +159,11 @@ export function importClaudeTranscript(
       }
     }
 
+    // A user/assistant record that yielded no step (e.g. an empty or
+    // content-less message) still counts — as skipped — so the imported-vs-
+    // skipped report accounts for every top-level record, as documented above.
     if (contributed) imported++;
+    else skipped++;
   }
 
   // Subagent transcripts live under `<session>/subagents/agent-<id>.jsonl`

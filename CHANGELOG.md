@@ -60,6 +60,10 @@ The recorded trace schema is unchanged.
   failed to `JSON.parse` on read and came back as `null`; it now wraps a string
   as `{ output: <string> }`, matching how the `message` handler already wraps
   string content.
+- `import`'s "records imported / skipped" report now accounts for a
+  content-less user/assistant record (it produced no step but was previously
+  counted as neither), so the tally the command prints matches the number of
+  records in the file.
 - `import` of a Claude Code transcript no longer discards an entire subagent
   file because of one corrupt line. The subagent path parsed every line inside a
   single `try`, so a truncated final line (common after a killed run) dropped all
