@@ -182,12 +182,22 @@ export function importClaudeTranscript(
         name: `subagent:${agentId}`,
         metadata: { hook_anchor: 1, agent_id: agentId, source: 'subagent-transcript' },
       });
-      let subRecords: Record<string, unknown>[] = [];
+      const subRecords: Record<string, unknown>[] = [];
       try {
-        subRecords = readFileSync(join(subDir, f), 'utf-8')
-          .split('\n').map((l) => l.trim()).filter(Boolean)
-          .map((l) => JSON.parse(l));
+        for (const l of readFileSync(join(subDir, f), 'utf-8').split('\n')) {
+          const trimmed = l.trim();
+          if (!trimmed) continue;
+          // Parse each line on its own, like the main transcript, so one bad
+          // line (e.g. a truncated final line from a killed run) skips only
+          // that line instead of discarding the whole subagent file.
+          try {
+            subRecords.push(JSON.parse(trimmed));
+          } catch {
+            skipped++;
+          }
+        }
       } catch {
+        // The file itself is unreadable — skip it whole.
         skipped++;
         continue;
       }

@@ -55,6 +55,11 @@ The recorded trace schema is unchanged.
 
 ### Fixed
 
+- `import` of a Claude Code transcript no longer discards an entire subagent
+  file because of one corrupt line. The subagent path parsed every line inside a
+  single `try`, so a truncated final line (common after a killed run) dropped all
+  of that subagent's steps and left an orphan anchor. It now parses line by line
+  and skips only the bad line, matching the main-transcript path.
 - `config set ai.max_tokens` rejects a non-positive-integer value instead of
   silently coercing it: `abc` and `0` used to become 1024 (while still printing
   "= abc"), and a negative was stored as-is and would break API calls.

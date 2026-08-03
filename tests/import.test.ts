@@ -116,4 +116,31 @@ describe('importClaudeTranscript — subagents', () => {
     expect(grep.parent_step_number).toBe(anchor.step_number);
     expect(grep.output).toEqual({ result: '3 matches' });
   });
+
+  it('tolerates a corrupt line in a subagent file instead of discarding the whole file', () => {
+    const path = fixture([
+      { type: 'user', sessionId: 'sess-bad', message: { role: 'user', content: 'go' } },
+      { type: 'assistant', sessionId: 'sess-bad', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Task', input: {} }] } },
+    ]);
+    const subDir = join(dir, 'transcript', 'subagents');
+    mkdirSync(subDir, { recursive: true });
+    // A truncated/garbage line (as a killed run leaves) sits between two valid records.
+    writeFileSync(
+      join(subDir, 'agent-b2.jsonl'),
+      [
+        JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'sb1', name: 'Read', input: { file: 'a' } }] } }),
+        '{ this is not valid json',
+        JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'sb1', content: 'ok' }] } }),
+      ].join('\n'),
+    );
+
+    const report = importClaudeTranscript(db, path);
+    const trace = getTrace(db, report.trace!.id)!;
+    // The anchor and the valid Read step survive; only the bad line is skipped.
+    expect(trace.steps.find((s) => s.name === 'subagent:b2')).toBeTruthy();
+    const read = trace.steps.find((s) => s.name === 'Read');
+    expect(read).toBeTruthy();
+    expect(read!.output).toEqual({ result: 'ok' });
+    expect(report.skipped).toBeGreaterThanOrEqual(1);
+  });
 });
