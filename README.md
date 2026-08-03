@@ -346,6 +346,10 @@ agent-replay eval <trace-id> --rubric my-rubric.yaml
 agent-replay eval <trace-id> --json
 ```
 
+`eval` exits non-zero when an evaluation fails (a rubric below its threshold or a
+built-in preset that fails), so `agent-replay eval <trace-id> --rubric q.yaml`
+drops straight into a CI job as a pass/fail gate.
+
 ### Guardrails
 
 ```bash
