@@ -231,6 +231,8 @@ export interface ForkResult {
 // ── Filter / Query Types ──────────────────────────────────────────────────
 
 export interface ListTracesFilter {
+  /** Exact trace id — used to scope a bulk operation to a single trace. */
+  id?: string;
   status?: string;
   agent_name?: string;
   tag?: string;

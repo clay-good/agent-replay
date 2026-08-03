@@ -11,6 +11,13 @@ the OpenTelemetry receiver. The recorded trace schema is unchanged.
 
 ### Added
 
+- `export` now accepts an optional `[trace-id]` positional, so you can export a
+  single trace by id (with prefix matching, like `show`/`why`/`replay`) instead
+  of only bulk-filtering. A trace id and the filter flags (`--status`, `--agent`,
+  `--tag`, `--since`) are mutually exclusive — passing both is a usage error
+  (exit `2`) rather than silently ignoring the filters, and an unknown id exits
+  `1`. Previously a trace id passed to `export` was silently dropped and the whole
+  database was exported.
 - The `otel serve` receiver now accepts `POST /v1/logs` in OTLP/protobuf as well
   as OTLP/JSON (it already accepted both on `/v1/traces`). OTLP exporters default
   to protobuf, so a Gemini CLI or Claude Code session left on the default

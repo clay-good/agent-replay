@@ -769,6 +769,13 @@ export function listTraces(
   const conditions: string[] = [];
   const params: unknown[] = [];
 
+  if (filter.id) {
+    // Exact id match — callers that want prefix resolution should resolve to a
+    // canonical id (via getTrace) before setting this, so bulk operations can be
+    // scoped to exactly one trace.
+    conditions.push('id = ?');
+    params.push(filter.id);
+  }
   if (filter.status) {
     // Reject an unknown status rather than silently matching nothing (a typo'd
     // `--status faield` shouldn't read as "no failed traces").

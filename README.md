@@ -370,12 +370,19 @@ agent-replay guard remove <policy-id>
 # Export as JSON
 agent-replay export --format json --output traces.json
 
+# Export a single trace by id (accepts an id prefix, like show/why/replay)
+agent-replay export <trace-id> --output one.json
+
 # Export completed traces as JSONL
 agent-replay export --format jsonl --status completed --output good.jsonl
 
 # Build a golden dataset for regression testing
 agent-replay export --format golden --tag production --output golden.json
 ```
+
+A trace id and the filter flags (`--status`, `--agent`, `--tag`, `--since`) are
+mutually exclusive: pass an id to export exactly one trace, or filters to export a
+set. Combining them is a usage error rather than silently ignoring the filters.
 
 ### Dashboard
 

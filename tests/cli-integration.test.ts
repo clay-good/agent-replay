@@ -143,6 +143,49 @@ describe('CLI integration', () => {
     expect(run(['check', '--golden', golden, '--fields', 'bogus']).code).toBe(2);
   });
 
+  it('export [trace-id] scopes to exactly one trace, matching prefixes like the other commands', () => {
+    const file = join(dir, '..', 'two.jsonl');
+    writeFileSync(
+      file,
+      [
+        JSON.stringify({ agent_name: 'alpha', status: 'completed', steps: [{ step_number: 1, step_type: 'output', name: 'a' }] }),
+        JSON.stringify({ agent_name: 'beta', status: 'completed', steps: [{ step_number: 1, step_type: 'output', name: 'b' }] }),
+      ].join('\n'),
+    );
+    run(['ingest', file, '--format', 'jsonl']);
+    const id = firstTraceId();
+
+    // No id → both traces.
+    expect(JSON.parse(run(['export', '--format', 'json']).stdout).length).toBe(2);
+
+    // Full id → exactly that one.
+    const byFull = JSON.parse(run(['export', id, '--format', 'json']).stdout);
+    expect(byFull.length).toBe(1);
+    expect(byFull[0].id).toBe(id);
+
+    // A prefix resolves to the same single canonical trace.
+    const byPrefix = JSON.parse(run(['export', id.slice(0, 10), '--format', 'json']).stdout);
+    expect(byPrefix.length).toBe(1);
+    expect(byPrefix[0].id).toBe(id);
+
+    // golden format honors the id too.
+    const golden = JSON.parse(run(['export', id, '--format', 'golden']).stdout);
+    expect(golden.length).toBe(1);
+  });
+
+  it('export rejects a trace-id combined with filter flags, and a missing id', () => {
+    const file = join(dir, '..', 'one.jsonl');
+    writeFileSync(file, JSON.stringify({ agent_name: 'solo', status: 'completed', steps: [{ step_number: 1, step_type: 'output', name: 's' }] }));
+    run(['ingest', file]);
+    const real = firstTraceId();
+
+    // id + filter is a usage error (not a silent ignore of the filter).
+    expect(run(['export', real, '--status', 'completed']).code).toBe(2);
+    expect(run(['export', real, '--agent', 'solo']).code).toBe(2);
+    // unknown id → runtime failure.
+    expect(run(['export', 'trc_does_not_exist']).code).toBe(1);
+  });
+
   it('propagates the wrapped child exit status via run', () => {
     expect(run(['run', '--', process.execPath, '-e', 'process.exit(0)']).code).toBe(0);
     expect(run(['run', '--', process.execPath, '-e', 'process.exit(5)']).code).toBe(5);

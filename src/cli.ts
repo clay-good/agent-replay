@@ -282,6 +282,7 @@ guardCmd
 program
   .command('export')
   .description('Export traces and evaluation results')
+  .argument('[trace-id]', 'Export only this trace (mutually exclusive with the filter flags)')
   .option('--format <format>', 'Export format: json, jsonl, golden', 'json')
   .option('--status <status>', 'Filter by status')
   .option('--tag <tag>', 'Filter by tag')
@@ -291,9 +292,9 @@ program
   .option('--with-snapshots', 'Include full snapshots')
   .option('--output <file>', 'Output file path (default: stdout)')
   .option('--dir <path>', 'Custom data directory')
-  .action(async (opts) => {
+  .action(async (traceId, opts) => {
     const { runExport } = await import('./commands/export.js');
-    await runExport(opts);
+    await runExport(traceId, opts);
   });
 
 // --- check ---

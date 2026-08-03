@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import chalk from 'chalk';
 import type { ListTracesFilter } from '../models/types.js';
 import { exportTraces, type ExportFormat } from '../services/export-service.js';
+import { getTrace } from '../services/trace-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { parseSinceToIso } from '../utils/time.js';
@@ -23,12 +24,39 @@ export interface ExportOptions {
 /**
  * `agent-replay export` — export traces in JSON, JSONL, or golden dataset format.
  * Writes to --output file or stdout.
+ *
+ * With a `traceId`, exports exactly that one trace (parity with show/why/replay/
+ * fork/eval); without one, exports every trace matching the filter flags. The two
+ * are mutually exclusive — passing both is a usage error rather than silently
+ * ignoring the filters.
  */
-export function runExport(opts: ExportOptions = {}): void {
+export function runExport(traceId: string | undefined, opts: ExportOptions = {}): void {
   const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
   const db = ensureDatabase(dbPath);
 
   const filter: ListTracesFilter = {};
+
+  if (traceId) {
+    const conflicting = ['status', 'agent', 'tag', 'since'] as const;
+    const used = conflicting.filter((k) => opts[k] != null);
+    if (used.length > 0) {
+      console.error(
+        chalk.red(`  A trace id can't be combined with filter flags (${used.map((k) => `--${k}`).join(', ')}).`),
+      );
+      console.error(chalk.dim('  Pass a trace id to export one trace, or filters to export a set — not both.'));
+      process.exitCode = 2;
+      return;
+    }
+    const full = getTrace(db, traceId);
+    if (!full) {
+      console.error(chalk.red(`  Trace not found: ${traceId}`));
+      process.exitCode = 1;
+      return;
+    }
+    // Resolve to the canonical id so a prefix exports exactly the one match.
+    filter.id = full.id;
+  }
+
   if (opts.status) filter.status = opts.status;
   if (opts.agent) filter.agent_name = opts.agent;
   if (opts.tag) filter.tag = opts.tag;
