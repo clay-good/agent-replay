@@ -6,8 +6,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-A hardening pass focused on scriptability, input validation, and robustness of
-the OpenTelemetry receiver. The recorded trace schema is unchanged.
+A hardening pass focused on scriptability and CI use (consistent exit codes,
+strict argument parsing), correctness of the comparison and evaluation paths
+(`diff`, `eval`, cost estimation), and robustness of the OpenTelemetry receiver.
+The recorded trace schema is unchanged.
 
 ### Added
 
