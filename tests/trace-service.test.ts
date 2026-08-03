@@ -10,6 +10,7 @@ import {
   deleteTrace,
   getStepSnapshot,
   createEval,
+  startTrace,
 } from '../src/services/trace-service.js';
 import { diffTraces } from '../src/services/diff-service.js';
 import { forkTrace } from '../src/services/fork-service.js';
@@ -196,6 +197,22 @@ describe('getTrace', () => {
     const found = getTrace(db, prefix);
     expect(found).not.toBeNull();
     expect(found!.id).toBe(trace.id);
+  });
+
+  it('prefers an exact id over a longer trace it merely prefixes', () => {
+    // `trc_abc` is both an exact id and a prefix of `trc_abcdef`. The lookup must
+    // return the exact match, not let the longer sibling shadow it.
+    startTrace(db, { agent_name: 'long', status: 'completed' }, { id: 'trc_abcdef' });
+    startTrace(db, { agent_name: 'exact', status: 'completed' }, { id: 'trc_abc' });
+    const found = getTrace(db, 'trc_abc');
+    expect(found!.id).toBe('trc_abc');
+    expect(found!.agent_name).toBe('exact');
+  });
+
+  it('resolves a prefix collision deterministically (lowest id)', () => {
+    startTrace(db, { agent_name: 'x', status: 'completed' }, { id: 'trc_pfx_bbb' });
+    startTrace(db, { agent_name: 'y', status: 'completed' }, { id: 'trc_pfx_aaa' });
+    expect(getTrace(db, 'trc_pfx_')!.id).toBe('trc_pfx_aaa');
   });
 
   it('includes evals in response', () => {

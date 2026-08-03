@@ -673,10 +673,16 @@ export function getTrace(
   // resolves to an arbitrary trace instead of reporting "not found".
   if (!traceId || !traceId.trim()) return null;
 
-  // Support prefix-matching
+  // Support prefix-matching, but always prefer an exact id and resolve prefix
+  // collisions deterministically. Without the ORDER BY, `LIMIT 1` could return a
+  // longer id that the given id merely prefixes (shadowing an exact match) or an
+  // arbitrary one of several prefix siblings. `(id = ?) DESC` floats the exact
+  // match to the top; `id ASC` makes the fallback stable.
   const traceRow = db
-    .prepare('SELECT * FROM agent_traces WHERE id = ? OR id LIKE ? LIMIT 1')
-    .get(traceId, `${traceId}%`) as Record<string, unknown> | undefined;
+    .prepare(
+      'SELECT * FROM agent_traces WHERE id = ? OR id LIKE ? ORDER BY (id = ?) DESC, id ASC LIMIT 1',
+    )
+    .get(traceId, `${traceId}%`, traceId) as Record<string, unknown> | undefined;
 
   if (!traceRow) return null;
 

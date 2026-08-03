@@ -62,6 +62,10 @@ the OpenTelemetry receiver. The recorded trace schema is unchanged.
   by a whole-file parse.
 - `eval --max-cost` rejects a malformed value instead of silently falling back
   to an unlimited budget — a typo like `0.O5` no longer disables the spend cap.
+- `getTrace` (and every command that resolves a trace id) now prefers an exact
+  id match and resolves prefix collisions deterministically, rather than letting
+  `LIMIT 1` return an arbitrary row. This only affects custom/short trace ids
+  where one id prefixes another; generated ids are fixed-length and unaffected.
 - AI-eval cost estimation no longer reports a misleading `$0.00` for a model
   outside the built-in price table. `estimateCost` now (a) matches a versioned
   or shortened model id to its family rate (e.g. `gpt-5.4-nano-2025-12-01` →
