@@ -5,6 +5,7 @@ import { callLlm } from './llm-client.js';
 import { getTrace } from './trace-service.js';
 import { summarizeDiffForLlm } from './trace-summarizer.js';
 import { extractJson } from './eval-service.js';
+import { stableStringify } from './check-service.js';
 import { safeParseJson } from '../utils/json.js';
 
 /**
@@ -63,23 +64,33 @@ export function diffTraces(
         });
       }
 
-      if (left.input !== right.input) {
+      // Compare the parsed values, not the raw JSON TEXT. Two traces carrying
+      // the same input/output but produced by different pipelines (e.g. an
+      // OTLP-ingested trace vs. a hook-recorded one) can serialize equal data
+      // with different key order or whitespace; a raw-string compare would then
+      // report a phantom diff and, worse, pin `divergence_step` to it — which
+      // feeds the AI diff analysis. stableStringify normalizes both.
+      const leftInput = safeParseJson(left.input as string);
+      const rightInput = safeParseJson(right.input as string);
+      if (stableStringify(leftInput) !== stableStringify(rightInput)) {
         if (divergence_step === null) divergence_step = stepNum;
         diffs.push({
           step_number: stepNum,
           field: 'input',
-          left_value: safeParseJson(left.input as string),
-          right_value: safeParseJson(right.input as string),
+          left_value: leftInput,
+          right_value: rightInput,
         });
       }
 
-      if (left.output !== right.output) {
+      const leftOutput = safeParseJson(left.output as string | null) ?? null;
+      const rightOutput = safeParseJson(right.output as string | null) ?? null;
+      if (stableStringify(leftOutput) !== stableStringify(rightOutput)) {
         if (divergence_step === null) divergence_step = stepNum;
         diffs.push({
           step_number: stepNum,
           field: 'output',
-          left_value: safeParseJson(left.output as string | null) ?? null,
-          right_value: safeParseJson(right.output as string | null) ?? null,
+          left_value: leftOutput,
+          right_value: rightOutput,
         });
       }
 

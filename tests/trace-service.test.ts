@@ -334,6 +334,33 @@ describe('diffTraces', () => {
     expect(result.diffs).toHaveLength(0);
   });
 
+  it('does not report a phantom input/output diff when only key order differs', () => {
+    // Two traces carrying the same step data serialized with different object
+    // key order (e.g. an OTLP trace vs. a hook-recorded one) must compare equal:
+    // a raw JSON-TEXT compare would flag a diff and mis-pin divergence_step.
+    const a = ingestTrace(db, makeTrace({
+      steps: [{ step_number: 1, step_type: 'tool_call', name: 't', input: { a: 1, b: 2 }, output: { x: 9, y: 8 } }],
+    }));
+    const b = ingestTrace(db, makeTrace({
+      steps: [{ step_number: 1, step_type: 'tool_call', name: 't', input: { b: 2, a: 1 }, output: { y: 8, x: 9 } }],
+    }));
+    const result = diffTraces(db, a.id, b.id);
+    expect(result.diffs.some((d) => d.field === 'input' || d.field === 'output')).toBe(false);
+    expect(result.divergence_step).toBeNull();
+  });
+
+  it('still reports a genuine input diff (not masked by normalization)', () => {
+    const a = ingestTrace(db, makeTrace({
+      steps: [{ step_number: 1, step_type: 'tool_call', name: 't', input: { a: 1 }, output: {} }],
+    }));
+    const b = ingestTrace(db, makeTrace({
+      steps: [{ step_number: 1, step_type: 'tool_call', name: 't', input: { a: 2 }, output: {} }],
+    }));
+    const result = diffTraces(db, a.id, b.id);
+    expect(result.diffs.some((d) => d.field === 'input')).toBe(true);
+    expect(result.divergence_step).toBe(1);
+  });
+
   it('detects divergence when step types differ', () => {
     const a = ingestTrace(db, makeTrace());
     const b = ingestTrace(db, makeTrace({

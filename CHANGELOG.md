@@ -62,6 +62,13 @@ the OpenTelemetry receiver. The recorded trace schema is unchanged.
   by a whole-file parse.
 - `eval --max-cost` rejects a malformed value instead of silently falling back
   to an unlimited budget — a typo like `0.O5` no longer disables the spend cap.
+- `diff` compares step `input`/`output` by parsed value instead of raw stored
+  JSON text, so two traces carrying the same data serialized with different
+  object-key order or whitespace (e.g. an OTLP-ingested trace vs. a
+  hook-recorded one) no longer report a phantom diff and mis-pin
+  `divergence_step` — which had been feeding the AI diff analysis a false
+  divergence point. Genuine value differences are still reported. Uses the same
+  `stableStringify` normalization `check --golden` already applies to inputs.
 - `eval` now exits `1` when an evaluation fails (a custom rubric scores below
   its threshold, or a built-in preset fails), matching the README's exit-code
   table. Previously it always exited `0` regardless of the result, so it could
