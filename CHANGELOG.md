@@ -126,6 +126,14 @@ The recorded trace schema is unchanged.
   `divergence_step` — which had been feeding the AI diff analysis a false
   divergence point. Genuine value differences are still reported. Uses the same
   `stableStringify` normalization `check --golden` already applies to inputs.
+- `diff` aligns steps by `step_number` (a merge-join) instead of by array
+  position. Step numbers may have gaps — validation only requires each be a
+  positive integer — and pairing by index then compared unrelated steps: a
+  trace numbered `1, 2, 4` diffed against `1, 2, 3, 4` reported phantom
+  differences on step 4 and pinned the divergence there, when in fact step 3
+  was simply right-only. A number present on only one side is now a one-sided
+  step and matching numbers are compared field-by-field, so `divergence_step`
+  and the AI diff analysis anchor to the real divergence.
 - `eval` now exits `1` when an evaluation fails (a custom rubric scores below
   its threshold, or a built-in preset fails), matching the README's exit-code
   table. Previously it always exited `0` regardless of the result, so it could

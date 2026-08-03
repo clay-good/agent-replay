@@ -35,14 +35,25 @@ export function diffTraces(
   const diffs: StepDiff[] = [];
   let divergence_step: number | null = null;
 
-  const maxSteps = Math.max(leftSteps.length, rightSteps.length);
+  // Align steps by step_number, not array position. Step numbers can have gaps
+  // — validation only requires each be a positive integer (see validators.ts),
+  // and an ingested, forked, or OTLP-assembled trace can leave holes — so
+  // pairing by index would compare unrelated steps and mis-pin the divergence
+  // point (which also feeds the AI diff analysis). Both lists are ordered by
+  // step_number, so a two-pointer merge-join pairs equal numbers and treats a
+  // number present on only one side as a one-sided step. Walking in ascending
+  // order means the first difference found is at the smallest step number.
+  let li = 0;
+  let ri = 0;
 
-  for (let i = 0; i < maxSteps; i++) {
-    const left = leftSteps[i];
-    const right = rightSteps[i];
+  while (li < leftSteps.length || ri < rightSteps.length) {
+    const left = leftSteps[li];
+    const right = rightSteps[ri];
+    const ln = left ? (left.step_number as number) : Infinity;
+    const rn = right ? (right.step_number as number) : Infinity;
 
-    if (left && right) {
-      const stepNum = left.step_number as number;
+    if (left && right && ln === rn) {
+      const stepNum = ln;
 
       if (left.step_type !== right.step_type) {
         if (divergence_step === null) divergence_step = stepNum;
@@ -105,24 +116,31 @@ export function diffTraces(
           right_value: (right.model as string | null) ?? null,
         });
       }
-    } else if (left && !right) {
-      const stepNum = left.step_number as number;
+
+      li++;
+      ri++;
+    } else if (ln < rn) {
+      // A step number present on the left only.
+      const stepNum = ln;
       if (divergence_step === null) divergence_step = stepNum;
       diffs.push({
         step_number: stepNum,
         field: 'missing_right',
-        left_value: left.name,
+        left_value: (left as Record<string, unknown>).name,
         right_value: null,
       });
-    } else if (!left && right) {
-      const stepNum = right.step_number as number;
+      li++;
+    } else {
+      // A step number present on the right only.
+      const stepNum = rn;
       if (divergence_step === null) divergence_step = stepNum;
       diffs.push({
         step_number: stepNum,
         field: 'missing_left',
         left_value: null,
-        right_value: right.name,
+        right_value: (right as Record<string, unknown>).name,
       });
+      ri++;
     }
   }
 

@@ -405,6 +405,35 @@ describe('diffTraces', () => {
     expect(result.diffs.some(d => d.field === 'missing_right')).toBe(true);
   });
 
+  it('aligns steps by step_number, not array index, when numbers have a gap', () => {
+    // Step numbers can have holes (validation only requires each be a positive
+    // integer). Pairing by array index would compare L's step 4 against R's step
+    // 3 — emitting phantom step_type/name diffs labeled "step 4" and pinning the
+    // divergence there. A merge-join on step_number must instead see steps
+    // 1/2/4 as identical and R's step 3 as the only (right-only) difference.
+    const a = ingestTrace(db, makeTrace({
+      steps: [
+        { step_number: 1, step_type: 'llm_call', name: 'a', input: {}, output: {} },
+        { step_number: 2, step_type: 'tool_call', name: 'b', input: {}, output: {} },
+        { step_number: 4, step_type: 'output', name: 'd', input: {}, output: {} },
+      ],
+    }));
+    const b = ingestTrace(db, makeTrace({
+      steps: [
+        { step_number: 1, step_type: 'llm_call', name: 'a', input: {}, output: {} },
+        { step_number: 2, step_type: 'tool_call', name: 'b', input: {}, output: {} },
+        { step_number: 3, step_type: 'tool_call', name: 'c', input: {}, output: {} },
+        { step_number: 4, step_type: 'output', name: 'd', input: {}, output: {} },
+      ],
+    }));
+    const result = diffTraces(db, a.id, b.id);
+    expect(result.divergence_step).toBe(3);
+    expect(result.diffs).toHaveLength(1);
+    expect(result.diffs[0]).toMatchObject({ step_number: 3, field: 'missing_left', right_value: 'c' });
+    // No phantom diffs on the correctly-matched step 4.
+    expect(result.diffs.some((d) => d.step_number === 4)).toBe(false);
+  });
+
   it('flags a swapped model (the "changed the model and it broke" case)', () => {
     const steps = [{ step_number: 1, step_type: 'llm_call', name: 'gen', input: {}, output: {}, model: 'gpt-4' }];
     const a = ingestTrace(db, makeTrace({ steps }));
