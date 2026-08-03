@@ -102,11 +102,11 @@ function formatDiffValue(val: unknown, field: string): string {
     return chalk.dim('(none)');
   }
 
-  if (field === 'missing_right') {
+  // For a step present on only one side, the empty side is already rendered as
+  // "(none)" by the null guard above; this branch handles the side that has the
+  // value, so show it (green) rather than blanking it too.
+  if (field === 'missing_right' || field === 'missing_left') {
     return chalk.green(truncate(String(val), 34));
-  }
-  if (field === 'missing_left') {
-    return chalk.dim('(none)');
   }
 
   if (typeof val === 'object') {

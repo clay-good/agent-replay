@@ -126,4 +126,16 @@ describe('renderDiff', () => {
     });
     expect(() => renderDiff(diff, trace(), trace())).not.toThrow();
   });
+
+  it('shows the value of a step that exists on only one side', () => {
+    // A right-only step (missing_left) must display its value in the Right
+    // column, not blank it out as "(none)".
+    const diff = diffResult({
+      divergence_step: 3, left_step_count: 2, right_step_count: 3,
+      diffs: [{ step_number: 3, field: 'missing_left', left_value: null, right_value: 'extra_step_xyz' }],
+    });
+    const out = noAnsi(renderDiff(diff, trace(), trace()));
+    expect(out).toContain('extra_step_xyz');
+    expect(out).toContain('Right only');
+  });
 });

@@ -55,6 +55,10 @@ The recorded trace schema is unchanged.
 
 ### Fixed
 
+- `diff` now shows the value of a step that exists on only one trace. A
+  right-only step (`+ Right only`) rendered its value as `(none)` in the Right
+  column instead of the actual step; both one-sided cases now display the
+  present value.
 - `config get` no longer prints API keys in plaintext. Fetching an object path
   (`config get ai` or `config get ai.api_keys`) dumped the raw object, bypassing
   the masking that `config list` and the scalar path already applied; the object
