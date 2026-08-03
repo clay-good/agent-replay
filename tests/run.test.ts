@@ -84,6 +84,26 @@ describe('runWrapped', () => {
     expect(new Set(trace.steps.map((s) => s.step_number)).size).toBe(240);
   }, 15000);
 
+  it('reassembles a multi-byte UTF-8 character split across a poll boundary', async () => {
+    // The child writes an event whose name contains a 4-byte emoji, but flushes
+    // the line in two halves — split mid-emoji — with a >200ms gap, so a poll
+    // reads a partial character. A naive byte→string decode would corrupt it
+    // into U+FFFD; the StringDecoder must recombine it.
+    const script = `
+      const fs = require('fs');
+      const f = process.env.AGENT_REPLAY_EVENTS, t = process.env.AGENT_REPLAY_TRACE_ID;
+      const line = JSON.stringify({ v: 1, type: 'step', trace_id: t, step_number: 1, step_type: 'thought', name: 'boundary_\u{1F600}_test' }) + '\\n';
+      const buf = Buffer.from(line, 'utf8');
+      const split = buf.indexOf(Buffer.from('\u{1F600}', 'utf8')) + 2; // mid-emoji
+      fs.appendFileSync(f, buf.subarray(0, split));
+      setTimeout(() => { fs.appendFileSync(f, buf.subarray(split)); process.exit(0); }, 320);
+    `;
+    const res = await runWrapped(db, { command: process.execPath, args: ['-e', script] });
+    expect(res.eventsApplied).toBe(1);
+    const trace = getTrace(db, res.traceId)!;
+    expect(trace.steps[0].name).toBe('boundary_\u{1F600}_test');
+  }, 15000);
+
   it('honors an explicit trace_end emitted by the child', async () => {
     const script = `
       const fs = require('fs');

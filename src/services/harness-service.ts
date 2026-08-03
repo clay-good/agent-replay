@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { writeFileSync, mkdtempSync, rmSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { startTrace, updateTrace } from './trace-service.js';
 import { applyEvent } from './recorder.js';
 import { parseEventLine } from './event-protocol.js';
@@ -52,6 +53,10 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
   // applied; a trailing partial line is buffered until the rest arrives.
   let bytesRead = 0;
   let partial = '';
+  // Decode bytes with a StringDecoder so a multi-byte UTF-8 character split
+  // across two reads (a poll boundary landing mid-character, or the child
+  // flushing a partial write) recombines instead of each half becoming U+FFFD.
+  const decoder = new StringDecoder('utf8');
 
   const applyLine = (line: string): void => {
     const { event, warning } = parseEventLine(line);
@@ -81,11 +86,12 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
         const buf = Buffer.alloc(size - bytesRead);
         const n = readSync(fd, buf, 0, buf.length, bytesRead);
         bytesRead += n;
-        partial += buf.toString('utf-8', 0, n);
+        partial += decoder.write(buf.subarray(0, n));
       } finally {
         closeSync(fd);
       }
     }
+    if (final) partial += decoder.end(); // flush any bytes still buffered
     const lines = partial.split('\n');
     if (final) {
       // Apply everything, including any trailing line with no final newline.

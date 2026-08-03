@@ -55,6 +55,11 @@ The recorded trace schema is unchanged.
 
 ### Fixed
 
+- `agent-replay run` no longer corrupts non-ASCII event data. The incremental
+  reader decoded raw byte slices with `Buffer.toString('utf-8')`, so a multi-byte
+  UTF-8 character straddling a 200ms poll boundary (or a partial child write)
+  turned into replacement characters. It now decodes through a `StringDecoder`,
+  which buffers an incomplete byte sequence until the rest arrives.
 - `diff` now shows the value of a step that exists on only one trace. A
   right-only step (`+ Right only`) rendered its value as `(none)` in the Right
   column instead of the actual step; both one-sided cases now display the
