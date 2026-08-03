@@ -260,8 +260,22 @@ describe('cost estimation', () => {
     expect(cost).toBeLessThan(estimateCost('claude-haiku-4-5-20251001', 1000, 500));
   });
 
-  it('returns 0 for unknown model', () => {
-    expect(estimateCost('unknown-model', 1000, 500)).toBe(0);
+  it('prices an unknown model conservatively (never $0) so the budget cap still guards', () => {
+    // A false $0 would make eval --max-cost gate on `0 > cap`, which never trips.
+    const unknown = estimateCost('unknown-model', 1000, 500);
+    expect(unknown).toBeGreaterThan(0);
+    // The fallback errs high: at least as expensive as any known model.
+    for (const known of Object.keys(COST_TABLE)) {
+      expect(unknown).toBeGreaterThanOrEqual(estimateCost(known, 1000, 500));
+    }
+  });
+
+  it('matches a versioned/family model id to its base rate', () => {
+    // A dated or shortened variant should resolve to the known family rate,
+    // not the conservative fallback.
+    const base = estimateCost('claude-haiku-4-5-20251001', 1000, 500);
+    expect(estimateCost('claude-haiku-4-5', 1000, 500)).toBe(base);
+    expect(estimateCost('gpt-5.4-nano-2025-12-01', 1000, 500)).toBe(estimateCost('gpt-5.4-nano', 1000, 500));
   });
 
   it('estimateAiEvalCost works', () => {

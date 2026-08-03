@@ -62,6 +62,13 @@ the OpenTelemetry receiver. The recorded trace schema is unchanged.
   by a whole-file parse.
 - `eval --max-cost` rejects a malformed value instead of silently falling back
   to an unlimited budget — a typo like `0.O5` no longer disables the spend cap.
+- AI-eval cost estimation no longer reports a misleading `$0.00` for a model
+  outside the built-in price table. `estimateCost` now (a) matches a versioned
+  or shortened model id to its family rate (e.g. `gpt-5.4-nano-2025-12-01` →
+  `gpt-5.4-nano`) and (b) falls back to the most expensive known rate for a
+  genuinely unknown model. This also restores the `eval --max-cost` budget cap,
+  which gates on `estimate > cap` and so was silently bypassed whenever the
+  estimate was a false `0`.
 - `attachSnapshot` now replaces a step's snapshot atomically (delete + insert in
   one transaction), matching `attachDecision`. Previously a failed insert — e.g.
   a context window that can't be serialized — left the step with its old

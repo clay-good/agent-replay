@@ -74,15 +74,39 @@ export async function callLlm(
 }
 
 /**
+ * Resolve the per-1M-token rate for a model.
+ *
+ * Real model ids are versioned variants of a base id (`gpt-5.4-nano-2025-12-01`,
+ * `claude-haiku-4-5` without the date), so after an exact lookup we try a
+ * family/prefix match. A genuinely unknown model falls back to the most
+ * expensive known rate — never a rate of 0. A 0 would make `estimateCost`
+ * report a misleading "$0.00" and, worse, silently defeat the `eval --max-cost`
+ * budget cap (which gates on `estimate > cap`, and 0 never exceeds it).
+ */
+function resolveModelRate(model: string): { input: number; output: number } {
+  const exact = COST_TABLE[model];
+  if (exact) return exact;
+  for (const [key, rate] of Object.entries(COST_TABLE)) {
+    if (model.startsWith(key) || key.startsWith(model)) return rate;
+  }
+  const rates = Object.values(COST_TABLE);
+  return {
+    input: Math.max(...rates.map((r) => r.input)),
+    output: Math.max(...rates.map((r) => r.output)),
+  };
+}
+
+/**
  * Estimate the cost of a request given an approximate input token count.
+ * An unknown model is priced conservatively (see resolveModelRate), so the
+ * estimate errs high rather than reporting a false zero.
  */
 export function estimateCost(
   model: string,
   inputTokens: number,
   outputTokens: number = 1024,
 ): number {
-  const costs = COST_TABLE[model];
-  if (!costs) return 0;
+  const costs = resolveModelRate(model);
   return (inputTokens / 1_000_000) * costs.input + (outputTokens / 1_000_000) * costs.output;
 }
 
