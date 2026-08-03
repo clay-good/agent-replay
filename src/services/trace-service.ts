@@ -643,19 +643,23 @@ export function attachSnapshot(
   snapshot: IngestSnapshotInput,
 ): void {
   const stepId = resolveStepId(db, traceId, stepNumber);
-  db.prepare('DELETE FROM agent_trace_snapshots WHERE step_id = ?').run(stepId);
-  db.prepare(
-    `INSERT INTO agent_trace_snapshots
-      (id, step_id, context_window, environment, tool_state, token_count)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(
-    generateId('snp'),
-    stepId,
-    jsonStr(snapshot.context_window),
-    jsonStr(snapshot.environment),
-    jsonStr(snapshot.tool_state),
-    snapshot.token_count ?? 0,
-  );
+  // Replace atomically so a failed insert can't leave the step with its old
+  // snapshot deleted and no replacement (matches attachDecision's invariant).
+  db.transaction(() => {
+    db.prepare('DELETE FROM agent_trace_snapshots WHERE step_id = ?').run(stepId);
+    db.prepare(
+      `INSERT INTO agent_trace_snapshots
+        (id, step_id, context_window, environment, tool_state, token_count)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      generateId('snp'),
+      stepId,
+      jsonStr(snapshot.context_window),
+      jsonStr(snapshot.environment),
+      jsonStr(snapshot.tool_state),
+      snapshot.token_count ?? 0,
+    );
+  })();
 }
 
 // ── 3. getTrace ───────────────────────────────────────────────────────────

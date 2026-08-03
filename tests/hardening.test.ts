@@ -131,6 +131,22 @@ describe('snapshot read robustness', () => {
     expect(snap!.context_window).toBe('raw unparseable text');
     expect(snap!.token_count).toBe(5);
   });
+
+  it('replaces a snapshot atomically — a failed insert keeps the old one', () => {
+    const t = startTrace(db, { agent_name: 'a' });
+    appendStep(db, t.id, { step_number: 1, step_type: 'thought', name: 's' });
+    attachSnapshot(db, t.id, 1, { context_window: { messages: 1 }, token_count: 7 });
+
+    // A BigInt can't be JSON-serialized, so the replacing insert throws after
+    // the delete. Without a transaction the step would be left snapshot-less.
+    expect(() =>
+      attachSnapshot(db, t.id, 1, { context_window: { bad: 1n } as unknown as Record<string, unknown>, token_count: 9 }),
+    ).toThrow();
+
+    const snap = getStepSnapshot(db, t.id, 1);
+    expect(snap).not.toBeNull();
+    expect(snap!.token_count).toBe(7); // original survived the rollback
+  });
 });
 
 // ── renderTree never drops steps in a parent cycle / self-loop ─────────────

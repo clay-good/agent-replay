@@ -62,6 +62,10 @@ the OpenTelemetry receiver. The recorded trace schema is unchanged.
   by a whole-file parse.
 - `eval --max-cost` rejects a malformed value instead of silently falling back
   to an unlimited budget — a typo like `0.O5` no longer disables the spend cap.
+- `attachSnapshot` now replaces a step's snapshot atomically (delete + insert in
+  one transaction), matching `attachDecision`. Previously a failed insert — e.g.
+  a context window that can't be serialized — left the step with its old
+  snapshot deleted and no replacement.
 - `diff` compares step `input`/`output` by parsed value instead of raw stored
   JSON text, so two traces carrying the same data serialized with different
   object-key order or whitespace (e.g. an OTLP-ingested trace vs. a
