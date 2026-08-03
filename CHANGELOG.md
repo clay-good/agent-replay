@@ -55,6 +55,11 @@ The recorded trace schema is unchanged.
 
 ### Fixed
 
+- `config get` no longer prints API keys in plaintext. Fetching an object path
+  (`config get ai` or `config get ai.api_keys`) dumped the raw object, bypassing
+  the masking that `config list` and the scalar path already applied; the object
+  branch now masks API keys recursively, and the scalar path masks even a short
+  value.
 - **Guardrails now fail closed on a malformed pattern (safety).** A blocking
   policy whose `name_regex` was invalid or ReDoS-rejected used to silently never
   match — a kill-switch that quietly did nothing. `guard add` now rejects an

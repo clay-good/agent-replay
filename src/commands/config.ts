@@ -70,15 +70,14 @@ export function runConfigGet(key: string, opts: ConfigOptions = {}): void {
   if (value === undefined) {
     console.log(chalk.dim(`  ${key}: (not set)`));
   } else if (typeof value === 'object') {
-    console.log(JSON.stringify(value, null, 2));
+    // Mask any API keys before printing — `config get ai` or `config get
+    // ai.api_keys` returns an object, and dumping it raw would leak secrets in
+    // plaintext (config list already masks; this keeps get consistent).
+    console.log(JSON.stringify(maskConfigValue(value, key), null, 2));
   } else {
-    // Mask API keys
+    // Mask API keys (via maskKey, so even a short value never prints raw).
     const str = String(value);
-    if (key.includes('api_key') && str.length > 8) {
-      console.log(maskKey(str));
-    } else {
-      console.log(str);
-    }
+    console.log(key.includes('api_key') ? maskKey(str) : str);
   }
 }
 
@@ -187,4 +186,37 @@ export async function runConfigTestAi(opts: ConfigOptions = {}): Promise<void> {
 function maskKey(key: string): string {
   if (key.length <= 8) return '***';
   return key.slice(0, 4) + '...' + key.slice(-4);
+}
+
+/**
+ * Deep-copy a config value with every API key masked, for `config get` on an
+ * object path. Handles both the case where the value *is* the api_keys map
+ * (e.g. `config get ai.api_keys`) and where it merely contains one (`config get
+ * ai`).
+ */
+function maskConfigValue(value: unknown, keyPath: string): unknown {
+  const clone = JSON.parse(JSON.stringify(value));
+  if (keyPath.split('.').pop() === 'api_keys' && clone && typeof clone === 'object') {
+    maskApiKeyMap(clone as Record<string, unknown>);
+    return clone;
+  }
+  maskApiKeysDeep(clone);
+  return clone;
+}
+
+function maskApiKeyMap(map: Record<string, unknown>): void {
+  for (const k of Object.keys(map)) {
+    if (typeof map[k] === 'string') map[k] = maskKey(map[k] as string);
+  }
+}
+
+function maskApiKeysDeep(node: unknown): void {
+  if (!node || typeof node !== 'object') return;
+  for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+    if (k === 'api_keys' && v && typeof v === 'object') {
+      maskApiKeyMap(v as Record<string, unknown>);
+    } else {
+      maskApiKeysDeep(v);
+    }
+  }
 }

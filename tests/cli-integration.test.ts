@@ -453,6 +453,18 @@ describe('CLI integration', () => {
     expect(run(['config', 'set', 'ai.provider', 'notreal']).code).toBe(2);   // invalid provider
   });
 
+  it('config get never prints an API key in plaintext, even for an object path', () => {
+    const secret = 'sk-ant-SECRET1234567890ABCDEF';
+    run(['config', 'set', 'ai.api_keys.anthropic', secret]);
+    // Object paths (the parent objects) and the scalar path must all be masked.
+    for (const path of ['ai.api_keys.anthropic', 'ai.api_keys', 'ai']) {
+      const out = run(['config', 'get', path]).stdout;
+      expect(out).not.toContain(secret);
+      expect(out).toContain('sk-a'); // masked form is still shown
+    }
+    expect(run(['config', 'list']).stdout).not.toContain(secret);
+  });
+
   it('reports failures via exit code, not just a stderr message', () => {
     // Usage errors → 2.
     expect(run(['export', '--format', 'bogus']).code).toBe(2);
