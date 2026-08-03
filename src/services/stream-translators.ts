@@ -161,13 +161,17 @@ export class GeminiStreamTranslator extends BaseTranslator {
       const num = id ? this.openTools.get(id) : undefined;
       if (num == null) return [];
       this.openTools.delete(id!);
+      // Wrap a bare-string result in an object (like the `message` handler
+      // below). A raw string is stored verbatim as TEXT and then fails to
+      // JSON.parse on read, so the tool output would silently come back null.
+      const out = obj.output ?? obj.result;
       return [
         {
           v: 1,
           type: 'step_end',
           trace_id: this.traceId!,
           step_number: num,
-          output: ((obj.output ?? obj.result) as Record<string, unknown>) ?? null,
+          output: typeof out === 'string' ? { output: out } : ((out as Record<string, unknown>) ?? null),
         } as CaptureEvent,
       ];
     }

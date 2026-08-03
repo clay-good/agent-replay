@@ -92,6 +92,19 @@ describe('GeminiStreamTranslator', () => {
     expect(trace.steps.some((s) => s.step_type === 'output' && s.name === 'message')).toBe(true);
   });
 
+  it('wraps a bare-string tool_result so the output is not lost on read', () => {
+    // A raw string stored verbatim as TEXT fails JSON.parse on read → null.
+    const t = makeTranslator('gemini-stream')!;
+    const id = run(t, [
+      { type: 'init', session_id: 'g_str' },
+      { type: 'tool_use', id: 't1', name: 'read_file', input: { path: 'a' } },
+      { type: 'tool_result', id: 't1', result: 'plain file contents' },
+      { type: 'result', exit_code: 0 },
+    ], false);
+    const tool = getTrace(db, id)!.steps.find((s) => s.step_type === 'tool_call')!;
+    expect(tool.output).toEqual({ output: 'plain file contents' });
+  });
+
   it('respects a non-zero result exit code as failure', () => {
     const t = makeTranslator('gemini-stream')!;
     const id = run(t, [

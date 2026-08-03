@@ -55,6 +55,11 @@ The recorded trace schema is unchanged.
 
 ### Fixed
 
+- `record --format gemini-stream` no longer loses a tool result that is a plain
+  string. The `tool_result` handler stored a bare string verbatim, which then
+  failed to `JSON.parse` on read and came back as `null`; it now wraps a string
+  as `{ output: <string> }`, matching how the `message` handler already wraps
+  string content.
 - `import` of a Claude Code transcript no longer discards an entire subagent
   file because of one corrupt line. The subagent path parsed every line inside a
   single `try`, so a truncated final line (common after a killed run) dropped all
