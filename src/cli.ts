@@ -20,6 +20,16 @@ program
   .version(version)
   .description('Agent Flight Data Recorder & Replay Engine — time-travel debugging, auto-eval, and what-if sandboxing for AI agents');
 
+// Map every commander parse error (unknown option, missing/excess argument,
+// unknown command) to exit code 2 — the documented "usage error" signal — so it
+// lines up with the runtime failures (exit 1) that command actions raise.
+// Commander's own default is 1 for all of these, which contradicts the README's
+// exit-code table. help/version still exit 0. Must be set BEFORE any .command()
+// so subcommands inherit the callback (commander copies it at creation time).
+program.exitOverride((err) => {
+  process.exit(err.exitCode === 0 ? 0 : 2);
+});
+
 // --- init ---
 program
   .command('init')
@@ -393,6 +403,18 @@ configCmd
     const { runConfigTestAi } = await import('./commands/config.js');
     await runConfigTestAi(opts);
   });
+
+// Reject unexpected extra positional arguments across every command instead of
+// silently ignoring them — e.g. `show <id> <typo>` or `list production` (meant
+// as `--tag production`) should fail loudly, not quietly run on the first arg.
+// There's no program-wide switch, so apply it to each registered command (and
+// nested subcommands like `config`/`otel`). Variadic args (e.g. `run
+// [command...]`) absorb their trailing args, so this never trips them.
+function rejectExcessArguments(cmd: Command): void {
+  cmd.allowExcessArguments(false);
+  cmd.commands.forEach(rejectExcessArguments);
+}
+rejectExcessArguments(program);
 
 // Parse asynchronously so a rejected command action (e.g. an unopenable/corrupt
 // database) is reported as a clean one-line error and a non-zero exit, rather

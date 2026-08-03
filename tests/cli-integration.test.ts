@@ -454,6 +454,32 @@ describe('CLI integration', () => {
     expect(r.code).not.toBe(0);
   });
 
+  it('treats commander usage errors as exit 2, matching the documented convention', () => {
+    // The README exit-code table says an unknown flag or bad argument value is a
+    // usage error (2). Commander defaults these to 1, so the CLI remaps them.
+    expect(run(['list', '--bogusflag']).code).toBe(2);        // unknown option
+    expect(run(['show']).code).toBe(2);                        // missing required argument
+    expect(run(['definitely-not-a-command']).code).toBe(2);    // unknown command
+    // help / version are not errors.
+    expect(run(['--help']).code).toBe(0);
+    expect(run(['--version']).code).toBe(0);
+  });
+
+  it('rejects stray positional arguments instead of silently ignoring them', () => {
+    const file = join(dir, '..', 'stray.jsonl');
+    writeFileSync(file, JSON.stringify({ agent_name: 'stray', status: 'completed', steps: [{ step_number: 1, step_type: 'output', name: 'o' }] }));
+    run(['ingest', file]);
+    const id = firstTraceId();
+
+    // `list production` (meant as `--tag production`) must fail, not list everything.
+    expect(run(['list', 'production']).code).toBe(2);
+    // A typo'd second id on a single-trace command must fail, not run on the first.
+    expect(run(['show', id, 'extra']).code).toBe(2);
+    // The valid forms still work.
+    expect(run(['list']).code).toBe(0);
+    expect(run(['show', id]).code).toBe(0);
+  });
+
   it('demo --reset refuses to delete a directory that is not an agent-replay store', () => {
     // Safety guard: --reset must never rm a directory whose name isn't an
     // agent-replay data dir. Spawned directly since it needs a custom --dir that

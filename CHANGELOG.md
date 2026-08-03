@@ -43,6 +43,13 @@ the OpenTelemetry receiver. The recorded trace schema is unchanged.
   `import` with nothing importable, `watch`/`why` not-found, `diff --ai` with no
   provider, `demo --reset` refusal). A new "Exit codes" section in the README
   documents the convention.
+- **Argument parsing now fails loudly on mistakes.** Every command rejects
+  unexpected extra positional arguments instead of silently ignoring them, so
+  `agent-replay show <id> <typo>` or `list production` (meant as `--tag
+  production`) errors rather than quietly running on the first argument. And
+  commander's own parse errors (unknown flag, unknown command, missing/excess
+  argument) now exit `2` to match the documented "usage error" code — they
+  previously exited `1`, contradicting the README's exit-code table.
 
 ### Fixed
 
