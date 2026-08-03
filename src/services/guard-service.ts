@@ -225,9 +225,40 @@ export function resolveGuardExit(
 
 // ── Matching logic ────────────────────────────────────────────────────────
 
+/**
+ * Validate a match pattern before it is stored, so a policy can never be saved
+ * in a form that silently fails open at evaluation time. Returns an error
+ * message, or null if the pattern is usable.
+ *
+ * The critical case: an invalid or ReDoS-rejected `name_regex` makes safeRegex
+ * return null, which the matcher would otherwise read as "no match" — a `deny`
+ * kill-switch that never fires. Reject it up front instead.
+ */
+export function validateMatchPattern(pattern: Record<string, unknown>): string | null {
+  for (const key of ['name_contains', 'input_contains', 'output_contains'] as const) {
+    if (pattern[key] != null && typeof pattern[key] !== 'string') {
+      return `${key} must be a string`;
+    }
+  }
+  if (pattern.name_regex != null) {
+    if (typeof pattern.name_regex !== 'string') {
+      return 'name_regex must be a string';
+    }
+    if (!safeRegex(pattern.name_regex, 'i')) {
+      return `name_regex is not a valid or safe regular expression: ${pattern.name_regex}`;
+    }
+  }
+  return null;
+}
+
 function matchesPolicy(step: TraceStep, policy: GuardrailPolicy): string | null {
   const pattern = policy.match_pattern;
   const reasons: string[] = [];
+  // A blocking policy must fail toward blocking. If a stored pattern is
+  // unusable (e.g. a legacy policy with a bad name_regex, or one inserted
+  // outside `guard add`'s validation), a deny/require_review policy treats the
+  // step as a match rather than silently skipping; warn/allow just don't fire.
+  const failsClosed = policy.action === 'deny' || policy.action === 'require_review';
 
   // Match by step_type (exact)
   if (pattern.step_type && step.step_type !== pattern.step_type) {
@@ -238,8 +269,8 @@ function matchesPolicy(step: TraceStep, policy: GuardrailPolicy): string | null 
   }
 
   // Match by step name (contains)
-  if (pattern.name_contains) {
-    const nameStr = typeof pattern.name_contains === 'string' ? pattern.name_contains : '';
+  if (pattern.name_contains != null) {
+    const nameStr = String(pattern.name_contains);
     if (!step.name.toLowerCase().includes(nameStr.toLowerCase())) {
       return null;
     }
@@ -247,18 +278,23 @@ function matchesPolicy(step: TraceStep, policy: GuardrailPolicy): string | null 
   }
 
   // Match by step name (regex)
-  if (pattern.name_regex) {
-    const regex = safeRegex(pattern.name_regex as string, 'i');
-    if (!regex || !regex.test(step.name)) {
+  if (pattern.name_regex != null) {
+    const regex = safeRegex(String(pattern.name_regex), 'i');
+    if (!regex) {
+      // Unusable pattern: fail closed for a blocking policy, skip otherwise.
+      if (!failsClosed) return null;
+      reasons.push(`name_regex '${pattern.name_regex}' is unusable — failing closed`);
+    } else if (!regex.test(step.name)) {
       return null;
+    } else {
+      reasons.push(`name matches /${pattern.name_regex}/`);
     }
-    reasons.push(`name matches /${pattern.name_regex}/`);
   }
 
   // Match by input field values
-  if (pattern.input_contains) {
+  if (pattern.input_contains != null) {
     const inputStr = JSON.stringify(step.input).toLowerCase();
-    const searchStr = (pattern.input_contains as string).toLowerCase();
+    const searchStr = String(pattern.input_contains).toLowerCase();
     if (!inputStr.includes(searchStr)) {
       return null;
     }
@@ -266,9 +302,9 @@ function matchesPolicy(step: TraceStep, policy: GuardrailPolicy): string | null 
   }
 
   // Match by output pattern
-  if (pattern.output_contains) {
+  if (pattern.output_contains != null) {
     const outputStr = JSON.stringify(step.output ?? '').toLowerCase();
-    const searchStr = (pattern.output_contains as string).toLowerCase();
+    const searchStr = String(pattern.output_contains).toLowerCase();
     if (!outputStr.includes(searchStr)) {
       return null;
     }

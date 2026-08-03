@@ -9,6 +9,7 @@ import {
   evaluateStep,
   verdictForMatches,
   resolveGuardExit,
+  validateMatchPattern,
 } from '../services/guard-service.js';
 import type { StepPolicyResult } from '../services/guard-service.js';
 import { ensureDatabase } from '../db/index.js';
@@ -86,6 +87,16 @@ export function runGuardAdd(opts: GuardAddOptions): void {
   if (!validActions.includes(opts.action)) {
     console.error(chalk.red(`  Invalid action: ${opts.action}`));
     console.error(chalk.dim(`  Valid actions: ${validActions.join(', ')}`));
+    process.exitCode = 2;
+    return;
+  }
+
+  // Reject an unusable pattern up front. A policy stored with an invalid or
+  // unsafe name_regex would silently fail to match at evaluation time — a
+  // kill-switch that never fires — so it must never be saved.
+  const patternError = validateMatchPattern(matchPattern);
+  if (patternError) {
+    console.error(chalk.red(`  Invalid --pattern: ${patternError}`));
     process.exitCode = 2;
     return;
   }

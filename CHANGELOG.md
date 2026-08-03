@@ -55,6 +55,15 @@ The recorded trace schema is unchanged.
 
 ### Fixed
 
+- **Guardrails now fail closed on a malformed pattern (safety).** A blocking
+  policy whose `name_regex` was invalid or ReDoS-rejected used to silently never
+  match — a kill-switch that quietly did nothing. `guard add` now rejects an
+  unusable pattern (bad/unsafe `name_regex`, or a non-string `name_contains` /
+  `input_contains` / `output_contains`) so it can't be stored, and at evaluation
+  time a `deny` / `require_review` policy with an unusable regex treats the step
+  as a match (fails closed) instead of skipping it. Non-string match values no
+  longer throw mid-evaluation (which, under `hook --enforce`, had let the pending
+  tool call through).
 - `check --golden` no longer reports spurious regressions when several traces
   share an agent name and input (repeated runs of the same agent, or a fork):
   golden entries are bucketed and each candidate is paired with its closest

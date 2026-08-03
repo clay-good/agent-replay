@@ -458,6 +458,9 @@ describe('CLI integration', () => {
     expect(run(['export', '--format', 'bogus']).code).toBe(2);
     expect(run(['guard', 'add', '--name', 'x', '--pattern', 'not json', '--action', 'deny']).code).toBe(2);
     expect(run(['guard', 'add', '--name', 'x', '--pattern', '{}', '--action', 'bogus']).code).toBe(2);
+    // A deny policy with an unusable name_regex must be rejected, not stored as
+    // a kill-switch that silently never fires.
+    expect(run(['guard', 'add', '--name', 'x', '--pattern', '{"name_regex":"(a+)+"}', '--action', 'deny']).code).toBe(2);
     // Runtime failure → 1: watching a named trace that doesn't exist. (diff's
     // no-provider exit-1 path is env-dependent — a machine with an API key would
     // resolve one — so it's verified manually rather than in this hermetic test.)

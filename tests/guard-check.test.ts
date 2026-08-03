@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
-import { addPolicy, evaluateStep, verdictForMatches, resolveGuardExit, testPolicies, removePolicy } from '../src/services/guard-service.js';
+import { addPolicy, evaluateStep, verdictForMatches, resolveGuardExit, testPolicies, removePolicy, validateMatchPattern } from '../src/services/guard-service.js';
 import { startTrace, ingestTrace } from '../src/services/trace-service.js';
 import type { TraceStep } from '../src/models/types.js';
 import type { StepType } from '../src/models/enums.js';
@@ -171,5 +171,40 @@ describe('testPolicies pre-flight matching', () => {
     expect(byStep(2).matches[0].policy.name).toBe('no-del');
     expect(byStep(3).matches.map((m) => m.action)).toEqual(['warn']);
     expect(byStep(4).matches).toHaveLength(0); // output step
+  });
+});
+
+// ── malformed patterns must never fail open (safety) ───────────────────────
+
+describe('malformed patterns fail closed, not open', () => {
+  it('validateMatchPattern rejects an invalid/unsafe regex and non-string values', () => {
+    expect(validateMatchPattern({ name_regex: '[unclosed' })).toMatch(/valid or safe/);
+    expect(validateMatchPattern({ name_regex: '(a+)+' })).toMatch(/valid or safe/); // ReDoS
+    expect(validateMatchPattern({ name_regex: 42 })).toMatch(/must be a string/);
+    expect(validateMatchPattern({ input_contains: 123 })).toMatch(/must be a string/);
+    // Usable patterns pass.
+    expect(validateMatchPattern({ step_type: 'tool_call', name_regex: 'delete' })).toBeNull();
+    expect(validateMatchPattern({ name_contains: 'rm' })).toBeNull();
+  });
+
+  it('a deny policy with an unusable regex blocks (fails closed) instead of being skipped', () => {
+    // Inserted directly, bypassing `guard add`'s validation — e.g. a legacy row.
+    addPolicy(db, { name: 'legacy-bad', action: 'deny', match_pattern: { step_type: 'tool_call', name_regex: '(x+)+' } });
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'delete_everything' })));
+    expect(v.action).toBe('deny');
+    expect(v.policy).toBe('legacy-bad');
+  });
+
+  it('a warn policy with an unusable regex does not spuriously fire', () => {
+    addPolicy(db, { name: 'warn-bad', action: 'warn', match_pattern: { step_type: 'tool_call', name_regex: '(x+)+' } });
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'anything' })));
+    expect(v.action).toBe('allow');
+  });
+
+  it('a non-string input_contains does not crash the matcher', () => {
+    addPolicy(db, { name: 'weird', action: 'deny', match_pattern: { input_contains: 123 } });
+    expect(() =>
+      verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 't', input: { note: 'has 123 inside' } }))),
+    ).not.toThrow();
   });
 });
