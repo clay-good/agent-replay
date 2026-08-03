@@ -138,6 +138,13 @@ The recorded trace schema is unchanged.
   to SQL `LIMIT` where SQLite reads it as "no limit". Previously `list --limit
   abc` quietly returned the default page and `otel serve --port abc` bound the
   default 4318, so an exporter pointed at the intended port connected to nothing.
+- The `otel serve` receiver no longer records an errored span as a successful
+  trace. A span with `status.code=ERROR` but an empty `status.message` (the
+  description is optional, and some OTLP/JSON exporters send `""`) produced an
+  empty error string, which then read as "no error" — so the trace was stored as
+  `completed` and the failure was invisible. An empty message now falls through
+  to `error.type`, then a generic `error`, so an error span always marks the
+  trace `failed` and carries a non-empty step error.
 - The `otel serve` receiver answers client-malformed payloads (a `null`, array,
   or primitive JSON body, or a body that claims gzip but isn't) with `400`
   rather than `500`, so exporters don't retry an un-processable batch (5xx is

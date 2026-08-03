@@ -109,6 +109,39 @@ describe('mapOtlpTraces (GenAI semconv)', () => {
     expect(trace.status).toBe('failed');
     expect(trace.steps![0].error).toBe('tool blew up');
   });
+
+  it('fails the trace on an ERROR span even when status.message is empty', () => {
+    // Some OTLP/JSON exporters set status.code=2 with an empty message (the
+    // description field is optional). The empty string is not a "no error"
+    // signal: the trace must still be marked failed and the step must carry a
+    // non-empty error, rather than being silently recorded as completed.
+    const payload = otlp([
+      {
+        traceId: 't-empty', spanId: 's1', name: 'execute_tool',
+        startTimeUnixNano: String(1 * MS), endTimeUnixNano: String(2 * MS),
+        attributes: [attr('gen_ai.operation.name', 'execute_tool'), attr('error.type', 'TimeoutError')],
+        status: { code: 2, message: '' },
+      },
+    ]);
+    const [trace] = mapOtlpTraces(payload);
+    expect(trace.status).toBe('failed');
+    // Falls back to error.type when the message is empty.
+    expect(trace.steps![0].error).toBe('TimeoutError');
+  });
+
+  it('marks an ERROR span with neither message nor error.type using a generic error', () => {
+    const payload = otlp([
+      {
+        traceId: 't-bare', spanId: 's1', name: 'execute_tool',
+        startTimeUnixNano: String(1 * MS), endTimeUnixNano: String(2 * MS),
+        attributes: [attr('gen_ai.operation.name', 'execute_tool')],
+        status: { code: 2, message: '' },
+      },
+    ]);
+    const [trace] = mapOtlpTraces(payload);
+    expect(trace.status).toBe('failed');
+    expect(trace.steps![0].error).toBe('error');
+  });
 });
 
 // ── Receiver ────────────────────────────────────────────────────────────────

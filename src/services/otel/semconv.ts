@@ -134,7 +134,12 @@ export function flattenSpans(otlp: Record<string, unknown>): FlatSpan[] {
           end: s.endTimeUnixNano != null ? num(s.endTimeUnixNano) : undefined,
           attrs,
           resource,
-          errorMessage: isError ? (status?.message ?? str(attrs['error.type']) ?? 'error') : null,
+          // An error span must yield a non-empty message: some exporters set
+          // status.code=2 with an empty description, and an empty string here
+          // would read as falsy in `anyError` below — silently recording the
+          // failure as a completed trace. `str` treats '' as absent, so this
+          // falls through to error.type, then a generic 'error'.
+          errorMessage: isError ? (str(status?.message) ?? str(attrs['error.type']) ?? 'error') : null,
         });
       }
     }
