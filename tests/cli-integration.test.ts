@@ -353,6 +353,32 @@ describe('CLI integration', () => {
     expect(run(['eval', id, '--rubric', passRubric]).code).toBe(0);
   });
 
+  it('diff --fields recomputes divergence so the view is self-consistent', () => {
+    // Two traces differing only in step name. Filtering to a field with no
+    // difference must clear the divergence too, not leave a stale banner that
+    // reads "DIVERGES AT STEP N" above "0 difference(s) found".
+    const f = join(dir, '..', 'df.jsonl');
+    writeFileSync(f, [
+      JSON.stringify({ agent_name: 'dl', status: 'completed', steps: [{ step_number: 1, step_type: 'output', name: 'left-name', output: { t: 'same' } }] }),
+      JSON.stringify({ agent_name: 'dr', status: 'completed', steps: [{ step_number: 1, step_type: 'output', name: 'right-name', output: { t: 'same' } }] }),
+    ].join('\n'));
+    run(['ingest', f, '--format', 'jsonl']);
+    const ids = JSON.parse(run(['list', '--json']).stdout).items.map((t: { id: string }) => t.id);
+
+    // Unfiltered, the name difference is a genuine divergence at step 1.
+    const full = JSON.parse(run(['diff', ids[0], ids[1], '--json']).stdout);
+    expect(full.divergence_step).toBe(1);
+    expect(full.diffs.length).toBeGreaterThan(0);
+
+    // Filtered to a field with no difference, both the diffs and the divergence
+    // clear — the --json output stays internally consistent...
+    const filtered = JSON.parse(run(['diff', ids[0], ids[1], '--fields', 'output', '--json']).stdout);
+    expect(filtered.diffs).toHaveLength(0);
+    expect(filtered.divergence_step).toBeNull();
+    // ...and the human view no longer contradicts itself.
+    expect(run(['diff', ids[0], ids[1], '--fields', 'output']).stdout).not.toContain('DIVERGES AT STEP');
+  });
+
   it('translates a codex exec --json stream via record --format codex-exec', () => {
     const stream = [
       '{"type":"thread.started","thread_id":"th_ci"}',

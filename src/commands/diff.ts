@@ -65,6 +65,14 @@ export async function runDiff(
         d.field === 'missing_left' ||
         d.field === 'missing_right',
     );
+    // Recompute the divergence point from the filtered diffs. Otherwise it can
+    // still point at a field that --fields removed, so the renderer draws
+    // "DIVERGES AT STEP N" directly above "0 difference(s) found" (and --json
+    // reports a divergence_step inconsistent with its own diffs). The earliest
+    // remaining step is the first visible divergence; none left means none.
+    diff.divergence_step = diff.diffs.length
+      ? Math.min(...diff.diffs.map((d) => d.step_number))
+      : null;
   }
 
   // Raw JSON output

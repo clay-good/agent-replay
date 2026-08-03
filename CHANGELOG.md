@@ -134,6 +134,10 @@ The recorded trace schema is unchanged.
   was simply right-only. A number present on only one side is now a one-sided
   step and matching numbers are compared field-by-field, so `divergence_step`
   and the AI diff analysis anchor to the real divergence.
+- `diff --fields` recomputes the divergence point from the filtered results, so
+  it no longer prints a "DIVERGES AT STEP N" banner above "0 difference(s)
+  found" (or emit a `--json` `divergence_step` inconsistent with its own
+  `diffs`) when the requested field has no difference.
 - `eval` now exits `1` when an evaluation fails (a custom rubric scores below
   its threshold, or a built-in preset fails), matching the README's exit-code
   table. Previously it always exited `0` regardless of the result, so it could
