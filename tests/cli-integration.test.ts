@@ -329,6 +329,30 @@ describe('CLI integration', () => {
     expect(run(['eval', id, '--ai', '--max-cost', '-1']).code).toBe(2);
   });
 
+  it('eval exits non-zero when an evaluation fails, so it gates CI', () => {
+    // The "build regression tests" use case and the README exit-code table
+    // require a failing eval to exit 1; otherwise it can never fail a CI job.
+    const f = join(dir, '..', 'gate.jsonl');
+    writeFileSync(f, JSON.stringify({
+      agent_name: 'gate', status: 'completed',
+      output: { text: 'the answer is 42' },
+      steps: [{ step_number: 1, step_type: 'output', name: 'respond', output: { text: 'the answer is 42' } }],
+    }));
+    run(['ingest', f]);
+    const id = firstTraceId();
+
+    // A custom rubric whose criterion is not met scores below threshold → exit 1.
+    const failRubric = join(dir, '..', 'fail.yaml');
+    writeFileSync(failRubric, 'name: needs-unicorn\nthreshold: 0.8\ncriteria:\n  - name: mentions-unicorn\n    pattern: unicorn\n    expected: true\n');
+    expect(run(['eval', id, '--rubric', failRubric]).code).toBe(1);
+    expect(run(['eval', id, '--rubric', failRubric, '--json']).code).toBe(1); // --json gates too
+
+    // A rubric that is satisfied passes → exit 0.
+    const passRubric = join(dir, '..', 'pass.yaml');
+    writeFileSync(passRubric, 'name: has-answer\nthreshold: 0.8\ncriteria:\n  - name: mentions-answer\n    pattern: answer\n    expected: true\n');
+    expect(run(['eval', id, '--rubric', passRubric]).code).toBe(0);
+  });
+
   it('translates a codex exec --json stream via record --format codex-exec', () => {
     const stream = [
       '{"type":"thread.started","thread_id":"th_ci"}',

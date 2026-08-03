@@ -62,6 +62,12 @@ the OpenTelemetry receiver. The recorded trace schema is unchanged.
   by a whole-file parse.
 - `eval --max-cost` rejects a malformed value instead of silently falling back
   to an unlimited budget — a typo like `0.O5` no longer disables the spend cap.
+- `eval` now exits `1` when an evaluation fails (a custom rubric scores below
+  its threshold, or a built-in preset fails), matching the README's exit-code
+  table. Previously it always exited `0` regardless of the result, so it could
+  never fail a CI job — defeating the "build regression tests" use case. `--json`
+  gates too. A passing eval, and a trace-not-found/no-provider/over-budget error,
+  are unchanged.
 - `list --limit`, `otel serve --port`, and `dashboard --refresh` reject a
   malformed value (non-integer, out of range) with a usage error instead of
   silently falling back to the default or, for a negative `--limit`, passing it

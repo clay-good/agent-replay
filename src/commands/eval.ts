@@ -202,6 +202,14 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
 
   if (results.length === 0) return;
 
+  // A failing evaluation (a rubric that misses its threshold, or a built-in
+  // preset that fails) is a non-zero exit, so `eval` works as a CI gate — the
+  // whole point of "build regression tests" and the README's exit-code table.
+  // Set this before any output path so `--json` gates too.
+  if (results.some((r) => !r.passed)) {
+    process.exitCode = 1;
+  }
+
   // Output
   if (opts.json) {
     console.log(JSON.stringify(results, null, 2));
