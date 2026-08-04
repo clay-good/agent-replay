@@ -60,6 +60,29 @@ describe('protobuf wire format', () => {
     expect(out[3]).toEqual({ key: 'nested', value: { kvlistValue: { values: [{ key: 'k', value: { stringValue: 'v' } }] } } });
     expect(out[4]).toEqual({ key: 'raw', value: { bytesValue: Buffer.from([0xde, 0xad]).toString('base64') } });
   });
+
+  it('decodes int64 attribute values precisely, including negatives and > 2^53', () => {
+    // A protobuf int64 encodes a negative value as a full 10-byte two's-complement
+    // varint, and positive values can exceed 2^53. The numeric varint path lost
+    // both (e.g. int_value -1 → ~1.84e19); the BigInt path must recover them.
+    const varintBig = (n: bigint): Buffer => {
+      const bytes: number[] = [];
+      let v = BigInt.asUintN(64, n); // negatives → full 64-bit two's complement
+      while (v > 0x7fn) { bytes.push(Number((v & 0x7fn) | 0x80n)); v >>= 7n; }
+      bytes.push(Number(v));
+      return Buffer.from(bytes);
+    };
+    const anyIntBig = (n: bigint) => Buffer.concat([tag(3, 0), varintBig(n)]); // AnyValue.int_value = 3
+    const attrs = [
+      keyValue('neg', anyIntBig(-1n)),
+      keyValue('big', anyIntBig((1n << 53n) + 1n)), // 9007199254740993
+    ];
+    const resource = Buffer.concat(attrs.map((kv) => lenField(1, kv)));
+    const decoded = decodeTracesData(lenField(1, lenField(1, resource))) as any;
+    const out = decoded.resourceSpans[0].resource.attributes;
+    expect(out[0]).toEqual({ key: 'neg', value: { intValue: '-1' } });
+    expect(out[1]).toEqual({ key: 'big', value: { intValue: '9007199254740993' } });
+  });
 });
 
 // ── Round-trip an encoded span tree through decode → map ───────────────────

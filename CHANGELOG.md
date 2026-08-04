@@ -79,6 +79,13 @@ trace schema is unchanged.
 
 ### Fixed
 
+- The OTLP/protobuf decoder now reads an `int64` attribute value precisely. It
+  accumulated the varint with JS `number` arithmetic, so a negative `int_value`
+  (encoded as a full 10-byte two's-complement varint) decoded to a huge positive
+  magnitude — `-1` surfaced as `~1.84e19` — and a positive value above 2^53 lost
+  precision. It now decodes int64 with `BigInt` and two's-complement sign
+  handling (matching the fixed64 path). Token counts and other small ints are
+  unaffected.
 - `check --golden` no longer lets a tool-input (or per-step model) regression
   slip through when the candidate numbers its steps differently from the golden.
   The `step_count`/`step_types`/`step_names` checks compare the two step

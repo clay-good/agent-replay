@@ -53,6 +53,23 @@ class Reader {
   varintNum(): number {
     return this.varint();
   }
+  /**
+   * A protobuf int64 as a signed decimal string. Uses BigInt (like fixed64Str)
+   * because the numeric `varint()` above loses precision past 2^53 and can't
+   * represent the 10-byte two's-complement encoding of a negative int64 — e.g.
+   * int_value -1 would otherwise decode to ~1.84e19 instead of "-1".
+   */
+  int64Str(): string {
+    let result = 0n;
+    let shift = 0n;
+    let byte: number;
+    do {
+      byte = this.buf[this.pos++];
+      result |= BigInt(byte & 0x7f) << shift;
+      shift += 7n;
+    } while (byte & 0x80);
+    return BigInt.asIntN(64, result).toString();
+  }
   skip(wire: number): void {
     if (wire === 0) this.varint();
     else if (wire === 1) this.pos += 8;
@@ -77,7 +94,7 @@ function decodeAnyValue(buf: Buffer): Record<string, unknown> {
     switch (field) {
       case 1: out.stringValue = r.string(); return true;
       case 2: out.boolValue = r.varintNum() !== 0; return true;
-      case 3: out.intValue = String(r.varintNum()); return true;
+      case 3: out.intValue = r.int64Str(); return true;
       case 4: out.doubleValue = r.double(); return true;
       case 5: out.arrayValue = { values: decodeValues(r.bytes()) }; return true;
       case 6: out.kvlistValue = { values: decodeKeyValues(r.bytes()) }; return true;
