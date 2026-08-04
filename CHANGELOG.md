@@ -79,6 +79,14 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `list --session <id>` now matches the session id as a literal prefix instead
+  of a SQL `LIKE` pattern. Session ids routinely contain `_` (e.g. `sess_1`),
+  which `LIKE` treats as a single-character wildcard, so `--session sess_1` also
+  returned unrelated sessions like `sessX1` (and inflated the paginated total to
+  match). The `_` and `%` metacharacters are now escaped with an explicit
+  `ESCAPE` clause so only the trailing prefix wildcard applies. (The sibling
+  `getTrace` prefix match is unaffected: generated `trc_…` ids carry `_` only at
+  a fixed position, so the wildcard was inert there.)
 - `eval --max-cost` and `replay --speed` now consume exactly the value they
   validate. Both flags were validated with `Number()` but then re-parsed with
   `parseFloat`, which disagree: an empty `--max-cost ""` validated as `$0` yet

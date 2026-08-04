@@ -805,9 +805,14 @@ export function listTraces(
     params.push(filter.tag);
   }
   if (filter.session_id) {
-    // Session correlation key — prefix matching, like trace IDs
-    conditions.push('(session_id = ? OR session_id LIKE ?)');
-    params.push(filter.session_id, `${filter.session_id}%`);
+    // Session correlation key — prefix matching, like trace IDs. But a session id
+    // is an arbitrary user string that routinely contains `_` (e.g. "sess_1"),
+    // and in a raw LIKE pattern `_`/`%` are wildcards — so "sess_1" would also
+    // match "sessX1", "sess-1", etc. Escape the metacharacters and declare the
+    // escape char so only the trailing `%` acts as the prefix wildcard.
+    const escaped = filter.session_id.replace(/[\\%_]/g, '\\$&');
+    conditions.push("(session_id = ? OR session_id LIKE ? ESCAPE '\\')");
+    params.push(filter.session_id, `${escaped}%`);
   }
   if (filter.since) {
     // since is an ISO string or relative duration — callers should resolve to ISO

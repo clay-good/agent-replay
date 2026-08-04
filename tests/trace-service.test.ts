@@ -274,6 +274,20 @@ describe('listTraces', () => {
     expect(items[0].tags).toContain('production');
   });
 
+  it('filters by session_id as a literal prefix, not a LIKE wildcard', () => {
+    // A session id commonly contains an underscore. Unescaped, `LIKE 'sess_1%'`
+    // treats the `_` as "any char" and over-matches "sessX1". The filter must
+    // return only sessions that literally start with the requested string.
+    ingestTrace(db, makeTrace({ agent_name: 'want', session_id: 'sess_1' }));
+    ingestTrace(db, makeTrace({ agent_name: 'nope', session_id: 'sessX1' }));
+    ingestTrace(db, makeTrace({ agent_name: 'prefix', session_id: 'sess_1_child' }));
+    const { items, total } = listTraces(db, { session_id: 'sess_1' });
+    const names = items.map((t) => t.agent_name).sort();
+    expect(total).toBe(2); // exact "sess_1" and prefix "sess_1_child"
+    expect(names).toEqual(['prefix', 'want']);
+    expect(names).not.toContain('nope');
+  });
+
   it('respects limit and offset', () => {
     for (let i = 0; i < 5; i++) {
       ingestTrace(db, makeTrace({ agent_name: `agent-${i}` }));
