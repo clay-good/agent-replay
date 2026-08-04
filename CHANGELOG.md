@@ -107,6 +107,14 @@ The recorded trace schema is unchanged.
   content-less user/assistant record (it produced no step but was previously
   counted as neither), so the tally the command prints matches the number of
   records in the file.
+- `import` of a Codex `rollout-*.jsonl` session no longer counts a dropped
+  follow-up user turn as imported. In a multi-turn session, the first user
+  message becomes the trace input and agent actions become steps, but a later
+  user turn has no home (there is no `user` step type) — yet it was still marked
+  "imported", inflating the tally and breaking `imported + skipped = records`.
+  Such a message now counts as skipped, matching the Claude-transcript importer.
+  (Its text is still not retained as a step — a shared limitation of both
+  importers.)
 - `import` of a Claude Code transcript with subagent files now reports "Records
   imported" as a count of records, not steps. The subagent loop added the number
   of steps produced to the imported total, so one subagent record that expanded

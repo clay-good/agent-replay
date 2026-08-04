@@ -138,11 +138,20 @@ export function importCodexRollout(
         const text = asText(it.content ?? it.text);
         if (role === 'user' && !input) {
           input = { prompt: text };
+          contributed = true;
         } else if (role === 'assistant' && text) {
           lastAssistantText = text;
           steps.push({ step_number: stepNumber++, step_type: 'output', name: 'assistant_message', output: { text } });
+          contributed = true;
+        } else {
+          // A follow-up user turn (input already set) or an empty message has no
+          // home in the current model — there is no 'user' step type, so the
+          // initial prompt is trace.input and only agent actions become steps
+          // (same as the claude-transcript importer). Count it as skipped:
+          // previously it was marked imported while nothing was retained,
+          // inflating "Records imported" and breaking imported + skipped = records.
+          skipped++;
         }
-        contributed = true;
         break;
       }
       case 'compacted': {

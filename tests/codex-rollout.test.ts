@@ -58,6 +58,28 @@ describe('importCodexRollout', () => {
     expect(trace.steps.some((s) => s.step_type === 'thought' && s.name === 'reasoning')).toBe(true);
   });
 
+  it('counts a follow-up user turn as skipped, not imported (no user step home)', () => {
+    // A normal multi-turn session. The first user prompt is the trace input and
+    // both assistant answers are steps, but a follow-up user turn is retained
+    // nowhere (there is no 'user' step type). It must count as skipped — before,
+    // it was marked imported while its text was dropped, inflating the tally.
+    const path = fixture([
+      { type: 'session_meta', payload: { id: 'roll-mt' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: 'first question' } },
+      { type: 'response_item', payload: { type: 'message', role: 'assistant', content: 'first answer' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: 'second question' } },
+      { type: 'response_item', payload: { type: 'message', role: 'assistant', content: 'second answer' } },
+    ]);
+    const report = importCodexRollout(db, path);
+    // 5 records; the follow-up user turn is the one skipped.
+    expect(report.imported + report.skipped).toBe(5);
+    expect(report.skipped).toBe(1);
+
+    const trace = getTrace(db, report.trace!.id)!;
+    expect(trace.input).toEqual({ prompt: 'first question' });
+    expect(trace.steps.filter((s) => s.name === 'assistant_message')).toHaveLength(2);
+  });
+
   it('is best-effort: skips corrupted and unknown records, notes compaction', () => {
     const path = fixture([
       { type: 'session_meta', payload: { id: 'roll-2' } },
