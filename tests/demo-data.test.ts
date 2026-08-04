@@ -59,6 +59,15 @@ describe('scenario data validation', () => {
         expect(data.steps![i].step_number).toBe(i + 1);
       }
     });
+
+    it(`${name} declares a total_tokens that equals the sum of its steps`, () => {
+      // Otherwise `show` (which prints the stored total_tokens) and `replay`
+      // (which re-sums step tokens_used) display different token counts for the
+      // same demo trace — a contradiction the first-time user would notice.
+      const data = fn(now);
+      const stepSum = data.steps!.reduce((sum, s) => sum + (s.tokens_used ?? 0), 0);
+      expect(data.total_tokens).toBe(stepSum);
+    });
   }
 });
 

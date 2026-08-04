@@ -26,7 +26,7 @@ export function ragContextPollution(baseTime: Date): IngestTraceInput {
     started_at: t(1_800_000), // 30 min ago
     ended_at: t(1_800_000 - 35_000),
     total_duration_ms: 35000,
-    total_tokens: 16800,
+    total_tokens: 15800,
     total_cost_usd: 0.084,
     error: 'LLM call timed out after 30s — context window exceeded practical limit',
     tags: ['research', 'timeout', 'context-overflow'],
@@ -218,7 +218,7 @@ export function ragContextPollution(baseTime: Date): IngestTraceInput {
         step_type: 'error',
         name: 'timeout_abort',
         input: { reason: 'LLM synthesis call exceeded 30s timeout' },
-        output: { partial_result: null, tokens_consumed: 16800, wasted_cost_usd: 0.084 },
+        output: { partial_result: null, tokens_consumed: 15800, wasted_cost_usd: 0.084 },
         started_at: t(1_800_000 - 33950),
         duration_ms: 1050,
         tokens_used: 200,

@@ -37,7 +37,7 @@ export function successfulBooking(baseTime: Date): IngestTraceInput {
     started_at: t(900_000), // 15 min ago
     ended_at: t(900_000 - 3_200),
     total_duration_ms: 3200,
-    total_tokens: 4500,
+    total_tokens: 3500,
     total_cost_usd: 0.018,
     error: null,
     tags: ['travel', 'booking', 'success'],

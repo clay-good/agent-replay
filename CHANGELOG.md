@@ -55,6 +55,12 @@ The recorded trace schema is unchanged.
 
 ### Fixed
 
+- The `demo` dataset's two token totals that didn't add up are corrected: the
+  `rag-context-pollution` and `successful-booking` sample traces declared a
+  `total_tokens` 1,000 higher than their steps summed to, so `show` (which
+  prints the stored total) and `replay` (which re-sums the steps) displayed
+  different token counts for the same trace. Each declared total now equals its
+  step sum, and a test asserts the invariant for every demo scenario.
 - `record --format gemini-stream` no longer loses a tool result that is a plain
   string. The `tool_result` handler stored a bare string verbatim, which then
   failed to `JSON.parse` on read and came back as `null`; it now wraps a string
