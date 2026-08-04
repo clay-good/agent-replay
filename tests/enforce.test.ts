@@ -19,6 +19,35 @@ function denyPolicy() {
   addPolicy(db, { name: 'no-delete', action: 'deny', match_pattern: { step_type: 'tool_call', name_contains: 'delete' } });
 }
 
+// Wrap a db so the guard_check step INSERT fails (simulating a disk-full/lock
+// error on the audit write) while every other operation works — step_type is a
+// positional arg to the insert's run(), so we key off 'guard_check'.
+function failGuardCheckWrites(real: Database.Database): Database.Database {
+  return new Proxy(real, {
+    get(target, prop) {
+      if (prop === 'prepare') {
+        return (sql: string) => {
+          const stmt = target.prepare(sql);
+          return new Proxy(stmt, {
+            get(s, p) {
+              if (p === 'run') {
+                return (...args: unknown[]) => {
+                  if (args.includes('guard_check')) throw new Error('simulated audit-write failure');
+                  return (s.run as (...a: unknown[]) => unknown)(...args);
+                };
+              }
+              const val = (s as Record<string | symbol, unknown>)[p];
+              return typeof val === 'function' ? (val as (...a: unknown[]) => unknown).bind(s) : val;
+            },
+          });
+        };
+      }
+      const val = (target as Record<string | symbol, unknown>)[prop];
+      return typeof val === 'function' ? (val as (...a: unknown[]) => unknown).bind(target) : val;
+    },
+  }) as unknown as Database.Database;
+}
+
 // ── Enforcement recording (task 2.2) ──────────────────────────────────────
 
 describe('enforcement recording', () => {
@@ -65,6 +94,22 @@ describe('enforcement recording', () => {
     const trace = getTrace(db, listTraces(db, { session_id: session }).items[0].id)!;
     const tool = trace.steps.find((s) => s.step_type === 'tool_call')!;
     expect(tool.input).toEqual({});
+  });
+
+  it('fails closed: a guard_check audit-write failure still returns the deny verdict', () => {
+    // A deny is already decided before the guard_check is recorded. If that
+    // audit write throws (disk full, lock), the block must still be enforced —
+    // letting the error propagate would have hook.ts swallow it and exit 0.
+    denyPolicy();
+    const session = 'sess-auditfail';
+    applyHookPayload(db, { hook_event_name: 'UserPromptSubmit', session_id: session, prompt: 'go' });
+    const res = applyHookPayload(
+      failGuardCheckWrites(db),
+      { hook_event_name: 'PreToolUse', session_id: session, tool_name: 'delete_all', tool_input: { path: '/' } },
+      { enforce: true },
+    );
+    expect(res.enforcement?.action).toBe('deny');
+    expect(res.enforcement?.policy).toBe('no-delete');
   });
 
   it('does not record a guard_check when nothing matches (allow)', () => {

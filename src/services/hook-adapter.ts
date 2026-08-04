@@ -264,14 +264,25 @@ export function applyHookPayload(
         return { action, dialect, traceId, note: `allowed tool_call "${toolName}"` };
       }
 
-      appendStepRetrying(db, traceId, (n) => ({
-        step_number: n,
-        step_type: 'guard_check',
-        name: `guard:${verdict.policy ?? 'policy'}`,
-        output: { action: verdict.action, policy: verdict.policy, reason: verdict.reason },
-        caused_by_step: toolStepNumber,
-        metadata: { policy: verdict.policy, action: verdict.action, reason: verdict.reason },
-      }));
+      // Record the guard_check for the audit trail — best-effort. A write
+      // failure here must NOT abort the block: the verdict is already decided,
+      // and letting the error propagate would let hook.ts swallow it and exit 0
+      // (allow), turning an infra failure into a safety fail-open. Fail closed —
+      // log and still return the deny/require_review verdict.
+      try {
+        appendStepRetrying(db, traceId, (n) => ({
+          step_number: n,
+          step_type: 'guard_check',
+          name: `guard:${verdict.policy ?? 'policy'}`,
+          output: { action: verdict.action, policy: verdict.policy, reason: verdict.reason },
+          caused_by_step: toolStepNumber,
+          metadata: { policy: verdict.policy, action: verdict.action, reason: verdict.reason },
+        }));
+      } catch (err) {
+        process.stderr.write(
+          `agent-replay hook: guard_check audit write failed (still enforcing ${verdict.action}): ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+      }
 
       return {
         action,

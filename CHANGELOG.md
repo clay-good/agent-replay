@@ -35,6 +35,12 @@ The recorded trace schema is unchanged.
   call was allowed — on exactly the shared machines where `--no-input` is used.
   Enforcement now evaluates the real arguments (held only in memory) while the
   stored tool-call input stays redacted. Name-based policies were unaffected.
+- `hook --enforce` no longer downgrades a block to an allow when the audit write
+  fails. The `guard_check` step is recorded after the verdict is decided but
+  before it is returned, so a write error there (disk full, a locked database)
+  propagated out and was swallowed into an exit `0`. The audit write is now
+  best-effort — a failure is logged to stderr but the deny / require_review
+  verdict is still returned, so the call is blocked (fail closed).
 - The `otel serve` receiver now bounds request memory. It read the entire
   request body into memory unbounded and `gunzip`-ed it with no output limit, so
   a runaway or hostile client could exhaust memory — a gzip body decompresses at
