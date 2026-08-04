@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runMigrations } from '../src/db/migrations.js';
-import { ingestTrace, getTrace } from '../src/services/trace-service.js';
+import { ingestTrace, getTrace, getStepSnapshot } from '../src/services/trace-service.js';
 import { parseEventLine, validateEvent } from '../src/services/event-protocol.js';
 import { applyEvent, TraceRecorder } from '../src/services/recorder.js';
 import type { CaptureEvent } from '../src/services/event-protocol.js';
@@ -193,6 +193,25 @@ describe('TraceRecorder SDK', () => {
   it('throws if a step is recorded before startTrace', () => {
     const rec = new TraceRecorder(db);
     expect(() => rec.startStep({ step_number: 1, step_type: 'thought', name: 'x' })).toThrow(/startTrace/);
+  });
+
+  it('attaches a snapshot to a step via the class API', () => {
+    const rec = new TraceRecorder(db);
+    const id = rec.startTrace({ agent_name: 'snap-bot' });
+    rec.step({ step_number: 1, step_type: 'tool_call', name: 'act' });
+    rec.snapshot(1, {
+      context_window: { messages: 3 },
+      environment: { region: 'eu' },
+      tool_state: { open: 2 },
+      token_count: 1234,
+    });
+    rec.endTrace({ status: 'completed' });
+
+    const snap = getStepSnapshot(db, id, 1)!;
+    expect(snap.context_window).toEqual({ messages: 3 });
+    expect(snap.environment).toEqual({ region: 'eu' });
+    expect(snap.tool_state).toEqual({ open: 2 });
+    expect(snap.token_count).toBe(1234);
   });
 });
 
