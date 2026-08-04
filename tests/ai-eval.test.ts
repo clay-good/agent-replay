@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import BetterSqlite3 from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
 import { ingestTrace, createEval, getTrace } from '../src/services/trace-service.js';
@@ -7,6 +7,7 @@ import {
   AI_PRESET_NAMES,
   estimateAiEvalCost,
   extractJson,
+  runAiEval,
 } from '../src/services/eval-service.js';
 import { summarizeTrace, summarizeDiffForLlm } from '../src/services/trace-summarizer.js';
 import { diffTraces } from '../src/services/diff-service.js';
@@ -344,5 +345,57 @@ describe('LlmError', () => {
     expect(err.provider).toBe('anthropic');
     expect(err.statusCode).toBe(401);
     expect(err.name).toBe('LlmError');
+  });
+});
+
+// ── runAiEval end-to-end with a stubbed LLM ──────────────────────────────
+
+function llmText(text: string): Response {
+  return { status: 200, json: async () => ({ content: [{ text }], usage: { input_tokens: 50, output_tokens: 20 } }) } as unknown as Response;
+}
+
+describe('runAiEval (stubbed LLM)', () => {
+  const opts = { provider: 'anthropic' as const, api_key: 'k', model: 'claude-haiku-4-5-20251001' };
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('runs an applicable preset and parses the model verdict into an EvalResult', async () => {
+    const db = createTestDb();
+    const trace = ingestTrace(db, makeTrace()); // failed → ai-root-cause applies
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(llmText(JSON.stringify({
+      root_cause: 'wrong path', failing_step: 3, confidence: 0.9, severity: 'high',
+    }))));
+
+    const result = await runAiEval(db, trace.id, 'ai-root-cause', opts);
+    expect(result.evaluator_type).toBe('llm_judge');
+    expect(result.score).toBe(0.9);
+    expect(result.passed).toBe(true); // 0.9 >= 0.5 threshold
+    expect(result.details.root_cause).toBe('wrong path');
+    expect(Number(result.details.cost_usd)).toBeGreaterThan(0);
+  });
+
+  it('skips a non-applicable preset for $0 without calling the model', async () => {
+    const db = createTestDb();
+    const clean = ingestTrace(db, makeTrace({
+      status: 'completed', error: undefined, output: { result: 'ok' },
+      steps: [{ step_number: 1, step_type: 'output', name: 'done', output: { result: 'ok' } }],
+    }));
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runAiEval(db, clean.id, 'ai-root-cause', opts);
+    expect(result.passed).toBe(true);
+    expect(result.details.skipped).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a failed verdict when the model returns unparseable text', async () => {
+    const db = createTestDb();
+    const trace = ingestTrace(db, makeTrace());
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(llmText('sorry, I cannot help with that')));
+
+    const result = await runAiEval(db, trace.id, 'ai-root-cause', opts);
+    expect(result.passed).toBe(false);
+    expect(result.score).toBe(0);
+    expect(result.details.parse_error).toBe(true);
   });
 });
