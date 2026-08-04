@@ -6,10 +6,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-A hardening pass focused on scriptability and CI use (consistent exit codes,
-strict argument parsing), correctness of the comparison and evaluation paths
-(`diff`, `eval`, cost estimation), and robustness of the OpenTelemetry receiver.
-The recorded trace schema is unchanged.
+A broad hardening pass across the whole CLI. Highlights: consistent exit codes
+and strict argument parsing for scripting and CI; correctness of the
+comparison, evaluation, and golden-regression paths (`diff`, `eval`,
+`check --golden`); guardrail enforcement that now fails closed (`hook
+--enforce`); more faithful live capture and import (`record`, `run`, `import`,
+`fork`); and a more robust, memory-bounded OpenTelemetry receiver. The recorded
+trace schema is unchanged.
 
 ### Added
 
