@@ -194,6 +194,43 @@ describe('validateStepInput', () => {
     expect(result.errors.some(e => e.field.includes('step_number'))).toBe(true);
   });
 
+  it('accepts a decision step with well-formed options', () => {
+    const result = validateStepInput({
+      step_number: 1, step_type: 'decision', name: 'pick',
+      decision: { chosen: 'A', decided_by: 'agent', options: [{ option: 'A', score: 0.9 }, { option: 'B' }] },
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects decision.options that is not an array', () => {
+    const result = validateStepInput({
+      step_number: 1, step_type: 'decision', name: 'pick',
+      decision: { chosen: 'A', decided_by: 'agent', options: 'nope' as unknown },
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.field.endsWith('.options'))).toBe(true);
+  });
+
+  it('rejects a decision option that is not an object, is missing its label, or has a non-finite score', () => {
+    const notObject = validateStepInput({
+      step_number: 1, step_type: 'decision', name: 'pick',
+      decision: { chosen: 'A', decided_by: 'agent', options: ['plain' as unknown] },
+    });
+    expect(notObject.errors.some(e => e.field.includes('.options[0]'))).toBe(true);
+
+    const missingLabel = validateStepInput({
+      step_number: 1, step_type: 'decision', name: 'pick',
+      decision: { chosen: 'A', decided_by: 'agent', options: [{ score: 0.5 }] },
+    });
+    expect(missingLabel.errors.some(e => e.field.includes('.options[0].option'))).toBe(true);
+
+    const badScore = validateStepInput({
+      step_number: 1, step_type: 'decision', name: 'pick',
+      decision: { chosen: 'A', decided_by: 'agent', options: [{ option: 'A', score: Infinity as unknown }] },
+    });
+    expect(badScore.errors.some(e => e.field.includes('.options[0].score'))).toBe(true);
+  });
+
   it('rejects missing step_type', () => {
     const result = validateStepInput({ step_number: 1, name: 'x' });
     expect(result.valid).toBe(false);

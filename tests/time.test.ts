@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseDurationString, parseSinceToIso, formatDuration, effectiveDurationMs, formatRelativeTime } from '../src/utils/time.js';
+import { parseDurationString, parseSinceToIso, formatDuration, effectiveDurationMs, formatRelativeTime, formatTimestamp } from '../src/utils/time.js';
 
 describe('parseDurationString', () => {
   it('parses units to milliseconds', () => {
@@ -39,6 +39,26 @@ describe('formatDuration', () => {
     expect(formatDuration(500)).toMatch(/ms/);
     expect(formatDuration(1500)).toMatch(/s/);
     expect(formatDuration(90000)).toMatch(/m/);
+  });
+  it('formats hours, with and without trailing minutes', () => {
+    expect(formatDuration(3_600_000)).toBe('1h'); // exactly one hour, no minutes
+    expect(formatDuration(3_661_000)).toBe('1h 1m'); // 1h 1m 1s → minutes shown, secs dropped
+    expect(formatDuration(2 * 3_600_000 + 30 * 60_000)).toBe('2h 30m');
+  });
+  it('returns a dash for a non-finite or negative duration', () => {
+    expect(formatDuration(NaN)).toBe('-');
+    expect(formatDuration(-5)).toBe('-');
+  });
+});
+
+describe('formatTimestamp', () => {
+  it('returns a dash for an unparseable timestamp', () => {
+    expect(formatTimestamp('not a date')).toBe('-');
+  });
+  it('formats a valid ISO timestamp as YYYY-MM-DD HH:MM:SS', () => {
+    // Uses local-time getters, so assert the shape rather than an exact value
+    // to stay deterministic across the runner's timezone.
+    expect(formatTimestamp('2026-01-15T10:30:00Z')).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/);
   });
 });
 
