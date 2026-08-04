@@ -22,6 +22,10 @@ abstract class BaseTranslator implements StreamTranslator {
   protected failed = false;
   protected errorText: string | null = null;
   protected ended = false;
+  // Whether this stream has a terminal event that signals a clean end (Gemini's
+  // `result`). If so, reaching EOF without it means the run was interrupted.
+  protected expectsTerminalEvent = false;
+  protected sawTerminal = false;
 
   protected abstract agentName: string;
 
@@ -49,6 +53,15 @@ abstract class BaseTranslator implements StreamTranslator {
 
   finalize(): CaptureEvent[] {
     if (!this.traceId || this.ended) return [];
+    // A stream that declares a terminal event but hit EOF without one (and
+    // without a recorded failure) was interrupted — killed or crashed. Emit no
+    // trace_end so the trace stays running and `record` finalizes it as timeout
+    // (or `--leave-open` keeps it open), matching the native protocol. Without
+    // this, an interrupted gemini-stream run was silently recorded as completed.
+    if (this.expectsTerminalEvent && !this.sawTerminal && !this.failed) {
+      this.ended = true;
+      return [];
+    }
     this.ended = true;
     return [
       {
@@ -126,6 +139,9 @@ export class CodexExecTranslator extends BaseTranslator {
 
 export class GeminiStreamTranslator extends BaseTranslator {
   protected agentName = 'gemini';
+  // A clean Gemini run always emits a terminal `result` event; EOF without it
+  // means the run was interrupted, so it should be timed out, not completed.
+  protected expectsTerminalEvent = true;
   private openTools = new Map<string, number>();
 
   translate(obj: Record<string, unknown>): CaptureEvent[] {
@@ -201,7 +217,9 @@ export class GeminiStreamTranslator extends BaseTranslator {
     }
 
     if (type === 'result') {
-      // Exit-code convention: 0 ok; 1/42/53 are failures.
+      // The terminal event — a clean end. Exit-code convention: 0 ok; nonzero
+      // is a failure.
+      this.sawTerminal = true;
       const code = Number(obj.exit_code ?? obj.code ?? 0);
       if (code !== 0) {
         this.failed = true;

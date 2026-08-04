@@ -87,6 +87,15 @@ The recorded trace schema is unchanged.
   failed to `JSON.parse` on read and came back as `null`; it now wraps a string
   as `{ output: <string> }`, matching how the `message` handler already wraps
   string content.
+- `record --format gemini-stream` marks an interrupted run as `timeout`, not
+  `completed`. A clean Gemini run always emits a terminal `result` event, so
+  reaching EOF without one means the process was killed or crashed — but the
+  translator's EOF finalize defaulted to `completed`, pre-closing the trace so
+  `record`'s "still-running → timeout" step never ran. The translator now emits
+  no `trace_end` when its terminal event never arrived, leaving the trace for
+  `record` to time out (or `--leave-open` to keep open), matching the native
+  protocol. `codex-exec`, which has no terminal event, still completes on a
+  clean EOF.
 - `import`'s "records imported / skipped" report now accounts for a
   content-less user/assistant record (it produced no step but was previously
   counted as neither), so the tally the command prints matches the number of

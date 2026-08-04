@@ -124,4 +124,26 @@ describe('GeminiStreamTranslator', () => {
     ], false);
     expect(getTrace(db, id)!.status).toBe('running');
   });
+
+  it('does not record a cut-off run as completed even when finalize runs at EOF', () => {
+    const t = makeTranslator('gemini-stream')!;
+    // A killed run: a tool call but no terminal `result`. finalize() (which
+    // `record` always calls at EOF) must NOT close it as completed — the trace
+    // stays running so record finalizes it as timeout, like the native path.
+    const id = run(t, [
+      { type: 'init', session_id: 'g_4' },
+      { type: 'tool_use', id: 't1', name: 'search', input: {} },
+    ], true);
+    expect(getTrace(db, id)!.status).toBe('running');
+  });
+
+  it('records a clean run as completed once the terminal result arrives', () => {
+    const t = makeTranslator('gemini-stream')!;
+    const id = run(t, [
+      { type: 'init', session_id: 'g_5' },
+      { type: 'message', content: 'hi' },
+      { type: 'result', exit_code: 0 },
+    ], true);
+    expect(getTrace(db, id)!.status).toBe('completed');
+  });
 });
