@@ -99,6 +99,11 @@ trace schema is unchanged.
   `record` to time out (or `--leave-open` to keep open), matching the native
   protocol. `codex-exec`, which has no terminal event, still completes on a
   clean EOF.
+- `agent-replay run` propagates a signal-killed child as `128 + signal number`
+  (e.g. `137` for SIGKILL) instead of flattening every signal death to exit `1`,
+  and records which signal killed it (`child killed by signal SIGKILL`). A
+  wrapped process that is OOM-killed is now distinguishable from a generic
+  failure, both in the exit code scripts see and in the recorded trace error.
 - `agent-replay run` now records a `failed` trace when the wrapped child exits
   non-zero after emitting a `trace_end` with no `status` field. The recorder
   defaults a statusless `trace_end` to `completed`, which is indistinguishable

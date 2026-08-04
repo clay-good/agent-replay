@@ -150,4 +150,16 @@ describe('runWrapped', () => {
     expect(trace.status).toBe('completed'); // explicit status honored
     expect(trace.metadata.exit_code).toBe(5); // exit code still recorded
   }, 15000);
+
+  it('propagates a signal death as 128 + signal number and records the signal', async () => {
+    // A child killed by SIGKILL has no exit code; the wrapper should report 137
+    // (128 + 9), not flatten every signal death to 1, and record which signal
+    // killed it (so an OOM/kill is distinguishable from a generic failure).
+    const res = await runWrapped(db, { command: process.execPath, args: ['-e', 'process.kill(process.pid, "SIGKILL")'] });
+    expect(res.exitCode).toBe(137);
+    const trace = getTrace(db, res.traceId)!;
+    expect(trace.status).toBe('failed');
+    expect(trace.error).toMatch(/SIGKILL/);
+    expect(trace.metadata.exit_code).toBe(137);
+  }, 15000);
 });

@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 import { spawn } from 'node:child_process';
 import { writeFileSync, mkdtempSync, rmSync, statSync, openSync, readSync, closeSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, constants } from 'node:os';
 import { join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { startTrace, updateTrace } from './trace-service.js';
@@ -112,6 +112,7 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
     for (const line of lines) applyLine(line);
   };
 
+  let killedSignal: string | null = null;
   const exitCode = await new Promise<number>((resolvePromise) => {
     const child = spawn(opts.command, opts.args, {
       stdio: 'inherit',
@@ -135,7 +136,17 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
       done(127);
     });
     child.on('close', (code, signal) => {
-      done(code == null ? (signal ? 1 : 0) : code);
+      // A child killed by a signal has no exit code; follow the shell
+      // convention and report 128 + signal number (e.g. SIGKILL → 137) so the
+      // status propagates and an OOM/kill is distinguishable from a generic
+      // failure, rather than flattening every signal death to 1.
+      if (code == null && signal) {
+        killedSignal = signal;
+        const num = (constants.signals as Record<string, number>)[signal] ?? 0;
+        done(128 + num);
+      } else {
+        done(code ?? 0);
+      }
     });
   });
 
@@ -157,7 +168,11 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
       status: exitCode === 0 ? 'completed' : 'failed',
       ended_at: new Date(startMs + durationMs).toISOString(),
       total_duration_ms: durationMs,
-      error: exitCode === 0 ? undefined : `child exited with code ${exitCode}`,
+      error: exitCode === 0
+        ? undefined
+        : killedSignal
+          ? `child killed by signal ${killedSignal} (exit ${exitCode})`
+          : `child exited with code ${exitCode}`,
     });
   }
 
