@@ -111,24 +111,32 @@ export function importClaudeTranscript(
     let contributed = false;
 
     if (typeof content === 'string') {
+      // Only a record that actually captures input or emits a step counts as
+      // imported. A follow-up user turn (input already set) captures nothing —
+      // there is no user/input step type — so it must fall through to skipped,
+      // matching the codex-rollout importer and the content-less-record test.
       if (type === 'user' && !input) {
         input = { prompt: content };
+        contributed = true;
       } else if (type === 'assistant') {
         lastAssistantText = content;
         steps.push({ step_number: stepNumber++, step_type: 'output', name: 'assistant_message', output: { text: content } });
+        contributed = true;
       }
-      contributed = true;
     } else if (Array.isArray(content)) {
       for (const block of content as Block[]) {
         switch (block?.type) {
           case 'text': {
             if (type === 'user' && !input) {
               input = { prompt: block.text ?? '' };
+              contributed = true;
             } else if (type === 'assistant' && block.text) {
               lastAssistantText = block.text;
               steps.push({ step_number: stepNumber++, step_type: 'output', name: 'assistant_message', output: { text: block.text } });
+              contributed = true;
             }
-            contributed = true;
+            // A follow-up user turn or an empty-text block yields no step; leave
+            // `contributed` false so the record is tallied as skipped.
             break;
           }
           case 'thinking': {

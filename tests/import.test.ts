@@ -100,6 +100,24 @@ describe('importClaudeTranscript — subagents', () => {
     expect(report.skipped).toBe(1);
   });
 
+  it('counts a follow-up user turn and an empty-text block as skipped, not imported', () => {
+    // A record that captures no input and emits no step must be tallied as
+    // skipped (the imported+skipped=records invariant). Two such zero-step
+    // records — a follow-up user turn (no user step type retains it) and an
+    // assistant record whose only text block is empty — were mis-counted as
+    // imported because `contributed` was set unconditionally in the text paths.
+    const path = fixture([
+      { type: 'user', sessionId: 's4', message: { content: 'first prompt' } },
+      { type: 'user', sessionId: 's4', message: { content: 'second prompt' } },
+      { type: 'assistant', sessionId: 's4', message: { content: [{ type: 'text', text: '' }] } },
+      { type: 'assistant', sessionId: 's4', message: { content: [{ type: 'text', text: 'answer' }] } },
+    ]);
+    const report = importClaudeTranscript(db, path);
+    expect(report.imported + report.skipped).toBe(4);
+    expect(report.imported).toBe(2); // first user prompt + assistant answer
+    expect(report.skipped).toBe(2);  // follow-up user turn + empty-text assistant
+  });
+
   it('imports subagent transcript files as nested steps under an anchor', () => {
     // Main transcript
     const path = fixture([

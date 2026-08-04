@@ -79,6 +79,14 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `import` of a Claude transcript now tallies a zero-step record as `skipped`,
+  not `imported`, keeping the documented `imported + skipped = records`
+  invariant. A follow-up user turn (which has no `user`/`input` step type to
+  retain it) and an assistant record whose only text block is empty both yielded
+  no step yet were counted as imported, inflating "Records imported" — the same
+  classification the codex-rollout importer was already fixed to get right. The
+  `contributed` flag is now set only on the paths that actually capture input or
+  emit a step.
 - `list --session <id>` now matches the session id as a literal prefix instead
   of a SQL `LIKE` pattern. Session ids routinely contain `_` (e.g. `sess_1`),
   which `LIKE` treats as a single-character wildcard, so `--session sess_1` also
