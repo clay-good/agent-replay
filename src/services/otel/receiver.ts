@@ -53,16 +53,37 @@ export interface OtelStats {
   acceptedTraces: number;
 }
 
+// Bound the receiver's memory against a runaway or hostile client. An
+// unbounded body read OOMs the process, and gzip decompresses at up to ~1000x,
+// so a few KB can expand to gigabytes (a "zip bomb"). Both caps sit far above
+// any real OTLP batch (typically KB to a few MB), so legitimate exporters are
+// unaffected; a body over the cap is 413 (not retryable) rather than a crash.
+const MAX_BODY_BYTES = 32 * 1024 * 1024; // compressed/raw request body
+const MAX_DECOMPRESSED_BYTES = 64 * 1024 * 1024; // after gunzip
+
 async function readBody(req: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];
-  for await (const c of req) chunks.push(c as Buffer);
+  let total = 0;
+  for await (const c of req) {
+    const chunk = c as Buffer;
+    total += chunk.length;
+    if (total > MAX_BODY_BYTES) {
+      req.destroy();
+      throw new HttpError(413, 'request body too large');
+    }
+    chunks.push(chunk);
+  }
   let buf = Buffer.concat(chunks);
   if ((req.headers['content-encoding'] ?? '').includes('gzip')) {
     // A body that claims gzip but isn't is a client mistake (400), not a server
-    // fault (500) — a 500 would make OTLP exporters retry the bad payload.
+    // fault (500) — a 500 would make OTLP exporters retry the bad payload. A
+    // body that decompresses past the cap is a bomb: 413, also not retryable.
     try {
-      buf = gunzipSync(buf);
-    } catch {
+      buf = gunzipSync(buf, { maxOutputLength: MAX_DECOMPRESSED_BYTES });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ERR_BUFFER_TOO_LARGE') {
+        throw new HttpError(413, 'decompressed body too large');
+      }
       throw new HttpError(400, 'malformed gzip body');
     }
   }

@@ -28,6 +28,14 @@ The recorded trace schema is unchanged.
 
 ### Security
 
+- The `otel serve` receiver now bounds request memory. It read the entire
+  request body into memory unbounded and `gunzip`-ed it with no output limit, so
+  a runaway or hostile client could exhaust memory — a gzip body decompresses at
+  up to ~1000x, so a few KB could expand to gigabytes (a "zip bomb"). The
+  receiver now caps the request body (32 MB) and the decompressed size (64 MB) —
+  both far above any real OTLP batch — and answers `413` (not retryable) instead
+  of crashing. Legitimate exporters are unaffected.
+
 - Pinned transitive dependencies (`lodash`, `xml2js`, `esbuild`) to patched
   versions via a package `overrides` block, clearing 5 advisories that
   `blessed-contrib`'s latest release still pulls in transitively. `npm audit`

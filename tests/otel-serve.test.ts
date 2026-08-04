@@ -145,6 +145,20 @@ describe('otel serve (end-to-end)', () => {
     }
   }, 20000);
 
+  it('rejects a gzip bomb with 413 instead of exhausting memory', async () => {
+    const url = await startReceiver();
+    // ~65 MB of highly compressible data gzips to a few KB but decompresses past
+    // the receiver's cap, so it must be rejected (413, not retryable) rather than
+    // OOM the process. The compressed body sent over the wire stays tiny.
+    const bomb = gzipSync(Buffer.alloc(65 * 1024 * 1024, 0x41));
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'content-encoding': 'gzip' },
+      body: bomb,
+    });
+    expect(res.status).toBe(413);
+  }, 20000);
+
   it('accepts an OTLP/protobuf export over HTTP (the exporter default)', async () => {
     const url = await startReceiver();
     // invoke_agent root carries agent.name/conversation.id; a chat child becomes
