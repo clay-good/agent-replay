@@ -209,7 +209,10 @@ export function importClaudeTranscript(
       steps.push(...built.steps);
       stepNumber += built.steps.length;
       totalTokens += built.tokens;
-      imported += built.steps.length;
+      // Add record counts, not step counts — "Records imported" must stay a
+      // count of records, and imported + skipped must equal the records read.
+      imported += built.imported;
+      skipped += built.skipped;
     }
   }
 
@@ -240,7 +243,7 @@ function buildSubagentSteps(
   records: Record<string, unknown>[],
   startNumber: number,
   parentStep: number,
-): { steps: IngestStepInput[]; tokens: number } {
+): { steps: IngestStepInput[]; tokens: number; imported: number; skipped: number } {
   const toolResults = new Map<string, unknown>();
   for (const rec of records) {
     const content = (rec.message as { content?: unknown } | undefined)?.content;
@@ -254,40 +257,50 @@ function buildSubagentSteps(
   const steps: IngestStepInput[] = [];
   let n = startNumber;
   let tokens = 0;
+  // Count records the same way the main loop does — a record that yields at
+  // least one step is imported, one that yields none is skipped — so the
+  // caller's "Records imported" total stays a record count and the
+  // imported + skipped = records invariant holds across subagents too.
+  let imported = 0;
+  let skipped = 0;
 
   for (const rec of records) {
+    const before = steps.length;
     const type = rec.type as string | undefined;
-    if (type !== 'user' && type !== 'assistant') continue;
-    const message = rec.message as { content?: unknown; usage?: Record<string, number> } | undefined;
-    if (message?.usage) tokens += (message.usage.input_tokens ?? 0) + (message.usage.output_tokens ?? 0);
-    const content = message?.content;
-    if (!Array.isArray(content)) {
-      if (typeof content === 'string' && type === 'assistant') {
-        steps.push({ step_number: n++, step_type: 'output', name: 'assistant_message', output: { text: content }, parent_step: parentStep });
+    if (type === 'user' || type === 'assistant') {
+      const message = rec.message as { content?: unknown; usage?: Record<string, number> } | undefined;
+      if (message?.usage) tokens += (message.usage.input_tokens ?? 0) + (message.usage.output_tokens ?? 0);
+      const content = message?.content;
+      if (!Array.isArray(content)) {
+        if (typeof content === 'string' && type === 'assistant') {
+          steps.push({ step_number: n++, step_type: 'output', name: 'assistant_message', output: { text: content }, parent_step: parentStep });
+        }
+      } else {
+        for (const block of content as Block[]) {
+          if (block?.type === 'thinking') {
+            steps.push({ step_number: n++, step_type: 'thought', name: 'thinking', output: { text: block.thinking ?? block.text ?? '' }, parent_step: parentStep });
+          } else if (block?.type === 'text' && type === 'assistant' && block.text) {
+            steps.push({ step_number: n++, step_type: 'output', name: 'assistant_message', output: { text: block.text }, parent_step: parentStep });
+          } else if (block?.type === 'tool_use') {
+            const result = block.id ? toolResults.get(block.id) : undefined;
+            steps.push({
+              step_number: n++,
+              step_type: 'tool_call',
+              name: block.name ?? 'tool',
+              input: block.input ?? {},
+              output: result !== undefined ? { result: normalizeResult(result) } : null,
+              parent_step: parentStep,
+              metadata: { tool_use_id: block.id },
+            });
+          }
+        }
       }
-      continue;
     }
-    for (const block of content as Block[]) {
-      if (block?.type === 'thinking') {
-        steps.push({ step_number: n++, step_type: 'thought', name: 'thinking', output: { text: block.thinking ?? block.text ?? '' }, parent_step: parentStep });
-      } else if (block?.type === 'text' && type === 'assistant' && block.text) {
-        steps.push({ step_number: n++, step_type: 'output', name: 'assistant_message', output: { text: block.text }, parent_step: parentStep });
-      } else if (block?.type === 'tool_use') {
-        const result = block.id ? toolResults.get(block.id) : undefined;
-        steps.push({
-          step_number: n++,
-          step_type: 'tool_call',
-          name: block.name ?? 'tool',
-          input: block.input ?? {},
-          output: result !== undefined ? { result: normalizeResult(result) } : null,
-          parent_step: parentStep,
-          metadata: { tool_use_id: block.id },
-        });
-      }
-    }
+    if (steps.length > before) imported++;
+    else skipped++;
   }
 
-  return { steps, tokens };
+  return { steps, tokens, imported, skipped };
 }
 
 function normalizeResult(content: unknown): string {

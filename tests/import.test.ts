@@ -155,4 +155,29 @@ describe('importClaudeTranscript — subagents', () => {
     expect(read!.output).toEqual({ result: 'ok' });
     expect(report.skipped).toBeGreaterThanOrEqual(1);
   });
+
+  it('reports "imported" as a record count, not a step count, for subagents', () => {
+    // Regression: the subagent loop added built.steps.length to `imported`, so a
+    // single subagent record expanding to N steps inflated "Records imported"
+    // and broke the imported + skipped = records invariant.
+    const path = fixture([
+      { type: 'user', sessionId: 'sess-cnt', message: { role: 'user', content: 'hi' } },
+    ]);
+    const subDir = join(dir, 'transcript', 'subagents');
+    mkdirSync(subDir, { recursive: true });
+    writeFileSync(
+      join(subDir, 'agent-x.jsonl'),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'thinking', thinking: 't' }, { type: 'tool_use', id: 'a', name: 'Grep', input: {} }] } }),
+    );
+
+    const report = importClaudeTranscript(db, path);
+    // Two records total (main user prompt + one subagent assistant record). The
+    // subagent record expands to 2 steps but is still one imported record.
+    expect(report.imported).toBe(2);
+    expect(report.skipped).toBe(0);
+
+    // The 2 subagent steps still land, nested under the anchor.
+    const trace = getTrace(db, report.trace!.id)!;
+    expect(trace.steps).toHaveLength(3); // anchor + thinking + Grep
+  });
 });

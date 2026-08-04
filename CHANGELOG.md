@@ -78,6 +78,12 @@ The recorded trace schema is unchanged.
   content-less user/assistant record (it produced no step but was previously
   counted as neither), so the tally the command prints matches the number of
   records in the file.
+- `import` of a Claude Code transcript with subagent files now reports "Records
+  imported" as a count of records, not steps. The subagent loop added the number
+  of steps produced to the imported total, so one subagent record that expanded
+  to several steps inflated the count (e.g. "3 records imported" from 2 input
+  records) and broke the imported + skipped = records invariant. Each subagent
+  record is now counted once — imported if it yielded a step, skipped otherwise.
 - `import` of a Claude Code transcript no longer discards an entire subagent
   file because of one corrupt line. The subagent path parsed every line inside a
   single `try`, so a truncated final line (common after a killed run) dropped all
