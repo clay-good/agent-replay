@@ -76,6 +76,25 @@ describe('checkGolden', () => {
     expect(report.failed).toBe(0);
   });
 
+  it('passes every candidate that reproduces one baseline when the bucket holds other shapes', () => {
+    // A golden bucket holds two known-good shapes (A and B) for one agent+input.
+    // Two candidates that both reproduce shape A must BOTH pass: a candidate is
+    // good if it matches ANY baseline. The greedy version consumed A's entry for
+    // the first candidate and forced the second onto B, falsely "regressing" a
+    // trace that exactly reproduces a known-good run.
+    const shapeA: IngestTraceInput = { agent_name: 'dup2', status: 'completed', input: { task: 't' }, steps: [{ step_number: 1, step_type: 'output', name: 'a' }] };
+    const shapeB: IngestTraceInput = { agent_name: 'dup2', status: 'completed', input: { task: 't' }, steps: [{ step_number: 1, step_type: 'thought', name: 'x' }, { step_number: 2, step_type: 'output', name: 'b' }] };
+    ingestTrace(db, shapeA);
+    ingestTrace(db, shapeB);
+    const golden = JSON.parse(exportTraces(db, { agent_name: 'dup2' }, 'golden')) as GoldenEntry[];
+    expect(golden).toHaveLength(2);
+
+    const report = checkGolden(golden, [candidate(shapeA), candidate(shapeA)]);
+    expect(report.passed).toBe(2);
+    expect(report.failed).toBe(0);
+    expect(report.ok).toBe(true);
+  });
+
   it('fails and names the divergent field when a tool input changes', () => {
     const golden = makeGolden();
     const altered: IngestTraceInput = {

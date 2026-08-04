@@ -113,6 +113,14 @@ The recorded trace schema is unchanged.
   share an agent name and input (repeated runs of the same agent, or a fork):
   golden entries are bucketed and each candidate is paired with its closest
   entry instead of colliding on one.
+- `check --golden` no longer consumes a golden entry once a candidate matches
+  it. A bucket can hold several known-good shapes for one agent+input, and a
+  candidate is good if it reproduces any of them — but the greedy pairing
+  removed the matched entry, so a second candidate identical to the first was
+  forced onto a leftover shape and falsely flagged `REGRESSED` (failing CI),
+  and, when the bucket emptied, a genuinely regressed candidate could be hidden
+  as merely "unmatched". Each candidate now compares against the whole bucket
+  without consuming, so identical known-good traces all pass.
 - `ingest` recognizes a pretty-printed (multi-line) single JSON object instead
   of misparsing it as JSONL and failing on "line 1"; the format is now detected
   by a whole-file parse.

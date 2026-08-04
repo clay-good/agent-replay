@@ -96,18 +96,20 @@ export function checkGolden(
       continue;
     }
 
-    // Pair the candidate with its closest golden entry in the bucket (fewest
-    // divergences), then consume it so distinct candidates don't collide.
-    let bestIdx = 0;
+    // Compare against the closest golden entry in the bucket (fewest
+    // divergences). A bucket holds several known-good baselines for one
+    // agent+input (repeated runs, or a fork), and a candidate is good if it
+    // reproduces ANY of them — so do NOT consume the matched entry. Consuming
+    // gave two identical candidates opposite verdicts (the first took the exact
+    // match, the next was forced onto a leftover and falsely "regressed") and
+    // could even hide a real regression as "unmatched" once the bucket emptied.
     let divergences = diffAgainstGolden(trace, bucket[0], fields);
     for (let i = 1; i < bucket.length && divergences.length > 0; i++) {
       const div = diffAgainstGolden(trace, bucket[i], fields);
       if (div.length < divergences.length) {
-        bestIdx = i;
         divergences = div;
       }
     }
-    bucket.splice(bestIdx, 1);
 
     const ok = divergences.length === 0;
     if (ok) passed++;
