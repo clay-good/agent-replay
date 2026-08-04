@@ -6,7 +6,7 @@ import { decodeTracesData, decodeLogsData } from '../src/services/otel/protobuf.
 import { mapOtlpTraces } from '../src/services/otel/semconv.js';
 import { mapOtlpLogs } from '../src/services/otel/log-events.js';
 import { handleTracesExportProtobuf, handleLogsExportProtobuf, type OtelStats } from '../src/services/otel/receiver.js';
-import { lenField, anyStr, anyInt, keyValue, span, tracesData, logRecord, logsData } from './helpers/otlp-protobuf.js';
+import { tag, varintField, lenField, anyStr, anyInt, keyValue, span, tracesData, logRecord, logsData } from './helpers/otlp-protobuf.js';
 
 let db: Database.Database;
 
@@ -32,6 +32,33 @@ describe('protobuf wire format', () => {
     const decoded = decodeTracesData(tracesData) as any;
     const attr = decoded.resourceSpans[0].resource.attributes[0];
     expect(attr).toEqual({ key: 'gen_ai.system', value: { stringValue: 'openai' } });
+  });
+
+  it('decodes every AnyValue kind: bool, double, array, kvlist, and bytes', () => {
+    // Real exporters send attribute values beyond strings/ints — a bool flag, a
+    // double score, a string array, a nested kvlist, raw bytes. Each AnyValue
+    // wire case must decode to the right shape (a wire-type mismatch here would
+    // silently corrupt attributes read off untrusted protobuf input).
+    const dbl = Buffer.alloc(8);
+    dbl.writeDoubleLE(1.5);
+    const attrs = [
+      keyValue('flag', varintField(2, 1)), // AnyValue.bool_value = 2
+      keyValue('temp', Buffer.concat([tag(4, 1), dbl])), // AnyValue.double_value = 4 (fixed64)
+      keyValue('list', lenField(5, Buffer.concat([lenField(1, anyStr('a')), lenField(1, anyStr('b'))]))), // array_value = 5
+      keyValue('nested', lenField(6, lenField(1, keyValue('k', anyStr('v'))))), // kvlist_value = 6
+      keyValue('raw', lenField(7, Buffer.from([0xde, 0xad]))), // bytes_value = 7
+    ];
+    // Resource{ attributes = 1 (repeated) } → ResourceSpans{ resource = 1 } → TracesData{ resourceSpans = 1 }.
+    const resource = Buffer.concat(attrs.map((kv) => lenField(1, kv)));
+    const buf = lenField(1, lenField(1, resource));
+    const decoded = decodeTracesData(buf) as any;
+    const out = decoded.resourceSpans[0].resource.attributes;
+
+    expect(out[0]).toEqual({ key: 'flag', value: { boolValue: true } });
+    expect(out[1]).toEqual({ key: 'temp', value: { doubleValue: 1.5 } });
+    expect(out[2]).toEqual({ key: 'list', value: { arrayValue: { values: [{ stringValue: 'a' }, { stringValue: 'b' }] } } });
+    expect(out[3]).toEqual({ key: 'nested', value: { kvlistValue: { values: [{ key: 'k', value: { stringValue: 'v' } }] } } });
+    expect(out[4]).toEqual({ key: 'raw', value: { bytesValue: Buffer.from([0xde, 0xad]).toString('base64') } });
   });
 });
 
