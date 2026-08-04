@@ -46,6 +46,17 @@ describe('traceTable', () => {
     const stale = trace({ status: 'running', started_at: '2020-01-01T00:00:00Z' });
     expect(noAnsi(traceTable([stale]))).toContain('abandoned');
   });
+
+  it('formats the duration column in ms, seconds, and minutes by magnitude', () => {
+    const out = noAnsi(traceTable([
+      trace({ id: 'trc_a', agent_name: 'fast', total_duration_ms: 500 }),
+      trace({ id: 'trc_b', agent_name: 'mid', total_duration_ms: 5000 }),
+      trace({ id: 'trc_c', agent_name: 'slow', total_duration_ms: 90000 }),
+    ]));
+    expect(out).toContain('500ms');
+    expect(out).toContain('5.0s');
+    expect(out).toContain('1.5m');
+  });
 });
 
 describe('evalTable / policyTable', () => {
@@ -56,6 +67,23 @@ describe('evalTable / policyTable', () => {
   it('evalTable renders a result', () => {
     const e: EvalResult = { id: 'e', trace_id: 't', evaluator_type: 'rubric', evaluator_name: 'r', score: 0.9, passed: true, details: {}, evaluated_at: '' };
     expect(noAnsi(evalTable([e]))).toContain('r');
+  });
+
+  it('evalTable summarizes deterministic criteria (failed names, or all-passed)', () => {
+    const withFailure: EvalResult = {
+      id: 'e1', trace_id: 't', evaluator_type: 'rubric', evaluator_name: 'quality', score: 0.5, passed: false,
+      details: { criteria: [{ name: 'grounded', score: 0.9 }, { name: 'no_hedging', score: 0.2 }] }, evaluated_at: '',
+    };
+    // Only the sub-threshold criterion is named in the summary.
+    const failOut = noAnsi(evalTable([withFailure]));
+    expect(failOut).toContain('no_hedging');
+    expect(failOut).not.toContain('grounded');
+
+    const allPass: EvalResult = {
+      id: 'e2', trace_id: 't', evaluator_type: 'rubric', evaluator_name: 'safety', score: 1, passed: true,
+      details: { criteria: [{ name: 'no_pii', score: 1 }] }, evaluated_at: '',
+    };
+    expect(noAnsi(evalTable([allPass]))).toContain('All criteria passed');
   });
 
   it('policyTable renders a policy', () => {
