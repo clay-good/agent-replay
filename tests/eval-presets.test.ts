@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
 import { ingestTrace } from '../src/services/trace-service.js';
-import { runEval } from '../src/services/eval-service.js';
+import { runEval, runCustomRubric } from '../src/services/eval-service.js';
 import type { IngestTraceInput } from '../src/models/types.js';
 
 /**
@@ -87,6 +87,42 @@ describe('completeness-check preset', () => {
       ],
     }), 'completeness-check');
     expect(res.passed).toBe(true);
+  });
+});
+
+describe('custom rubric weighting', () => {
+  // A YAML author who quotes weights ("weight: '2'") hands runCustomRubric a
+  // STRING. Before the coercion fix, `totalWeight += weight` string-concatenated
+  // ("0" + "2" + "2" → "022" → 22), so a fully-passing rubric scored 4/22 ≈ 0.18
+  // and reported passed:false — silently failing a CI gate on a correct trace.
+  it('scores string weights numerically, not by concatenation', () => {
+    const t = ingestTrace(db, base({ output: { text: 'foo and bar' } }));
+    const rubric = {
+      name: 'quoted-weights',
+      threshold: 0.8,
+      criteria: [
+        { name: 'has-foo', pattern: 'foo', expected: true, weight: '2' },
+        { name: 'has-bar', pattern: 'bar', expected: true, weight: '2' },
+      ],
+    } as unknown as Parameters<typeof runCustomRubric>[2];
+    const res = runCustomRubric(db, t.id, rubric);
+    expect(res.score).toBe(1);
+    expect(res.passed).toBe(true);
+  });
+
+  it('weights criteria proportionally (2:1) when they disagree', () => {
+    // has-foo passes (weight 2), has-baz fails (weight 1) → 2/3 ≈ 0.667.
+    const t = ingestTrace(db, base({ output: { text: 'foo only' } }));
+    const rubric = {
+      name: 'proportional',
+      threshold: 0.6,
+      criteria: [
+        { name: 'has-foo', pattern: 'foo', expected: true, weight: 2 },
+        { name: 'has-baz', pattern: 'baz', expected: true, weight: 1 },
+      ],
+    };
+    const res = runCustomRubric(db, t.id, rubric);
+    expect(res.score).toBeCloseTo(0.667, 2);
   });
 });
 

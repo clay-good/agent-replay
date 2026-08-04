@@ -370,6 +370,18 @@ describe('CLI integration', () => {
     const passRubric = join(dir, '..', 'pass.yaml');
     writeFileSync(passRubric, 'name: has-answer\nthreshold: 0.8\ncriteria:\n  - name: mentions-answer\n    pattern: answer\n    expected: true\n');
     expect(run(['eval', id, '--rubric', passRubric]).code).toBe(0);
+
+    // A YAML author who quotes the weight ("weight: '2'") still gets a correct
+    // score: both criteria pass with equal quoted weights → 1.0 ≥ threshold → exit 0.
+    // Before the fix the string weight corrupted the aggregate and this exited 1.
+    const quotedRubric = join(dir, '..', 'quoted.yaml');
+    writeFileSync(quotedRubric, "name: quoted\nthreshold: 0.8\ncriteria:\n  - name: a\n    pattern: answer\n    expected: true\n    weight: '2'\n  - name: b\n    pattern: '42'\n    expected: true\n    weight: '2'\n");
+    expect(run(['eval', id, '--rubric', quotedRubric]).code).toBe(0);
+
+    // A malformed weight is a usage error (exit 2), not a silently wrong score.
+    const badRubric = join(dir, '..', 'badweight.yaml');
+    writeFileSync(badRubric, 'name: bad\ncriteria:\n  - name: a\n    pattern: answer\n    expected: true\n    weight: -1\n');
+    expect(run(['eval', id, '--rubric', badRubric]).code).toBe(2);
   });
 
   it('diff --fields recomputes divergence so the view is self-consistent', () => {

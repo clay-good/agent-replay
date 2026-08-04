@@ -50,17 +50,28 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
   // Custom rubric file
   if (opts.rubric) {
     const spinner = startSpinner(`Loading rubric from ${opts.rubric}...`);
+    let rubric: Awaited<ReturnType<typeof parseRubric>>;
     try {
       const raw = readFileSync(resolve(opts.rubric), 'utf-8');
-      const rubric = await parseRubric(raw, opts.rubric);
-      successSpinner(spinner, `Loaded rubric: ${rubric.name}`);
+      rubric = await parseRubric(raw, opts.rubric);
+    } catch (err) {
+      // A malformed or unreadable rubric must fail the command, not exit 0 —
+      // otherwise a broken CI gate silently reads as "passed". Treat a bad
+      // rubric file as a usage error (exit 2), like a malformed --max-cost.
+      failSpinner(spinner, `Rubric error: ${errorMessage(err)}`);
+      process.exitCode = 2;
+      return;
+    }
+    successSpinner(spinner, `Loaded rubric: ${rubric.name}`);
 
-      const evalSpinner = startSpinner(`Running rubric "${rubric.name}"...`);
+    const evalSpinner = startSpinner(`Running rubric "${rubric.name}"...`);
+    try {
       const result = runCustomRubric(db, trace.id, rubric);
       results.push(result);
       successSpinner(evalSpinner, `Rubric "${rubric.name}" complete.`);
     } catch (err) {
-      failSpinner(spinner, `Rubric error: ${errorMessage(err)}`);
+      failSpinner(evalSpinner, `Rubric error: ${errorMessage(err)}`);
+      process.exitCode = 1;
       return;
     }
   }
@@ -283,6 +294,17 @@ async function parseRubric(raw: string, path: string): Promise<{
     }
     if (typeof c.expected !== 'boolean') {
       throw new Error(`criteria[${i}] must have an "expected" boolean`);
+    }
+    // A YAML author naturally quotes numbers ("weight: '2'"), which arrives as a
+    // string. Left unchecked it would later hit `totalWeight += weight` as string
+    // concatenation and corrupt the aggregate score. Coerce a numeric weight to a
+    // real number here and reject anything that isn't a non-negative number.
+    if (c.weight != null) {
+      const w = Number(c.weight);
+      if (!Number.isFinite(w) || w < 0) {
+        throw new Error(`criteria[${i}] "weight", if set, must be a non-negative number`);
+      }
+      c.weight = w;
     }
   }
 

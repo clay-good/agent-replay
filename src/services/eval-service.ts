@@ -318,7 +318,11 @@ export function runCustomRubric(
   let totalWeight = 0;
 
   for (const c of rubric.criteria) {
-    const weight = c.weight ?? 1;
+    // Coerce defensively: this is an exported entry point, so a caller (or a
+    // rubric parsed straight from JSON/YAML) can supply a stringy weight. Without
+    // this, `totalWeight += weight` below would string-concatenate and corrupt
+    // the score — a fully-passing rubric could report as failed.
+    const weight = Number(c.weight ?? 1);
     const regex = safeRegex(c.pattern, 'i');
     if (!regex) {
       criteriaResults.push({

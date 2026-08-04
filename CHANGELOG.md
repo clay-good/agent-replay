@@ -79,6 +79,17 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `eval --rubric` no longer mis-scores a rubric whose `weight` is written as a
+  quoted string. YAML authors naturally quote values (`weight: "2"`), which
+  arrived as a string and made the score aggregation do `totalWeight += weight`
+  as string concatenation (`"0"+"2"+"2"` → `"022"` → `22`), so a fully-passing
+  rubric scored ~`0.18` and reported `passed: false` — silently failing a CI
+  gate on a correct trace. A numeric weight is now coerced to a real number, and
+  a weight that is present but not a non-negative number is rejected as a usage
+  error (exit `2`), catching a negative weight that would otherwise push the
+  score out of `[0, 1]`. Relatedly, a malformed or unreadable rubric file now
+  fails the command (exit `2`) instead of exiting `0`, so a broken gate can no
+  longer read as "passed".
 - The `demo` dataset's two token totals that didn't add up are corrected: the
   `rag-context-pollution` and `successful-booking` sample traces declared a
   `total_tokens` 1,000 higher than their steps summed to, so `show` (which
