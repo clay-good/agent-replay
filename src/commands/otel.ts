@@ -3,7 +3,6 @@ import chalk from 'chalk';
 import { ensureDatabase } from '../db/index.js';
 import { startOtelReceiver, type OtelStats } from '../services/otel/receiver.js';
 import { heading } from '../ui/theme.js';
-import { safeParseInt } from '../utils/json.js';
 
 export interface OtelServeOptions {
   port?: string;
@@ -20,6 +19,7 @@ export async function runOtelServe(opts: OtelServeOptions = {}): Promise<void> {
   // A malformed --port must be a usage error, not a silent fall-back to 4318 —
   // otherwise a typo'd port binds the default and the user's exporter, pointed
   // at the intended port, silently connects to nothing.
+  let port = 4318;
   if (opts.port != null) {
     const p = Number(opts.port);
     if (!Number.isInteger(p) || p < 1 || p > 65535) {
@@ -27,8 +27,11 @@ export async function runOtelServe(opts: OtelServeOptions = {}): Promise<void> {
       process.exitCode = 2;
       return;
     }
+    // Bind the value we validated. A second parse (parseInt) would disagree on
+    // strings like "0x20" (Number → 32 but parseInt → 0, binding a random OS
+    // port) or "1e2" (100 vs 1) — the exporter would then hit the wrong port.
+    port = p;
   }
-  const port = safeParseInt(opts.port, 4318);
   const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
   const db = ensureDatabase(dbPath);
 

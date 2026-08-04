@@ -156,6 +156,13 @@ The recorded trace schema is unchanged.
   to SQL `LIMIT` where SQLite reads it as "no limit". Previously `list --limit
   abc` quietly returned the default page and `otel serve --port abc` bound the
   default 4318, so an exporter pointed at the intended port connected to nothing.
+- `list --limit`, `otel serve --port`, and `dashboard --refresh` now consume the
+  same parse they validate. Each validated with `Number()` but then re-parsed
+  the raw string with `parseInt`, and the two disagree on values like `0x20`
+  (`Number` → 32, `parseInt` → 0) or `1e2` (100 vs 1): the input passed
+  validation but ran with a different number — `list --limit 0x20` executed
+  `LIMIT 0` and reported a false "No traces found", and `otel serve --port 0x20`
+  bound a random OS port. The validated integer is now the one used.
 - The `otel serve` receiver no longer records an errored span as a successful
   trace. A span with `status.code=ERROR` but an empty `status.message` (the
   description is optional, and some OTLP/JSON exporters send `""`) produced an

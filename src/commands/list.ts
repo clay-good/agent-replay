@@ -6,7 +6,7 @@ import { ensureDatabase } from '../db/index.js';
 import { traceTable } from '../ui/table.js';
 import { heading } from '../ui/theme.js';
 import { parseSinceToIso } from '../utils/time.js';
-import { safeParseInt, errorMessage } from '../utils/json.js';
+import { errorMessage } from '../utils/json.js';
 
 export interface ListOptions {
   status?: string;
@@ -48,8 +48,13 @@ export function runList(opts: ListOptions = {}): void {
       process.exitCode = 2;
       return;
     }
+    // Consume the value we validated. A second parse (parseInt) would disagree
+    // on strings like "0x20" (Number → 32 but parseInt → 0, i.e. SQL LIMIT 0 →
+    // zero rows → a false "No traces found") or "1e2" (100 vs 1).
+    filter.limit = n;
+  } else {
+    filter.limit = 25;
   }
-  filter.limit = safeParseInt(opts.limit, 25);
 
   let traces, total;
   try {

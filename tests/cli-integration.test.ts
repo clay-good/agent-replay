@@ -70,6 +70,25 @@ describe('CLI integration', () => {
     expect(run(['list']).stdout).toContain('cli-bot');
   });
 
+  it('list --limit consumes the validated number, not a divergent second parse', () => {
+    // Regression: --limit was validated with Number() but consumed with
+    // parseInt(_, 10). "0x20" is Number → 32 (passes) but parseInt → 0, so the
+    // query ran LIMIT 0 (zero rows) and printed a false "No traces found";
+    // "1e2" is 100 vs 1. Both must now return all three ingested traces.
+    const f = join(dir, '..', 'many.jsonl');
+    writeFileSync(f, [
+      JSON.stringify({ agent_name: 'a', status: 'completed', steps: [{ step_number: 1, step_type: 'output', name: 'x' }] }),
+      JSON.stringify({ agent_name: 'b', status: 'completed', steps: [{ step_number: 1, step_type: 'output', name: 'y' }] }),
+      JSON.stringify({ agent_name: 'c', status: 'completed', steps: [{ step_number: 1, step_type: 'output', name: 'z' }] }),
+    ].join('\n'));
+    run(['ingest', f, '--format', 'jsonl']);
+
+    expect(JSON.parse(run(['list', '--limit', '0x20', '--json']).stdout).items).toHaveLength(3);
+    expect(JSON.parse(run(['list', '--limit', '1e2', '--json']).stdout).items).toHaveLength(3);
+    // A genuinely malformed value is still a usage error.
+    expect(run(['list', '--limit', 'abc']).code).toBe(2);
+  });
+
   it('ingests a pretty-printed single JSON object (not misdetected as JSONL)', () => {
     // A multi-line object is one JSON value; the old detector saw it didn't
     // start with "[" and parsed it line-by-line, failing on "line 1".
