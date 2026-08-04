@@ -96,6 +96,15 @@ The recorded trace schema is unchanged.
   `record` to time out (or `--leave-open` to keep open), matching the native
   protocol. `codex-exec`, which has no terminal event, still completes on a
   clean EOF.
+- `agent-replay run` now records a `failed` trace when the wrapped child exits
+  non-zero after emitting a `trace_end` with no `status` field. The recorder
+  defaults a statusless `trace_end` to `completed`, which is indistinguishable
+  from the child having explicitly declared success — so the wrapper's
+  exit-code finalization (which only ran while the trace was still `running`)
+  was skipped, and a failed run was recorded as `completed` with no error. The
+  wrapper now tracks whether the child declared an explicit status: if it did
+  not, a non-zero exit finalizes the trace as `failed` with the code recorded,
+  per the spec. An explicit child status is still honored.
 - `record` (the live native protocol) now honors the `parent_step_number` /
   `caused_by_step_number` aliases on `step` and `step_start` events, matching
   batch `ingest`. The recorder forwarded only the `parent_step` / `caused_by_step`

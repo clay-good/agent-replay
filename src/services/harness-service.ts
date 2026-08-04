@@ -53,6 +53,7 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
   // applied; a trailing partial line is buffered until the rest arrives.
   let bytesRead = 0;
   let partial = '';
+  let childDeclaredStatus = false;
   // Decode bytes with a StringDecoder so a multi-byte UTF-8 character split
   // across two reads (a poll boundary landing mid-character, or the child
   // flushing a partial write) recombines instead of each half becoming U+FFFD.
@@ -65,6 +66,14 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
     // The wrapper owns the trace; ignore child trace_start, and stamp our id.
     if (event.type === 'trace_start') return;
     if (!event.trace_id) event.trace_id = trace.id;
+    // Note only an EXPLICIT terminal status from the child. A statusless
+    // trace_end is defaulted to 'completed' by the recorder, which is
+    // indistinguishable from the trace still being open — so it must not
+    // suppress the exit-code finalization below (a child that emits a bare
+    // trace_end then exits non-zero must still be recorded as failed).
+    if (event.type === 'trace_end' && typeof event.status === 'string' && event.status) {
+      childDeclaredStatus = true;
+    }
     try {
       applyEvent(db, event);
       applied++;
@@ -138,8 +147,12 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
     | { status: string; metadata: string }
     | undefined;
 
-  // Honor an explicit trace_end from the child; otherwise derive from exit code.
-  if (current && current.status === 'running') {
+  // Honor an EXPLICIT terminal status from the child; otherwise derive from the
+  // exit code. The trace is still `running` if the child emitted no trace_end,
+  // and a statusless trace_end defaults to `completed` — so a non-zero exit
+  // without an explicit child status must override that default to `failed`,
+  // per the spec (exit 0 → completed, non-zero → failed with the code recorded).
+  if (current && !childDeclaredStatus && (current.status === 'running' || exitCode !== 0)) {
     updateTrace(db, trace.id, {
       status: exitCode === 0 ? 'completed' : 'failed',
       ended_at: new Date(startMs + durationMs).toISOString(),

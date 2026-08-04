@@ -115,4 +115,39 @@ describe('runWrapped', () => {
     expect(trace.status).toBe('completed');
     expect(trace.total_tokens).toBe(42);
   }, 15000);
+
+  it('finalizes as failed when a statusless trace_end is followed by a non-zero exit', async () => {
+    // The child emits a bare trace_end (no status), which the recorder defaults
+    // to `completed`, then exits 3. The wrapper must still record the trace as
+    // failed with the exit code — the default must not mask the failure.
+    const script = `
+      const fs = require('fs');
+      const t = process.env.AGENT_REPLAY_TRACE_ID;
+      fs.appendFileSync(process.env.AGENT_REPLAY_EVENTS, JSON.stringify({ v: 1, type: 'trace_end', trace_id: t, total_tokens: 7 }) + '\\n');
+      process.exit(3);
+    `;
+    const res = await runWrapped(db, { command: process.execPath, args: ['-e', script] });
+    expect(res.exitCode).toBe(3);
+    const trace = getTrace(db, res.traceId)!;
+    expect(trace.status).toBe('failed');
+    expect(trace.error).toMatch(/code 3/);
+    expect(trace.metadata.exit_code).toBe(3);
+  }, 15000);
+
+  it('still honors an EXPLICIT child status even when the exit code disagrees', async () => {
+    // The child explicitly declares success, then exits non-zero. An explicit
+    // status is authoritative (unlike the statusless default above), so the
+    // trace stays completed while the exit code is still propagated/recorded.
+    const script = `
+      const fs = require('fs');
+      const t = process.env.AGENT_REPLAY_TRACE_ID;
+      fs.appendFileSync(process.env.AGENT_REPLAY_EVENTS, JSON.stringify({ v: 1, type: 'trace_end', trace_id: t, status: 'completed' }) + '\\n');
+      process.exit(5);
+    `;
+    const res = await runWrapped(db, { command: process.execPath, args: ['-e', script] });
+    expect(res.exitCode).toBe(5);
+    const trace = getTrace(db, res.traceId)!;
+    expect(trace.status).toBe('completed'); // explicit status honored
+    expect(trace.metadata.exit_code).toBe(5); // exit code still recorded
+  }, 15000);
 });
