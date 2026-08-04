@@ -233,12 +233,19 @@ export function applyHookPayload(
     case 'pre_tool': {
       const toolName = str(payload.tool_name) ?? 'tool';
       const parentStep = agentId ? findAnchor(db, traceId, agentId) : undefined;
-      const toolInput = noInput ? {} : ((payload.tool_input as Record<string, unknown>) ?? {});
+      const realInput = (payload.tool_input as Record<string, unknown>) ?? {};
+      // --no-input redacts the input we STORE, but policy evaluation below must
+      // still see the real arguments — otherwise a content-based deny/
+      // require_review (e.g. input_contains "rm -rf") silently never fires, a
+      // fail-open on exactly the shared machines where --no-input is used. The
+      // real input is only ever held in memory here (proposedToolStep builds a
+      // transient step; evaluateStep never persists it).
+      const storedInput = noInput ? {} : realInput;
       const toolStepNumber = appendStepRetrying(db, traceId, (n) => ({
         step_number: n,
         step_type: 'tool_call',
         name: toolName,
-        input: toolInput,
+        input: storedInput,
         started_at: isoNow(),
         parent_step: parentStep ?? null,
         metadata: { ...rawMeta(payload, noInput), agent_id: agentId, agent_type: str(payload.agent_type) },
@@ -248,9 +255,10 @@ export function applyHookPayload(
         return { action, dialect, traceId, note: `opened tool_call "${toolName}"` };
       }
 
-      // Enforce: evaluate the proposed tool call and, on a match, record a
-      // guard_check step linked to the attempt and return the verdict.
-      const proposed = proposedToolStep(toolStepNumber, toolName, toolInput);
+      // Enforce: evaluate the proposed tool call (against the real input) and,
+      // on a match, record a guard_check step linked to the attempt and return
+      // the verdict.
+      const proposed = proposedToolStep(toolStepNumber, toolName, realInput);
       const verdict = verdictForMatches(evaluateStep(db, proposed));
       if (verdict.action === 'allow') {
         return { action, dialect, traceId, note: `allowed tool_call "${toolName}"` };

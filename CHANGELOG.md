@@ -28,6 +28,13 @@ The recorded trace schema is unchanged.
 
 ### Security
 
+- `hook --enforce --no-input` no longer fails open on content-based guardrails.
+  `--no-input` redacted the tool-call arguments before policy evaluation, not
+  just before storage, so a `deny` / `require_review` policy keyed on the input
+  (e.g. `input_contains: "rm -rf"`) silently never matched and the dangerous
+  call was allowed — on exactly the shared machines where `--no-input` is used.
+  Enforcement now evaluates the real arguments (held only in memory) while the
+  stored tool-call input stays redacted. Name-based policies were unaffected.
 - The `otel serve` receiver now bounds request memory. It read the entire
   request body into memory unbounded and `gunzip`-ed it with no output limit, so
   a runaway or hostile client could exhaust memory — a gzip body decompresses at

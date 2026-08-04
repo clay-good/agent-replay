@@ -44,6 +44,29 @@ describe('enforcement recording', () => {
     expect(guard.output).toMatchObject({ action: 'deny', policy: 'no-delete' });
   });
 
+  it('still enforces an input-based deny under --no-input, while redacting the stored input', () => {
+    // --no-input is a privacy flag; it must not turn a content-based kill-switch
+    // into a no-op. The policy is evaluated against the real arguments (so the
+    // dangerous call is blocked), but the STORED tool_call input is redacted.
+    addPolicy(db, { name: 'no-rm', action: 'deny', match_pattern: { step_type: 'tool_call', input_contains: 'rm -rf' } });
+    const session = 'sess-noinput';
+    applyHookPayload(db, { hook_event_name: 'UserPromptSubmit', session_id: session, prompt: 'go' }, { noInput: true });
+    const res = applyHookPayload(
+      db,
+      { hook_event_name: 'PreToolUse', session_id: session, tool_name: 'Bash', tool_input: { command: 'rm -rf /' } },
+      { enforce: true, noInput: true },
+    );
+
+    // Blocked, not allowed — the fail-open is gone.
+    expect(res.enforcement?.action).toBe('deny');
+    expect(res.enforcement?.policy).toBe('no-rm');
+
+    // The stored input is still redacted for privacy.
+    const trace = getTrace(db, listTraces(db, { session_id: session }).items[0].id)!;
+    const tool = trace.steps.find((s) => s.step_type === 'tool_call')!;
+    expect(tool.input).toEqual({});
+  });
+
   it('does not record a guard_check when nothing matches (allow)', () => {
     denyPolicy();
     const session = 'sess-ok';
