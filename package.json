@@ -42,6 +42,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
     "verify": "npm run typecheck && npm run build && npm test",
     "prepublishOnly": "npm run build"
   },
@@ -63,6 +64,7 @@
     "@types/better-sqlite3": "^7.6.12",
     "@types/blessed": "^0.1.25",
     "@types/node": "^22.10.0",
+    "@vitest/coverage-v8": "^4.1.10",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2",
     "vitest": "^4.1.0"
