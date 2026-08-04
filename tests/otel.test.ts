@@ -112,6 +112,20 @@ describe('mapOtlpTraces (GenAI semconv)', () => {
     expect(trace.steps).toHaveLength(1);
   });
 
+  it('classifies OpenLLMetry (traceloop.*) span kinds and an llm.request.type span', () => {
+    // Documented OpenLLMetry support: workflow/agent anchor the trace, tool →
+    // tool_call, task → thought, and an llm.request.type attribute marks an
+    // inference (llm_call) span.
+    const payload = otlp([
+      span({ traceId: 'tl', spanId: 'root', name: 'workflow', start: 1 * MS, end: 5 * MS, attrs: { 'traceloop.span.kind': 'workflow' } }),
+      span({ traceId: 'tl', spanId: 's1', parentSpanId: 'root', name: 'call_tool', start: 2 * MS, end: 3 * MS, attrs: { 'traceloop.span.kind': 'tool' } }),
+      span({ traceId: 'tl', spanId: 's2', parentSpanId: 'root', name: 'subtask', start: 3 * MS, end: 4 * MS, attrs: { 'traceloop.span.kind': 'task' } }),
+      span({ traceId: 'tl', spanId: 's3', parentSpanId: 'root', name: 'infer', start: 4 * MS, end: 5 * MS, attrs: { 'llm.request.type': 'chat' } }),
+    ]);
+    const [trace] = mapOtlpTraces(payload);
+    expect(trace.steps!.map((s) => s.step_type)).toEqual(['tool_call', 'thought', 'llm_call']);
+  });
+
   it('falls back to OpenInference span kinds when GenAI attrs are absent', () => {
     const payload = otlp([
       span({ traceId: 't3', spanId: 's1', name: 'tool.execute', start: 1 * MS, end: 2 * MS, attrs: { 'openinference.span.kind': 'TOOL' } }),
