@@ -128,6 +128,14 @@ The recorded trace schema is unchanged.
   as a match (fails closed) instead of skipping it. Non-string match values no
   longer throw mid-evaluation (which, under `hook --enforce`, had let the pending
   tool call through).
+- `fork --modify-context` no longer silently drops the modification. It was
+  applied only by mutating a snapshot that already existed at the fork-point
+  step, but snapshots are optional and most steps have none — so a fork at a
+  snapshot-less step discarded the context while the CLI still reported
+  "Modified context: Yes". `forkTrace` now creates a snapshot at the fork point
+  when one is needed, and the modified context lands in `context_window` (the
+  field the flag names and that `show --snapshots` renders) instead of
+  `environment`; any other snapshot fields are still copied.
 - `check --golden` no longer reports spurious regressions when several traces
   share an agent name and input (repeated runs of the same agent, or a fork):
   golden entries are bucketed and each candidate is paired with its closest

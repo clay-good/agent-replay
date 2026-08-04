@@ -137,19 +137,20 @@ export function forkTrace(
         );
       }
 
-      // Copy snapshot if one exists for this step
+      // Copy the step's snapshot if it has one, and apply --modify-context at
+      // the fork point. Snapshots are optional, so the fork-point step often
+      // has none — in that case still create a snapshot to hold the modified
+      // context, otherwise the modification is silently dropped (the whole
+      // point of --modify-context is to change the fork-point context). The
+      // modified context lands in `context_window`, the field the flag names
+      // and that `show --snapshots` renders.
       const snapshot = db
         .prepare('SELECT * FROM agent_trace_snapshots WHERE step_id = ?')
         .get(oldStepId) as Record<string, unknown> | undefined;
+      const applyContext = modifiedContext != null && (step.step_number as number) === fromStep;
 
-      if (snapshot) {
+      if (snapshot || applyContext) {
         const newSnapId = generateId('snp');
-        // Apply modified context only at the fork point, not to earlier steps
-        const environment =
-          (modifiedContext && (step.step_number as number) === fromStep)
-            ? JSON.stringify(modifiedContext)
-            : (snapshot.environment as string);
-
         db.prepare(
           `INSERT INTO agent_trace_snapshots
             (id, step_id, context_window, environment, tool_state, token_count)
@@ -157,10 +158,13 @@ export function forkTrace(
         ).run(
           newSnapId,
           newStepId,
-          snapshot.context_window,
-          environment,
-          snapshot.tool_state,
-          snapshot.token_count,
+          // The columns are NOT NULL with these defaults; a fresh fork-point
+          // snapshot (no original to copy) uses them, keeping only the modified
+          // context window.
+          applyContext ? JSON.stringify(modifiedContext) : (snapshot?.context_window ?? '[]'),
+          snapshot?.environment ?? '{}',
+          snapshot?.tool_state ?? '{}',
+          snapshot?.token_count ?? 0,
         );
       }
     }

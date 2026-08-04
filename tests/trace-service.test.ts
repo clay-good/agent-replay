@@ -481,6 +481,31 @@ describe('forkTrace', () => {
     expect(forked!.input).toEqual({ task: 'modified' });
   });
 
+  it('applies --modify-context by creating a snapshot when the fork step has none', () => {
+    // Snapshots are optional, so the fork point usually has none. The modified
+    // context must still land (previously it was silently dropped) — in a new
+    // snapshot at the fork point, in the context_window field.
+    const trace = ingestTrace(db, {
+      agent_name: 'ctx', status: 'completed',
+      steps: [
+        { step_number: 1, step_type: 'thought', name: 'a' },
+        { step_number: 2, step_type: 'tool_call', name: 'b' },
+      ],
+    });
+    const result = forkTrace(db, trace.id, 2, undefined, { region: 'eu-west' });
+    const snap = getStepSnapshot(db, result.forked_trace_id, 2);
+    expect(snap).not.toBeNull();
+    expect(snap!.context_window).toEqual({ region: 'eu-west' });
+  });
+
+  it('applies --modify-context to context_window while preserving the copied snapshot fields', () => {
+    const trace = ingestTrace(db, makeTrace()); // step 2 carries a snapshot (token_count 300)
+    const result = forkTrace(db, trace.id, 2, undefined, { region: 'us-east' });
+    const snap = getStepSnapshot(db, result.forked_trace_id, 2)!;
+    expect(snap.context_window).toEqual({ region: 'us-east' }); // modified
+    expect(snap.token_count).toBe(300); // preserved from the original snapshot
+  });
+
   it('throws for nonexistent trace', () => {
     expect(() => forkTrace(db, 'nonexistent', 1)).toThrow(/not found/);
   });
