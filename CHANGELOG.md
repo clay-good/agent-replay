@@ -79,6 +79,15 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `eval --max-cost` and `replay --speed` now consume exactly the value they
+  validate. Both flags were validated with `Number()` but then re-parsed with
+  `parseFloat`, which disagree: an empty `--max-cost ""` validated as `$0` yet
+  ran with an *unlimited* budget (`parseFloat("")` → `NaN` → the `Infinity`
+  fallback), silently defeating the spend cap the validation exists to enforce;
+  and `--speed 0x10` validated as `16` but replayed at speed `0` (instant),
+  since `parseFloat` stops at the `x`. Each flag now uses the validated number
+  directly, completing the "validate and consume the same value" convention
+  already applied to `list --limit`, `otel --port`, and `dashboard --refresh`.
 - `eval --rubric` no longer mis-scores a rubric whose `weight` is written as a
   quoted string. YAML authors naturally quote values (`weight: "2"`), which
   arrived as a string and made the score aggregation do `totalWeight += weight`

@@ -16,7 +16,7 @@ import { evalTable } from '../ui/table.js';
 import { aiEvalPanel } from '../ui/boxen-panels.js';
 import { heading } from '../ui/theme.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
-import { errorMessage, safeParseFloat } from '../utils/json.js';
+import { errorMessage } from '../utils/json.js';
 import type { EvalResult } from '../models/types.js';
 
 export interface EvalOptions {
@@ -118,6 +118,7 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
     // fail loudly rather than fall back to Infinity (an unlimited budget). A
     // typo like "0.O5" would otherwise silently disable the cap. Validate before
     // touching the provider so the message is about the actual mistake.
+    let maxCost = Infinity;
     if (opts.maxCost != null) {
       const c = Number(opts.maxCost);
       if (!Number.isFinite(c) || c < 0) {
@@ -125,6 +126,11 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
         process.exitCode = 2;
         return;
       }
+      // Consume the value we just validated. Re-parsing with safeParseFloat below
+      // would disagree with Number() on inputs like "" (Number → 0, parseFloat →
+      // NaN → the Infinity fallback) or "0x10", silently restoring the unlimited
+      // budget this check exists to prevent.
+      maxCost = c;
     }
 
     const config = loadConfig(opts.dir);
@@ -144,7 +150,6 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
     };
 
     const presetsToRun = isAiPreset ? [opts.preset!] : AI_PRESET_NAMES;
-    const maxCost = safeParseFloat(opts.maxCost, Infinity);
 
     // Show cost estimate
     const estimate = estimateAiEvalCost(trace, presetsToRun, resolved.model);

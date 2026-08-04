@@ -348,6 +348,44 @@ describe('CLI integration', () => {
     expect(run(['eval', id, '--ai', '--max-cost', '-1']).code).toBe(2);
   });
 
+  it('eval --max-cost consumes the validated budget, so a $0 cap is honored', () => {
+    // Regression: the cap was validated with Number() but consumed with
+    // safeParseFloat, which disagree on e.g. "" (Number → 0; parseFloat → NaN →
+    // the Infinity fallback). An empty --max-cost validated as $0 yet silently ran
+    // with an unlimited budget — the exact footgun the validation exists to stop.
+    // A provider must resolve to reach the consumption path, so set one in config;
+    // with a $0 cap the estimate ( > $0 ) is rejected before any network call.
+    run(['config', 'set', 'ai.provider', 'anthropic']);
+    run(['config', 'set', 'ai.api_keys.anthropic', 'sk-test-not-real']);
+    const f = join(dir, '..', 'cap.jsonl');
+    writeFileSync(f, JSON.stringify({
+      agent_name: 'cap', status: 'completed',
+      output: { text: 'enough content here to estimate a non-zero token cost' },
+      steps: [{ step_number: 1, step_type: 'output', name: 'respond', output: { text: 'a grounded answer' } }],
+    }));
+    run(['ingest', f]);
+    const id = firstTraceId();
+    // "0" is the control (Number and parseFloat agree); "" is the regression.
+    // Both mean a $0 budget → estimate exceeds it → exit 1, identically.
+    expect(run(['eval', id, '--ai', '--max-cost', '0']).code).toBe(1);
+    expect(run(['eval', id, '--ai', '--max-cost', '']).code).toBe(1);
+  });
+
+  it('replay --speed consumes the validated value (hex parses, not silent instant)', () => {
+    // Regression: --speed was validated with Number() ("0x10" → 16) but consumed
+    // with safeParseFloat ("0x10" → 0), so a valid hex speed replayed instantly.
+    const f = join(dir, '..', 'spd.jsonl');
+    writeFileSync(f, JSON.stringify({
+      agent_name: 'spd', status: 'completed',
+      steps: [{ step_number: 1, step_type: 'output', name: 'respond', output: { t: 'x' }, duration_ms: 10 }],
+    }));
+    run(['ingest', f]);
+    const id = firstTraceId();
+    const out = run(['replay', id, '--speed', '0x10']).stdout;
+    expect(out).toContain('16x speed');
+    expect(out).not.toContain('(instant)');
+  });
+
   it('eval exits non-zero when an evaluation fails, so it gates CI', () => {
     // The "build regression tests" use case and the README exit-code table
     // require a failing eval to exit 1; otherwise it can never fail a CI job.

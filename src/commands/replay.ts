@@ -7,7 +7,7 @@ import { ensureDatabase } from '../db/index.js';
 import { traceHeaderPanel } from '../ui/boxen-panels.js';
 import { stepSpinner, successSpinner, failSpinner, warnSpinner } from '../ui/spinner.js';
 import { stepIcon, stepLabel, heading, separator, colors } from '../ui/theme.js';
-import { errorMessage, safeParseFloat, safeParseInt, truncate } from '../utils/json.js';
+import { errorMessage, safeParseInt, truncate } from '../utils/json.js';
 import { formatDuration } from '../utils/time.js';
 
 export interface ReplayOptions {
@@ -64,7 +64,10 @@ export async function runReplay(
     return;
   }
 
-  const speed = safeParseFloat(opts.speed, 5);
+  // Consume the value validated with Number() above. safeParseFloat/parseFloat
+  // would disagree on inputs like "0x10" (Number → 16, parseFloat → 0), replaying
+  // at the wrong (here: instant) speed. Keep validation and consumption in sync.
+  const speed = opts.speed != null ? Number(opts.speed) : 5;
 
   // Filter steps to the requested range
   const steps = trace.steps.filter(
