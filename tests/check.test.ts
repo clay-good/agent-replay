@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
-import { ingestTrace, getTrace } from '../src/services/trace-service.js';
+import { ingestTrace, getTrace, createEval } from '../src/services/trace-service.js';
 import { exportTraces } from '../src/services/export-service.js';
 import { checkGolden, inputHash, stableStringify } from '../src/services/check-service.js';
 import type { GoldenEntry } from '../src/services/export-service.js';
@@ -171,5 +171,23 @@ describe('checkGolden', () => {
   it('rejects an unknown --fields value instead of silently passing', () => {
     const golden = makeGolden();
     expect(() => checkGolden(golden, [candidate(baseline)], { fields: ['bogus'] })).toThrow(/Unknown --fields/);
+  });
+});
+
+describe('exportTraces formats', () => {
+  it('exports JSONL with one JSON object per line', () => {
+    ingestTrace(db, { agent_name: 'e1', status: 'completed', input: { a: 1 }, steps: [{ step_number: 1, step_type: 'output', name: 'x' }] });
+    ingestTrace(db, { agent_name: 'e2', status: 'completed', input: { b: 2 }, steps: [{ step_number: 1, step_type: 'output', name: 'y' }] });
+    const lines = exportTraces(db, {}, 'jsonl').trim().split('\n');
+    expect(lines).toHaveLength(2);
+    for (const line of lines) expect(() => JSON.parse(line)).not.toThrow();
+    expect(lines.map((l) => JSON.parse(l).agent_name).sort()).toEqual(['e1', 'e2']);
+  });
+
+  it('carries a trace\'s eval_criteria into the golden export', () => {
+    const t = ingestTrace(db, { agent_name: 'g', status: 'completed', input: { a: 1 }, steps: [{ step_number: 1, step_type: 'output', name: 'x' }] });
+    createEval(db, t.id, { evaluator_type: 'rubric', evaluator_name: 'quality', score: 0.9, passed: true, details: {} });
+    const golden = JSON.parse(exportTraces(db, {}, 'golden')) as GoldenEntry[];
+    expect(golden[0].eval_criteria).toEqual([{ evaluator_name: 'quality', score: 0.9, passed: true }]);
   });
 });
