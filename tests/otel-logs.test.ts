@@ -55,6 +55,18 @@ describe('mapOtlpLogs — Gemini CLI', () => {
     expect(decision.decision!.decided_by).toBe('user');
   });
 
+  it('preserves malformed tool args by wrapping them as { args } rather than dropping them', () => {
+    // function_args need not be a JSON object: a Gemini log can send a bare
+    // command string, or a JSON scalar. Either must be kept (wrapped), not lost.
+    const nonJson = otlpLogs([logRecord('gemini_cli.tool_call', { 'session.id': 'g3', function_name: 'run_shell', function_args: 'rm -rf tmp' })]);
+    const t1 = getTrace(db, ingestTrace(db, mapOtlpLogs(nonJson)[0]).id)!;
+    expect(t1.steps.find((s) => s.step_type === 'tool_call')!.input).toEqual({ args: 'rm -rf tmp' });
+
+    const jsonScalar = otlpLogs([logRecord('gemini_cli.tool_call', { 'session.id': 'g4', function_name: 'wait', function_args: '42' })]);
+    const t2 = getTrace(db, ingestTrace(db, mapOtlpLogs(jsonScalar)[0]).id)!;
+    expect(t2.steps.find((s) => s.step_type === 'tool_call')!.input).toEqual({ args: '42' });
+  });
+
   it('attributes an auto_accept decision to policy', () => {
     const payload = otlpLogs([
       logRecord('gemini_cli.tool_call', { 'session.id': 'g2', function_name: 'read', function_args: '{}', decision: 'auto_accept' }),
