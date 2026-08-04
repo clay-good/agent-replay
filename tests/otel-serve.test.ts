@@ -241,6 +241,15 @@ describe('otel serve (end-to-end)', () => {
     // The logs endpoint shares the guard.
     expect((await post(json, 'null').then(() => fetch(url.replace('/v1/traces', '/v1/logs'), { method: 'POST', headers: json, body: 'null' }))).status).toBe(400);
 
+    // A well-typed top-level object whose repeated fields are the wrong type is
+    // still malformed. `?? []` guards only null/undefined, so a non-array here
+    // used to iterate a non-iterable and 500. Every quadrant must answer 400.
+    const logsUrl = url.replace('/v1/traces', '/v1/logs');
+    expect((await post(json, '{"resourceSpans":{}}')).status).toBe(400);
+    expect((await post(json, '{"resourceSpans":[{"scopeSpans":5}]}')).status).toBe(400);
+    expect((await fetch(logsUrl, { method: 'POST', headers: json, body: '{"resourceLogs":{}}' })).status).toBe(400);
+    expect((await fetch(logsUrl, { method: 'POST', headers: json, body: '{"resourceLogs":[{"scopeLogs":[{"logRecords":5}]}]}' })).status).toBe(400);
+
     // An empty OTLP object is still a valid (empty) batch → 200.
     expect((await post(json, '{}')).status).toBe(200);
   }, 20000);

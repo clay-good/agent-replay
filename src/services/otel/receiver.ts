@@ -179,8 +179,19 @@ function ingestOtlpTraces(
   otlp: Record<string, unknown>,
   stats: OtelStats,
 ): { status: number; payload: Record<string, unknown> } {
-  const totalSpans = countSpans(otlp);
-  const traces = mapOtlpTraces(otlp);
+  // Mapping is a pure transform of client-supplied structure. A malformed body
+  // (e.g. a non-array `resourceSpans`/`scopeSpans`/`spans`, which `?? []` does
+  // not guard against) throws here and must answer 400, not fall through to the
+  // outer 500 — a 5xx tells OTLP exporters to retry the same bad batch forever.
+  let totalSpans: number;
+  let traces: IngestTraceInput[];
+  try {
+    totalSpans = countSpans(otlp);
+    traces = mapOtlpTraces(otlp);
+  } catch {
+    return { status: 400, payload: { error: 'invalid OTLP body: resourceSpans/scopeSpans/spans must be arrays' } };
+  }
+  // DB writes are server-side: let them propagate to a 500.
   for (const t of traces) {
     upsertOtelTrace(db, t, stats);
   }
@@ -233,7 +244,14 @@ function ingestOtlpLogs(
   otlp: Record<string, unknown>,
   stats: OtelStats,
 ): { status: number; payload: Record<string, unknown> } {
-  const traces = mapOtlpLogs(otlp);
+  // As in ingestOtlpTraces: a malformed body (non-array resourceLogs/scopeLogs/
+  // logRecords) throws in the pure mapping step and must answer 400, not 500.
+  let traces: IngestTraceInput[];
+  try {
+    traces = mapOtlpLogs(otlp);
+  } catch {
+    return { status: 400, payload: { error: 'invalid OTLP body: resourceLogs/scopeLogs/logRecords must be arrays' } };
+  }
   for (const t of traces) {
     upsertOtelTrace(db, t, stats);
   }

@@ -79,6 +79,15 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `otel serve` now answers `400`, not `500`, when an OTLP/JSON body is a valid
+  object but a repeated field (`resourceSpans`/`scopeSpans`/`spans`,
+  `resourceLogs`/`scopeLogs`/`logRecords`) is the wrong type — e.g.
+  `{"resourceLogs":{}}`. The `?? []` iteration guards only null/undefined, so a
+  non-array value iterated a non-iterable and threw, surfacing as a `500`. OTLP
+  exporters retry `5xx` but not `4xx`, so a permanently-malformed batch would
+  have looped forever. The mapping step (pure client-data transform) now answers
+  `400` on such input across all four quadrants (traces/logs × JSON/protobuf),
+  while database-write errors still surface as `500`.
 - The OTLP/protobuf decoder now reads an `int64` attribute value precisely. It
   accumulated the varint with JS `number` arithmetic, so a negative `int_value`
   (encoded as a full 10-byte two's-complement varint) decoded to a huge positive
