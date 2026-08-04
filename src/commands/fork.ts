@@ -38,13 +38,18 @@ export function runFork(traceId: string, opts: ForkOptions): void {
     return;
   }
 
-  // Validate step exists
-  const maxStep = trace.steps.length > 0
-    ? Math.max(...trace.steps.map((s) => s.step_number))
-    : 0;
-  if (fromStep > maxStep) {
+  // Validate the fork point is a real step. step_number can have gaps (a valid
+  // ingested/merged trace may be numbered [1, 3]), so checking only against the
+  // MAX step would let `--from-step 2` through on a [1, 3] trace — and then
+  // --modify-context targets a step that doesn't exist and is silently dropped.
+  // Require an exact match so the fork point (and its context edit) always lands.
+  const forkPointExists = trace.steps.some((s) => s.step_number === fromStep);
+  if (!forkPointExists) {
+    const maxStep = trace.steps.length > 0
+      ? Math.max(...trace.steps.map((s) => s.step_number))
+      : 0;
     console.error(
-      chalk.red(`  Step ${fromStep} doesn't exist. Trace has ${maxStep} steps.`),
+      chalk.red(`  Step ${fromStep} doesn't exist in this trace (max step ${maxStep}).`),
     );
     process.exitCode = 1;
     return;

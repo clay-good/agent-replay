@@ -523,6 +523,22 @@ describe('forkTrace', () => {
   it('throws for nonexistent trace', () => {
     expect(() => forkTrace(db, 'nonexistent', 1)).toThrow(/not found/);
   });
+
+  it('rejects forking at a step number that does not exist (gapped steps)', () => {
+    // step_number may have gaps, so `fromStep <= maxStep` is not enough. Forking
+    // [1, 3] at step 2 must fail loudly, not silently copy step 1 and drop the
+    // --modify-context (whose target step 2 never gets created).
+    const trace = ingestTrace(db, {
+      agent_name: 'gap', status: 'completed',
+      steps: [
+        { step_number: 1, step_type: 'thought', name: 'a', output: {} },
+        { step_number: 3, step_type: 'output', name: 'c', output: {} },
+      ],
+    });
+    expect(() => forkTrace(db, trace.id, 2, undefined, { region: 'eu' })).toThrow(/no step 2/);
+    // A real fork point still works.
+    expect(forkTrace(db, trace.id, 3).steps_copied).toBe(2);
+  });
 });
 
 // ── Eval ──────────────────────────────────────────────────────────────────

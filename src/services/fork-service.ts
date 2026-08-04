@@ -44,6 +44,17 @@ export function forkTrace(
         `fromStep ${fromStep} exceeds max step ${maxStep.max_step} in trace ${traceId}`,
       );
     }
+    // step_number may have gaps (a valid ingested/merged trace can be numbered
+    // [1, 3]), so `fromStep <= maxStep` is not enough — the fork point must be a
+    // real step. Otherwise forking [1, 3] at step 2 copies only step 1 and the
+    // `applyContext` guard below (`step_number === fromStep`) never fires, so
+    // --modify-context is silently dropped at a fork point that doesn't exist.
+    const forkPointExists = db
+      .prepare('SELECT 1 FROM agent_trace_steps WHERE trace_id = ? AND step_number = ?')
+      .get(traceId, fromStep);
+    if (!forkPointExists) {
+      throw new Error(`Trace ${traceId} has no step ${fromStep} to fork at`);
+    }
 
     // Create the forked trace
     const forkedId = generateId('trc');

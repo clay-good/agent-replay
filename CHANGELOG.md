@@ -79,6 +79,14 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `fork --from-step N` now requires step `N` to actually exist, instead of only
+  checking `N` against the highest step number. Step numbers can have gaps (a
+  valid ingested or OTLP-assembled trace may be numbered `[1, 3]`), so forking
+  such a trace at step `2` passed the bound check but copied only step `1` — and
+  because the fork point never existed, `--modify-context` was silently dropped
+  even though the summary reported "Modified context: Yes" and the command exited
+  `0`. Forking at a non-existent step now fails loudly (exit `1` from the CLI; the
+  exported `forkTrace` throws).
 - `import` of a Claude transcript now tallies a zero-step record as `skipped`,
   not `imported`, keeping the documented `imported + skipped = records`
   invariant. A follow-up user turn (which has no `user`/`input` step type to

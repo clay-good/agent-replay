@@ -324,6 +324,23 @@ describe('CLI integration', () => {
     expect(run(['fork', 'tfk', '--from-step', '2', '--modify-input', '[oops']).code).toBe(2);
   });
 
+  it('rejects forking at a non-existent (gapped) step number', () => {
+    // step_number can have gaps. Forking at a missing number must fail loudly,
+    // not silently copy a prefix and drop --modify-context while the summary
+    // still claims "Modified context: Yes".
+    const stream = [
+      '{"v":1,"type":"trace_start","trace_id":"tgap","agent_name":"g"}',
+      '{"v":1,"type":"step","trace_id":"tgap","step_number":1,"step_type":"thought","name":"a"}',
+      '{"v":1,"type":"step","trace_id":"tgap","step_number":3,"step_type":"output","name":"c"}',
+      '{"v":1,"type":"trace_end","trace_id":"tgap","status":"completed"}',
+    ].join('\n');
+    run(['record'], stream);
+    // No step 2 → runtime error (exit 1), even with --modify-context supplied.
+    expect(run(['fork', 'tgap', '--from-step', '2', '--modify-context', '{"region":"eu"}']).code).toBe(1);
+    // The real fork points still work.
+    expect(run(['fork', 'tgap', '--from-step', '3']).code).toBe(0);
+  });
+
   it('runs deterministic evaluations offline via eval --all', () => {
     const f = join(dir, '..', 'e.jsonl');
     writeFileSync(f, JSON.stringify({
