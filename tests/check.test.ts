@@ -113,6 +113,27 @@ describe('checkGolden', () => {
     expect(div.step_number).toBe(2);
   });
 
+  it('catches a tool-input regression even when the candidate renumbers its steps', () => {
+    // step_types/step_names align positionally, so tool_inputs must too. A valid
+    // candidate can number its steps differently from the golden (step_number
+    // need only be >= 1 and may be gapped — e.g. an OTLP-assembled or imported
+    // trace). Aligning tool_inputs by absolute step_number made the candidate's
+    // tool_call miss its golden counterpart, so a real regression slipped through
+    // while the positional checks reported a perfect match.
+    const golden = makeGolden(); // baseline: tool_call at step 2, input dest: JFK
+    const renumbered: IngestTraceInput = {
+      ...baseline,
+      steps: [
+        { step_number: 1, step_type: 'thought', name: 'plan' },
+        { step_number: 3, step_type: 'tool_call', name: 'search_flights', input: { origin: 'SFO', dest: 'LAX' } },
+        { step_number: 5, step_type: 'output', name: 'confirm' },
+      ],
+    };
+    const report = checkGolden(golden, [candidate(renumbered)]);
+    expect(report.ok).toBe(false);
+    expect(report.results[0].divergences.some((d) => d.field === 'tool_inputs')).toBe(true);
+  });
+
   it('detects a changed step sequence', () => {
     const golden = makeGolden();
     const altered: IngestTraceInput = {

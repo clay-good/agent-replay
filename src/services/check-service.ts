@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { TraceWithDetails } from '../models/types.js';
-import type { GoldenEntry, GoldenStepSummary } from './export-service.js';
+import type { GoldenEntry } from './export-service.js';
 
 /**
  * Golden regression check: compare candidate traces against a golden dataset,
@@ -150,12 +150,17 @@ function diffAgainstGolden(trace: TraceWithDetails, golden: GoldenEntry, fields:
   }
 
   if (fields.includes('tool_inputs')) {
-    const byNumber = new Map<number, GoldenStepSummary>();
-    for (const g of gSteps) byNumber.set(g.step_number, g);
-    for (const step of cSteps) {
-      if (step.step_type !== 'tool_call') continue;
-      const g = byNumber.get(step.step_number);
-      if (!g || g.input === undefined) continue;
+    // Align positionally, exactly like step_types/step_names above. Keying off
+    // the absolute step_number instead would disagree with those checks whenever
+    // the two traces number their steps differently — a valid, common case, since
+    // step numbers need only be >= 1 (OTLP-assembled, imported, or gapped traces
+    // may start above 1 or skip values). That mismatch made a tool_call's number
+    // land on an unrelated golden step, so a real tool-input regression slipped
+    // through the gate while the positional checks reported a perfect match.
+    for (let i = 0; i < n; i++) {
+      const g = gSteps[i];
+      const step = cSteps[i];
+      if (step.step_type !== 'tool_call' || g.input === undefined) continue;
       if (stableStringify(g.input) !== stableStringify(step.input)) {
         divergences.push({ field: 'tool_inputs', step_number: step.step_number, golden: g.input, candidate: step.input });
         break;
@@ -171,12 +176,12 @@ function diffAgainstGolden(trace: TraceWithDetails, golden: GoldenEntry, fields:
   }
 
   // Opt-in: catch a per-step model change (only where the golden recorded one).
+  // Positional, for the same reason as tool_inputs above.
   if (fields.includes('model')) {
-    const byNumber = new Map<number, GoldenStepSummary>();
-    for (const g of gSteps) byNumber.set(g.step_number, g);
-    for (const step of cSteps) {
-      const g = byNumber.get(step.step_number);
-      if (!g || g.model == null) continue;
+    for (let i = 0; i < n; i++) {
+      const g = gSteps[i];
+      const step = cSteps[i];
+      if (g.model == null) continue;
       if (g.model !== (step.model ?? null)) {
         divergences.push({ field: 'model', step_number: step.step_number, golden: g.model, candidate: step.model ?? null });
         break;

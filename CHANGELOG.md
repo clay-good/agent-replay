@@ -79,6 +79,16 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `check --golden` no longer lets a tool-input (or per-step model) regression
+  slip through when the candidate numbers its steps differently from the golden.
+  The `step_count`/`step_types`/`step_names` checks compare the two step
+  sequences positionally, but `tool_inputs` and `model` matched by absolute
+  `step_number`. Since a step number need only be `>= 1` (an OTLP-assembled or
+  imported trace may start above 1 or skip values), a candidate with the same
+  shape but shifted numbering had its `tool_call` look up an unrelated golden
+  step and silently skip the comparison — so a real regression passed the gate
+  while the positional checks reported a perfect match. `tool_inputs` and `model`
+  now align positionally, consistent with the other structural checks.
 - `otel serve` no longer reports an absurd trace duration for a span that has an
   end time but no start time. A span missing `startTimeUnixNano` flattens to
   nanos `0` and sorts first, so the trace-level `total_duration_ms` computed
