@@ -79,6 +79,15 @@ trace schema is unchanged.
 
 ### Fixed
 
+- The `hook` adapter no longer mislabels a Gemini CLI session as `claude-code`.
+  Gemini and Claude Code share the `SessionStart`/`SessionEnd` hook event names
+  verbatim, but the Gemini detection allowlist omitted them, so a Gemini session
+  whose first hook is `SessionStart` created its trace labeled `claude-code` —
+  and because every later (correctly-detected) event reuses the running trace,
+  the whole session stayed mislabeled. Detection now disambiguates these shared
+  events by payload shape (Gemini carries `timestamp` and no `permission_mode`).
+  Enforcement was unaffected (it runs only on `BeforeTool`, always detected
+  correctly); this was a trace-labeling fix.
 - `fork --from-step N` now requires step `N` to actually exist, instead of only
   checking `N` against the highest step number. Step numbers can have gaps (a
   valid ingested or OTLP-assembled trace may be numbered `[1, 3]`), so forking

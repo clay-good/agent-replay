@@ -27,6 +27,16 @@ describe('detectDialect', () => {
     expect(detectDialect({}, 'PreToolUse')).toBe('claude-code');
     expect(detectDialect({}, 'Nonsense')).toBe('unknown');
   });
+
+  it('disambiguates SessionStart/SessionEnd (shared by Gemini and Claude Code) by payload shape', () => {
+    // Gemini payloads carry `timestamp` and no `permission_mode`; Claude Code's
+    // carry `permission_mode`. The two share these event names verbatim.
+    expect(detectDialect({ timestamp: '2026-08-04T00:00:00Z', cwd: '/p' }, 'SessionStart')).toBe('gemini');
+    expect(detectDialect({ timestamp: '2026-08-04T00:00:00Z' }, 'SessionEnd')).toBe('gemini');
+    expect(detectDialect({ permission_mode: 'default', prompt_id: 'p1' }, 'SessionStart')).toBe('claude-code');
+    // Absent a positive Gemini signal, stay on the historical Claude Code default.
+    expect(detectDialect({ cwd: '/p' }, 'SessionStart')).toBe('claude-code');
+  });
 });
 
 // ── Claude Code session → one trace ───────────────────────────────────────
@@ -79,6 +89,24 @@ describe('Gemini hook sequence', () => {
     expect(trace.status).toBe('completed');
     const tool = trace.steps.find((s) => s.step_type === 'tool_call')!;
     expect(tool.output).toEqual({ content: 'hi' });
+  });
+
+  it('labels a session that opens with Gemini SessionStart as gemini, not claude-code', () => {
+    // Regression: Gemini's first hook is SessionStart, a name it shares with
+    // Claude Code. Misdetected as claude-code, it created the trace with that
+    // label; every later (correctly-detected) Gemini event reused the running
+    // trace, so the whole session was permanently mislabeled claude-code.
+    const session = 'sess-gemini-start';
+    const start = apply({ hook_event_name: 'SessionStart', session_id: session, cwd: '/p', timestamp: '2026-08-04T00:00:00Z' });
+    expect(start.dialect).toBe('gemini');
+    apply({ hook_event_name: 'BeforeAgent', session_id: session, prompt: 'summarize' });
+    apply({ hook_event_name: 'BeforeTool', session_id: session, tool_name: 'read_file', tool_input: { path: 'a' } });
+    apply({ hook_event_name: 'AfterTool', session_id: session, tool_response: { content: 'hi' } });
+    apply({ hook_event_name: 'SessionEnd', session_id: session, timestamp: '2026-08-04T00:01:00Z' });
+
+    const trace = getTrace(db, listTraces(db, { session_id: session }).items[0].id)!;
+    expect(trace.agent_name).toBe('gemini');
+    expect((trace.metadata as { dialect?: string }).dialect).toBe('gemini');
   });
 });
 

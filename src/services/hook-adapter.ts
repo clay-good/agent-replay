@@ -85,7 +85,24 @@ function str(v: unknown): string | undefined {
 export function detectDialect(payload: Record<string, unknown>, eventName?: string): HookDialect {
   if (eventName && GEMINI_EVENTS.has(eventName)) return 'gemini';
   if (payload.turn_id != null) return 'codex';
-  if (eventName && eventName in EVENT_ACTIONS) return 'claude-code';
+  if (eventName && eventName in EVENT_ACTIONS) {
+    // SessionStart/SessionEnd are the only hook event names Gemini CLI shares
+    // verbatim with Claude Code, so the GEMINI_EVENTS allowlist can't separate
+    // them. Disambiguate by base-field shape (per the documented payloads): a
+    // Gemini payload carries `timestamp` and no `permission_mode`, while every
+    // Claude Code payload carries `permission_mode`. Without this, a Gemini
+    // session that opens with SessionStart creates the trace labeled
+    // claude-code, and every later (correctly-detected) event reuses that
+    // running trace — so the whole session is permanently mislabeled.
+    if (
+      (eventName === 'SessionStart' || eventName === 'SessionEnd') &&
+      payload.permission_mode == null &&
+      payload.timestamp != null
+    ) {
+      return 'gemini';
+    }
+    return 'claude-code';
+  }
   return 'unknown';
 }
 
