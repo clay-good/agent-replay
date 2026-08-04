@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
 import { ingestTrace, getTrace, listTraces } from '../src/services/trace-service.js';
-import { mapOtlpTraces } from '../src/services/otel/semconv.js';
+import { mapOtlpTraces, attrsToMap, decodeAnyValue } from '../src/services/otel/semconv.js';
 import { handleTracesExport, startOtelReceiver, type OtelStats } from '../src/services/otel/receiver.js';
 
 let db: Database.Database;
@@ -44,6 +44,27 @@ function otlp(spans: unknown[], resource: Record<string, unknown> = {}) {
 const MS = 1_000_000; // nanos per ms
 
 // ── GenAI span mapping ─────────────────────────────────────────────────────
+
+describe('attrsToMap / decodeAnyValue (OTLP/JSON attribute values)', () => {
+  it('converts every AnyValue kind to its JS value', () => {
+    const m = attrsToMap([
+      { key: 's', value: { stringValue: 'hi' } },
+      { key: 'i', value: { intValue: '42' } }, // JSON encodes 64-bit ints as strings
+      { key: 'd', value: { doubleValue: 1.5 } },
+      { key: 'b', value: { boolValue: true } },
+      { key: 'arr', value: { arrayValue: { values: [{ stringValue: 'a' }, { intValue: '2' }] } } },
+      { key: 'kv', value: { kvlistValue: { values: [{ key: 'nested', value: { boolValue: false } }] } } },
+    ]);
+    expect(m).toEqual({ s: 'hi', i: 42, d: 1.5, b: true, arr: ['a', 2], kv: { nested: false } });
+  });
+
+  it('skips a keyless attribute and handles unknown/primitive values', () => {
+    expect(attrsToMap([{ value: { stringValue: 'x' } }])).toEqual({}); // no key → skipped
+    expect(attrsToMap(undefined)).toEqual({});
+    expect(decodeAnyValue({ somethingElse: 1 })).toBeUndefined(); // unrecognized shape
+    expect(decodeAnyValue('raw')).toBe('raw'); // non-object passes through
+  });
+});
 
 describe('mapOtlpTraces (GenAI semconv)', () => {
   it('maps an agent span tree to a trace with hierarchy and token totals', () => {
