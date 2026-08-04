@@ -76,8 +76,8 @@ export function summarizeDiffForLlm(
   // Trace headers
   const leftVer = left.agent_version ? ` v${left.agent_version}` : '';
   const rightVer = right.agent_version ? ` v${right.agent_version}` : '';
-  lines.push(`TRACE A: ${left.agent_name}${leftVer} [${left.status.toUpperCase()}] (${left.steps.length} steps${left.total_duration_ms ? `, ${formatDuration(left.total_duration_ms)}` : ''})`);
-  lines.push(`TRACE B: ${right.agent_name}${rightVer} [${right.status.toUpperCase()}] (${right.steps.length} steps${right.total_duration_ms ? `, ${formatDuration(right.total_duration_ms)}` : ''})`);
+  lines.push(`TRACE A: ${left.agent_name}${leftVer} [${left.status.toUpperCase()}] (${left.steps.length} steps${left.total_duration_ms != null ? `, ${formatDuration(left.total_duration_ms)}` : ''})`);
+  lines.push(`TRACE B: ${right.agent_name}${rightVer} [${right.status.toUpperCase()}] (${right.steps.length} steps${right.total_duration_ms != null ? `, ${formatDuration(right.total_duration_ms)}` : ''})`);
 
   // Input comparison
   lines.push(`\nINPUT A: ${truncObj(left.input, 200)}`);
