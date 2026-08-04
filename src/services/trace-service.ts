@@ -796,8 +796,13 @@ export function listTraces(
     params.push(filter.status);
   }
   if (filter.agent_name) {
-    conditions.push('agent_name LIKE ?');
-    params.push(`%${filter.agent_name}%`);
+    // Substring match, but escape the LIKE metacharacters in the user's term so
+    // they stay literal — agent names routinely contain `_` (e.g. "travel_bot"),
+    // which unescaped matches any character ("travel-bot"), and a literal `%`
+    // would match everything. Mirrors the session_id branch below.
+    const escaped = filter.agent_name.replace(/[\\%_]/g, '\\$&');
+    conditions.push("agent_name LIKE ? ESCAPE '\\'");
+    params.push(`%${escaped}%`);
   }
   if (filter.tag) {
     // SQLite JSON: check if the tags array contains the tag

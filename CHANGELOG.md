@@ -136,6 +136,12 @@ trace schema is unchanged.
   classification the codex-rollout importer was already fixed to get right. The
   `contributed` flag is now set only on the paths that actually capture input or
   emit a step.
+- `list --agent <name>` (and the same filter in `export`/`check`) now escapes
+  `LIKE` metacharacters in the search term, so `_` and `%` match literally
+  instead of acting as wildcards. A snake_case name like `travel_bot` otherwise
+  also matched `travel-bot` (the `_` matches any character), and a term
+  containing `%` matched nearly everything. This mirrors the `--session` fix
+  below; the substring (`%term%`) behavior is unchanged for ordinary terms.
 - `list --session <id>` now matches the session id as a literal prefix instead
   of a SQL `LIKE` pattern. Session ids routinely contain `_` (e.g. `sess_1`),
   which `LIKE` treats as a single-character wildcard, so `--session sess_1` also

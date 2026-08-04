@@ -266,6 +266,16 @@ describe('listTraces', () => {
     expect(items[0].agent_name).toBe('alpha-bot');
   });
 
+  it('treats a LIKE metacharacter in the agent_name term as a literal', () => {
+    // A snake_case agent name contains `_`, which unescaped matches any char.
+    // The substring filter must match the literal underscore, not "travel-bot".
+    ingestTrace(db, makeTrace({ agent_name: 'travel_bot' }));
+    ingestTrace(db, makeTrace({ agent_name: 'travel-bot' }));
+    const { items, total } = listTraces(db, { agent_name: 'travel_bot' });
+    expect(total).toBe(1);
+    expect(items[0].agent_name).toBe('travel_bot');
+  });
+
   it('filters by tag', () => {
     ingestTrace(db, makeTrace({ tags: ['production', 'v2'] }));
     ingestTrace(db, makeTrace({ tags: ['staging'] }));
