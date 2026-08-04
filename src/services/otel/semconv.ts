@@ -231,7 +231,12 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
       output: root ? messageContent(root.attrs, 'output') ?? null : null,
       started_at: isoFromNanos(group[0].start),
       ended_at: maxEnd != null ? isoFromNanos(maxEnd) : null,
-      total_duration_ms: maxEnd != null ? Math.round((maxEnd - group[0].start) / 1e6) : null,
+      // Guard the start the same way the step-level duration (above) and
+      // isoFromNanos do: a span missing startTimeUnixNano flattens to nanos 0 and
+      // sorts first, so without this the total would be `maxEnd - 0` — an absurd
+      // epoch-based duration paired with an unknown (undefined) started_at.
+      total_duration_ms:
+        maxEnd != null && group[0].start ? Math.round((maxEnd - group[0].start) / 1e6) : null,
       total_tokens: totalTokens || null,
       metadata: { source_format: 'otel-genai', otel_trace_id: group[0].traceId, ...(root ? {} : { synthetic_trace: true }) },
       steps,

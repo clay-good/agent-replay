@@ -102,6 +102,21 @@ describe('mapOtlpTraces (GenAI semconv)', () => {
     expect(trace.steps![0].metadata!.provider).toBe('openai');
   });
 
+  it('leaves the trace duration null when a span has an end but no start', () => {
+    // A span missing startTimeUnixNano flattens to nanos 0 and sorts first, so
+    // the trace start is unknown. The total duration must stay null (consistent
+    // with the undefined started_at and the null step duration), not compute
+    // `end - 0` into an absurd epoch-based value.
+    const payload = otlp([
+      { traceId: 'nostart', spanId: 's1', name: 'chat', endTimeUnixNano: String(5 * MS),
+        attributes: [attr('gen_ai.operation.name', 'chat')] },
+    ]);
+    const [trace] = mapOtlpTraces(payload);
+    expect(trace.started_at).toBeUndefined();
+    expect(trace.total_duration_ms).toBeNull();
+    expect(trace.steps![0].duration_ms).toBeNull();
+  });
+
   it('groups spans with no agent root into a synthetic trace per OTel trace ID', () => {
     const payload = otlp([
       span({ traceId: 'orphan', spanId: 's1', name: 'chat', start: 1 * MS, end: 2 * MS, attrs: { 'gen_ai.operation.name': 'chat' } }),

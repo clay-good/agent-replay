@@ -79,6 +79,12 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `otel serve` no longer reports an absurd trace duration for a span that has an
+  end time but no start time. A span missing `startTimeUnixNano` flattens to
+  nanos `0` and sorts first, so the trace-level `total_duration_ms` computed
+  `end - 0` — a ~158-year duration paired with an unknown (`null`) start — while
+  the parallel step-level duration and start time were both correctly `null`.
+  The trace duration now applies the same missing-start guard, staying `null`.
 - The `hook` adapter no longer mislabels a Gemini CLI session as `claude-code`.
   Gemini and Claude Code share the `SessionStart`/`SessionEnd` hook event names
   verbatim, but the Gemini detection allowlist omitted them, so a Gemini session
