@@ -55,6 +55,11 @@ export interface StepStartEvent extends BaseEvent {
   started_at?: string;
   parent_step?: number | null;
   caused_by_step?: number | null;
+  /** Aliases matching the persisted/exported column names, so a trace replayed
+   * from `show --json` / `export` re-records with its hierarchy intact — the
+   * same aliases `ingestTrace` accepts. */
+  parent_step_number?: number | null;
+  caused_by_step_number?: number | null;
   metadata?: Record<string, unknown>;
 }
 
@@ -87,6 +92,9 @@ export interface StepEvent extends BaseEvent {
   metadata?: Record<string, unknown>;
   parent_step?: number | null;
   caused_by_step?: number | null;
+  /** Aliases matching the persisted/exported column names (see StepStartEvent). */
+  parent_step_number?: number | null;
+  caused_by_step_number?: number | null;
   decision?: IngestDecisionInput | null;
   snapshot?: IngestSnapshotInput;
 }

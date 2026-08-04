@@ -60,8 +60,8 @@ export function applyEvent(db: Database.Database, event: CaptureEvent): ApplyRes
         input: event.input,
         model: event.model ?? null,
         started_at: event.started_at,
-        parent_step: event.parent_step ?? null,
-        caused_by_step: event.caused_by_step ?? null,
+        parent_step: event.parent_step ?? event.parent_step_number ?? null,
+        caused_by_step: event.caused_by_step ?? event.caused_by_step_number ?? null,
         metadata: event.metadata,
       });
       return { traceId: event.trace_id! };
@@ -94,8 +94,8 @@ export function applyEvent(db: Database.Database, event: CaptureEvent): ApplyRes
         model: event.model ?? null,
         error: event.error,
         metadata: event.metadata,
-        parent_step: event.parent_step ?? null,
-        caused_by_step: event.caused_by_step ?? null,
+        parent_step: event.parent_step ?? event.parent_step_number ?? null,
+        caused_by_step: event.caused_by_step ?? event.caused_by_step_number ?? null,
         decision: event.decision,
         snapshot: event.snapshot,
       });

@@ -236,3 +236,29 @@ describe('WAL concurrency', () => {
     reader.close();
   });
 });
+
+describe('recorder honors the persisted-column aliases', () => {
+  it('accepts parent_step_number / caused_by_step_number on a native step event', () => {
+    // A trace replayed from `show --json` / `export` uses the persisted column
+    // spelling. The live recorder must honor it just like batch ingest does,
+    // otherwise the hierarchy/causality is silently lost on round-trip.
+    const tid = 'trc_alias_1';
+    const events: CaptureEvent[] = [
+      { v: 1, type: 'trace_start', trace_id: tid, agent_name: 'a' },
+      { v: 1, type: 'step', trace_id: tid, step_number: 1, step_type: 'thought', name: 'root' },
+      { v: 1, type: 'step_start', trace_id: tid, step_number: 2, step_type: 'tool_call', name: 'viaStart', parent_step_number: 1, caused_by_step_number: 1 },
+      { v: 1, type: 'step_end', trace_id: tid, step_number: 2 },
+      { v: 1, type: 'step', trace_id: tid, step_number: 3, step_type: 'tool_call', name: 'viaStep', parent_step_number: 1, caused_by_step_number: 2 },
+      { v: 1, type: 'trace_end', trace_id: tid, status: 'completed' },
+    ];
+    for (const ev of events) applyEvent(db, ev);
+
+    const trace = getTrace(db, tid)!;
+    const viaStart = trace.steps.find((s) => s.name === 'viaStart')!;
+    const viaStep = trace.steps.find((s) => s.name === 'viaStep')!;
+    expect(viaStart.parent_step_number).toBe(1);
+    expect(viaStart.caused_by_step_number).toBe(1);
+    expect(viaStep.parent_step_number).toBe(1);
+    expect(viaStep.caused_by_step_number).toBe(2);
+  });
+});

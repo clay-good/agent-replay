@@ -96,6 +96,13 @@ The recorded trace schema is unchanged.
   `record` to time out (or `--leave-open` to keep open), matching the native
   protocol. `codex-exec`, which has no terminal event, still completes on a
   clean EOF.
+- `record` (the live native protocol) now honors the `parent_step_number` /
+  `caused_by_step_number` aliases on `step` and `step_start` events, matching
+  batch `ingest`. The recorder forwarded only the `parent_step` / `caused_by_step`
+  spelling, so a trace replayed from `show --json` or `export` — which uses the
+  persisted column names — lost its step hierarchy and causality when re-recorded
+  (the links stored as `null`), breaking the documented "a recorded trace is
+  identical to the same run ingested as one batch" invariant for that round-trip.
 - `import`'s "records imported / skipped" report now accounts for a
   content-less user/assistant record (it produced no step but was previously
   counted as neither), so the tally the command prints matches the number of
