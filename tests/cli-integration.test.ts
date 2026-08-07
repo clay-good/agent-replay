@@ -624,6 +624,18 @@ describe('CLI integration', () => {
     expect(run(['ingest', ok]).code).toBe(0);
   });
 
+  it('ingest exits non-zero on a partial validation failure, not just a total one', () => {
+    // One valid record, one invalid (missing agent_name). The valid one is
+    // still inserted, but the invalid one is silently dropped — so the command
+    // must exit non-zero (as it does when every record is invalid), or a CI
+    // gate would read the data loss as success.
+    const mixed = join(dir, '..', 'mixed.jsonl');
+    writeFileSync(mixed, '{"agent_name":"good","status":"completed"}\n{"no_agent_name":true}\n');
+    expect(run(['ingest', mixed]).code).not.toBe(0);
+    // --dry-run is the natural "validate my file" gate, so it must fail too.
+    expect(run(['ingest', mixed, '--dry-run']).code).not.toBe(0);
+  });
+
   it('exits non-zero and reports on an unknown command', () => {
     const r = run(['definitely-not-a-command']);
     expect(r.code).not.toBe(0);

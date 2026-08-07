@@ -86,6 +86,13 @@ trace schema is unchanged.
   `LEFT=[object Object] | RIGHT=[object Object]`, giving it no signal. The values
   are now JSON-stringified (a null side, meaning the step is absent on that
   trace, still renders as `(missing)`).
+- `ingest` now exits non-zero on a partial validation failure, not only when
+  every record is invalid. When some records failed validation but at least one
+  passed, it inserted the valid ones and exited `0`, silently dropping the
+  invalid records — so a CI gate (including `ingest --dry-run`, the natural
+  "validate my file" check) read the data loss as success. Any validation error
+  now yields a non-zero exit, matching the all-invalid path and the documented
+  exit-code contract; the valid records are still inserted.
 - `otel serve` now answers `400`, not `500`, when an OTLP/JSON body is a valid
   object but a repeated field (`resourceSpans`/`scopeSpans`/`spans`,
   `resourceLogs`/`scopeLogs`/`logRecords`) is the wrong type — e.g.

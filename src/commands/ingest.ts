@@ -96,8 +96,13 @@ export function runIngest(filePath: string, opts: IngestOptions = {}): void {
     if (errors.length > 10) {
       console.error(chalk.dim(`  ... and ${errors.length - 10} more`));
     }
+    // Any validation error is a non-zero exit, even when we continue with the
+    // valid subset. A partial failure silently drops input records, so it must
+    // not read as success to a CI gate — matching the total-failure path below
+    // and the documented exit-code contract. (--dry-run reaches this too, so a
+    // "validate my file" gate fails when any record is invalid.)
+    process.exitCode = 1;
     if (valid.length === 0) {
-      process.exitCode = 1;
       return;
     }
     console.log(chalk.yellow(`  Continuing with ${valid.length} valid trace(s).`));
