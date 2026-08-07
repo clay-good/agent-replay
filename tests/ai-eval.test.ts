@@ -142,6 +142,17 @@ describe('AI presets', () => {
       }));
       expect(parsed.passed).toBe(false);
     });
+
+    it('a boundary score agrees with its verdict (rounded score drives passed)', () => {
+      // avg = 6.997*4/40 = 0.6997, which rounds to the displayed 0.700 and must
+      // therefore pass the 0.7 threshold, not report "0.700 ... passed: false".
+      const parsed = preset.parse_response(JSON.stringify({
+        relevance: 6.997, completeness: 6.997, coherence: 6.997, accuracy: 6.997,
+        overall_assessment: 'boundary', issues: [],
+      }));
+      expect(parsed.score).toBe(0.7);
+      expect(parsed.passed).toBe(true);
+    });
   });
 
   describe('ai-security-audit', () => {
@@ -178,6 +189,15 @@ describe('AI presets', () => {
         summary: 'Mostly efficient',
       }));
       expect(parsed.score).toBe(0.7);
+      expect(parsed.passed).toBe(true);
+    });
+
+    it('a boundary score agrees with its verdict (rounded score drives passed)', () => {
+      // effScore/10 = 5.997/10 = 0.5997, which rounds to 0.600 and must pass 0.6.
+      const parsed = preset.parse_response(JSON.stringify({
+        efficiency_score: 5.997, total_waste_estimate_pct: 0, optimizations: [], summary: 'boundary',
+      }));
+      expect(parsed.score).toBe(0.6);
       expect(parsed.passed).toBe(true);
     });
   });

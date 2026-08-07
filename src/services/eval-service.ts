@@ -453,9 +453,12 @@ Respond in this exact JSON format (no other text):
     const coherence = clamp(Number(data.coherence) || 0, 0, 10);
     const accuracy = clamp(Number(data.accuracy) || 0, 0, 10);
     const avg = (relevance + completeness + coherence + accuracy) / 40;
+    // Compare the rounded score that is stored/displayed, not the raw average,
+    // so a boundary result can't read as `score 0.700 ... passed false`.
+    const score = Math.round(avg * 1000) / 1000;
     return {
-      score: Math.round(avg * 1000) / 1000,
-      passed: avg >= 0.7,
+      score,
+      passed: score >= 0.7,
       details: {
         relevance, completeness, coherence, accuracy,
         overall_assessment: data.overall_assessment ?? '',
@@ -537,9 +540,10 @@ Respond in this exact JSON format (no other text):
   parse_response: (text) => {
     const data = extractJson(text);
     const effScore = clamp(Number(data.efficiency_score) || 0, 0, 10);
-    const score = effScore / 10;
+    // Compare the rounded score that is stored/displayed, not the raw ratio.
+    const score = Math.round((effScore / 10) * 1000) / 1000;
     return {
-      score: Math.round(score * 1000) / 1000,
+      score,
       passed: score >= 0.6,
       details: {
         efficiency_score: effScore,

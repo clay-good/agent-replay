@@ -84,8 +84,8 @@ trace schema is unchanged.
   `score` was rounded to three decimals, so a score just under the threshold
   (e.g. a raw `0.6997` against a `0.700` threshold) failed but displayed as
   `score 0.700, threshold 0.700, passed false`. `passed` is now derived from the
-  same rounded score that is shown, for both the built-in presets and custom
-  rubrics.
+  same rounded score that is shown — for the built-in presets, custom rubrics,
+  and the AI-powered presets (`ai-quality-review`, `ai-optimization`).
 - Several commands now exit non-zero when they fail at runtime, instead of
   printing an error and exiting `0` (which reads as success to a CI script). Each
   wrapped its work in a `try` whose `catch` reported the failure but never set
