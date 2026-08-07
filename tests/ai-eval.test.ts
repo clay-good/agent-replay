@@ -246,6 +246,29 @@ describe('trace summarizer', () => {
     expect(summary.text).toMatch(/DIVERGES AT STEP|DIFFERENCES/);
     expect(summary.estimated_tokens).toBeGreaterThan(0);
   });
+
+  it('renders object input/output diffs as JSON, not "[object Object]"', () => {
+    const db = createTestDb();
+    const base = { agent_version: undefined, error: undefined, status: 'completed' as const };
+    const a = getTrace(db, ingestTrace(db, makeTrace({ ...base, agent_name: 'agent-a' })).id)!;
+    const b = getTrace(db, ingestTrace(db, makeTrace({
+      ...base,
+      agent_name: 'agent-b',
+      steps: [
+        { step_number: 1, step_type: 'thought', name: 'plan', input: { plan: 'Read, Write, Test' } },
+        // Same shape as A's step 2 but a different path — an `input` field diff
+        // whose values are parsed objects.
+        { step_number: 2, step_type: 'tool_call', name: 'read_file', input: { path: '/DIFFERENT.ts' }, output: { content: 'export {}' }, duration_ms: 100, tokens_used: 200 },
+      ],
+    })).id)!;
+
+    const summary = summarizeDiffForLlm(diffTraces(db, a.id, b.id), a, b);
+    // The AI diff prompt must carry the actual differing values, not the
+    // useless String({...}) === "[object Object]" (which gives the LLM no signal).
+    expect(summary.text).not.toContain('[object Object]');
+    expect(summary.text).toContain('/src/index.ts');
+    expect(summary.text).toContain('/DIFFERENT.ts');
+  });
 });
 
 describe('cost estimation', () => {

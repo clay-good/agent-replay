@@ -1,6 +1,6 @@
 import type { TraceWithDetails, TraceStep, TraceDiffResult } from '../models/types.js';
 import { formatDuration } from '../utils/time.js';
-import { truncate } from '../utils/json.js';
+import { truncate, truncateJson } from '../utils/json.js';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -96,8 +96,13 @@ export function summarizeDiffForLlm(
   if (diff.diffs.length > 0) {
     lines.push(`\nDIFFERENCES (${diff.diffs.length}):`);
     for (const d of diff.diffs.slice(0, 15)) {
-      const leftVal = truncate(String(d.left_value ?? '(missing)'), 80);
-      const rightVal = truncate(String(d.right_value ?? '(missing)'), 80);
+      // JSON-stringify the values rather than String(): `input`/`output` field
+      // diffs carry the parsed objects, and String({...}) is "[object Object]",
+      // which would give the AI diff analysis no signal about the most
+      // information-rich kind of difference. A null side means the step is
+      // absent on that trace (a `missing_left`/`missing_right` diff).
+      const leftVal = d.left_value == null ? '(missing)' : truncateJson(d.left_value, 80);
+      const rightVal = d.right_value == null ? '(missing)' : truncateJson(d.right_value, 80);
       lines.push(`- Step ${d.step_number}, ${d.field}: LEFT=${leftVal} | RIGHT=${rightVal}`);
     }
     if (diff.diffs.length > 15) {

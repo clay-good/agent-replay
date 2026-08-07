@@ -79,6 +79,13 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `diff --ai` now shows the AI analyzer the actual differing `input`/`output`
+  values instead of `[object Object]`. The diff summary stringified each field
+  difference with `String(...)`, but `input`/`output` diffs carry the parsed
+  objects — so the most information-rich kind of difference reached the model as
+  `LEFT=[object Object] | RIGHT=[object Object]`, giving it no signal. The values
+  are now JSON-stringified (a null side, meaning the step is absent on that
+  trace, still renders as `(missing)`).
 - `otel serve` now answers `400`, not `500`, when an OTLP/JSON body is a valid
   object but a repeated field (`resourceSpans`/`scopeSpans`/`spans`,
   `resourceLogs`/`scopeLogs`/`logRecords`) is the wrong type — e.g.
