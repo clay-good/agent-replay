@@ -92,6 +92,11 @@ trace schema is unchanged.
   other commands just fixed, its `catch` reported the failure but never set
   `process.exitCode`, so a broken or expired provider key exited `0` — a CI check
   gating on it would read a broken provider as healthy.
+- Two more runtime-failure paths now exit non-zero, completing the exit-code
+  sweep: an AI preset that throws inside `eval --ai` (a provider/network error —
+  previously swallowed by the loop, and since the thrown preset never reached the
+  pass/fail tally, a lone failing AI preset could exit `0`), and a `demo` seed
+  failure.
 - `otel serve` now answers a real `413` for an oversized *uncompressed* request
   body instead of resetting the connection. On exceeding the 32 MB raw-body cap
   it destroyed the socket before the `413` could flush, so the client saw a

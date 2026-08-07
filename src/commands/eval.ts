@@ -199,6 +199,10 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
         }
       } catch (err) {
         failSpinner(spinner, `${presetName}: ${errorMessage(err)}`);
+        // An AI preset that throws (provider/network error) is a run failure,
+        // not a pass; it also never reached `results`, so the pass/fail gate
+        // below can't account for it — set a non-zero exit here.
+        process.exitCode = 1;
       }
     }
   }

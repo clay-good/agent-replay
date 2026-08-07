@@ -59,6 +59,7 @@ export async function runDemo(opts: DemoOptions = {}): Promise<void> {
       successSpinner(spinner, 'Loaded 5 demo traces + 3 guardrail policies.');
     } catch (err) {
       failSpinner(spinner, `Seed error: ${errorMessage(err)}`);
+      process.exitCode = 1;
     }
   }
 
