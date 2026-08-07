@@ -56,6 +56,12 @@ trace schema is unchanged.
   versions via a package `overrides` block, clearing 5 advisories that
   `blessed-contrib`'s latest release still pulls in transitively. `npm audit`
   now reports 0 vulnerabilities.
+- Cleared a newly-disclosed high-severity `nanoid` advisory
+  (GHSA-28wg-ghj8-5hjv / GHSA-2v37-7h3g-55p8 — a non-secure generator can loop
+  indefinitely on a negative or zero size). Bumped the direct dependency to
+  `^5.1.16` (the patched 5.x release; `nanoid`'s API is unchanged) and raised the
+  `postcss` override to `^8.5.26`, which pulls the patched `nanoid ^3.3.17`
+  transitively. `npm audit` is back to 0 vulnerabilities.
 
 ### Changed
 
