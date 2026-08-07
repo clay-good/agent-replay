@@ -86,14 +86,26 @@ export async function callLlm(
 function resolveModelRate(model: string): { input: number; output: number } {
   const exact = COST_TABLE[model];
   if (exact) return exact;
+  // A family match may only borrow a rate when one id extends the other at a
+  // VERSION/DATE boundary (`-<digits>`, e.g. `claude-haiku-4-5` vs
+  // `claude-haiku-4-5-20251001`). A non-numeric extension is a DIFFERENT variant
+  // with its own pricing (`gemini-2.5-flash` vs the cheaper `gemini-2.5-flash-lite`,
+  // `gpt-5` vs `gpt-5-pro`); borrowing across it can under-price a pricier model
+  // and silently defeat the `--max-cost` cap. Such models fall through to the
+  // conservative max-rate fallback instead (never cheaper than reality).
   for (const [key, rate] of Object.entries(COST_TABLE)) {
-    if (model.startsWith(key) || key.startsWith(model)) return rate;
+    if (isVersionExtension(model, key) || isVersionExtension(key, model)) return rate;
   }
   const rates = Object.values(COST_TABLE);
   return {
     input: Math.max(...rates.map((r) => r.input)),
     output: Math.max(...rates.map((r) => r.output)),
   };
+}
+
+/** True if `long` is `short` extended by a `-<digits...>` version/date suffix. */
+function isVersionExtension(long: string, short: string): boolean {
+  return long.startsWith(short + '-') && /^\d/.test(long.slice(short.length + 1));
 }
 
 /**

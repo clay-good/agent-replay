@@ -79,6 +79,15 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `eval --ai` / `diff --ai` cost estimation no longer under-prices a model that
+  merely shares a name prefix with a cheaper entry in the rate table, which could
+  let a run slip past `--max-cost`. The family-match borrowed a known rate when
+  one model id was a string prefix of another — so `gemini-2.5-flash` (a real,
+  pricier model) matched the cheaper `gemini-2.5-flash-lite` and was priced ~4×
+  too low. A family match now only borrows a rate across a version/date suffix
+  (`-<digits>`, e.g. `claude-haiku-4-5` ↔ `claude-haiku-4-5-20251001`); a
+  different variant (`-lite`, `-pro`, …) falls through to the conservative
+  max-rate fallback, preserving the "never cheaper than reality" guarantee.
 - `otel serve` now answers a real `413` for an oversized *uncompressed* request
   body instead of resetting the connection. On exceeding the 32 MB raw-body cap
   it destroyed the socket before the `413` could flush, so the client saw a

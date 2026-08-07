@@ -362,6 +362,20 @@ describe('cost estimation', () => {
     expect(estimateCost('gpt-5.4-nano-2025-12-01', 1000, 500)).toBe(estimateCost('gpt-5.4-nano', 1000, 500));
   });
 
+  it('does not borrow a cheaper sibling rate across a variant boundary (guards --max-cost)', () => {
+    // gemini-2.5-flash is a real, pricier model than the table's cheaper
+    // gemini-2.5-flash-lite. A naive prefix match would return the lite rate and
+    // under-price it, silently defeating the budget cap. A non-numeric extension
+    // (`-lite`) is a different variant, so it must fall through to the
+    // conservative max-rate fallback instead.
+    const flash = estimateCost('gemini-2.5-flash', 1000, 500);
+    const lite = estimateCost('gemini-2.5-flash-lite', 1000, 500);
+    expect(flash).toBeGreaterThan(lite);
+    for (const known of Object.keys(COST_TABLE)) {
+      expect(flash).toBeGreaterThanOrEqual(estimateCost(known, 1000, 500));
+    }
+  });
+
   it('estimateAiEvalCost works', () => {
     const db = createTestDb();
     const trace = ingestTrace(db, makeTrace());
