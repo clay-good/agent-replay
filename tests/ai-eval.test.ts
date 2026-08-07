@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import BetterSqlite3 from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
-import { ingestTrace, createEval, getTrace } from '../src/services/trace-service.js';
+import { ingestTrace, createEval, getTrace, attachDecision } from '../src/services/trace-service.js';
 import {
   AI_PRESETS,
   AI_PRESET_NAMES,
@@ -223,6 +223,26 @@ describe('trace summarizer', () => {
     const summary = summarizeTrace(getTrace(db, trace.id)!);
     expect(summary.text).toContain('chose: search_flights');
     expect(summary.text).toContain('destination is unambiguous');
+  });
+
+  it('keeps a decision record attached to a non-decision step under a tight budget', () => {
+    const db = createTestDb();
+    const trace = ingestTrace(db, {
+      agent_name: 'live',
+      status: 'completed',
+      steps: [
+        { step_number: 1, step_type: 'tool_call', name: 'search_db', input: { q: 'a' } },
+        { step_number: 2, step_type: 'tool_call', name: 'read_file', input: { p: 'b' } },
+        { step_number: 3, step_type: 'tool_call', name: 'write_file', input: { p: 'c' } },
+      ],
+    });
+    // Live-recorder path: a decision record on a tool_call step (not a decision
+    // step). A tight budget makes summarizeSteps take the "important steps only"
+    // path; the decision must survive it (it feeds AI evaluators via eval --ai).
+    attachDecision(db, trace.id, 2, { chosen: 'use_cache', rationale: 'fresh enough', decided_by: 'agent' });
+
+    const summary = summarizeTrace(getTrace(db, trace.id)!, 100);
+    expect(summary.text).toContain('chose: use_cache');
   });
 
   it('summarizeDiffForLlm renders both traces, the divergence, and the differences', () => {

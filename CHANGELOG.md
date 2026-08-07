@@ -89,6 +89,14 @@ trace schema is unchanged.
   throws — including in `--all`, the default all-presets run, and the AI-preset
   loop, where the thrown preset also never reached the pass/fail tally, so even a
   total failure could exit `0`). All now exit `1` on a runtime failure.
+- `eval --ai` and the AI evaluators no longer summarize a large trace with the
+  agent's decisions dropped. The trace summarizer's "important step" filter (used
+  once the token budget is tight, on traces past ~145 steps) keyed off
+  `step_type === 'decision'`, but the live recorder attaches decision records to
+  steps of any type — so on a large trace the summary silently omitted a
+  decision/rationale that `show`, `why`, and `decisions` all display. The filter
+  (and the `why` causal-walk fallback, for consistency) now treat any step
+  carrying a decision record as a decision point.
 - `diff --ai` now shows the AI analyzer the actual differing `input`/`output`
   values instead of `[object Object]`. The diff summary stringified each field
   difference with `String(...)`, but `input`/`output` diffs carry the parsed

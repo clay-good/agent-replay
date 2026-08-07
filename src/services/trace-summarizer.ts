@@ -132,7 +132,11 @@ function summarizeSteps(steps: TraceStep[], charBudget: number): string[] {
   const showAll = charBudget > steps.length * 80;
 
   for (const step of steps) {
-    const isImportant = step.error || step.step_type === 'error' || step.step_type === 'output' || step.step_type === 'decision';
+    // A decision record can be attached to a step of any type via the live
+    // recorder (see listDecisions), so key off the record's presence, not just
+    // step_type === 'decision' — otherwise a tight token budget drops the
+    // agent's actual choice/rationale from the AI summary on large traces.
+    const isImportant = step.error || step.step_type === 'error' || step.step_type === 'output' || step.step_type === 'decision' || step.decision != null;
 
     if (!showAll && !isImportant) continue;
 

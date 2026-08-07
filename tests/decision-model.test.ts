@@ -328,6 +328,25 @@ describe('decision-service', () => {
     expect(walk3.chain[1].link).toBe('prior_decision');
   });
 
+  it('falls back to a decision record attached to a non-decision step', () => {
+    // The causal-walk fallback ("nearest earlier decision point") must recognize
+    // a decision record on a tool_call/llm_call step, not only a decision-type
+    // step — consistent with listDecisions, since the live path attaches records
+    // to any step type.
+    const t = ingestTrace(db, {
+      agent_name: 'fb',
+      steps: [
+        { step_number: 1, step_type: 'tool_call', name: 'gather' },
+        { step_number: 2, step_type: 'output', name: 'end' }, // no refs → prior-decision fallback
+      ],
+    });
+    attachDecision(db, t.id, 1, { chosen: 'go', decided_by: 'agent' });
+    const walk = causalWalk(db, t.id, 2)!;
+    expect(walk.chain.map((h) => h.step.step_number)).toEqual([2, 1]);
+    expect(walk.chain[1].link).toBe('prior_decision');
+    expect(walk.chain[1].decision!.chosen).toBe('go');
+  });
+
   it('returns an empty chain for an unknown step number', () => {
     const t = ingestTrace(db, branchingTrace());
     expect(causalWalk(db, t.id, 99)!.chain).toHaveLength(0);

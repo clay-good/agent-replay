@@ -100,10 +100,13 @@ function resolveAntecedent(
     const s = byNumber.get(step.parent_step_number);
     if (s) return { step: s, link: 'parent' };
   }
-  // Fallback: nearest earlier decision step
+  // Fallback: nearest earlier decision point. A decision point is a
+  // `decision`-type step OR any step carrying a decision record (the live
+  // recorder attaches records to steps of any type) — mirroring listDecisions,
+  // so the causal walk doesn't skip past a real decision on a tool/llm step.
   let best: TraceStep | null = null;
   for (const s of byNumber.values()) {
-    if (s.step_type === 'decision' && s.step_number < step.step_number) {
+    if ((s.step_type === 'decision' || s.decision != null) && s.step_number < step.step_number) {
       if (!best || s.step_number > best.step_number) best = s;
     }
   }
