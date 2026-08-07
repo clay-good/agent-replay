@@ -79,6 +79,12 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `hook` now records a genuine 0 ms tool duration instead of leaving it blank. An
+  instant or cached tool call that closed in the same millisecond it opened had
+  its duration computed as `Math.max(0, …) || undefined`, so the real `0`
+  collapsed to `undefined` and the step showed no duration — inconsistent with
+  the live recorder, which preserves `0`. It now keeps `0` while still coalescing
+  an unparseable timestamp to no-duration.
 - `otel serve` no longer loses a whole trace's start time and duration to a
   single span that has an end but no start. Such a span flattens to nanos `0`,
   which sorted to the front of the group, so the trace's `started_at` came out

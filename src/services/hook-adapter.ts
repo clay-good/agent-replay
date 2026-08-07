@@ -316,7 +316,12 @@ export function applyHookPayload(
       const open = findOpenToolStep(db, traceId, toolName);
       if (!open) return { action, dialect, traceId, note: 'no matching open tool step' };
       const ended = isoNow();
-      const duration = Math.max(0, Date.parse(ended) - Date.parse(open.started_at)) || undefined;
+      // Preserve a genuine 0 ms duration (an instant/cached tool call closing in
+      // the same millisecond) — `|| undefined` would drop it to null, unlike the
+      // recorder which passes 0 through. Still coalesce an unparseable started_at
+      // (NaN) to undefined so a bogus duration is never stored.
+      const delta = Date.parse(ended) - Date.parse(open.started_at);
+      const duration = Number.isFinite(delta) ? Math.max(0, delta) : undefined;
       const result = (payload.tool_output ?? payload.tool_response) as Record<string, unknown> | undefined;
       updateStep(db, traceId, open.step_number, {
         output: result ?? null,

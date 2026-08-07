@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
 import { getTrace, listTraces } from '../src/services/trace-service.js';
@@ -63,6 +63,24 @@ describe('Claude Code hook sequence', () => {
     expect(tools[0].name).toBe('Bash');
     expect(tools[0].ended_at).not.toBeNull();
     expect(tools[0].output).toEqual({ exit_code: 0 });
+  });
+
+  it('records a 0 ms duration for an instant tool call, not null', () => {
+    // A tool that opens and closes in the same millisecond has a real 0 ms
+    // duration; it must be stored as 0, not dropped to null (the recorder keeps
+    // 0). Freeze time so both hook events stamp the same instant.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+    try {
+      const session = 'sess-instant';
+      apply({ hook_event_name: 'PreToolUse', session_id: session, tool_name: 'Bash', tool_input: {} });
+      apply({ hook_event_name: 'PostToolUse', session_id: session, tool_name: 'Bash', tool_output: {} });
+    } finally {
+      vi.useRealTimers();
+    }
+    const trace = getTrace(db, listTraces(db, { session_id: 'sess-instant' }).items[0].id)!;
+    const tool = trace.steps.find((s) => s.step_type === 'tool_call')!;
+    expect(tool.duration_ms).toBe(0);
   });
 
   it('records a tool failure as a step error', () => {
