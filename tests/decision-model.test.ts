@@ -3,7 +3,7 @@ import Database from 'better-sqlite3';
 import { applySchemaV1 } from '../src/db/schema.js';
 import { runMigrations } from '../src/db/migrations.js';
 import { getSchemaVersion } from '../src/db/schema.js';
-import { ingestTrace, getTrace, listTraces } from '../src/services/trace-service.js';
+import { ingestTrace, getTrace, listTraces, attachDecision } from '../src/services/trace-service.js';
 import { forkTrace } from '../src/services/fork-service.js';
 import { exportTraces } from '../src/services/export-service.js';
 import { listDecisions, causalWalk } from '../src/services/decision-service.js';
@@ -274,6 +274,26 @@ describe('decision-service', () => {
     const res = listDecisions(db, t.id)!;
     expect(res.decisions.map((d) => d.step.name)).toEqual(['first', 'second']);
     expect(res.decisions[0].decision!.chosen).toBe('x');
+  });
+
+  it('lists a decision attached to a non-decision step, matching `why`', () => {
+    // The live recorder / SDK (attachDecision) can attach a decision record to
+    // a step of any type — no step_type guard, unlike the ingest validator.
+    // `listDecisions` must surface it, or `decisions` omits a record that the
+    // causal walk (`why`) shows on the same trace.
+    const t = ingestTrace(db, {
+      agent_name: 'live',
+      steps: [{ step_number: 1, step_type: 'tool_call', name: 'search_db' }],
+    });
+    attachDecision(db, t.id, 1, { chosen: 'use_cache', decided_by: 'policy' });
+
+    const res = listDecisions(db, t.id)!;
+    expect(res.decisions.map((d) => d.step.name)).toEqual(['search_db']);
+    expect(res.decisions[0].decision!.chosen).toBe('use_cache');
+
+    // Consistent with the causal walk, which surfaces the same record.
+    const hop = causalWalk(db, t.id, 1)!.chain.find((h) => h.step.step_number === 1)!;
+    expect(hop.decision!.chosen).toBe('use_cache');
   });
 
   it('walks the causal chain back to the root and orders hops', () => {

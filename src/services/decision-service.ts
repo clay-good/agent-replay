@@ -23,8 +23,12 @@ export interface CausalHop {
 // ── List decisions ─────────────────────────────────────────────────────────
 
 /**
- * List every decision point in a trace, in step order. Returns `decision`
- * steps together with their structured record (null if the step carries none).
+ * List every decision point in a trace, in step order. A decision point is a
+ * `decision`-type step OR any step that carries a decision record: the live
+ * recorder (`attachDecision`) and the SDK's inline `step({ decision })` can
+ * attach a record to a step of any type, and the causal walk (`why`) surfaces
+ * those records regardless of step type — so listing only `decision`-type steps
+ * here made `decisions` omit a record that `why` shows on the same trace.
  */
 export function listDecisions(
   db: Database.Database,
@@ -34,7 +38,7 @@ export function listDecisions(
   if (!trace) return null;
 
   const decisions: DecisionPoint[] = trace.steps
-    .filter((s) => s.step_type === 'decision')
+    .filter((s) => s.step_type === 'decision' || s.decision != null)
     .map((step) => ({ step, decision: step.decision ?? null }));
 
   return { trace, decisions };

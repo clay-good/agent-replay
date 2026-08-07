@@ -93,6 +93,13 @@ trace schema is unchanged.
   "validate my file" check) read the data loss as success. Any validation error
   now yields a non-zero exit, matching the all-invalid path and the documented
   exit-code contract; the valid records are still inserted.
+- `decisions` no longer omits a decision record attached to a non-`decision`
+  step. The live recorder and the SDK's inline `step({ decision })` can attach a
+  decision record to a step of any type (unlike the `ingest` validator, which
+  requires a `decision`-type step), and the causal walk behind `why` surfaces
+  those records regardless of step type — so `decisions` and `why` disagreed on
+  the same trace. `decisions` now lists any step that carries a decision record,
+  not just `decision`-type steps.
 - `otel serve` now answers `400`, not `500`, when an OTLP/JSON body is a valid
   object but a repeated field (`resourceSpans`/`scopeSpans`/`spans`,
   `resourceLogs`/`scopeLogs`/`logRecords`) is the wrong type — e.g.
