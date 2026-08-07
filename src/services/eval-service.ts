@@ -270,12 +270,17 @@ export function runEval(
   }
 
   const overallScore = totalWeight > 0 ? weightedSum / totalWeight : 0;
-  const passed = overallScore >= preset.threshold;
+  // Derive `passed` from the same rounded score that is stored and displayed,
+  // not the raw value. Otherwise a boundary score can read as a contradiction:
+  // a raw 0.6997 fails a 0.700 threshold but rounds to 0.700 for display, so the
+  // report would show `score 0.700, threshold 0.700, passed false`.
+  const score = Math.round(overallScore * 1000) / 1000;
+  const passed = score >= preset.threshold;
 
   return createEval(db, traceId, {
     evaluator_type: preset.evaluator_type,
     evaluator_name: preset.name,
-    score: Math.round(overallScore * 1000) / 1000,
+    score,
     passed,
     details: {
       threshold: preset.threshold,
@@ -351,12 +356,15 @@ export function runCustomRubric(
   }
 
   const overallScore = totalWeight > 0 ? weightedSum / totalWeight : 0;
-  const passed = overallScore >= threshold;
+  // Derive `passed` from the same rounded score that is stored and displayed
+  // (see runEval), so a boundary score can't read as a self-contradiction.
+  const score = Math.round(overallScore * 1000) / 1000;
+  const passed = score >= threshold;
 
   return createEval(db, traceId, {
     evaluator_type: 'rubric',
     evaluator_name: rubric.name,
-    score: Math.round(overallScore * 1000) / 1000,
+    score,
     passed,
     details: {
       threshold,

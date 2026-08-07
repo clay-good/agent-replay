@@ -8,6 +8,7 @@ import {
   estimateAiEvalCost,
   extractJson,
   runAiEval,
+  runCustomRubric,
 } from '../src/services/eval-service.js';
 import { summarizeTrace, summarizeDiffForLlm } from '../src/services/trace-summarizer.js';
 import { diffTraces } from '../src/services/diff-service.js';
@@ -288,6 +289,25 @@ describe('trace summarizer', () => {
     expect(summary.text).not.toContain('[object Object]');
     expect(summary.text).toContain('/src/index.ts');
     expect(summary.text).toContain('/DIFFERENT.ts');
+  });
+});
+
+describe('rubric scoring', () => {
+  it('a boundary score and its verdict agree (both use the rounded score)', () => {
+    const db = createTestDb();
+    const trace = ingestTrace(db, { agent_name: 'r', status: 'completed', input: { task: 'alpha' } });
+    // Raw score = 6997/10000 = 0.6997, which rounds to the displayed 0.700, so it
+    // must pass the 0.700 threshold — not report "score 0.700 ... passed: false".
+    const result = runCustomRubric(db, trace.id, {
+      name: 'boundary',
+      threshold: 0.7,
+      criteria: [
+        { name: 'present', pattern: 'alpha', expected: true, weight: 6997 },
+        { name: 'absent', pattern: 'zzz-no-such-token', expected: true, weight: 3003 },
+      ],
+    });
+    expect(result.score).toBe(0.7);
+    expect(result.passed).toBe(true);
   });
 });
 

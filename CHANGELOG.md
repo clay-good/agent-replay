@@ -79,6 +79,13 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `eval` no longer reports a self-contradictory verdict at a threshold boundary.
+  `passed` was computed from the raw weighted score while the stored/displayed
+  `score` was rounded to three decimals, so a score just under the threshold
+  (e.g. a raw `0.6997` against a `0.700` threshold) failed but displayed as
+  `score 0.700, threshold 0.700, passed false`. `passed` is now derived from the
+  same rounded score that is shown, for both the built-in presets and custom
+  rubrics.
 - Several commands now exit non-zero when they fail at runtime, instead of
   printing an error and exiting `0` (which reads as success to a CI script). Each
   wrapped its work in a `try` whose `catch` reported the failure but never set
