@@ -87,6 +87,14 @@ trace schema is unchanged.
   the cap exists to stop. The receiver now stops reading, sends the `413` with
   `Connection: close`, and lets the socket close after the response is delivered.
   (The gzip-bomb `413` path already worked; only the raw-body path reset.)
+- `guard` now rejects a non-string `step_type` in a policy match pattern, and a
+  blocking policy carrying one fails closed. `step_type` was the only match key
+  not type-validated, so `guard add --pattern '{"step_type": true}'` stored a
+  `deny` whose `step.step_type !== true` is always true — a kill-switch that
+  silently never fired. `guard add` now rejects it (like the other keys), and the
+  matcher treats an unusable `step_type` on a `deny` / `require_review` policy as
+  a match (fail closed), mirroring the `name_regex` handling, so a policy stored
+  before this validation still blocks rather than silently passing.
 - `hook` now records a genuine 0 ms tool duration instead of leaving it blank. An
   instant or cached tool call that closed in the same millisecond it opened had
   its duration computed as `Math.max(0, …) || undefined`, so the real `0`

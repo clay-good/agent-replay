@@ -182,9 +182,25 @@ describe('malformed patterns fail closed, not open', () => {
     expect(validateMatchPattern({ name_regex: '(a+)+' })).toMatch(/valid or safe/); // ReDoS
     expect(validateMatchPattern({ name_regex: 42 })).toMatch(/must be a string/);
     expect(validateMatchPattern({ input_contains: 123 })).toMatch(/must be a string/);
+    expect(validateMatchPattern({ step_type: true })).toMatch(/must be a string/);
     // Usable patterns pass.
     expect(validateMatchPattern({ step_type: 'tool_call', name_regex: 'delete' })).toBeNull();
     expect(validateMatchPattern({ name_contains: 'rm' })).toBeNull();
+  });
+
+  it('a deny policy with a non-string step_type blocks (fails closed), not silently never matches', () => {
+    // A non-string step_type can never equal a real step_type; a deny must not
+    // silently never fire. Inserted directly (a legacy / pre-validation row).
+    addPolicy(db, { name: 'legacy-badtype', action: 'deny', match_pattern: { step_type: true } });
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'anything' })));
+    expect(v.action).toBe('deny');
+    expect(v.policy).toBe('legacy-badtype');
+  });
+
+  it('a warn policy with a non-string step_type does not spuriously fire', () => {
+    addPolicy(db, { name: 'warn-badtype', action: 'warn', match_pattern: { step_type: true } });
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'anything' })));
+    expect(v.action).toBe('allow');
   });
 
   it('a deny policy with an unusable regex blocks (fails closed) instead of being skipped', () => {

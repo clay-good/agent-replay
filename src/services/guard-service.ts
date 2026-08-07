@@ -235,7 +235,7 @@ export function resolveGuardExit(
  * kill-switch that never fires. Reject it up front instead.
  */
 export function validateMatchPattern(pattern: Record<string, unknown>): string | null {
-  for (const key of ['name_contains', 'input_contains', 'output_contains'] as const) {
+  for (const key of ['name_contains', 'input_contains', 'output_contains', 'step_type'] as const) {
     if (pattern[key] != null && typeof pattern[key] !== 'string') {
       return `${key} must be a string`;
     }
@@ -260,12 +260,20 @@ function matchesPolicy(step: TraceStep, policy: GuardrailPolicy): string | null 
   // step as a match rather than silently skipping; warn/allow just don't fire.
   const failsClosed = policy.action === 'deny' || policy.action === 'require_review';
 
-  // Match by step_type (exact)
-  if (pattern.step_type && step.step_type !== pattern.step_type) {
-    return null; // step_type filter doesn't match — skip
-  }
-  if (pattern.step_type) {
-    reasons.push(`step_type=${step.step_type}`);
+  // Match by step_type (exact). A non-string step_type can never equal a real
+  // step_type, so it's an unusable pattern: fail closed for a blocking policy
+  // rather than silently never matching (a deny that never fires), mirroring the
+  // name_regex handling below. `guard add` now rejects it up front; this guards a
+  // policy stored before that validation existed.
+  if (pattern.step_type != null) {
+    if (typeof pattern.step_type !== 'string') {
+      if (!failsClosed) return null;
+      reasons.push(`step_type '${String(pattern.step_type)}' is unusable — failing closed`);
+    } else if (step.step_type !== pattern.step_type) {
+      return null; // step_type filter doesn't match — skip
+    } else {
+      reasons.push(`step_type=${step.step_type}`);
+    }
   }
 
   // Match by step name (contains)
