@@ -125,5 +125,6 @@ export function runFork(traceId: string, opts: ForkOptions): void {
     console.log('');
   } catch (err) {
     failSpinner(spinner, `Fork failed: ${errorMessage(err)}`);
+    process.exitCode = 1;
   }
 }

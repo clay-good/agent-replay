@@ -125,6 +125,7 @@ export async function runDiff(
       console.log('');
     } catch (err) {
       failSpinner(spinner, `AI analysis failed: ${errorMessage(err)}`);
+      process.exitCode = 1;
     }
   }
 }

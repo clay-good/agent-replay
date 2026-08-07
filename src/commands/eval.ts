@@ -89,6 +89,10 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
         successSpinner(spinner, `${preset}: ${icon} ${Math.round(result.score * 100)}%`);
       } catch (err) {
         failSpinner(spinner, `${preset}: ${errorMessage(err)}`);
+        // A preset that throws is a run failure, not a pass — set a non-zero
+        // exit (and it never reached `results`, so the pass/fail gate below
+        // can't account for it otherwise).
+        process.exitCode = 1;
       }
     }
   } else if (opts.preset && !isAiPreset) {
@@ -108,6 +112,7 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
       successSpinner(spinner, `${opts.preset}: ${icon} ${Math.round(result.score * 100)}%`);
     } catch (err) {
       failSpinner(spinner, `${opts.preset}: ${errorMessage(err)}`);
+      process.exitCode = 1;
       return;
     }
   }
@@ -212,6 +217,10 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
         successSpinner(spinner, `${preset}: ${icon} ${Math.round(result.score * 100)}%`);
       } catch (err) {
         failSpinner(spinner, `${preset}: ${errorMessage(err)}`);
+        // A preset that throws is a run failure, not a pass — set a non-zero
+        // exit (and it never reached `results`, so the pass/fail gate below
+        // can't account for it otherwise).
+        process.exitCode = 1;
       }
     }
   }

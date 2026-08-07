@@ -79,6 +79,16 @@ trace schema is unchanged.
 
 ### Fixed
 
+- Several commands now exit non-zero when they fail at runtime, instead of
+  printing an error and exiting `0` (which reads as success to a CI script). Each
+  wrapped its work in a `try` whose `catch` reported the failure but never set
+  `process.exitCode`: `export` (a failed write or serialization — e.g.
+  `export --output` to a missing directory — is the standout, since a later
+  `&& upload` step would proceed with no file), `fork` (a database write
+  failure), `diff --ai` (an AI-analysis failure), and `eval` (a preset that
+  throws — including in `--all`, the default all-presets run, and the AI-preset
+  loop, where the thrown preset also never reached the pass/fail tally, so even a
+  total failure could exit `0`). All now exit `1` on a runtime failure.
 - `diff --ai` now shows the AI analyzer the actual differing `input`/`output`
   values instead of `[object Object]`. The diff summary stringified each field
   difference with `String(...)`, but `input`/`output` diffs carry the parsed

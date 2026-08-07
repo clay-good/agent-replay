@@ -624,6 +624,16 @@ describe('CLI integration', () => {
     expect(run(['ingest', ok]).code).toBe(0);
   });
 
+  it('export exits non-zero when the output file cannot be written', () => {
+    // A failed write must not read as success: a CI step doing
+    // `export --output f && upload f` would otherwise proceed with no file.
+    const f = join(dir, '..', 'exp-src.jsonl');
+    writeFileSync(f, '{"agent_name":"e","status":"completed"}');
+    run(['ingest', f]);
+    const bad = join(dir, 'no', 'such', 'subdir', 'out.json'); // parent dir doesn't exist
+    expect(run(['export', '--output', bad]).code).not.toBe(0);
+  });
+
   it('ingest exits non-zero on a partial validation failure, not just a total one', () => {
     // One valid record, one invalid (missing agent_name). The valid one is
     // still inserted, but the invalid one is silently dropped — so the command

@@ -97,5 +97,6 @@ export function runExport(traceId: string | undefined, opts: ExportOptions = {})
     }
   } catch (err) {
     failSpinner(spinner, `Export failed: ${errorMessage(err)}`);
+    process.exitCode = 1;
   }
 }
