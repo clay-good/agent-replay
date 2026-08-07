@@ -79,6 +79,14 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `otel serve` now answers a real `413` for an oversized *uncompressed* request
+  body instead of resetting the connection. On exceeding the 32 MB raw-body cap
+  it destroyed the socket before the `413` could flush, so the client saw a
+  connection reset (`ECONNRESET`). OTLP exporters treat a reset as retryable but
+  a `413` as not — so an oversized batch was resent forever, the exact runaway
+  the cap exists to stop. The receiver now stops reading, sends the `413` with
+  `Connection: close`, and lets the socket close after the response is delivered.
+  (The gzip-bomb `413` path already worked; only the raw-body path reset.)
 - `hook` now records a genuine 0 ms tool duration instead of leaving it blank. An
   instant or cached tool call that closed in the same millisecond it opened had
   its duration computed as `Math.max(0, …) || undefined`, so the real `0`

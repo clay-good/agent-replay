@@ -68,7 +68,12 @@ async function readBody(req: IncomingMessage): Promise<Buffer> {
     const chunk = c as Buffer;
     total += chunk.length;
     if (total > MAX_BODY_BYTES) {
-      req.destroy();
+      // Stop reading, but do NOT destroy the socket here: destroying it before
+      // the 413 response flushes surfaces to the client as a connection reset,
+      // which OTLP exporters treat as retryable — so they'd resend the oversized
+      // batch forever, the exact runaway this cap exists to stop. Throw and let
+      // the handler send a real 413 with `Connection: close` (below), so the
+      // response reaches the client and the socket closes right after.
       throw new HttpError(413, 'request body too large');
     }
     chunks.push(chunk);
@@ -296,7 +301,14 @@ export function startOtelReceiver(db: Database.Database, port: number, stats: Ot
       res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(payload));
     } catch (err) {
       const status = err instanceof HttpError ? err.status : 500;
-      res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify({ error: (err as Error).message }));
+      // Close the connection after an error response. In the oversized-body case
+      // the client may still be streaming a body we stopped reading; `Connection:
+      // close` makes Node flush this response and then tear the socket down,
+      // instead of trying to keep-alive (which would need the unread body drained)
+      // — so the client actually receives the status (e.g. 413) rather than a reset.
+      res
+        .writeHead(status, { 'content-type': 'application/json', connection: 'close' })
+        .end(JSON.stringify({ error: (err as Error).message }));
     }
   }
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
+import { request as httpRequest } from 'node:http';
 import { gzipSync } from 'node:zlib';
 import Database from 'better-sqlite3';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
@@ -157,6 +158,27 @@ describe('otel serve (end-to-end)', () => {
       body: bomb,
     });
     expect(res.status).toBe(413);
+  }, 20000);
+
+  it('rejects an oversized uncompressed body with a real 413, not a connection reset', async () => {
+    const url = await startReceiver();
+    // A >32 MB uncompressed body exceeds the raw-body cap. The receiver must
+    // answer 413 (not retryable), NOT reset the socket — a reset is retryable to
+    // OTLP exporters, so they'd resend the oversized batch forever. Use a raw
+    // http request so the response status is observed even if the server responds
+    // and closes while the 33 MB body is still being written.
+    const big = Buffer.alloc(33 * 1024 * 1024, 0x20); // 33 MB
+    const status = await new Promise<number>((resolve, reject) => {
+      const u = new URL(url);
+      let responded = false;
+      const req = httpRequest(
+        { hostname: u.hostname, port: u.port, path: u.pathname, method: 'POST', headers: { 'content-type': 'application/json' } },
+        (res) => { responded = true; res.resume(); resolve(res.statusCode ?? 0); },
+      );
+      req.on('error', (e) => { if (!responded) reject(e); }); // ignore a write error after the response arrives
+      req.end(big);
+    });
+    expect(status).toBe(413);
   }, 20000);
 
   it('accepts an OTLP/protobuf export over HTTP (the exporter default)', async () => {
