@@ -79,6 +79,14 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `import` now tallies a tool-result-only record inside a subagent transcript as
+  imported, not skipped, matching how the main transcript loop counts the
+  identical record. Such a record carries no step of its own (its content is
+  attached to the paired tool-call step's output), and tool calls and their
+  results normally live in separate records — so the `Records imported` /
+  `Records skipped` summary under-counted imported and over-counted skipped for
+  any subagent that used tools. The `imported + skipped = records` invariant held
+  either way; only the split between the two was wrong.
 - `eval` no longer reports a self-contradictory verdict at a threshold boundary.
   `passed` was computed from the raw weighted score while the stored/displayed
   `score` was rounded to three decimals, so a score just under the threshold

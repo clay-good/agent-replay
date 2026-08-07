@@ -198,4 +198,33 @@ describe('importClaudeTranscript — subagents', () => {
     const trace = getTrace(db, report.trace!.id)!;
     expect(trace.steps).toHaveLength(3); // anchor + thinking + Grep
   });
+
+  it('counts a tool_result-only subagent record as imported, like the main loop', () => {
+    // A tool_result-only record contributes retained data (attached to the
+    // paired tool_use step's output), so it must tally as imported — matching
+    // how the main transcript loop counts the identical record. Previously the
+    // subagent loop counted it skipped (it pushes no step of its own).
+    const path = fixture([
+      { type: 'user', sessionId: 'sess-tr', message: { role: 'user', content: 'go' } },
+      { type: 'assistant', sessionId: 'sess-tr', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Task', input: {} }] } },
+      { type: 'user', sessionId: 'sess-tr', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'done' }] } },
+    ]);
+    const subDir = join(dir, 'transcript', 'subagents');
+    mkdirSync(subDir, { recursive: true });
+    writeFileSync(
+      join(subDir, 'agent-a1.jsonl'),
+      [
+        { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'st1', name: 'Grep', input: { pattern: 'x' } }] } },
+        { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'st1', content: '3 matches' }] } },
+      ].map((r) => JSON.stringify(r)).join('\n'),
+    );
+
+    const report = importClaudeTranscript(db, path);
+    // 3 main records + 2 subagent records, all contribute → 0 skipped.
+    expect(report.skipped).toBe(0);
+    expect(report.imported).toBe(5);
+    // The subagent tool_result is retained as the Grep step's output.
+    const trace = getTrace(db, report.trace!.id)!;
+    expect(trace.steps.find((s) => s.name === 'Grep')!.output).toEqual({ result: '3 matches' });
+  });
 });

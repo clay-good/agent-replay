@@ -274,6 +274,13 @@ function buildSubagentSteps(
 
   for (const rec of records) {
     const before = steps.length;
+    // A tool_result block yields no step of its own — it was indexed above and
+    // attached to the paired tool_use step's output — but it DID contribute
+    // retained data, so the record counts as imported (mirroring the main loop's
+    // `case 'tool_result'`). Without this, a tool_result-only record (the normal
+    // shape: tool_use and its result live in separate records) is mis-tallied as
+    // skipped, disagreeing with the main transcript loop on the same record.
+    let contributedResult = false;
     const type = rec.type as string | undefined;
     if (type === 'user' || type === 'assistant') {
       const message = rec.message as { content?: unknown; usage?: Record<string, number> } | undefined;
@@ -300,11 +307,13 @@ function buildSubagentSteps(
               parent_step: parentStep,
               metadata: { tool_use_id: block.id },
             });
+          } else if (block?.type === 'tool_result') {
+            contributedResult = true;
           }
         }
       }
     }
-    if (steps.length > before) imported++;
+    if (steps.length > before || contributedResult) imported++;
     else skipped++;
   }
 
