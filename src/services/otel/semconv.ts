@@ -166,7 +166,10 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
 
   const traces: IngestTraceInput[] = [];
   for (const [, group] of byTrace) {
-    group.sort((a, b) => a.start - b.start);
+    // Order by start time, but sort a span missing startTimeUnixNano (flattened
+    // to 0 by num()) to the END, not the front — otherwise it steals step_number
+    // 1 and the trace's start time from genuinely-earlier, fully-timed spans.
+    group.sort((a, b) => (a.start || Infinity) - (b.start || Infinity));
 
     const roots = group.filter((s) => classify(s.name, s.attrs).role === 'root');
 
@@ -220,6 +223,11 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
     // OTel-ingested traces show a duration instead of "-".
     const spanEnds = group.map((s) => s.end).filter((e): e is number => e != null);
     const maxEnd = spanEnds.length ? Math.max(...spanEnds) : undefined;
+    // Earliest VALID start (a span missing startTimeUnixNano flattens to 0, which
+    // is not a real 1970 timestamp), so one start-less span can't null the whole
+    // trace's start/duration when other spans are properly timed.
+    const spanStarts = group.map((s) => s.start).filter((st): st is number => st > 0);
+    const minStart = spanStarts.length ? Math.min(...spanStarts) : undefined;
 
     traces.push({
       agent_name: agentName,
@@ -229,14 +237,15 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
       session_id: anyConversation ?? null,
       input: root ? messageContent(root.attrs, 'input') ?? {} : {},
       output: root ? messageContent(root.attrs, 'output') ?? null : null,
-      started_at: isoFromNanos(group[0].start),
+      started_at: minStart != null ? isoFromNanos(minStart) : undefined,
       ended_at: maxEnd != null ? isoFromNanos(maxEnd) : null,
-      // Guard the start the same way the step-level duration (above) and
-      // isoFromNanos do: a span missing startTimeUnixNano flattens to nanos 0 and
-      // sorts first, so without this the total would be `maxEnd - 0` — an absurd
-      // epoch-based duration paired with an unknown (undefined) started_at.
+      // Derive the duration from the earliest valid start (not group[0], which
+      // may be a start-less span): a span missing startTimeUnixNano flattens to
+      // nanos 0, so trusting it would give `maxEnd - 0` — an absurd epoch-based
+      // duration — or, once such spans sort last, would wrongly null a duration
+      // that the timed spans do define.
       total_duration_ms:
-        maxEnd != null && group[0].start ? Math.round((maxEnd - group[0].start) / 1e6) : null,
+        maxEnd != null && minStart != null ? Math.round((maxEnd - minStart) / 1e6) : null,
       total_tokens: totalTokens || null,
       metadata: { source_format: 'otel-genai', otel_trace_id: group[0].traceId, ...(root ? {} : { synthetic_trace: true }) },
       steps,

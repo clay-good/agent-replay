@@ -117,6 +117,20 @@ describe('mapOtlpTraces (GenAI semconv)', () => {
     expect(trace.steps![0].duration_ms).toBeNull();
   });
 
+  it('derives trace start/duration from the earliest valid start when another span lacks one', () => {
+    // A start-less span (nanos 0) must not steal the trace start — or step 1 —
+    // from a fully-timed span. Start/duration come from the earliest VALID start.
+    const payload = otlp([
+      span({ traceId: 'mix', spanId: 'timed', name: 'chat', start: 2 * MS, end: 6 * MS, attrs: { 'gen_ai.operation.name': 'chat' } }),
+      { traceId: 'mix', spanId: 'nostart', name: 'execute_tool', endTimeUnixNano: String(4 * MS),
+        attributes: [attr('gen_ai.operation.name', 'execute_tool')] },
+    ]);
+    const [trace] = mapOtlpTraces(payload);
+    expect(trace.started_at).toBe('1970-01-01T00:00:00.002Z'); // the valid 2ms start
+    expect(trace.total_duration_ms).toBe(4); // 6ms end - 2ms start
+    expect(trace.steps![0].name).toBe('chat'); // the timed span is step 1, not the start-less one
+  });
+
   it('groups spans with no agent root into a synthetic trace per OTel trace ID', () => {
     const payload = otlp([
       span({ traceId: 'orphan', spanId: 's1', name: 'chat', start: 1 * MS, end: 2 * MS, attrs: { 'gen_ai.operation.name': 'chat' } }),

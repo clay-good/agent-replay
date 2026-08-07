@@ -79,6 +79,14 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `otel serve` no longer loses a whole trace's start time and duration to a
+  single span that has an end but no start. Such a span flattens to nanos `0`,
+  which sorted to the front of the group, so the trace's `started_at` came out
+  `undefined` and `total_duration_ms` `null` even when other spans were fully
+  timed (and the start-less span also stole `step_number` 1). The trace start and
+  duration are now derived from the earliest *valid* span start, and a start-less
+  span sorts last instead of first. (Extends the earlier start-less-span duration
+  guard, which prevented the absurd `end - 0` value but discarded good timing.)
 - `import` now tallies a tool-result-only record inside a subagent transcript as
   imported, not skipped, matching how the main transcript loop counts the
   identical record. Such a record carries no step of its own (its content is
