@@ -186,6 +186,7 @@ export async function runConfigTestAi(opts: ConfigOptions = {}): Promise<void> {
     console.log('');
   } catch (err) {
     failSpinner(spinner, `Failed: ${errorMessage(err)}`);
+    process.exitCode = 1;
   }
 }
 

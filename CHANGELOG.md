@@ -88,6 +88,10 @@ trace schema is unchanged.
   (`-<digits>`, e.g. `claude-haiku-4-5` ↔ `claude-haiku-4-5-20251001`); a
   different variant (`-lite`, `-pro`, …) falls through to the conservative
   max-rate fallback, preserving the "never cheaper than reality" guarantee.
+- `config test-ai` now exits non-zero when the connectivity check fails. Like the
+  other commands just fixed, its `catch` reported the failure but never set
+  `process.exitCode`, so a broken or expired provider key exited `0` — a CI check
+  gating on it would read a broken provider as healthy.
 - `otel serve` now answers a real `413` for an oversized *uncompressed* request
   body instead of resetting the connection. On exceeding the 32 MB raw-body cap
   it destroyed the socket before the `413` could flush, so the client saw a
