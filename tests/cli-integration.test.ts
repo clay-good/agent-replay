@@ -307,6 +307,14 @@ describe('CLI integration', () => {
     expect(r.stdout).toMatch(/go|completed/i);
   });
 
+  it('watch rejects a malformed --interval as a usage error (even with no trace)', () => {
+    // The interval is validated before resolving the trace, so a typo is a
+    // usage error (exit 2) regardless of whether anything is running — it does
+    // not fall through to the benign "nothing to watch" (exit 0) path.
+    expect(run(['watch', '--interval', 'abc']).code).toBe(2);
+    expect(run(['watch', '--interval', '-5']).code).toBe(2);
+  });
+
   it('diffs two traces and reports the model divergence', () => {
     const a = join(dir, '..', 'a.jsonl');
     const b = join(dir, '..', 'b.jsonl');

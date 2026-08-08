@@ -23,6 +23,21 @@ export function runWatch(traceId: string | undefined, opts: WatchOptions = {}): 
   const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
   const db = ensureDatabase(dbPath);
 
+  // Reject a malformed --interval up front — before resolving the trace — rather
+  // than silently polling at the default (which would hide a typo), matching
+  // `dashboard --refresh`. Validating first means a bad value is a usage error
+  // even when there is no trace to watch.
+  let pollMs = DEFAULT_POLL_MS;
+  if (opts.interval != null) {
+    const n = Number(opts.interval);
+    if (!Number.isFinite(n) || n <= 0) {
+      console.error(chalk.red(`  Invalid --interval: ${opts.interval} (must be a positive number of milliseconds).`));
+      process.exitCode = 2;
+      return;
+    }
+    pollMs = n;
+  }
+
   const resolved = traceId ? getTrace(db, traceId) : getMostRecentRunningTrace(db);
   if (!resolved) {
     if (traceId) {
@@ -37,19 +52,6 @@ export function runWatch(traceId: string | undefined, opts: WatchOptions = {}): 
   }
 
   const id = resolved.id;
-
-  // Reject a malformed --interval up front rather than silently polling at the
-  // default (which would hide a typo), matching `dashboard --refresh`.
-  let pollMs = DEFAULT_POLL_MS;
-  if (opts.interval != null) {
-    const n = Number(opts.interval);
-    if (!Number.isFinite(n) || n <= 0) {
-      console.error(chalk.red(`  Invalid --interval: ${opts.interval} (must be a positive number of milliseconds).`));
-      process.exitCode = 2;
-      return;
-    }
-    pollMs = n;
-  }
 
   console.log('');
   console.log(heading(`  Watching ${id} — ${resolved.agent_name}`));
