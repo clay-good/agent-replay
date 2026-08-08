@@ -181,6 +181,13 @@ function num(v: unknown): number {
   return 0;
 }
 function numOrNull(v: unknown): number | null {
-  const n = num(v);
-  return n || null;
+  // Preserve a genuine 0 (an instant/cached tool call really does take 0 ms) —
+  // `num(v) || null` collapsed it to null, the same class as the hook 0 ms
+  // duration fix. Only an absent or non-numeric value becomes null.
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'string') {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
 }

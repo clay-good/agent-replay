@@ -67,6 +67,19 @@ describe('mapOtlpLogs — Gemini CLI', () => {
     expect(t2.steps.find((s) => s.step_type === 'tool_call')!.input).toEqual({ args: '42' });
   });
 
+  it('preserves a genuine 0 ms tool duration (does not collapse it to null)', () => {
+    // An instant/cached tool really can report duration_ms 0; it must survive as
+    // 0, not become "no duration" (the same class as the hook 0 ms fix). A tool
+    // call with no duration_ms at all still yields null.
+    const withZero = otlpLogs([logRecord('gemini_cli.tool_call', { 'session.id': 'gz', function_name: 'cached', function_args: '{}', duration_ms: 0 })]);
+    const t0 = getTrace(db, ingestTrace(db, mapOtlpLogs(withZero)[0]).id)!;
+    expect(t0.steps.find((s) => s.step_type === 'tool_call')!.duration_ms).toBe(0);
+
+    const noDur = otlpLogs([logRecord('gemini_cli.tool_call', { 'session.id': 'gn', function_name: 'plain', function_args: '{}' })]);
+    const tn = getTrace(db, ingestTrace(db, mapOtlpLogs(noDur)[0]).id)!;
+    expect(tn.steps.find((s) => s.step_type === 'tool_call')!.duration_ms).toBeNull();
+  });
+
   it('attributes an auto_accept decision to policy', () => {
     const payload = otlpLogs([
       logRecord('gemini_cli.tool_call', { 'session.id': 'g2', function_name: 'read', function_args: '{}', decision: 'auto_accept' }),

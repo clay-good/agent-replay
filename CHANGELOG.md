@@ -98,6 +98,12 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `otel serve` log ingest now preserves a genuine `0 ms` tool-call duration from
+  a Gemini CLI `tool_call` log event instead of dropping it to no-duration. The
+  helper coalesced with `|| null`, so a real `0` (an instant or cached tool)
+  collapsed to `null` and the step showed no duration — the same class as the
+  earlier `hook` 0 ms fix, in the OTLP path. A `0` is now kept; only an absent or
+  non-numeric value becomes `null`.
 - `eval --rubric` now coerces and validates the rubric's `threshold` like it
   already does `weight`. A YAML author naturally quotes it (`threshold: "0.8"`),
   which arrived as a string and flowed into `score >= threshold`; a numeric
