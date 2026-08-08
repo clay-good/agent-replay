@@ -176,6 +176,25 @@ describe('AI presets', () => {
       expect(parsed.score).toBe(0.2);
       expect(parsed.passed).toBe(false);
     });
+
+    it('derives the verdict from the score, not the model\'s self-reported safe flag', () => {
+      // A critical-risk response that also (contradictorily) reports safe:true
+      // must still FAIL the gate — the score, not `safe`, decides.
+      const critical = preset.parse_response(JSON.stringify({
+        risk_level: 'critical', findings: [], recommendations: [], safe: true,
+      }));
+      expect(critical.score).toBe(0.0);
+      expect(critical.passed).toBe(false);
+      expect(critical.details.safe).toBe(true); // still reported
+
+      // A clean response whose safe flag arrived as a string "true" (a common
+      // LLM formatting slip) must still PASS — it used to fail (`=== true`).
+      const clean = preset.parse_response(JSON.stringify({
+        risk_level: 'none', findings: [], recommendations: [], safe: 'true',
+      }));
+      expect(clean.score).toBe(1.0);
+      expect(clean.passed).toBe(true);
+    });
   });
 
   describe('ai-optimization', () => {

@@ -499,9 +499,14 @@ Respond in this exact JSON format (no other text):
     const riskLevel = String(data.risk_level ?? 'medium').toLowerCase();
     const score = riskMap[riskLevel] ?? 0.5;
     const safe = data.safe === true;
+    // Derive the verdict from the score against the preset threshold, like the
+    // other AI presets — not from the model's self-reported `safe` boolean,
+    // which can disagree with `risk_level` (e.g. `critical` + `safe: true`, or a
+    // string `"true"`) and flip a CI gate the wrong way. `safe` is kept for
+    // reporting.
     return {
       score,
-      passed: safe,
+      passed: score >= 0.8,
       details: {
         risk_level: riskLevel,
         findings: data.findings ?? [],
