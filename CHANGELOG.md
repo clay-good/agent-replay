@@ -98,6 +98,42 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `guard add` and `eval --rubric` no longer reject a safe regular expression
+  that ends in an optional group, e.g. `read(_\w+)?`. The ReDoS guard in
+  `safeRegex` flagged a trailing `?` on a quantified group as a nested
+  quantifier, but `?` bounds the group to 0–1 repetitions and cannot backtrack
+  catastrophically. The false rejection blocked legitimate kill-switch policies
+  from being stored, and, in an eval rubric, scored a criterion with such a
+  pattern as a failed "invalid regex" (its weight still counting), silently
+  depressing the trace's score. The guard now treats only an unbounded outer
+  quantifier (`+`, `*`, `{…}`) as dangerous; genuine nested quantifiers
+  (`(a+)+`, `(a*)*`, `(a+){2,}`) are still rejected.
+- `eval` with the `ai-security-audit` preset now derives its pass/fail verdict
+  from the risk score against the preset threshold, like every other AI preset,
+  instead of the model's self-reported `safe` boolean. The two can disagree — a
+  well-formed response of `risk_level: "critical", safe: true`, or a clean one
+  whose `safe` arrived as the string `"true"` — and because the verdict came
+  straight from `safe`, the CI gate could pass a critical-risk trace or fail a
+  clean one, and the stored record contradicted itself (`score 0.0, passed
+  true`). The verdict is now `score >= 0.8`; the `safe` flag is retained in the
+  eval details for reporting.
+- `ingest` now reports a non-string `status` or `trigger` as a clean, named
+  validation error instead of letting it reach the database. The trace
+  validator required `typeof === 'string'` before checking the enum, so a
+  non-string value (`status: 42`, `trigger: true`) passed validation and then
+  failed at insert with a cryptic SQLite `CHECK` or bind error — or, for
+  `--dry-run`, was reported valid. It is now rejected up front like `step_type`
+  already was.
+- The v1→v2 schema migration is now idempotent and safe under concurrent
+  upgrades. `runMigrations` read the schema version *outside* any transaction,
+  so two processes opening a still-v1 database at once (the app spawns
+  short-lived `hook` processes freely) could both attempt the v2 `ALTER TABLE
+  ADD COLUMN` — and the loser crashed with `duplicate column name` (not
+  `SQLITE_BUSY`, so the busy timeout didn't help), surfacing as a stack trace,
+  or, under `hook`'s catch-all, a silently dropped step. The version is now
+  re-read inside a `BEGIN IMMEDIATE` transaction so a process that loses the
+  race sees v2 and skips, and each `ADD COLUMN` is guarded by a column-existence
+  check as a backstop. Only the one-time upgrade window was affected.
 - `otel serve` log ingest no longer lets a timestamp-less log record steal
   `step_number` 1 and mis-order a session's steps. `timeUnixNano` is optional in
   OTLP, and a record without it flattens to time `0`, which sorted ahead of the
