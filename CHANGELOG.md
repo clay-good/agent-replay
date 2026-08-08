@@ -98,6 +98,12 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `ingest` reports the true file line number when a JSONL line is malformed.
+  The line number was computed after blank and `//`-comment lines were filtered
+  out, so a broken line preceded by any of them was named as an earlier line
+  (e.g. a syntax error on file line 5 reported as `line 2`), sending you to the
+  wrong place in the file. Exit code and tallies were already correct; only the
+  diagnostic was off.
 - `guard check` / `hook --enforce` now attribute a block to a deterministic
   policy when several equal-priority policies match the same step. The verdict
   keeps the first most-restrictive match, but enabled policies were loaded

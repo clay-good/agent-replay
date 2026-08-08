@@ -177,16 +177,18 @@ function parseTraces(raw: string, format: 'json' | 'jsonl'): unknown[] {
     return Array.isArray(parsed) ? parsed : [parsed];
   }
 
-  // JSONL: one JSON object per line
+  // JSONL: one JSON object per line. Track the true file line number *before*
+  // dropping blank/comment lines, so a parse error names the line the user sees
+  // in their editor rather than a post-filter index.
   return raw
     .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith('//'))
-    .map((line, i) => {
+    .map((line, idx) => ({ text: line.trim(), lineNo: idx + 1 }))
+    .filter((e) => e.text.length > 0 && !e.text.startsWith('//'))
+    .map((e) => {
       try {
-        return JSON.parse(line);
+        return JSON.parse(e.text);
       } catch {
-        throw new Error(`Invalid JSON on line ${i + 1}`);
+        throw new Error(`Invalid JSON on line ${e.lineNo}`);
       }
     });
 }

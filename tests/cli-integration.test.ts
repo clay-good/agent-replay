@@ -70,6 +70,25 @@ describe('CLI integration', () => {
     expect(run(['list']).stdout).toContain('cli-bot');
   });
 
+  it('reports the true file line number for a malformed JSONL line', () => {
+    // Regression: the parse-error line number was computed after blank/comment
+    // lines were filtered out, so a bad line preceded by blanks was misreported
+    // as an earlier line. The good record on file line 3 must ingest, and the
+    // broken record on file line 5 must be named "line 5", not "line 2".
+    const f = join(dir, '..', 'lineno.jsonl');
+    writeFileSync(f, [
+      '',                                                                              // line 1 (blank)
+      '// a comment',                                                                  // line 2
+      JSON.stringify({ agent_name: 'ok', status: 'completed', steps: [{ step_number: 1, step_type: 'output', name: 'x' }] }), // line 3
+      '',                                                                              // line 4 (blank)
+      '{ broken json',                                                                 // line 5
+    ].join('\n'));
+    const res = run(['ingest', f, '--format', 'jsonl']);
+    expect(res.code).toBe(1);
+    expect(res.stderr + res.stdout).toContain('line 5');
+    expect(res.stderr + res.stdout).not.toContain('line 2');
+  });
+
   it('list --limit consumes the validated number, not a divergent second parse', () => {
     // Regression: --limit was validated with Number() but consumed with
     // parseInt(_, 10). "0x20" is Number → 32 (passes) but parseInt → 0, so the
