@@ -859,7 +859,7 @@ export function listTraces(
     .prepare(
       `SELECT *,
         (SELECT COUNT(*) FROM agent_trace_steps s WHERE s.trace_id = agent_traces.id) AS step_count
-       FROM agent_traces ${whereClause} ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?`,
+       FROM agent_traces ${whereClause} ORDER BY ${sortCol} ${sortDir}, id ASC LIMIT ? OFFSET ?`,
     )
     .all([...params, limit, offset]) as Record<string, unknown>[];
 

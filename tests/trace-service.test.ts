@@ -307,6 +307,27 @@ describe('listTraces', () => {
     expect(items).toHaveLength(2);
   });
 
+  it('orders tied sort keys deterministically by id (stable pagination)', () => {
+    // All five share an identical started_at, so the primary sort key ties for
+    // every row. Without a unique tiebreaker the order among ties is
+    // unspecified — a row could repeat on one page and be skipped on the next.
+    // The id tiebreaker makes the order a stable total order (id ascending).
+    const ts = '2026-05-01T00:00:00.000Z';
+    const ids: string[] = [];
+    for (let i = 0; i < 5; i++) ids.push(ingestTrace(db, makeTrace({ started_at: ts })).id);
+
+    const ordered = listTraces(db, { limit: 100 }).items.map((t) => t.id);
+    expect(ordered).toEqual([...ids].sort());
+
+    // Paging covers every trace exactly once, no repeats across page boundaries.
+    const paged = [
+      ...listTraces(db, { limit: 2, offset: 0 }).items,
+      ...listTraces(db, { limit: 2, offset: 2 }).items,
+      ...listTraces(db, { limit: 2, offset: 4 }).items,
+    ].map((t) => t.id);
+    expect(new Set(paged).size).toBe(5);
+  });
+
   it('sorts by different fields', () => {
     ingestTrace(db, makeTrace({ total_tokens: 100 }));
     ingestTrace(db, makeTrace({ total_tokens: 500 }));
