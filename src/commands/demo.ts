@@ -97,6 +97,7 @@ export async function runDemo(opts: DemoOptions = {}): Promise<void> {
   console.log(`    ${chalk.cyanBright('8.')} ${chalk.white('agent-replay guard list')}              ${chalk.dim('— View guardrail policies')}`);
   console.log(`    ${chalk.cyanBright('9.')} ${chalk.white('agent-replay guard test <id>')}         ${chalk.dim('— Test policies against trace')}`);
   console.log(`   ${chalk.cyanBright('10.')} ${chalk.white('agent-replay dashboard')}               ${chalk.dim('— Full-screen TUI')}`);
+  console.log(`       ${chalk.white('agent-replay stats')}                   ${chalk.dim('— Scriptable summary (--json, --since)')}`);
   console.log('');
   console.log(chalk.white('  Understand why an agent acted (the travel-assistant trace has decisions):'));
   console.log('');
