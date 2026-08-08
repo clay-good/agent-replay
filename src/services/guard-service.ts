@@ -110,8 +110,13 @@ export interface StepPolicyResult {
 
 /** Load enabled policies, highest priority first. */
 function loadEnabledPolicies(db: Database.Database): GuardrailPolicy[] {
+  // `name` (UNIQUE) is a stable tiebreaker so the verdict attributes a block to
+  // a deterministic policy when several equal-priority policies match a step —
+  // `verdictForMatches` keeps the first max-restrictiveness match, so without it
+  // the cited policy/reason varied by SQLite's incidental row order. Mirrors the
+  // ordering `listPolicies` already uses.
   const rows = db
-    .prepare('SELECT * FROM guardrail_policies WHERE enabled = 1 ORDER BY priority DESC')
+    .prepare('SELECT * FROM guardrail_policies WHERE enabled = 1 ORDER BY priority DESC, name')
     .all() as Record<string, unknown>[];
   return rows.map(rowToPolicy);
 }

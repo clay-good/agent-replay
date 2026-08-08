@@ -44,6 +44,18 @@ describe('single-step evaluation', () => {
     expect(v.reason).toContain('delete');
   });
 
+  it('attributes a block deterministically among equal-priority matches', () => {
+    // Two same-priority deny policies both match. The verdict action is deny
+    // either way, but the *attributed* policy must be stable (not SQLite's
+    // incidental row order). Inserted in non-alphabetical order to prove the
+    // name tiebreaker, not insertion order, decides.
+    addPolicy(db, { name: 'zzz-block', action: 'deny', priority: 5, match_pattern: { step_type: 'tool_call', name_contains: 'delete' } });
+    addPolicy(db, { name: 'aaa-block', action: 'deny', priority: 5, match_pattern: { step_type: 'tool_call', name_contains: 'delete' } });
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'delete_user' })));
+    expect(v.action).toBe('deny');
+    expect(v.policy).toBe('aaa-block'); // name-ascending tiebreak, stable across runs
+  });
+
   it('matches name_contains case-insensitively, so casing cannot bypass a policy', () => {
     addPolicy(db, { name: 'no-delete', action: 'deny', match_pattern: { step_type: 'tool_call', name_contains: 'delete' } });
     for (const name of ['DELETE_USER', 'Delete_User', 'deLeTe_records']) {

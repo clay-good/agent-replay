@@ -98,6 +98,15 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `guard check` / `hook --enforce` now attribute a block to a deterministic
+  policy when several equal-priority policies match the same step. The verdict
+  keeps the first most-restrictive match, but enabled policies were loaded
+  ordered only by `priority DESC` with no tiebreaker, so among equal-priority,
+  equally-restrictive matches (e.g. two `deny` policies) the cited policy name
+  and reason — shown to the user and recorded on the `guard_check` step — varied
+  with SQLite's incidental row order. The block itself was always correct; only
+  the attribution was unstable. Enabled policies now break ties by `name`
+  (unique), matching the ordering `guard list` already uses.
 - `list` (and every paginated trace query) now orders tied sort keys
   deterministically. The `ORDER BY` had no unique tiebreaker, so rows sharing
   the sort value — a common case, since batch-ingested or demo traces routinely
