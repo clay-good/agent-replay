@@ -712,6 +712,22 @@ describe('CLI integration', () => {
     expect(run(['stats', 'bogus']).code).toBe(2); // usage error
   });
 
+  it('stats renders an empty store without crashing (null aggregates → "-")', () => {
+    // No traces ingested — AVG/SUM come back null and by_agent is empty. The
+    // human view must show "-" rather than "null"/NaN, and --json must carry the
+    // nulls through.
+    const human = run(['stats']);
+    expect(human.code).toBe(0);
+    expect(human.stdout).toContain('Traces:');
+    expect(human.stdout).not.toContain('NaN');
+    expect(human.stdout).not.toContain('null');
+
+    const out = JSON.parse(run(['stats', '--json']).stdout);
+    expect(out.overall.traces).toBe(0);
+    expect(out.overall.avgDurationMs).toBeNull();
+    expect(out.by_agent).toEqual([]);
+  });
+
   it('demo --reset refuses to delete a directory that is not an agent-replay store', () => {
     // Safety guard: --reset must never rm a directory whose name isn't an
     // agent-replay data dir. Spawned directly since it needs a custom --dir that
