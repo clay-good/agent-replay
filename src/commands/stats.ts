@@ -4,6 +4,7 @@ import { ensureDatabase } from '../db/index.js';
 import { dashboardStats, statusCounts, agentStats } from '../ui/dashboard-data.js';
 import { summaryPanel } from '../ui/boxen-panels.js';
 import { heading, label } from '../ui/theme.js';
+import { formatDuration } from '../utils/time.js';
 
 export interface StatsOptions {
   json?: boolean;
@@ -43,7 +44,7 @@ export function runStats(opts: StatsOptions = {}): void {
       Steps: overall.steps,
       Evals: overall.evals,
       'Active policies': overall.policies,
-      'Avg duration': overall.avgDurationMs != null ? formatDuration(overall.avgDurationMs) : '-',
+      'Avg duration': overall.avgDurationMs != null ? formatDuration(Math.round(overall.avgDurationMs)) : '-',
       'Total tokens': overall.totalTokens != null ? overall.totalTokens.toLocaleString() : '-',
       'Total cost': overall.totalCost != null ? '$' + overall.totalCost.toFixed(4) : '-',
     }),
@@ -71,10 +72,4 @@ export function runStats(opts: StatsOptions = {}): void {
   }
 
   console.log('');
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60000).toFixed(1)}m`;
 }
