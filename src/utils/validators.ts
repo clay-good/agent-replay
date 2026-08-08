@@ -56,18 +56,20 @@ export function validateTraceInput(input: unknown): ValidationResult {
     errors.push({ field: 'agent_name', message: 'agent_name is required and must be a string' });
   }
 
-  // Optional enum fields
-  if (data.status != null && typeof data.status === 'string' && !isValidStatus(data.status)) {
+  // Optional enum fields — a non-string value is invalid too, not skipped.
+  // (`typeof === 'string'` here let a non-string slip through validation and
+  // then fail at insert with a cryptic CHECK/bind error; mirror step_type.)
+  if (data.status != null && (typeof data.status !== 'string' || !isValidStatus(data.status))) {
     errors.push({
       field: 'status',
-      message: `Invalid status "${data.status}". Must be one of: ${TRACE_STATUSES.join(', ')}`,
+      message: `Invalid status "${String(data.status)}". Must be one of: ${TRACE_STATUSES.join(', ')}`,
     });
   }
 
-  if (data.trigger != null && typeof data.trigger === 'string' && !isValidTrigger(data.trigger)) {
+  if (data.trigger != null && (typeof data.trigger !== 'string' || !isValidTrigger(data.trigger))) {
     errors.push({
       field: 'trigger',
-      message: `Invalid trigger "${data.trigger}". Must be one of: ${TRIGGER_TYPES.join(', ')}`,
+      message: `Invalid trigger "${String(data.trigger)}". Must be one of: ${TRIGGER_TYPES.join(', ')}`,
     });
   }
 

@@ -136,6 +136,19 @@ describe('validateTraceInput', () => {
     expect(result.errors.some(e => e.field === 'trigger')).toBe(true);
   });
 
+  it('rejects a non-string status/trigger instead of passing it to the DB', () => {
+    // A non-string enum value used to slip past validation (the guard required
+    // `typeof === 'string'`) and then fail at insert with a cryptic CHECK/bind
+    // error. It is now a clean, field-named validation error.
+    const status = validateTraceInput({ agent_name: 'a', status: 42 as unknown });
+    expect(status.valid).toBe(false);
+    expect(status.errors.some(e => e.field === 'status')).toBe(true);
+
+    const trigger = validateTraceInput({ agent_name: 'a', trigger: true as unknown });
+    expect(trigger.valid).toBe(false);
+    expect(trigger.errors.some(e => e.field === 'trigger')).toBe(true);
+  });
+
   it('rejects non-number total_duration_ms', () => {
     const result = validateTraceInput({ agent_name: 'a', total_duration_ms: 'fast' as unknown });
     expect(result.valid).toBe(false);
