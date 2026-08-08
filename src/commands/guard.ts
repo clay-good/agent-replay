@@ -250,7 +250,7 @@ export async function runGuardCheck(opts: GuardCheckOptions = {}): Promise<void>
     return;
   }
 
-  let parsed: Record<string, unknown>;
+  let parsed: unknown;
   try {
     parsed = JSON.parse(raw.trim());
   } catch {
@@ -259,7 +259,17 @@ export async function runGuardCheck(opts: GuardCheckOptions = {}): Promise<void>
     return;
   }
 
-  if (typeof parsed.step_type !== 'string' || !isValidStepType(parsed.step_type)) {
+  // `null`, an array, or a bare primitive are all valid JSON but not a step
+  // object — reject them with a clean message rather than crashing on the
+  // property access below (`null.step_type` throws a raw TypeError).
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    console.error(chalk.red('  Invalid step on stdin — expected a single step object.'));
+    process.exitCode = 1;
+    return;
+  }
+  const step_input = parsed as Record<string, unknown>;
+
+  if (typeof step_input.step_type !== 'string' || !isValidStepType(step_input.step_type)) {
     console.error(chalk.red('  Step must include a valid "step_type".'));
     process.exitCode = 1;
     return;
@@ -268,11 +278,11 @@ export async function runGuardCheck(opts: GuardCheckOptions = {}): Promise<void>
   const step: TraceStep = {
     id: '',
     trace_id: '',
-    step_number: typeof parsed.step_number === 'number' ? parsed.step_number : 1,
-    step_type: parsed.step_type as StepType,
-    name: typeof parsed.name === 'string' ? parsed.name : '',
-    input: (parsed.input as Record<string, unknown>) ?? {},
-    output: (parsed.output as Record<string, unknown>) ?? null,
+    step_number: typeof step_input.step_number === 'number' ? step_input.step_number : 1,
+    step_type: step_input.step_type as StepType,
+    name: typeof step_input.name === 'string' ? step_input.name : '',
+    input: (step_input.input as Record<string, unknown>) ?? {},
+    output: (step_input.output as Record<string, unknown>) ?? null,
     started_at: '',
     ended_at: null,
     duration_ms: null,

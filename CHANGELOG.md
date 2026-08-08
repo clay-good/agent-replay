@@ -98,6 +98,19 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `eval --rubric` now coerces and validates the rubric's `threshold` like it
+  already does `weight`. A YAML author naturally quotes it (`threshold: "0.8"`),
+  which arrived as a string and flowed into `score >= threshold`; a numeric
+  string happened to coerce, but a non-numeric one (`"abc"`) made every
+  comparison `score >= NaN` → always false, failing an otherwise-passing trace
+  and reporting a correct trace as a CI regression (the same class the `weight`
+  fix closed). A present `threshold` that isn't a number in `[0, 1]` is now a
+  usage error (exit `2`), and a numeric string is coerced.
+- `guard check` no longer crashes with a raw `TypeError` when the step piped to
+  stdin is valid JSON but not an object (`null`, an array, or a bare value).
+  `null` in particular reached a property access (`null.step_type`) and threw a
+  stack trace; it now reports a clean "expected a single step object" error and
+  exits `1`, like the other malformed-input paths.
 - `ingest` reports the true file line number when a JSONL line is malformed.
   The line number was computed after blank and `//`-comment lines were filtered
   out, so a broken line preceded by any of them was named as an earlier line

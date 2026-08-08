@@ -168,6 +168,16 @@ describe('CLI integration', () => {
     expect(run(['guard', 'check'], '{"step_type":"tool_call","name":"safe"}').code).toBe(0);
   });
 
+  it('guard check rejects non-object JSON stdin cleanly (no crash)', () => {
+    // `null`/array/primitive are valid JSON but not a step object; they must
+    // yield a clean error + exit 1, not a raw TypeError from `null.step_type`.
+    for (const body of ['null', '[]', '42']) {
+      const r = run(['guard', 'check'], body);
+      expect(r.code).toBe(1);
+      expect(r.stderr + r.stdout).not.toMatch(/TypeError|Cannot read/i);
+    }
+  });
+
   it('runs a golden regression check with correct exit codes', () => {
     const good = join(dir, '..', 'good.jsonl');
     writeFileSync(good, JSON.stringify({ agent_name: 'g', status: 'completed', input: { t: 'x' }, steps: [{ step_number: 1, step_type: 'tool_call', name: 's', input: { q: 'a' } }] }));
@@ -464,6 +474,18 @@ describe('CLI integration', () => {
     const badRubric = join(dir, '..', 'badweight.yaml');
     writeFileSync(badRubric, 'name: bad\ncriteria:\n  - name: a\n    pattern: answer\n    expected: true\n    weight: -1\n');
     expect(run(['eval', id, '--rubric', badRubric]).code).toBe(2);
+
+    // A quoted numeric threshold ("0.8") is coerced, so a satisfied rubric still
+    // passes → exit 0 (not a string flowing into `score >= "0.8"`).
+    const quotedThresh = join(dir, '..', 'qthresh.yaml');
+    writeFileSync(quotedThresh, "name: qt\nthreshold: '0.8'\ncriteria:\n  - name: a\n    pattern: answer\n    expected: true\n");
+    expect(run(['eval', id, '--rubric', quotedThresh]).code).toBe(0);
+
+    // A non-numeric / out-of-range threshold is a usage error (exit 2), not a
+    // silent `score >= NaN` that fails every otherwise-passing trace.
+    const badThresh = join(dir, '..', 'bthresh.yaml');
+    writeFileSync(badThresh, 'name: bt\nthreshold: abc\ncriteria:\n  - name: a\n    pattern: answer\n    expected: true\n');
+    expect(run(['eval', id, '--rubric', badThresh]).code).toBe(2);
   });
 
   it('diff --fields recomputes divergence so the view is self-consistent', () => {

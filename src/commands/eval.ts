@@ -301,6 +301,20 @@ async function parseRubric(raw: string, path: string): Promise<{
     throw new Error('Rubric must have a non-empty "criteria" array');
   }
 
+  // Coerce/validate the pass threshold for the same reason as `weight` below: a
+  // YAML author naturally quotes it ("threshold: '0.8'"), which arrives as a
+  // string. A non-numeric value flows through to `score >= threshold` as
+  // `score >= NaN` → always false, silently failing an otherwise-passing trace
+  // (a false CI regression on a correct trace); an out-of-range value can never
+  // pass or always passes. Reject anything that isn't a number in [0, 1].
+  if (parsed.threshold != null) {
+    const t = Number(parsed.threshold);
+    if (!Number.isFinite(t) || t < 0 || t > 1) {
+      throw new Error('Rubric "threshold", if set, must be a number between 0 and 1');
+    }
+    parsed.threshold = t;
+  }
+
   // Validate individual criteria
   for (let i = 0; i < parsed.criteria.length; i++) {
     const c = parsed.criteria[i] as Record<string, unknown>;
