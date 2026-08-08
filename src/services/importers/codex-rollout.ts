@@ -128,14 +128,21 @@ export function importCodexRollout(
           step_number: stepNumber++,
           step_type: 'thought',
           name: 'reasoning',
-          output: { text: asText(it.summary ?? it.content ?? it.text) },
+          // Fall back with `||`, not `??`: the Responses API serializes a
+          // reasoning item with no summary as `summary: []` (present but empty),
+          // which is not nullish, so `??` would keep the empty summary and drop
+          // the real text carried in `content`. Treat an empty asText result
+          // ("" from `[]` or a blank string) as absent.
+          output: { text: asText(it.summary) || asText(it.content) || asText(it.text) },
         });
         contributed = true;
         break;
       }
       case 'message': {
         const role = str(it.role);
-        const text = asText(it.content ?? it.text);
+        // `||` for the same reason as the reasoning case above: an empty
+        // `content: []` is not nullish, so `??` would drop text carried in `text`.
+        const text = asText(it.content) || asText(it.text);
         if (role === 'user' && !input) {
           input = { prompt: text };
           contributed = true;

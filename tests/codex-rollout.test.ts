@@ -80,6 +80,43 @@ describe('importCodexRollout', () => {
     expect(trace.steps.filter((s) => s.name === 'assistant_message')).toHaveLength(2);
   });
 
+  it('reads reasoning text from content when summary is an empty array', () => {
+    // The Responses API serializes a reasoning item with no generated summary as
+    // `summary: []` (present but empty), carrying the actual text in `content`.
+    // An empty array is not nullish, so a `summary ?? content` fallback keeps the
+    // empty summary and drops the reasoning; the fallback must treat "" as absent.
+    const path = fixture([
+      { type: 'session_meta', payload: { id: 'roll-3' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: 'why did it fail?' } },
+      {
+        type: 'response_item',
+        payload: {
+          type: 'reasoning',
+          summary: [],
+          content: [{ type: 'reasoning_text', text: 'the target was missing' }],
+        },
+      },
+    ]);
+
+    const report = importCodexRollout(db, path);
+    const trace = getTrace(db, report.trace!.id)!;
+    const reasoning = trace.steps.find((s) => s.name === 'reasoning')!;
+    expect(reasoning.output).toEqual({ text: 'the target was missing' });
+  });
+
+  it('reads an assistant message from text when content is an empty array', () => {
+    const path = fixture([
+      { type: 'session_meta', payload: { id: 'roll-4' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: 'hi' } },
+      { type: 'response_item', payload: { type: 'message', role: 'assistant', content: [], text: 'hello there' } },
+    ]);
+
+    const report = importCodexRollout(db, path);
+    const trace = getTrace(db, report.trace!.id)!;
+    expect(trace.output).toEqual({ text: 'hello there' });
+    expect(trace.steps.find((s) => s.name === 'assistant_message')?.output).toEqual({ text: 'hello there' });
+  });
+
   it('is best-effort: skips corrupted and unknown records, notes compaction', () => {
     const path = fixture([
       { type: 'session_meta', payload: { id: 'roll-2' } },

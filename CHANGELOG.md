@@ -93,6 +93,15 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `import --format codex-rollout` no longer drops a reasoning step's text (or an
+  assistant message's) when the richer field is an empty array. A Codex/Responses
+  API `reasoning` item with no generated summary serializes as `summary: []`
+  (present but empty) with the actual text in `content`; the fallback chain used
+  `??`, which treats `[]` as present, so it kept the empty summary and imported
+  the thought as `{ text: "" }` — silently losing the reasoning. The same defeated
+  a `message` whose `content` was `[]` with text in `text`. Both now fall back
+  with `||`, treating an empty (`""`) extraction as absent, so the next candidate
+  field is used.
 - `eval --ai` / `diff --ai` cost estimation no longer under-prices a model that
   merely shares a name prefix with a cheaper entry in the rate table, which could
   let a run slip past `--max-cost`. The family-match borrowed a known rate when
