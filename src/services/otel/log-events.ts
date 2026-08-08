@@ -60,7 +60,12 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
 
   const traces: IngestTraceInput[] = [];
   for (const [sid, group] of bySession) {
-    group.sort((a, b) => a.time - b.time);
+    // Order by event time, but sort a record missing timeUnixNano (which num()
+    // flattens to 0) LAST rather than first — otherwise a timestamp-less log
+    // record (timeUnixNano is optional in OTLP) sorts ahead of real, timed events
+    // and steals step_number 1, mis-ordering the steps. Mirrors the start-less
+    // span guard in semconv.ts. (startedAt is already guarded by `&& l.time`.)
+    group.sort((a, b) => (a.time || Infinity) - (b.time || Infinity));
     const isGemini = group.some((l) => l.eventName.startsWith('gemini_cli.'));
 
     let input: Record<string, unknown> | undefined;

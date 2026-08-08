@@ -97,6 +97,26 @@ describe('mapOtlpLogs — Claude Code', () => {
     expect(trace.steps.some((s) => s.step_type === 'decision' && s.decision?.chosen === 'allow')).toBe(true);
   });
 
+  it('sorts a timestamp-less log record last, not first (no stolen step 1)', () => {
+    // timeUnixNano is optional in OTLP. num() flattens a missing one to 0, so an
+    // untimed record must NOT sort ahead of real, timed events and take
+    // step_number 1. Mirrors the start-less span guard in semconv.
+    const untimed = {
+      eventName: 'claude_code.tool_result',
+      attributes: Object.entries({ 'session.id': 'c2', tool_name: 'Untimed', success: true }).map(([k, v]) => attr(k, v)),
+      // no timeUnixNano
+    };
+    const payload = otlpLogs([
+      untimed,
+      logRecord('claude_code.tool_result', { 'session.id': 'c2', tool_name: 'Timed', success: true }, 5_000_000),
+    ]);
+
+    const [t] = mapOtlpLogs(payload);
+    const toolNames = t.steps.filter((s) => s.step_type === 'tool_call').map((s) => s.name);
+    // The timed event comes first; the untimed one is appended after it.
+    expect(toolNames).toEqual(['Timed', 'Untimed']);
+  });
+
   it('separates two sessions and ignores unrelated events', () => {
     const payload = otlpLogs([
       logRecord('gemini_cli.user_prompt', { 'session.id': 'a', prompt: 'one' }),

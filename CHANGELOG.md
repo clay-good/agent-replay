@@ -93,6 +93,13 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `otel serve` log ingest no longer lets a timestamp-less log record steal
+  `step_number` 1 and mis-order a session's steps. `timeUnixNano` is optional in
+  OTLP, and a record without it flattens to time `0`, which sorted ahead of the
+  real, timed events — so a timestamp-less `tool_result`/`tool_decision` jumped
+  to the front of the trace. The sort now places an untimed record last (`time ||
+  Infinity`), mirroring the start-less span guard already applied to the trace
+  path; the trace `started_at` was already derived only from timed records.
 - `import --format codex-rollout` no longer drops a reasoning step's text (or an
   assistant message's) when the richer field is an empty array. A Codex/Responses
   API `reasoning` item with no generated summary serializes as `summary: []`
