@@ -7,21 +7,28 @@ import { SCHEMA_VERSION, getSchemaVersion, applySchemaV1, applySchemaV2 } from '
  * upgrade are both atomic. Returns the version after migration.
  */
 export function runMigrations(db: Database.Database): number {
-  const current = getSchemaVersion(db);
-
-  if (current >= SCHEMA_VERSION) {
-    return current;
+  // Fast path: already current — avoid taking a write lock on every open.
+  if (getSchemaVersion(db) >= SCHEMA_VERSION) {
+    return SCHEMA_VERSION;
   }
 
-  // v0 → v1: initial schema
-  if (current < 1) {
-    db.transaction(() => applySchemaV1(db))();
-  }
+  // Serialize migration across processes. Take the write lock up front
+  // (BEGIN IMMEDIATE) and re-read the version *inside* the transaction, so a
+  // process that lost a concurrent-upgrade race sees the already-applied
+  // version and skips the DDL instead of re-running it. Reading the version
+  // outside any transaction (as before) was a TOCTOU: two processes could both
+  // read v1 and both attempt the v2 `ALTER TABLE ADD COLUMN`, and the loser
+  // crashed with `duplicate column name` (not SQLITE_BUSY, so busy_timeout
+  // didn't help). The steps within are also idempotent as a backstop.
+  db.transaction(() => {
+    const current = getSchemaVersion(db);
 
-  // v1 → v2: decision-trace model (hierarchy, causality, sessions, decisions)
-  if (current < 2) {
-    db.transaction(() => applySchemaV2(db))();
-  }
+    // v0 → v1: initial schema
+    if (current < 1) applySchemaV1(db);
+
+    // v1 → v2: decision-trace model (hierarchy, causality, sessions, decisions)
+    if (current < 2) applySchemaV2(db);
+  }).immediate();
 
   return SCHEMA_VERSION;
 }

@@ -143,11 +143,20 @@ CREATE INDEX IF NOT EXISTS idx_guardrail_policies_enabled ON guardrail_policies(
 // Applied as an in-place migration over v1 tables so opening a v1 database
 // upgrades it while preserving every existing row (see migrations.ts).
 // ============================================================================
-const SCHEMA_V2 = `
-ALTER TABLE agent_trace_steps ADD COLUMN parent_step_number INTEGER;
-ALTER TABLE agent_trace_steps ADD COLUMN caused_by_step_number INTEGER;
+// The new v2 columns, added one at a time and only if absent. `ALTER TABLE ADD
+// COLUMN` has no `IF NOT EXISTS`, so re-running it on a table that already has
+// the column raises `duplicate column name`. Guarding each add keeps the
+// migration idempotent (a re-run, or a process that lost a concurrent-upgrade
+// race, is a no-op rather than a crash).
+const SCHEMA_V2_COLUMNS: { table: string; column: string; ddl: string }[] = [
+  { table: 'agent_trace_steps', column: 'parent_step_number', ddl: 'ALTER TABLE agent_trace_steps ADD COLUMN parent_step_number INTEGER' },
+  { table: 'agent_trace_steps', column: 'caused_by_step_number', ddl: 'ALTER TABLE agent_trace_steps ADD COLUMN caused_by_step_number INTEGER' },
+  { table: 'agent_traces', column: 'session_id', ddl: 'ALTER TABLE agent_traces ADD COLUMN session_id TEXT' },
+];
 
-ALTER TABLE agent_traces ADD COLUMN session_id TEXT;
+// Indexes and the decisions table are already `IF NOT EXISTS`, so this block is
+// safe to re-run as-is.
+const SCHEMA_V2_OBJECTS = `
 CREATE INDEX IF NOT EXISTS idx_agent_traces_session ON agent_traces(session_id);
 
 CREATE TABLE IF NOT EXISTS agent_trace_decisions (
@@ -165,6 +174,12 @@ CREATE TABLE IF NOT EXISTS agent_trace_decisions (
 CREATE INDEX IF NOT EXISTS idx_agent_trace_decisions_step ON agent_trace_decisions(step_id);
 `;
 
+/** True if `table` already has a column named `column`. */
+function hasColumn(db: Database.Database, table: string, column: string): boolean {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  return cols.some((c) => c.name === column);
+}
+
 /** Apply schema v1 to the database (records schema version 1). */
 export function applySchemaV1(db: Database.Database): void {
   db.exec(SCHEMA_V1);
@@ -173,7 +188,10 @@ export function applySchemaV1(db: Database.Database): void {
 
 /** Migrate a v1 database in place to v2 (records schema version 2). */
 export function applySchemaV2(db: Database.Database): void {
-  db.exec(SCHEMA_V2);
+  for (const { table, column, ddl } of SCHEMA_V2_COLUMNS) {
+    if (!hasColumn(db, table, column)) db.exec(ddl);
+  }
+  db.exec(SCHEMA_V2_OBJECTS);
   db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(2);
 }
 

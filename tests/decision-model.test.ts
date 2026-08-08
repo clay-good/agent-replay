@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { applySchemaV1 } from '../src/db/schema.js';
+import { applySchemaV1, applySchemaV2 } from '../src/db/schema.js';
 import { runMigrations } from '../src/db/migrations.js';
 import { getSchemaVersion } from '../src/db/schema.js';
 import { ingestTrace, getTrace, listTraces, attachDecision } from '../src/services/trace-service.js';
@@ -66,6 +66,21 @@ describe('v1 → v2 migration', () => {
   it('is idempotent when already at v2', () => {
     runMigrations(db);
     expect(runMigrations(db)).toBe(2);
+  });
+
+  it('does not crash re-applying v2 when the columns already exist (upgrade race)', () => {
+    // Simulate a concurrent upgrade: the winning process already applied v2 —
+    // the new columns exist — but this process still sees the recorded version
+    // as 1 (its read lost the race). Re-running the v2 migration must be a
+    // no-op, not a `duplicate column name` crash that (under `hook`) silently
+    // drops a step.
+    applySchemaV1(db);
+    applySchemaV2(db); // "winner": columns added, version bumped to 2
+    db.prepare('DELETE FROM schema_version WHERE version = 2').run(); // "loser" still reads 1
+    expect(getSchemaVersion(db)).toBe(1);
+
+    expect(() => runMigrations(db)).not.toThrow();
+    expect(getSchemaVersion(db)).toBe(2);
   });
 });
 
