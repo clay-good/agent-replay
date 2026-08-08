@@ -98,6 +98,25 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `list` (and every paginated trace query) now orders tied sort keys
+  deterministically. The `ORDER BY` had no unique tiebreaker, so rows sharing
+  the sort value — a common case, since batch-ingested or demo traces routinely
+  share a millisecond `started_at`, and running traces all have `NULL`
+  tokens/duration/cost — came back in an unspecified order. Across `--limit`
+  / `--offset` pages (especially with a live recorder writing concurrently) a
+  tied row could repeat on one page and be skipped on the next. A stable
+  `id` tiebreaker is now appended, making the order a total order.
+- `watch` no longer silently drops a step that is written after a
+  higher-numbered one. The live tail cursored on the highest `step_number` seen,
+  but step numbers are producer-supplied and need not be written in increasing
+  order (only unique per trace), so a step whose number was lower than one
+  already printed — but written later — fell outside the `> cursor` window and
+  never appeared. The tail now tracks the set of printed step numbers, so a
+  late, lower-numbered step is surfaced on the next poll.
+- `watch --interval` now rejects a malformed value (non-numeric, zero, or
+  negative) with a usage error (exit `2`) instead of silently falling back to
+  the 500 ms default, matching the `dashboard --refresh` convention. A typo like
+  `--interval 5OO` no longer looks like it took effect.
 - `guard add` and `eval --rubric` no longer reject a safe regular expression
   that ends in an optional group, e.g. `read(_\w+)?`. The ReDoS guard in
   `safeRegex` flagged a trailing `?` on a quantified group as a nested
