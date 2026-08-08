@@ -712,6 +712,26 @@ describe('CLI integration', () => {
     expect(run(['stats', 'bogus']).code).toBe(2); // usage error
   });
 
+  it('stats --since windows the counts and rejects a malformed value', () => {
+    const f = join(dir, '..', 'since.jsonl');
+    writeFileSync(f, [
+      JSON.stringify({ agent_name: 'old', status: 'completed', started_at: '2020-01-01T00:00:00Z', steps: [{ step_number: 1, step_type: 'output', name: 'x' }] }),
+      JSON.stringify({ agent_name: 'new', status: 'completed', started_at: '2030-01-01T00:00:00Z', steps: [{ step_number: 1, step_type: 'output', name: 'y' }] }),
+    ].join('\n'));
+    run(['ingest', f, '--format', 'jsonl']);
+
+    const all = JSON.parse(run(['stats', '--json']).stdout);
+    expect(all.overall.traces).toBe(2);
+    expect(all.since).toBeNull();
+
+    const windowed = JSON.parse(run(['stats', '--json', '--since', '2025-01-01']).stdout);
+    expect(windowed.overall.traces).toBe(1); // only the 2030 trace
+    expect(windowed.since).toBe('2025-01-01');
+    expect(windowed.by_agent).toEqual([{ agent_name: 'new', count: 1, failed: 0 }]);
+
+    expect(run(['stats', '--since', 'not-a-window']).code).toBe(2); // usage error
+  });
+
   it('stats renders an empty store without crashing (null aggregates → "-")', () => {
     // No traces ingested — AVG/SUM come back null and by_agent is empty. The
     // human view must show "-" rather than "null"/NaN, and --json must carry the

@@ -23,7 +23,12 @@ trace schema is unchanged.
   `dashboard` TUI but works in a plain terminal, a log, or CI, and `--json`
   emits `{ overall, by_status, by_agent }` for piping into `jq` or a gate.
   Previously these numbers were reachable only through the full-screen
-  dashboard, which needs an interactive TTY.
+  dashboard, which needs an interactive TTY. `stats --since <window>` (a
+  duration like `7d`/`24h` or an ISO date, matching `list --since`) windows
+  every count to traces started at or after the cutoff — steps and evals by
+  their parent trace's start time, so the view is internally consistent — while
+  the active-policy count stays store-wide (current config, not history). A
+  malformed `--since` is a usage error (exit `2`); `--json` adds a `since` field.
 - `export` now accepts an optional `[trace-id]` positional, so you can export a
   single trace by id (with prefix matching, like `show`/`why`/`replay`) instead
   of only bulk-filtering. A trace id and the filter flags (`--status`, `--agent`,

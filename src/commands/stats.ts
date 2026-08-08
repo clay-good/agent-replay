@@ -4,10 +4,12 @@ import { ensureDatabase } from '../db/index.js';
 import { dashboardStats, statusCounts, agentStats } from '../ui/dashboard-data.js';
 import { summaryPanel } from '../ui/boxen-panels.js';
 import { heading, label } from '../ui/theme.js';
-import { formatDuration } from '../utils/time.js';
+import { formatDuration, parseSinceToIso } from '../utils/time.js';
+import { errorMessage } from '../utils/json.js';
 
 export interface StatsOptions {
   json?: boolean;
+  since?: string;
   dir?: string;
 }
 
@@ -20,16 +22,29 @@ export function runStats(opts: StatsOptions = {}): void {
   const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
   const db = ensureDatabase(dbPath);
 
-  const overall = dashboardStats(db);
-  const byStatus = statusCounts(db);
-  const byAgent = agentStats(db);
+  // A malformed --since is a usage error, not a silent store-wide fallback
+  // (which would hide a typo behind plausible-looking numbers). Mirrors `list`.
+  let filter: { since?: string } = {};
+  if (opts.since != null) {
+    try {
+      filter = { since: parseSinceToIso(opts.since) };
+    } catch (err) {
+      console.error(chalk.red(`  Invalid --since: ${errorMessage(err)}`));
+      process.exitCode = 2;
+      return;
+    }
+  }
+
+  const overall = dashboardStats(db, filter);
+  const byStatus = statusCounts(db, filter);
+  const byAgent = agentStats(db, filter);
 
   if (opts.json) {
     const status: Record<string, number> = {};
     byStatus.titles.forEach((t, i) => (status[t] = byStatus.data[i]));
     console.log(
       JSON.stringify(
-        { overall, by_status: status, by_agent: byAgent },
+        { since: filter.since ?? null, overall, by_status: status, by_agent: byAgent },
         null,
         2,
       ),
@@ -39,7 +54,7 @@ export function runStats(opts: StatsOptions = {}): void {
 
   console.log('');
   console.log(
-    summaryPanel('Store Summary', {
+    summaryPanel(filter.since ? `Store Summary — since ${opts.since}` : 'Store Summary', {
       Traces: overall.traces,
       Steps: overall.steps,
       Evals: overall.evals,

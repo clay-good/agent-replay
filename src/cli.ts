@@ -367,6 +367,7 @@ program
 program
   .command('stats')
   .description('Print a non-interactive summary of the trace store (scriptable, --json)')
+  .option('--since <window>', 'Only count traces since a time (e.g. 7d, 24h, or an ISO date)')
   .option('--json', 'Output as JSON')
   .option('--dir <path>', 'Custom data directory')
   .action(async (opts) => {

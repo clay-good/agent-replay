@@ -415,11 +415,15 @@ A non-interactive summary of the store — the same aggregates the dashboard sho
 # Overall counts, per-status, and per-agent breakdown
 agent-replay stats
 
+# Only count activity in a recent window (like `list --since`)
+agent-replay stats --since 7d
+agent-replay stats --since 2026-08-01
+
 # JSON for piping into jq / a CI check
 agent-replay stats --json
 ```
 
-The `--json` shape is `{ overall, by_status, by_agent }`, where `by_agent` lists each agent's trace `count` and a `failed` tally (failed + timeout), most-active first.
+The `--json` shape is `{ since, overall, by_status, by_agent }`, where `by_agent` lists each agent's trace `count` and a `failed` tally (failed + timeout), most-active first. `--since` windows every count to traces started at or after the cutoff (steps and evals by their parent trace's start time); the active-policy count is current config and is never windowed. A malformed `--since` is a usage error (exit `2`).
 
 ### Configuration
 

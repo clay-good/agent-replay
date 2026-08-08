@@ -85,6 +85,54 @@ describe('statusCounts', () => {
   });
 });
 
+describe('StatsFilter (since)', () => {
+  // Two old traces, one recent, so a mid-point cutoff keeps only the recent one.
+  const seed = () => {
+    ingestTrace(db, trace({ agent_name: 'old-bot', status: 'failed', started_at: '2020-01-01T00:00:00Z', total_tokens: 10, steps: [
+      { step_number: 1, step_type: 'output', name: 'a' },
+      { step_number: 2, step_type: 'output', name: 'b' },
+    ] }));
+    ingestTrace(db, trace({ agent_name: 'old-bot', status: 'completed', started_at: '2020-06-01T00:00:00Z', total_tokens: 20 }));
+    ingestTrace(db, trace({ agent_name: 'new-bot', status: 'completed', started_at: '2030-01-01T00:00:00Z', total_tokens: 100, steps: [
+      { step_number: 1, step_type: 'output', name: 'c' },
+    ] }));
+  };
+
+  it('windows trace, step, token, status, and agent counts to the cutoff', () => {
+    seed();
+    const cutoff = '2025-01-01T00:00:00Z';
+
+    const overall = dashboardStats(db, { since: cutoff });
+    expect(overall.traces).toBe(1); // only new-bot
+    expect(overall.steps).toBe(1); // only new-bot's single step (not the 2 old ones)
+    expect(overall.totalTokens).toBe(100);
+
+    const byStatus = Object.fromEntries(
+      (({ titles, data }) => titles.map((t, i) => [t, data[i]]))(statusCounts(db, { since: cutoff })),
+    );
+    expect(byStatus.completed).toBe(1);
+    expect(byStatus.failed).toBe(0); // the failed one is old, excluded
+
+    expect(agentStats(db, { since: cutoff })).toEqual([{ agent_name: 'new-bot', count: 1, failed: 0 }]);
+  });
+
+  it('counts everything with no filter (store-wide), matching the dashboard call', () => {
+    seed();
+    expect(dashboardStats(db).traces).toBe(3);
+    expect(dashboardStats(db).steps).toBe(4); // 2 + 1 (default) + 1
+    expect(agentStats(db).length).toBe(2);
+  });
+
+  it('active-policy count is never windowed (current config, not history)', () => {
+    seed();
+    addPolicy(db, { name: 'p', action: 'warn', match_pattern: { step_type: 'output' } });
+    // A cutoff after every trace → zero traces, but the policy still counts.
+    const overall = dashboardStats(db, { since: '2099-01-01T00:00:00Z' });
+    expect(overall.traces).toBe(0);
+    expect(overall.policies).toBe(1);
+  });
+});
+
 describe('agentStats', () => {
   it('counts traces per agent, newest-heaviest first, with a failed+timeout tally', () => {
     ingestTrace(db, trace({ agent_name: 'bot-a', status: 'completed' }));
