@@ -37,17 +37,38 @@ export function runWatch(traceId: string | undefined, opts: WatchOptions = {}): 
   }
 
   const id = resolved.id;
-  const pollMs = Number(opts.interval) > 0 ? Number(opts.interval) : DEFAULT_POLL_MS;
+
+  // Reject a malformed --interval up front rather than silently polling at the
+  // default (which would hide a typo), matching `dashboard --refresh`.
+  let pollMs = DEFAULT_POLL_MS;
+  if (opts.interval != null) {
+    const n = Number(opts.interval);
+    if (!Number.isFinite(n) || n <= 0) {
+      console.error(chalk.red(`  Invalid --interval: ${opts.interval} (must be a positive number of milliseconds).`));
+      process.exitCode = 2;
+      return;
+    }
+    pollMs = n;
+  }
 
   console.log('');
   console.log(heading(`  Watching ${id} — ${resolved.agent_name}`));
   console.log(chalk.dim(`  Polling every ${pollMs}ms. Press Ctrl-C to stop.`));
   console.log('');
 
-  // Render steps already present, then tail from the last of them.
-  const existing = getStepsAfter(db, id, 0);
-  for (const s of existing) console.log(renderStepLine(s));
-  let lastSeen = existing.length > 0 ? existing[existing.length - 1].step_number : 0;
+  // Track which step numbers have been printed, rather than cursoring on the
+  // max step number seen. Step numbers are producer-supplied and need not be
+  // written in increasing order (only unique per trace), so a `> lastSeen`
+  // cursor would silently drop a step whose number is lower than one already
+  // printed but which was written later. A seen-set surfaces it on the next poll.
+  const seen = new Set<number>();
+  const printNew = (): void => {
+    for (const s of unseenSteps(getStepsAfter(db, id, 0), seen)) {
+      console.log(renderStepLine(s));
+      seen.add(s.step_number);
+    }
+  };
+  printNew();
 
   const finish = (status: TraceStatus): void => {
     clearInterval(timer);
@@ -57,11 +78,7 @@ export function runWatch(traceId: string | undefined, opts: WatchOptions = {}): 
   };
 
   const timer = setInterval(() => {
-    const fresh = getStepsAfter(db, id, lastSeen);
-    for (const s of fresh) {
-      console.log(renderStepLine(s));
-      lastSeen = s.step_number;
-    }
+    printNew();
 
     const row = db.prepare('SELECT status FROM agent_traces WHERE id = ?').get(id) as
       | { status: TraceStatus }
@@ -78,6 +95,15 @@ export function runWatch(traceId: string | undefined, opts: WatchOptions = {}): 
     console.log(chalk.dim('  watch stopped.'));
     process.exit(0);
   });
+}
+
+/**
+ * The steps whose numbers have not yet been printed, preserving input order.
+ * Cursoring on a seen-set (rather than the max step number) keeps the tail from
+ * dropping a step written after a higher-numbered one.
+ */
+export function unseenSteps(steps: TraceStep[], seen: Set<number>): TraceStep[] {
+  return steps.filter((s) => !seen.has(s.step_number));
 }
 
 /** One compact line per step for the live tail. */

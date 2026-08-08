@@ -9,7 +9,7 @@ import {
   isPossiblyAbandoned,
   updateTrace,
 } from '../src/services/trace-service.js';
-import { renderStepLine } from '../src/commands/watch.js';
+import { renderStepLine, unseenSteps } from '../src/commands/watch.js';
 
 let db: Database.Database;
 
@@ -46,6 +46,32 @@ describe('getStepsAfter', () => {
     appendStep(db, t.id, { step_number: 2, step_type: 'output', name: 'b' });
     const fresh = getStepsAfter(db, t.id, cursor);
     expect(fresh.map((s) => s.step_number)).toEqual([2]);
+  });
+});
+
+// ── unseenSteps (live tail cursor — out-of-order safety) ──────────────────
+
+describe('unseenSteps', () => {
+  it('does not drop a step written after a higher-numbered one', () => {
+    const t = startTrace(db, { agent_name: 'tail' });
+    const seen = new Set<number>();
+
+    // Poll 1: the producer has written step 2 first.
+    appendStep(db, t.id, { step_number: 2, step_type: 'tool_call', name: 'b' });
+    let batch = unseenSteps(getStepsAfter(db, t.id, 0), seen);
+    batch.forEach((s) => seen.add(s.step_number));
+    expect(batch.map((s) => s.step_number)).toEqual([2]);
+
+    // Poll 2: step 1 arrives late (a lower number). A max-step-number cursor
+    // (`getStepsAfter(id, 2)`) would filter it out and silently drop it; the
+    // seen-set surfaces it.
+    appendStep(db, t.id, { step_number: 1, step_type: 'thought', name: 'a' });
+    batch = unseenSteps(getStepsAfter(db, t.id, 0), seen);
+    batch.forEach((s) => seen.add(s.step_number));
+    expect(batch.map((s) => s.step_number)).toEqual([1]);
+
+    // Poll 3: nothing new.
+    expect(unseenSteps(getStepsAfter(db, t.id, 0), seen)).toEqual([]);
   });
 });
 
