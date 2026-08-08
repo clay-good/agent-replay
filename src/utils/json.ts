@@ -90,9 +90,12 @@ export function safeParseFloat(str: string | undefined, fallback: number): numbe
  * which are the most common cause of catastrophic backtracking.
  */
 export function safeRegex(pattern: string, flags = 'i'): RegExp | null {
-  // Reject nested quantifiers: a quantifier immediately after a group that
-  // itself contains a quantifier. Matches patterns like (x+)+, (x*)+, (x{n})*
-  if (/([+*?]|\{\d+,?\d*\})\s*\)\s*([+*?]|\{\d+,?\d*\})/.test(pattern)) {
+  // Reject nested quantifiers: an *unbounded* quantifier immediately after a
+  // group that itself contains a quantifier. Matches patterns like (x+)+, (x*)+,
+  // (x{n})*. The outer quantifier is limited to `+`, `*`, and `{…}` — a trailing
+  // `?` (as in `read(_\w+)?`) makes the group optional (0–1 repetitions), which
+  // cannot cause catastrophic backtracking, so it must not be rejected.
+  if (/([+*?]|\{\d+,?\d*\})\s*\)\s*([+*]|\{\d+,?\d*\})/.test(pattern)) {
     return null;
   }
   try {

@@ -28,5 +28,17 @@ describe('safeRegex', () => {
     expect(safeRegex('(a+)+')).toBeNull();
     expect(safeRegex('(a*)*')).toBeNull();
     expect(safeRegex('(a{1,3})+')).toBeNull();
+    expect(safeRegex('(a+){2,}')).toBeNull();
+  });
+
+  it('accepts an optional quantified group (a trailing `?` is not ReDoS)', () => {
+    // `?` makes the group 0–1 repetitions, which cannot backtrack
+    // catastrophically — these are ordinary, safe patterns and must compile.
+    for (const p of ['read(_\\w+)?', '(\\d+)?', '(a+)?', '(ab*)?']) {
+      const re = safeRegex(p);
+      expect(re, `expected ${p} to be accepted`).not.toBeNull();
+    }
+    expect(safeRegex('read(_\\w+)?')!.test('read_user')).toBe(true);
+    expect(safeRegex('read(_\\w+)?')!.test('read')).toBe(true);
   });
 });
