@@ -363,6 +363,17 @@ program
     await runDashboard(opts);
   });
 
+// --- stats ---
+program
+  .command('stats')
+  .description('Print a non-interactive summary of the trace store (scriptable, --json)')
+  .option('--json', 'Output as JSON')
+  .option('--dir <path>', 'Custom data directory')
+  .action(async (opts) => {
+    const { runStats } = await import('./commands/stats.js');
+    await runStats(opts);
+  });
+
 // --- config ---
 const configCmd = program
   .command('config')

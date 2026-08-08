@@ -3,7 +3,7 @@ import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
 import { ingestTrace, createEval } from '../src/services/trace-service.js';
 import { addPolicy } from '../src/services/guard-service.js';
-import { dashboardStats, statusCounts, recentTraces, recentEvalScores } from '../src/ui/dashboard-data.js';
+import { dashboardStats, statusCounts, agentStats, recentTraces, recentEvalScores } from '../src/ui/dashboard-data.js';
 import type { IngestTraceInput } from '../src/models/types.js';
 
 /**
@@ -82,6 +82,32 @@ describe('statusCounts', () => {
     expect(byStatus.completed).toBe(2);
     expect(byStatus.failed).toBe(1);
     expect(byStatus.timeout).toBe(0); // absent statuses still get a zero bar
+  });
+});
+
+describe('agentStats', () => {
+  it('counts traces per agent, newest-heaviest first, with a failed+timeout tally', () => {
+    ingestTrace(db, trace({ agent_name: 'bot-a', status: 'completed' }));
+    ingestTrace(db, trace({ agent_name: 'bot-a', status: 'failed' }));
+    ingestTrace(db, trace({ agent_name: 'bot-a', status: 'timeout' }));
+    ingestTrace(db, trace({ agent_name: 'bot-b', status: 'completed' }));
+
+    const rows = agentStats(db);
+    expect(rows).toEqual([
+      { agent_name: 'bot-a', count: 3, failed: 2 }, // failed + timeout both count
+      { agent_name: 'bot-b', count: 1, failed: 0 },
+    ]);
+  });
+
+  it('breaks a count tie alphabetically by agent name', () => {
+    ingestTrace(db, trace({ agent_name: 'zeta' }));
+    ingestTrace(db, trace({ agent_name: 'alpha' }));
+
+    expect(agentStats(db).map((r) => r.agent_name)).toEqual(['alpha', 'zeta']);
+  });
+
+  it('returns an empty list on an empty store', () => {
+    expect(agentStats(db)).toEqual([]);
   });
 });
 

@@ -407,6 +407,20 @@ agent-replay dashboard --refresh 10
 
 Keyboard: `q` quit, `r` refresh, arrow keys navigate.
 
+### Stats
+
+A non-interactive summary of the store — the same aggregates the dashboard shows, but printable to a log and scriptable in CI (where the full-screen dashboard can't run).
+
+```bash
+# Overall counts, per-status, and per-agent breakdown
+agent-replay stats
+
+# JSON for piping into jq / a CI check
+agent-replay stats --json
+```
+
+The `--json` shape is `{ overall, by_status, by_agent }`, where `by_agent` lists each agent's trace `count` and a `failed` tally (failed + timeout), most-active first.
+
 ### Configuration
 
 ```bash

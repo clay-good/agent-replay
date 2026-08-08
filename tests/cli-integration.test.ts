@@ -677,6 +677,41 @@ describe('CLI integration', () => {
     expect(run(['show', id]).code).toBe(0);
   });
 
+  it('stats --json reports store aggregates, per-status, and per-agent counts', () => {
+    const f = join(dir, '..', 'stats.jsonl');
+    writeFileSync(f, [
+      JSON.stringify({ agent_name: 'bot-a', status: 'completed', total_tokens: 100, steps: [{ step_number: 1, step_type: 'output', name: 'x' }] }),
+      JSON.stringify({ agent_name: 'bot-a', status: 'failed', total_tokens: 50, steps: [{ step_number: 1, step_type: 'error', name: 'boom', error: 'nope' }] }),
+      JSON.stringify({ agent_name: 'bot-b', status: 'completed', total_tokens: 25, steps: [{ step_number: 1, step_type: 'output', name: 'y' }] }),
+    ].join('\n'));
+    run(['ingest', f, '--format', 'jsonl']);
+
+    const res = run(['stats', '--json']);
+    expect(res.code).toBe(0);
+    const out = JSON.parse(res.stdout);
+    expect(out.overall.traces).toBe(3);
+    expect(out.overall.totalTokens).toBe(175);
+    expect(out.by_status.completed).toBe(2);
+    expect(out.by_status.failed).toBe(1);
+    expect(out.by_agent).toEqual([
+      { agent_name: 'bot-a', count: 2, failed: 1 },
+      { agent_name: 'bot-b', count: 1, failed: 0 },
+    ]);
+  });
+
+  it('stats renders a human summary and rejects an excess argument', () => {
+    const f = join(dir, '..', 'stats2.jsonl');
+    writeFileSync(f, JSON.stringify({ agent_name: 'solo-bot', status: 'completed', steps: [{ step_number: 1, step_type: 'output', name: 'x' }] }));
+    run(['ingest', f]);
+
+    const human = run(['stats']);
+    expect(human.code).toBe(0);
+    expect(human.stdout).toContain('Store Summary');
+    expect(human.stdout).toContain('solo-bot');
+
+    expect(run(['stats', 'bogus']).code).toBe(2); // usage error
+  });
+
   it('demo --reset refuses to delete a directory that is not an agent-replay store', () => {
     // Safety guard: --reset must never rm a directory whose name isn't an
     // agent-replay data dir. Spawned directly since it needs a custom --dir that

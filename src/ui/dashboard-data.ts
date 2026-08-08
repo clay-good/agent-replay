@@ -43,6 +43,30 @@ export function statusCounts(db: Database.Database): { titles: string[]; data: n
   return { titles, data };
 }
 
+export interface AgentStatRow {
+  agent_name: string;
+  count: number;
+  failed: number;
+}
+
+/**
+ * Per-agent trace counts (with a failed/timeout tally), most traces first.
+ * Powers the non-interactive `stats` command; a plain aggregation with no
+ * terminal dependency, like the rest of this module.
+ */
+export function agentStats(db: Database.Database): AgentStatRow[] {
+  return db
+    .prepare(
+      `SELECT agent_name,
+              COUNT(*) as count,
+              SUM(CASE WHEN status IN ('failed', 'timeout') THEN 1 ELSE 0 END) as failed
+       FROM agent_traces
+       GROUP BY agent_name
+       ORDER BY count DESC, agent_name ASC`,
+    )
+    .all() as AgentStatRow[];
+}
+
 export interface DashboardTraceRow {
   id: string;
   agent_name: string;

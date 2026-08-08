@@ -16,6 +16,14 @@ trace schema is unchanged.
 
 ### Added
 
+- A `stats` command prints a non-interactive summary of the trace store —
+  overall counts (traces, steps, evals, active policies), average duration, and
+  token/cost totals, plus a per-status and per-agent breakdown (each agent's
+  trace count and a failed+timeout tally). It exposes the same aggregates as the
+  `dashboard` TUI but works in a plain terminal, a log, or CI, and `--json`
+  emits `{ overall, by_status, by_agent }` for piping into `jq` or a gate.
+  Previously these numbers were reachable only through the full-screen
+  dashboard, which needs an interactive TTY.
 - `export` now accepts an optional `[trace-id]` positional, so you can export a
   single trace by id (with prefix matching, like `show`/`why`/`replay`) instead
   of only bulk-filtering. A trace id and the filter flags (`--status`, `--agent`,
