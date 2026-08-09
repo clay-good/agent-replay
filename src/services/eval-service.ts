@@ -407,9 +407,15 @@ Respond in this exact JSON format (no other text):
   parse_response: (text) => {
     const data = extractJson(text);
     const confidence = clamp(Number(data.confidence) || 0, 0, 1);
+    // Compare the rounded score that is stored/displayed, not the raw
+    // confidence, so a boundary result can't read as `Confidence 50% ...
+    // passed false` (the display rounds score to whole percents). Same fix the
+    // sibling AI presets already carry (ai-quality-review / ai-optimization /
+    // ai-security-audit); ai-root-cause was the one that still compared raw.
+    const score = Math.round(confidence * 1000) / 1000;
     return {
-      score: confidence,
-      passed: confidence >= 0.5,
+      score,
+      passed: score >= 0.5,
       details: {
         root_cause: data.root_cause ?? 'Unknown',
         failing_step: data.failing_step ?? null,

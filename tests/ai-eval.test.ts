@@ -118,6 +118,20 @@ describe('AI presets', () => {
       expect(parsed.passed).toBe(true);
       expect(parsed.details.root_cause).toBe('wrong file path');
     });
+
+    it('a boundary confidence agrees with its verdict (rounded score drives passed)', () => {
+      // confidence 0.4996 rounds to the stored/displayed 0.500, so it must PASS
+      // the 0.5 threshold — not report "Confidence 50% ... passed: false". Before
+      // the fix, score was the raw 0.4996 and passed compared the raw value
+      // (0.4996 >= 0.5 → false) while the UI rounded it to 50%, the exact
+      // self-contradiction the sibling AI presets were patched to avoid.
+      const parsed = preset.parse_response(JSON.stringify({
+        root_cause: 'x', failing_step: 1, contributing_factors: [],
+        suggested_fix: 'y', confidence: 0.4996, severity: 'medium',
+      }));
+      expect(parsed.score).toBe(0.5);
+      expect(parsed.passed).toBe(true);
+    });
   });
 
   describe('ai-quality-review', () => {

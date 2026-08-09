@@ -98,6 +98,13 @@ trace schema is unchanged.
 
 ### Fixed
 
+- The `ai-root-cause` eval preset now derives `passed` from the rounded score
+  that is stored and displayed, not the raw confidence. Its three sibling AI
+  presets (`ai-quality-review`, `ai-optimization`, `ai-security-audit`) were
+  already fixed this way; `ai-root-cause` still compared the raw value, so a
+  confidence that rounds up across the 0.5 threshold (e.g. `0.4996` → shown as
+  `50%`) reported `passed: false` while the panel read `Confidence 50%` — the
+  same score-vs-verdict contradiction the sibling fix closed.
 - AI eval / diff against OpenAI now sends `max_completion_tokens` instead of the
   legacy `max_tokens`. The default OpenAI model is a GPT-5-family model
   (`gpt-5.4-nano`), and OpenAI's chat/completions endpoint rejects `max_tokens`
