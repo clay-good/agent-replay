@@ -75,10 +75,15 @@ describe('callLlm — provider request/response parsing', () => {
 
     const init = fetchMock.mock.calls[0][1];
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer o-key');
-    expect(JSON.parse(init.body as string).messages).toEqual([
+    const body = JSON.parse(init.body as string);
+    expect(body.messages).toEqual([
       { role: 'system', content: 'S' },
       { role: 'user', content: 'P' },
     ]);
+    // GPT-5 / o-series (the default `gpt-5.4-nano` is GPT-5-family) reject the
+    // legacy `max_tokens` and require `max_completion_tokens`.
+    expect(body.max_completion_tokens).toBeGreaterThan(0);
+    expect(body).not.toHaveProperty('max_tokens');
   });
 
   it('defaults the model per provider when none is given', async () => {

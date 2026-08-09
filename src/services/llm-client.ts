@@ -232,7 +232,14 @@ async function callOpenai(
   }
   messages.push({ role: 'user', content: request.prompt });
 
-  const body = { model, max_tokens: maxTokens, messages };
+  // Use `max_completion_tokens`, not the legacy `max_tokens`. The default
+  // OpenAI model here is a GPT-5-family model (`gpt-5.4-nano`), and OpenAI's
+  // chat/completions endpoint rejects `max_tokens` for GPT-5 / o-series
+  // (reasoning-class) models with a 400 ("Unsupported parameter: 'max_tokens'
+  // ... Use 'max_completion_tokens' instead."). `max_completion_tokens` is the
+  // current field and is accepted by GPT-4o-and-later as well, so it is the
+  // forward-compatible choice for every model this adapter targets.
+  const body = { model, max_completion_tokens: maxTokens, messages };
 
   const res = await safeFetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',

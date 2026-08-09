@@ -98,6 +98,14 @@ trace schema is unchanged.
 
 ### Fixed
 
+- AI eval / diff against OpenAI now sends `max_completion_tokens` instead of the
+  legacy `max_tokens`. The default OpenAI model is a GPT-5-family model
+  (`gpt-5.4-nano`), and OpenAI's chat/completions endpoint rejects `max_tokens`
+  for GPT-5 / o-series models with a 400 — so every `--provider openai` eval on
+  the default model failed the request outright (and the 400 was then reported
+  as a generic "Server error"). `max_completion_tokens` is the current field and
+  is also accepted by GPT-4o-and-later, so it works for any model the adapter
+  targets. Anthropic (`max_tokens`) and Google (`maxOutputTokens`) were correct.
 - Live capture (`record`/`run`) now validates the `chosen` field of a `step`
   event's inline decision, instead of losing the whole step to a silent DB
   error. `appendStep` binds `decision.chosen` straight into SQL; an inline
