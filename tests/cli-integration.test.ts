@@ -197,6 +197,46 @@ describe('CLI integration', () => {
     expect(post.stdout).not.toMatch(/permissionDecision|deny/);
   });
 
+  it('show/replay validate step windows strictly (Number, not parseInt)', () => {
+    const f = join(dir, '..', 'multi.jsonl');
+    writeFileSync(f, JSON.stringify({
+      agent_name: 'm', status: 'completed',
+      steps: Array.from({ length: 5 }, (_, i) => ({ step_number: i + 1, step_type: 'output', name: `s${i + 1}` })),
+    }));
+    run(['ingest', f]);
+    const id = firstTraceId();
+
+    // Trailing-garbage / non-integer is a usage error (exit 2), not a silent
+    // parseInt truncation to 3 / 2.
+    expect(run(['show', id, '--to-step', '3abc']).code).toBe(2);
+    expect(run(['show', id, '--from-step', '2.9']).code).toBe(2);
+    expect(run(['replay', id, '--from-step', '2.9']).code).toBe(2);
+
+    // `1e2` is 100 under Number(), not parseInt's 1 — so the window keeps all 5
+    // steps instead of silently capping at step 1.
+    const shown = JSON.parse(run(['show', id, '--json', '--to-step', '1e2']).stdout);
+    expect(shown.steps).toHaveLength(5);
+  });
+
+  it('list shows "-" not "NaNd ago" for an unparseable started_at', () => {
+    const f = join(dir, '..', 'nostart.jsonl');
+    // `??` in the ingest path does not catch an empty string, so started_at is
+    // stored verbatim as "" — new Date("").getTime() is NaN.
+    writeFileSync(f, JSON.stringify({ agent_name: 'n', status: 'completed', started_at: '', steps: [{ step_number: 1, step_type: 'output', name: 'x' }] }));
+    run(['ingest', f]);
+    const out = run(['list']).stdout;
+    expect(out).toContain('n');
+    expect(out).not.toMatch(/NaN/);
+  });
+
+  it('config set ai.max_tokens echoes the normalized stored value', () => {
+    const out = run(['config', 'set', 'ai.max_tokens', '1e3']).stdout;
+    // Stored as 1000; the confirmation must match what config get/list will show,
+    // not the raw `1e3` input.
+    expect(out).toMatch(/ai\.max_tokens = 1000/);
+    expect(out).not.toContain('1e3');
+  });
+
   it('guard check rejects non-object JSON stdin cleanly (no crash)', () => {
     // `null`/array/primitive are valid JSON but not a step object; they must
     // yield a clean error + exit 1, not a raw TypeError from `null.step_type`.

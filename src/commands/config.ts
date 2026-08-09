@@ -112,6 +112,11 @@ export function runConfigSet(key: string, value: string, opts: ConfigOptions = {
     }
   }
 
+  // The value echoed in the confirmation — the value actually STORED, so it
+  // matches what `config get`/`config list` will show. For a normalized numeric
+  // key that differs from the raw input (`1e3` → 1000, `08` → 8, `5.0` → 5).
+  let displayValue: string | number = value;
+
   // For numeric keys, set the value as a number directly instead of going
   // through setConfigValue (which always stores strings)
   if (key === 'ai.max_tokens') {
@@ -128,6 +133,7 @@ export function runConfigSet(key: string, value: string, opts: ConfigOptions = {
       (config as unknown as Record<string, unknown>).ai = {};
     }
     config.ai!.max_tokens = numValue;
+    displayValue = numValue;
   } else {
     setConfigValue(config, key, value);
   }
@@ -138,7 +144,7 @@ export function runConfigSet(key: string, value: string, opts: ConfigOptions = {
     console.log(chalk.greenBright(`  ${key} = ${maskKey(value)}`));
     console.log(chalk.dim('  Note: API key is stored in plaintext in config.json'));
   } else {
-    console.log(chalk.greenBright(`  ${key} = ${value}`));
+    console.log(chalk.greenBright(`  ${key} = ${displayValue}`));
   }
 }
 

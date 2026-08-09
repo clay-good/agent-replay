@@ -6,7 +6,7 @@ import type { StepType } from '../models/enums.js';
 import { getTrace, getStepSnapshot } from '../services/trace-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { traceHeaderPanel } from '../ui/boxen-panels.js';
-import { truncate, safeParseInt } from '../utils/json.js';
+import { truncate } from '../utils/json.js';
 import { renderTimeline, renderTree } from '../ui/timeline.js';
 import { evalTable } from '../ui/table.js';
 import { heading, separator } from '../ui/theme.js';
@@ -42,17 +42,29 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
   // sessions can run to thousands of steps — stay inspectable. Matches replay.
   // Validate the bounds so a typo (non-numeric, or an inverted range) is a
   // clear usage error rather than silently falling back to "no steps in window".
-  const fromStep = opts.fromStep != null ? safeParseInt(opts.fromStep, 0) : undefined;
-  const toStep = opts.toStep != null ? safeParseInt(opts.toStep, 0) : undefined;
-  if (fromStep != null && fromStep < 1) {
-    console.error(chalk.red(`  Invalid --from-step: ${opts.fromStep} (must be a positive integer).`));
-    process.exitCode = 2;
-    return;
+  // Parse with Number, not parseInt: `--to-step 1e2` must mean 100 (or be a
+  // usage error), not a silently-truncated 1, and `2.9`/`3abc` must not slip
+  // through as 2/3 — the same validate/consume divergence `list --limit` and
+  // `config set` already guard against. A non-integer or < 1 is a usage error.
+  let fromStep: number | undefined;
+  if (opts.fromStep != null) {
+    const n = Number(opts.fromStep);
+    if (!Number.isInteger(n) || n < 1) {
+      console.error(chalk.red(`  Invalid --from-step: ${opts.fromStep} (must be a positive integer).`));
+      process.exitCode = 2;
+      return;
+    }
+    fromStep = n;
   }
-  if (toStep != null && toStep < 1) {
-    console.error(chalk.red(`  Invalid --to-step: ${opts.toStep} (must be a positive integer).`));
-    process.exitCode = 2;
-    return;
+  let toStep: number | undefined;
+  if (opts.toStep != null) {
+    const n = Number(opts.toStep);
+    if (!Number.isInteger(n) || n < 1) {
+      console.error(chalk.red(`  Invalid --to-step: ${opts.toStep} (must be a positive integer).`));
+      process.exitCode = 2;
+      return;
+    }
+    toStep = n;
   }
   if (fromStep != null && toStep != null && fromStep > toStep) {
     console.error(chalk.red(`  --from-step (${fromStep}) cannot be greater than --to-step (${toStep}).`));

@@ -7,7 +7,7 @@ import { ensureDatabase } from '../db/index.js';
 import { traceHeaderPanel } from '../ui/boxen-panels.js';
 import { stepSpinner, successSpinner, failSpinner, warnSpinner } from '../ui/spinner.js';
 import { stepIcon, stepLabel, heading, separator, colors } from '../ui/theme.js';
-import { errorMessage, safeParseInt, truncate } from '../utils/json.js';
+import { errorMessage, truncate } from '../utils/json.js';
 import { formatDuration } from '../utils/time.js';
 
 export interface ReplayOptions {
@@ -46,17 +46,28 @@ export async function runReplay(
       return;
     }
   }
-  const fromStep = opts.fromStep != null ? safeParseInt(opts.fromStep, 0) : 1;
-  if (opts.fromStep != null && fromStep < 1) {
-    console.error(chalk.red(`  Invalid --from-step: ${opts.fromStep} (must be a positive integer).`));
-    process.exitCode = 2;
-    return;
+  // Parse with Number, not parseInt: `--to-step 1e2` must mean 100 (or be a
+  // usage error), not a silently-truncated 1, matching `list --limit`/`config`
+  // and the --speed check above. A non-integer or < 1 is a usage error.
+  let fromStep = 1;
+  if (opts.fromStep != null) {
+    const n = Number(opts.fromStep);
+    if (!Number.isInteger(n) || n < 1) {
+      console.error(chalk.red(`  Invalid --from-step: ${opts.fromStep} (must be a positive integer).`));
+      process.exitCode = 2;
+      return;
+    }
+    fromStep = n;
   }
-  const toStep = opts.toStep != null ? safeParseInt(opts.toStep, 0) : Infinity;
-  if (opts.toStep != null && toStep < 1) {
-    console.error(chalk.red(`  Invalid --to-step: ${opts.toStep} (must be a positive integer).`));
-    process.exitCode = 2;
-    return;
+  let toStep = Infinity;
+  if (opts.toStep != null) {
+    const n = Number(opts.toStep);
+    if (!Number.isInteger(n) || n < 1) {
+      console.error(chalk.red(`  Invalid --to-step: ${opts.toStep} (must be a positive integer).`));
+      process.exitCode = 2;
+      return;
+    }
+    toStep = n;
   }
   if (fromStep > toStep) {
     console.error(chalk.red(`  --from-step (${fromStep}) cannot be greater than --to-step (${toStep}).`));

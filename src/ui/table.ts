@@ -136,6 +136,10 @@ function formatDurationShort(ms: number | null): string {
 
 function formatRelative(iso: string): string {
   const d = new Date(iso);
+  // Guard an unparseable/empty started_at: getTime() is NaN, so every `<`
+  // comparison below is false and the last branch would print "NaNd ago". Show
+  // "-" instead, matching the sibling helpers formatRelativeTime/formatTimestamp.
+  if (Number.isNaN(d.getTime())) return chalk.dim('-');
   const diffMs = Date.now() - d.getTime();
   const diffSec = Math.floor(diffMs / 1000);
 

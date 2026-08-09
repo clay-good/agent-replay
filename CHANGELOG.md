@@ -98,6 +98,18 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `show`/`replay` now validate `--from-step`/`--to-step` with `Number()` instead
+  of `parseInt`, matching `list --limit` and `config set`. `--to-step 1e2` read
+  as `1` (parseInt stops at `e`), silently capping the window at step 1 instead
+  of 100, and `--from-step 2.9`/`3abc` slipped through as `2`/`3`. A non-integer
+  is now a usage error (exit `2`), and `1e2` correctly means `100`.
+- `list` no longer prints `NaNd ago` for a trace whose `started_at` is an
+  unparseable/empty string. The table's local `formatRelative` helper missed the
+  `isNaN` guard its two siblings (`formatRelativeTime`/`formatTimestamp`) already
+  have; it now renders `-`, like them.
+- `config set ai.max_tokens` now echoes the normalized value it stored, not the
+  raw input — `config set ai.max_tokens 1e3` confirms `= 1000` (what `config
+  get`/`list` will show), not the misleading `= 1e3`.
 - `hook --enforce` now fails **closed** when it cannot reach a verdict. The
   audit-write path already failed closed, but a failure *before* the verdict —
   opening the trace, appending the `tool_call` step, or loading policies (e.g. a
