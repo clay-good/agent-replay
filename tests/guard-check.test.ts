@@ -200,6 +200,14 @@ describe('malformed patterns fail closed, not open', () => {
     expect(validateMatchPattern({ name_contains: 'rm' })).toBeNull();
   });
 
+  it('validateMatchPattern rejects a pattern with no recognized match key', () => {
+    // A typo'd key (the real one is `name_contains`) leaves the pattern with no
+    // recognized keys, so it matches nothing — a deny that never fires. Reject
+    // it at add time rather than saving a silent no-op kill-switch.
+    expect(validateMatchPattern({ tool_name: 'delete' })).toMatch(/at least one match key/);
+    expect(validateMatchPattern({})).toMatch(/at least one match key/);
+  });
+
   it('a deny policy with a non-string step_type blocks (fails closed), not silently never matches', () => {
     // A non-string step_type can never equal a real step_type; a deny must not
     // silently never fire. Inserted directly (a legacy / pre-validation row).

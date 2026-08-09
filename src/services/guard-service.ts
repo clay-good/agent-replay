@@ -239,6 +239,14 @@ export function resolveGuardExit(
  * return null, which the matcher would otherwise read as "no match" — a `deny`
  * kill-switch that never fires. Reject it up front instead.
  */
+const MATCH_KEYS = [
+  'name_contains',
+  'input_contains',
+  'output_contains',
+  'step_type',
+  'name_regex',
+] as const;
+
 export function validateMatchPattern(pattern: Record<string, unknown>): string | null {
   for (const key of ['name_contains', 'input_contains', 'output_contains', 'step_type'] as const) {
     if (pattern[key] != null && typeof pattern[key] !== 'string') {
@@ -252,6 +260,13 @@ export function validateMatchPattern(pattern: Record<string, unknown>): string |
     if (!safeRegex(pattern.name_regex, 'i')) {
       return `name_regex is not a valid or safe regular expression: ${pattern.name_regex}`;
     }
+  }
+  // A pattern with no recognized match key matches nothing at evaluation time —
+  // a kill-switch that never fires. This catches a typo'd key (e.g. `tool_name`
+  // instead of `name_contains`), which would otherwise be silently ignored and
+  // the policy saved as a deny that can never block. Require at least one key.
+  if (!MATCH_KEYS.some((key) => pattern[key] != null)) {
+    return `pattern must include at least one match key (${MATCH_KEYS.join(', ')})`;
   }
   return null;
 }
