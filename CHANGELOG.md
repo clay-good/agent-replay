@@ -98,6 +98,16 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `hook --enforce` now fails **closed** when it cannot reach a verdict. The
+  audit-write path already failed closed, but a failure *before* the verdict —
+  opening the trace, appending the `tool_call` step, or loading policies (e.g. a
+  transient `SQLITE_BUSY` on a shared machine) — threw out of `applyHookPayload`,
+  and the command's catch logged it and exited `0` (allow). So an infrastructure
+  hiccup could let a tool call that a `deny` policy would have blocked run
+  through — a safety fail-open contradicting the enforcement contract. A
+  `pre_tool` event that can't be evaluated now emits the dialect's block
+  (deny/exit 2) with a clear reason; capture-only events (and capture mode
+  without `--enforce`) still never block the host.
 - The `ai-root-cause` eval preset now derives `passed` from the rounded score
   that is stored and displayed, not the raw confidence. Its three sibling AI
   presets (`ai-quality-review`, `ai-optimization`, `ai-security-audit`) were

@@ -106,6 +106,24 @@ export function detectDialect(payload: Record<string, unknown>, eventName?: stri
   return 'unknown';
 }
 
+/**
+ * Resolve a payload's hook action and dialect WITHOUT touching the database —
+ * the same mapping `applyHookPayload` performs at its top. `hook` uses this to
+ * fail CLOSED: if `applyHookPayload` throws part-way through a `pre_tool`
+ * enforcement evaluation (e.g. a transient SQLITE_BUSY on a shared machine), the
+ * caller still needs the action + dialect to emit a block, rather than exiting 0
+ * (allow) and letting a call a deny policy might have stopped through.
+ */
+export function resolveHookRouting(
+  payload: Record<string, unknown>,
+  eventArg?: string,
+): { action: HookAction; dialect: HookDialect } {
+  const eventName = str(payload.hook_event_name) ?? eventArg;
+  const action = (eventName && EVENT_ACTIONS[eventName]) || 'unknown';
+  const dialect = detectDialect(payload, eventName);
+  return { action, dialect };
+}
+
 function nextStepNumber(db: Database.Database, traceId: string): number {
   const row = db
     .prepare('SELECT MAX(step_number) as m FROM agent_trace_steps WHERE trace_id = ?')

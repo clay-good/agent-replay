@@ -168,6 +168,35 @@ describe('CLI integration', () => {
     expect(run(['guard', 'check'], '{"step_type":"tool_call","name":"safe"}').code).toBe(0);
   });
 
+  it('enforce mode fails CLOSED when the store cannot be read', () => {
+    // Corrupt the store so opening/reading it throws part-way through the
+    // enforcement evaluation (the real-world case is a transient SQLITE_BUSY on
+    // a shared machine). A `pre_tool` event that cannot reach a verdict must
+    // BLOCK — a deny policy might have applied — not silently exit 0 (allow),
+    // which would run a call the policy would have stopped.
+    writeFileSync(join(dir, 'traces.db'), 'not a sqlite database at all');
+    const payload = JSON.stringify({
+      hook_event_name: 'PreToolUse', session_id: 's', tool_name: 'delete_all', tool_input: { path: '/' },
+    });
+
+    // Claude Code signals a block via a stdout permissionDecision:"deny".
+    const blocked = run(['hook', 'PreToolUse', '--enforce'], payload);
+    expect(blocked.stdout).toMatch(/permissionDecision/);
+    expect(blocked.stdout).toMatch(/deny/);
+
+    // Capture mode (no --enforce) must NEVER block the host, even on a broken
+    // store — it stays exit 0 with no decision.
+    const captured = run(['hook', 'PreToolUse'], payload);
+    expect(captured.code).toBe(0);
+    expect(captured.stdout).not.toMatch(/permissionDecision|deny/);
+
+    // A non-pre-tool event under --enforce is capture-only, so a store failure
+    // there does not block either.
+    const post = run(['hook', 'PostToolUse', '--enforce'],
+      JSON.stringify({ hook_event_name: 'PostToolUse', session_id: 's', tool_name: 'delete_all' }));
+    expect(post.stdout).not.toMatch(/permissionDecision|deny/);
+  });
+
   it('guard check rejects non-object JSON stdin cleanly (no crash)', () => {
     // `null`/array/primitive are valid JSON but not a step object; they must
     // yield a clean error + exit 1, not a raw TypeError from `null.step_type`.
