@@ -211,4 +211,32 @@ describe('exportTraces formats', () => {
     const golden = JSON.parse(exportTraces(db, {}, 'golden')) as GoldenEntry[];
     expect(golden[0].eval_criteria).toEqual([{ evaluator_name: 'quality', score: 0.9, passed: true }]);
   });
+
+  it('exports every matching trace, past the old 10000 fixed cap', () => {
+    // Regression: `exportTraces` used to pass a hard `limit: 10000` to
+    // `listTraces` (despite a comment claiming it removed the limit), silently
+    // truncating any larger export and corrupting datasets built from it. It now
+    // passes an unbounded limit. Insert rows straight into the table (fast; no
+    // per-trace step machinery needed) and assert the full set comes back.
+    const N = 10001;
+    const insert = db.prepare(
+      `INSERT INTO agent_traces (id, agent_name, trigger, status, input, started_at, tags, metadata, created_at)
+       VALUES (?, 'bulk', 'manual', 'completed', '{}', ?, '[]', '{}', ?)`,
+    );
+    const now = new Date().toISOString();
+    const many = db.transaction(() => {
+      for (let i = 0; i < N; i++) {
+        // Distinct started_at so the sort is stable; zero-padded so ids/order don't collide.
+        const ts = new Date(Date.UTC(2020, 0, 1) + i * 1000).toISOString();
+        insert.run(`trc_bulk_${String(i).padStart(6, '0')}`, ts, now);
+      }
+    });
+    many();
+
+    const jsonl = exportTraces(db, { agent_name: 'bulk' }, 'jsonl').trim();
+    const lines = jsonl.length ? jsonl.split('\n') : [];
+    expect(lines).toHaveLength(N);
+    // Exporting 10k+ traces means a getTrace per row, so give this real headroom
+    // over the default 5s — the point is correctness (nothing dropped), not speed.
+  }, 30000);
 });

@@ -50,8 +50,12 @@ export function exportTraces(
   format: ExportFormat,
   options: ExportOptions = {},
 ): string {
-  // Fetch all matching traces (remove limit for export)
-  const exportFilter = { ...filter, limit: 10000, offset: 0 };
+  // Fetch every matching trace — export must not silently drop rows. A fixed
+  // cap (previously 10000) truncated large exports with no warning, which
+  // corrupts a golden/JSONL dataset built from them. `listTraces` always emits
+  // `LIMIT ? OFFSET ?`; SQLite treats a negative LIMIT as unbounded, so -1
+  // returns all matches (OFFSET 0 keeps them all) without a special-case path.
+  const exportFilter = { ...filter, limit: -1, offset: 0 };
   const { items } = listTraces(db, exportFilter);
 
   if (format === 'golden') {

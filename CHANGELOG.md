@@ -98,6 +98,12 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `export` no longer silently caps at 10,000 traces. Despite a comment claiming
+  it "removed the limit," the code passed a fixed `limit: 10000` to `listTraces`,
+  which applies it as a SQL `LIMIT` — so exporting a store with more than 10,000
+  matching traces dropped the overflow with no warning, corrupting any
+  golden/JSONL dataset built from it. It now passes an unbounded limit (SQLite
+  treats a negative `LIMIT` as no limit), so every matching trace is exported.
 - `otel serve` log ingest now preserves a genuine `0 ms` tool-call duration from
   a Gemini CLI `tool_call` log event instead of dropping it to no-duration. The
   helper coalesced with `|| null`, so a real `0` (an instant or cached tool)
