@@ -370,8 +370,9 @@ agent-replay guard remove <policy-id>
 
 Patterns support `step_type`, `name_contains`, `name_regex`, `input_contains`, and
 `output_contains`. `guard add` rejects an unusable pattern (an invalid or unsafe
-`name_regex`, or a non-string match value) so a blocking policy can never be
-stored in a form that silently fails to match. If a malformed policy is somehow
+`name_regex`, a non-string match value, or a pattern with no recognized match
+key — e.g. a typo'd key) so a blocking policy can never be stored in a form that
+silently fails to match. If a malformed policy is somehow
 present anyway, a `deny`/`require_review` policy fails *closed* (treats the step
 as a match) rather than letting it through.
 
@@ -627,7 +628,9 @@ Policies match against trace steps and trigger actions.
 }
 ```
 
-All fields are optional. When multiple fields are specified, all must match (AND logic). `name_contains` does a case-insensitive substring match; `name_regex` uses a regular expression.
+Every field is optional individually, but a pattern must include at least one of
+them — an empty pattern (or one with only unrecognized keys) is rejected, since it
+would match nothing. When multiple fields are specified, all must match (AND logic). `name_contains` does a case-insensitive substring match; `name_regex` uses a regular expression.
 
 ### Actions
 
