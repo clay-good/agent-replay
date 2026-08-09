@@ -4,7 +4,6 @@ import type { CausalHop } from '../services/decision-service.js';
 import { causalWalk } from '../services/decision-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { stepIcon, stepLabel, heading, label } from '../ui/theme.js';
-import { safeParseInt } from '../utils/json.js';
 import type { StepType } from '../models/enums.js';
 
 export interface WhyOptions {
@@ -28,8 +27,12 @@ export function runWhy(traceId: string, opts: WhyOptions = {}): void {
   const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
   const db = ensureDatabase(dbPath);
 
-  const stepNumber = safeParseInt(opts.step, 0);
-  if (!stepNumber || stepNumber < 1) {
+  // Parse with Number, not parseInt: `--step 1e2` must mean 100 (or be a usage
+  // error), not a silently-truncated 1 that explains the wrong step. Matches
+  // show/replay/fork's step-number flags. A missing flag is NaN → the required
+  // error below; a non-integer or < 1 is a usage error.
+  const stepNumber = Number(opts.step);
+  if (!Number.isInteger(stepNumber) || stepNumber < 1) {
     console.error(chalk.red('  --step <N> is required and must be a positive integer.'));
     process.exitCode = 2;
     return;

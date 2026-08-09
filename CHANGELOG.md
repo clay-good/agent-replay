@@ -112,6 +112,11 @@ trace schema is unchanged.
   policy, and then matched nothing at evaluation time — a kill-switch that never
   fires. This is the same silent-fail-open class the pattern validator already
   guards against for an unusable `name_regex`/`step_type`.
+- `why --step` is now parsed with `Number()` instead of `parseInt`, matching
+  `show`/`replay`/`fork`. `--step 1e2` read as `1` and explained the causal chain
+  for the wrong step with a success exit; `--step 2.9`/`2abc` slipped through as
+  `2`. `1e2` now correctly means `100` and a non-integer is a usage error
+  (exit `2`).
 - `fork --from-step` is now parsed with `Number()` instead of `parseInt`,
   matching `show`/`replay`'s `--from-step`/`--to-step` and `list --limit`.
   `--from-step 1e2` read as `1` (parseInt stops at `e`) and `2.9`/`3abc` slipped

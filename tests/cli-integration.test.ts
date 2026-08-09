@@ -143,6 +143,15 @@ describe('CLI integration', () => {
     expect(missingStep.stderr).toMatch(/not found/i);
     expect(run(['why', 'tcli', '--step', '999', '--json']).code).toBe(1);
 
+    // --step is parsed with Number, not parseInt (matching show/replay/fork).
+    // `2.9`/`2abc` were silently truncated to a valid step 2 and explained the
+    // wrong step; they are now usage errors (exit 2).
+    expect(run(['why', 'tcli', '--step', '2.9']).code).toBe(2);
+    expect(run(['why', 'tcli', '--step', '2abc']).code).toBe(2);
+    // `1e2` means 100 (not a parseInt-truncated 1): step 100 doesn't exist here,
+    // so it's a not-found (exit 1), not a silent success explaining step 1.
+    expect(run(['why', 'tcli', '--step', '1e2']).code).toBe(1);
+
     // Default show surfaces session + decision.
     expect(run(['show', 'tcli']).stdout).toMatch(/scli|Chose/);
   });
