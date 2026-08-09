@@ -215,6 +215,19 @@ describe('getTrace', () => {
     expect(getTrace(db, 'trc_pfx_')!.id).toBe('trc_pfx_aaa');
   });
 
+  it('treats LIKE metacharacters in a partial id as literal (no wildcard match)', () => {
+    // nanoid's default alphabet includes `_`, so a real id can contain it. An
+    // unescaped `_` in the lookup would act as "any char" and resolve to an
+    // unrelated trace; `%` would match everything. Both must stay literal.
+    startTrace(db, { agent_name: 'real', status: 'completed' }, { id: 'trc_abXc001' });
+    // `trc_ab_c` would wildcard-match `trc_abXc001` if `_` were not escaped.
+    expect(getTrace(db, 'trc_ab_c')).toBeNull();
+    // `%` would otherwise match every row and return an arbitrary trace.
+    expect(getTrace(db, '%')).toBeNull();
+    // A correct literal prefix still resolves.
+    expect(getTrace(db, 'trc_abXc')!.id).toBe('trc_abXc001');
+  });
+
   it('includes evals in response', () => {
     const trace = ingestTrace(db, makeTrace());
     createEval(db, trace.id, {

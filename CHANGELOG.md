@@ -98,6 +98,13 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `getTrace` (the prefix resolver behind `show`/`diff`/`replay`/`fork`/`eval`/
+  `guard`/`watch`) now escapes LIKE metacharacters in a partial trace id. Trace
+  ids are `trc_` + `nanoid(12)` over an alphabet that includes `_`, so a copied
+  partial such as `trc_ab_c` treated `_` as a wildcard and could resolve to an
+  unrelated trace (and a literal `%` matched every row). The lookup now declares
+  `ESCAPE '\'` and escapes `\ % _`, mirroring the `agent_name`/`session_id`
+  branches in `listTraces`.
 - `guard add` now rejects a `--pattern` with no recognized match key
   (`name_contains`, `input_contains`, `output_contains`, `step_type`,
   `name_regex`). A typo'd key such as `{"tool_name":"delete"}` (the real key is

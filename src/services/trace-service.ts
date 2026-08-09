@@ -678,11 +678,17 @@ export function getTrace(
   // longer id that the given id merely prefixes (shadowing an exact match) or an
   // arbitrary one of several prefix siblings. `(id = ?) DESC` floats the exact
   // match to the top; `id ASC` makes the fallback stable.
+  // Escape LIKE metacharacters so a partial id stays literal. Trace ids are
+  // `trc_` + nanoid(12) over the default alphabet, which includes `_` and `-`,
+  // so a copied partial like `trc_ab_c` would otherwise treat `_` as a wildcard
+  // and resolve to an unrelated trace; a literal `%` would match everything.
+  // Mirrors the agent_name/session_id branches in listTraces.
+  const escaped = traceId.replace(/[\\%_]/g, '\\$&');
   const traceRow = db
     .prepare(
-      'SELECT * FROM agent_traces WHERE id = ? OR id LIKE ? ORDER BY (id = ?) DESC, id ASC LIMIT 1',
+      "SELECT * FROM agent_traces WHERE id = ? OR id LIKE ? ESCAPE '\\' ORDER BY (id = ?) DESC, id ASC LIMIT 1",
     )
-    .get(traceId, `${traceId}%`, traceId) as Record<string, unknown> | undefined;
+    .get(traceId, `${escaped}%`, traceId) as Record<string, unknown> | undefined;
 
   if (!traceRow) return null;
 
