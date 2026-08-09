@@ -57,6 +57,37 @@ describe('event protocol', () => {
     expect(validateEvent({ v: 1, type: 'step_end', step_number: 1 }).warning).toMatch(/requires trace_id/);
     expect(validateEvent({ v: 1, type: 'step_end', trace_id: 't' }).warning).toMatch(/step_number/);
   });
+
+  it('rejects a step event whose inline decision has no chosen', () => {
+    // An inline decision's chosen is bound straight into SQL by appendStep; a
+    // missing chosen would throw and roll back the WHOLE step (and its inline
+    // snapshot). Validation must catch it here — as it does a top-level decision.
+    const missing = validateEvent({
+      v: 1, type: 'step', trace_id: 't', step_number: 1, step_type: 'tool_call', name: 'act',
+      decision: { options: [{ option: 'a' }] },
+    });
+    expect(missing.event).toBeNull();
+    expect(missing.warning).toMatch(/inline decision requires chosen/);
+
+    // Empty-string chosen is rejected too — the top-level decision path already
+    // rejects it, so the inline path must not accept it (closing the asymmetry).
+    const empty = validateEvent({
+      v: 1, type: 'step', trace_id: 't', step_number: 1, step_type: 'tool_call', name: 'act',
+      decision: { chosen: '' },
+    });
+    expect(empty.event).toBeNull();
+    expect(empty.warning).toMatch(/inline decision requires chosen/);
+
+    // A well-formed inline decision still passes, and a step with no decision is
+    // unaffected.
+    expect(validateEvent({
+      v: 1, type: 'step', trace_id: 't', step_number: 1, step_type: 'tool_call', name: 'act',
+      decision: { chosen: 'a', options: [{ option: 'a' }] },
+    }).event).not.toBeNull();
+    expect(validateEvent({
+      v: 1, type: 'step', trace_id: 't', step_number: 1, step_type: 'tool_call', name: 'act',
+    }).event).not.toBeNull();
+  });
 });
 
 // ── Recorder equivalence (task 3.3) ───────────────────────────────────────

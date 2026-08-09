@@ -98,6 +98,15 @@ trace schema is unchanged.
 
 ### Fixed
 
+- Live capture (`record`/`run`) now validates the `chosen` field of a `step`
+  event's inline decision, instead of losing the whole step to a silent DB
+  error. `appendStep` binds `decision.chosen` straight into SQL; an inline
+  decision with no `chosen` bound `undefined`, which better-sqlite3 rejects,
+  rolling back the step-and-snapshot transaction — a data loss swallowed as a
+  generic per-event warning. The event protocol now skips such an event with a
+  clear "inline decision requires chosen" warning, matching how a top-level
+  `decision` event is already validated (and closing an asymmetry where an
+  empty-string `chosen` was accepted inline but rejected top-level).
 - The AI diff analysis (`diff --ai`) no longer mislabels a null-valued field as
   a missing step. The diff summary rendered any `null` diff value as `(missing)`,
   but `diffTraces` emits ordinary field diffs (`output`, `model`) whose value is

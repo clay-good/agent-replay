@@ -210,6 +210,20 @@ export function validateEvent(obj: unknown): ParseResult {
   if (type === 'decision' && (typeof e.chosen !== 'string' || !e.chosen)) {
     return { event: null, warning: 'skipped: decision requires chosen' };
   }
+  // A `step` event may carry an INLINE decision (StepEvent.decision). Validate
+  // its `chosen` exactly as the top-level `decision` event above — the same
+  // field, same rule. Without this, appendStep binds an undefined `chosen`
+  // straight into SQL, better-sqlite3 throws, and the surrounding transaction
+  // rolls back the whole step (and any inline snapshot) — a silent data loss
+  // swallowed as a generic per-event warning. An empty-string `chosen` was also
+  // accepted here while the top-level path rejected it; this closes that
+  // asymmetry too.
+  if (type === 'step' && e.decision != null) {
+    const dec = e.decision as Record<string, unknown>;
+    if (typeof dec !== 'object' || Array.isArray(dec) || typeof dec.chosen !== 'string' || !dec.chosen) {
+      return { event: null, warning: 'skipped: step inline decision requires chosen' };
+    }
+  }
 
   return { event: obj as CaptureEvent, warning: null };
 }
