@@ -90,12 +90,14 @@ export function safeParseFloat(str: string | undefined, fallback: number): numbe
  * which are the most common cause of catastrophic backtracking.
  */
 export function safeRegex(pattern: string, flags = 'i'): RegExp | null {
-  // Reject nested quantifiers: an *unbounded* quantifier immediately after a
-  // group that itself contains a quantifier. Matches patterns like (x+)+, (x*)+,
-  // (x{n})*. The outer quantifier is limited to `+`, `*`, and `{…}` — a trailing
-  // `?` (as in `read(_\w+)?`) makes the group optional (0–1 repetitions), which
-  // cannot cause catastrophic backtracking, so it must not be rejected.
-  if (/([+*?]|\{\d+,?\d*\})\s*\)\s*([+*]|\{\d+,?\d*\})/.test(pattern)) {
+  // Reject nested quantifiers: a quantified group followed by an *unbounded*
+  // outer quantifier. Matches patterns like (x+)+, (x*)*, (x{1,3})+, (x+){2,}.
+  // The danger is the OUTER quantifier being open-ended (`+`, `*`, or `{n,}`):
+  // it lets a variable-length group repeat unboundedly, the source of
+  // catastrophic backtracking. A *bounded* outer quantifier (`{n}` or `{n,m}`,
+  // e.g. `(\d{3}){2}`) caps total work and is safe, so it must not be rejected —
+  // as is a trailing `?`, which makes the group optional (0–1 repetitions).
+  if (/([+*?]|\{\d+,?\d*\})\s*\)\s*([+*]|\{\d+,\})/.test(pattern)) {
     return null;
   }
   try {

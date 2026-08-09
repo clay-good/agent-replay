@@ -31,6 +31,18 @@ describe('safeRegex', () => {
     expect(safeRegex('(a+){2,}')).toBeNull();
   });
 
+  it('accepts a bounded outer quantifier (fixed/ranged repetition is not ReDoS)', () => {
+    // A *bounded* outer quantifier caps total work, so these are safe and must
+    // compile — even though the inner group is itself quantified. `(\d{3}){2}`
+    // is the natural way to write "exactly six digits as two groups".
+    for (const p of ['(\\d{3}){2}', '(\\w{4}){3}', '(a{2}){3}', '(ab+){2}']) {
+      const re = safeRegex(p);
+      expect(re, `expected ${p} to be accepted`).not.toBeNull();
+    }
+    expect(safeRegex('(\\d{3}){2}')!.test('123456')).toBe(true);
+    expect(safeRegex('(\\d{3}){2}')!.test('12345')).toBe(false);
+  });
+
   it('accepts an optional quantified group (a trailing `?` is not ReDoS)', () => {
     // `?` makes the group 0–1 repetitions, which cannot backtrack
     // catastrophically — these are ordinary, safe patterns and must compile.

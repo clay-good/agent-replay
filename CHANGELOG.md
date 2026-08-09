@@ -98,6 +98,14 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `safeRegex` (which backs guard `name_regex` matching) no longer rejects a safe
+  pattern with a *bounded* outer quantifier such as `(\d{3}){2}` ("exactly six
+  digits as two groups"). Its ReDoS guard flagged any quantified group followed
+  by any quantifier, but catastrophic backtracking requires the *outer*
+  quantifier to be unbounded (`+`, `*`, `{n,}`); a bounded `{n}`/`{n,m}` caps the
+  work. The guard now keys off the outer quantifier, so `guard add
+  --pattern '{"name_regex":"(\\d{3}){2}"}'` is accepted while the genuinely
+  dangerous `(a+)+`, `(a{1,3})+`, and `(a+){2,}` stay rejected.
 - OTel-ingested traces whose root span carries no output messages now record
   `output: null` instead of an empty `{}`. `messageContent` always returns an
   object (it just omits the `messages` key when absent), so the intended
