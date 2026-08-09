@@ -98,6 +98,14 @@ trace schema is unchanged.
 
 ### Fixed
 
+- The AI diff analysis (`diff --ai`) no longer mislabels a null-valued field as
+  a missing step. The diff summary rendered any `null` diff value as `(missing)`,
+  but `diffTraces` emits ordinary field diffs (`output`, `model`) whose value is
+  legitimately `null` on a step that exists on both traces — so a paired step
+  whose left output was recorded but right output was `null` told the model
+  "step N is absent on the right," the opposite of the truth. `(missing)` now
+  renders only for the `missing_left`/`missing_right` diff types that actually
+  mean an absent step; a null field value renders as `null`.
 - `export` no longer silently caps at 10,000 traces. Despite a comment claiming
   it "removed the limit," the code passed a fixed `limit: 10000` to `listTraces`,
   which applies it as a SQL `LIMIT` — so exporting a store with more than 10,000

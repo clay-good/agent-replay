@@ -99,10 +99,14 @@ export function summarizeDiffForLlm(
       // JSON-stringify the values rather than String(): `input`/`output` field
       // diffs carry the parsed objects, and String({...}) is "[object Object]",
       // which would give the AI diff analysis no signal about the most
-      // information-rich kind of difference. A null side means the step is
-      // absent on that trace (a `missing_left`/`missing_right` diff).
-      const leftVal = d.left_value == null ? '(missing)' : truncateJson(d.left_value, 80);
-      const rightVal = d.right_value == null ? '(missing)' : truncateJson(d.right_value, 80);
+      // information-rich kind of difference. Render `(missing)` ONLY for the diff
+      // types that mean an absent step — `missing_left` (no such step on the
+      // left) and `missing_right`. A field diff (`output`, `model`, …) can carry
+      // a legitimate `null` value on a step that exists on both sides, so
+      // labeling that `(missing)` would falsely tell the analysis the step is
+      // gone; those render `null` (via truncateJson) instead.
+      const leftVal = d.field === 'missing_left' ? '(missing)' : truncateJson(d.left_value, 80);
+      const rightVal = d.field === 'missing_right' ? '(missing)' : truncateJson(d.right_value, 80);
       lines.push(`- Step ${d.step_number}, ${d.field}: LEFT=${leftVal} | RIGHT=${rightVal}`);
     }
     if (diff.diffs.length > 15) {

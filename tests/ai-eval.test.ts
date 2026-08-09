@@ -329,6 +329,36 @@ describe('trace summarizer', () => {
     expect(summary.text).toContain('/src/index.ts');
     expect(summary.text).toContain('/DIFFERENT.ts');
   });
+
+  it('renders a null-valued field diff as null, not "(missing)"', () => {
+    const db = createTestDb();
+    const base = { agent_version: undefined, error: undefined, status: 'completed' as const };
+    // Both traces have step 1 (same step_type + name), so it is a PAIRED step —
+    // not an absent one. They differ only in step 1's `output`: A recorded a
+    // real output, B recorded none (null). That yields an `output` field diff
+    // with left_value = {...}, right_value = null.
+    const a = getTrace(db, ingestTrace(db, makeTrace({
+      ...base, agent_name: 'agent-a',
+      steps: [{ step_number: 1, step_type: 'tool_call', name: 'act', input: { x: 1 }, output: { result: 'ok' } }],
+    })).id)!;
+    const b = getTrace(db, ingestTrace(db, makeTrace({
+      ...base, agent_name: 'agent-b',
+      steps: [{ step_number: 1, step_type: 'tool_call', name: 'act', input: { x: 1 } }],
+    })).id)!;
+
+    const diff = diffTraces(db, a.id, b.id);
+    // Sanity: this is an `output` field diff on a paired step, not a missing_* one.
+    expect(diff.diffs.some((d) => d.field === 'output')).toBe(true);
+    expect(diff.diffs.some((d) => d.field === 'missing_left' || d.field === 'missing_right')).toBe(false);
+
+    const summary = summarizeDiffForLlm(diff, a, b);
+    // The null output must read as `null` (a step that exists but recorded no
+    // output), not `(missing)` — which would falsely tell the analysis the step
+    // is absent on trace B.
+    const outputLine = summary.text.split('\n').find((l) => l.includes('output:'))!;
+    expect(outputLine).toContain('RIGHT=null');
+    expect(outputLine).not.toContain('(missing)');
+  });
 });
 
 describe('rubric scoring', () => {
