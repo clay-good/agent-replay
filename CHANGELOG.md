@@ -98,6 +98,13 @@ trace schema is unchanged.
 
 ### Fixed
 
+- OTel-ingested traces whose root span carries no output messages now record
+  `output: null` instead of an empty `{}`. `messageContent` always returns an
+  object (it just omits the `messages` key when absent), so the intended
+  `?? null` fallback was dead and a spurious empty output persisted — which
+  reads as truthy downstream (a trace summary printed `OUTPUT: {}`, and a golden
+  export stored `{}` rather than null). The input side is unaffected (`{}` is its
+  correct empty value).
 - `show`/`replay` now validate `--from-step`/`--to-step` with `Number()` instead
   of `parseInt`, matching `list --limit` and `config set`. `--to-step 1e2` read
   as `1` (parseInt stops at `e`), silently capping the window at step 1 instead

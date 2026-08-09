@@ -229,14 +229,25 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
     const spanStarts = group.map((s) => s.start).filter((st): st is number => st > 0);
     const minStart = spanStarts.length ? Math.min(...spanStarts) : undefined;
 
+    // messageContent always returns an object (never null) — it just omits the
+    // `messages` key when the span carries no message attributes. So a root with
+    // no output must be mapped to null EXPLICITLY: the bare `?? null` would be
+    // dead and persist a spurious empty `{}` output, which reads as truthy
+    // downstream (e.g. a summary prints "OUTPUT: {}", golden export stores `{}`
+    // instead of null). Input keeps `{}` as its empty value — it is a non-null
+    // Record either way, so the distinction doesn't arise there.
+    const rootInput = root ? messageContent(root.attrs, 'input') : {};
+    const rootOutputContent = root ? messageContent(root.attrs, 'output') : null;
+    const rootOutput = rootOutputContent && 'messages' in rootOutputContent ? rootOutputContent : null;
+
     traces.push({
       agent_name: agentName,
       trigger: 'api',
       status: anyError ? 'failed' : 'completed',
       // gen_ai.conversation.id is never synthesized when absent.
       session_id: anyConversation ?? null,
-      input: root ? messageContent(root.attrs, 'input') ?? {} : {},
-      output: root ? messageContent(root.attrs, 'output') ?? null : null,
+      input: rootInput,
+      output: rootOutput,
       started_at: minStart != null ? isoFromNanos(minStart) : undefined,
       ended_at: maxEnd != null ? isoFromNanos(maxEnd) : null,
       // Derive the duration from the earliest valid start (not group[0], which

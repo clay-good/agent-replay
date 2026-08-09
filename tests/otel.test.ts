@@ -93,6 +93,20 @@ describe('mapOtlpTraces (GenAI semconv)', () => {
     expect(tool.parent_step).toBe(1); // execute_tool nested under chat
   });
 
+  it('maps a root with no output messages to output null, not an empty {}', () => {
+    // messageContent returns {} (never null) when a span has no message attrs,
+    // so a root carrying only input must yield output: null — a spurious {} reads
+    // as truthy downstream (summary prints "OUTPUT: {}", golden stores {}).
+    const payload = otlp([
+      span({ traceId: 'noout', spanId: 'root', name: 'invoke_agent', start: 1 * MS, end: 5 * MS,
+        attrs: { 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'planner', 'gen_ai.input.messages': '[{"role":"user"}]' } }),
+    ]);
+    const [trace] = mapOtlpTraces(payload);
+    expect(trace.output).toBeNull();
+    // A present input is still carried, not nulled.
+    expect(trace.input).toMatchObject({ messages: expect.anything() });
+  });
+
   it('normalizes deprecated attribute names (gen_ai.system, prompt_tokens)', () => {
     const payload = otlp([
       span({ traceId: 't2', spanId: 's1', name: 'chat', start: 1 * MS, end: 2 * MS, attrs: { 'gen_ai.operation.name': 'chat', 'gen_ai.system': 'openai', 'gen_ai.usage.prompt_tokens': 1200, 'gen_ai.usage.completion_tokens': 300 } }),
