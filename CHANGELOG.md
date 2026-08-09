@@ -98,6 +98,19 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `guard add` now rejects a `--pattern` with no recognized match key
+  (`name_contains`, `input_contains`, `output_contains`, `step_type`,
+  `name_regex`). A typo'd key such as `{"tool_name":"delete"}` (the real key is
+  `name_contains`) previously passed validation, was saved as an enabled `deny`
+  policy, and then matched nothing at evaluation time — a kill-switch that never
+  fires. This is the same silent-fail-open class the pattern validator already
+  guards against for an unusable `name_regex`/`step_type`.
+- `fork --from-step` is now parsed with `Number()` instead of `parseInt`,
+  matching `show`/`replay`'s `--from-step`/`--to-step` and `list --limit`.
+  `--from-step 1e2` read as `1` (parseInt stops at `e`) and `2.9`/`3abc` slipped
+  through as `2`/`3`, so a fork silently started from the wrong step (and its
+  `--modify-context`/`--modify-input` landed on the wrong point) with a success
+  exit. A non-integer is now a usage error (exit `2`).
 - `safeRegex` (which backs guard `name_regex` matching) no longer rejects a safe
   pattern with a *bounded* outer quantifier such as `(\d{3}){2}` ("exactly six
   digits as two groups"). Its ReDoS guard flagged any quantified group followed

@@ -31,8 +31,12 @@ export function runFork(traceId: string, opts: ForkOptions): void {
     return;
   }
 
-  const fromStep = parseInt(opts.fromStep, 10);
-  if (isNaN(fromStep) || fromStep < 1) {
+  // Parse with Number, not parseInt: `--from-step 1e2` must mean 100 (or be a
+  // usage error), not a silently-truncated 1, matching `show`/`replay`'s
+  // `--from-step`/`--to-step` and `list --limit`. A non-integer or < 1 is a
+  // usage error.
+  const fromStep = Number(opts.fromStep);
+  if (!Number.isInteger(fromStep) || fromStep < 1) {
     console.error(chalk.red(`  Invalid step number: ${opts.fromStep}`));
     process.exitCode = 2;
     return;

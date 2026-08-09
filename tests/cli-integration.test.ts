@@ -428,6 +428,12 @@ describe('CLI integration', () => {
     // Malformed --modify-context/--modify-input is a usage error, not a crash.
     expect(run(['fork', 'tfk', '--from-step', '2', '--modify-context', 'not json{']).code).toBe(2);
     expect(run(['fork', 'tfk', '--from-step', '2', '--modify-input', '[oops']).code).toBe(2);
+
+    // --from-step is parsed with Number, not parseInt (matching show/replay):
+    // `2.9`/`3abc` were silently truncated to a valid step 2/3 and forked at the
+    // wrong point; they are now usage errors (exit 2), not a silent exit 0.
+    expect(run(['fork', 'tfk', '--from-step', '2.9']).code).toBe(2);
+    expect(run(['fork', 'tfk', '--from-step', '3abc']).code).toBe(2);
   });
 
   it('rejects forking at a non-existent (gapped) step number', () => {
