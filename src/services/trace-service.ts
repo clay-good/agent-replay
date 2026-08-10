@@ -16,7 +16,7 @@ import type {
   CreateEvalInput,
   ListTracesFilter,
 } from '../models/types.js';
-import { DECIDED_BY, TRACE_STATUSES } from '../models/enums.js';
+import { DECIDED_BY, TRACE_STATUSES, TRIGGER_TYPES } from '../models/enums.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -203,7 +203,13 @@ function insertTraceRow(
     traceId,
     input.agent_name,
     input.agent_version ?? null,
-    input.trigger ?? 'manual',
+    // Coerce trigger to a valid enum value, like decided_by below. The live
+    // `record` path types trigger as a free string, so a producer's own
+    // vocabulary ("scheduled") would otherwise violate the CHECK constraint and
+    // abort trace creation — which the recorder swallows as a warning, losing the
+    // entire trace. (The ingest path already rejects a bad trigger upstream, so
+    // this only ever coerces live-captured values.)
+    (TRIGGER_TYPES as readonly string[]).includes(input.trigger as string) ? input.trigger : 'manual',
     status,
     jsonStr(input.input),
     jsonOrNull(input.output),
@@ -892,7 +898,13 @@ export function updateTrace(
 
   if (update.status !== undefined) {
     sets.push('status = ?');
-    params.push(update.status);
+    // Coerce to a valid enum value, like trigger/decided_by. A `trace_end` from
+    // the live `record` path carries a free-string status, so a producer value
+    // like "success" or "" would otherwise violate the CHECK constraint and abort
+    // the whole finalization (dropping output/tokens/ended_at and leaving the
+    // trace stuck `running`). An unknown terminal status maps to `completed`,
+    // matching the recorder's own `?? 'completed'` default for a missing status.
+    params.push((TRACE_STATUSES as readonly string[]).includes(update.status as string) ? update.status : 'completed');
   }
   if (update.output !== undefined) {
     sets.push('output = ?');

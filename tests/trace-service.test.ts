@@ -378,6 +378,31 @@ describe('updateTrace', () => {
   it('throws for nonexistent trace', () => {
     expect(() => updateTrace(db, 'nonexistent', { status: 'failed' })).toThrow(/not found/);
   });
+
+  it('coerces an unknown status to completed instead of violating the CHECK', () => {
+    // The live `record` path types trace_end.status as a free string, so a
+    // producer value like "success" must not crash the status CHECK and abort
+    // the whole finalization (which would drop output/tokens and leave the trace
+    // stuck `running`). An unknown terminal status maps to `completed`.
+    const trace = ingestTrace(db, makeTrace({ status: 'running', steps: [] }));
+    const updated = updateTrace(db, trace.id, { status: 'success', total_tokens: 900 });
+    expect(updated.status).toBe('completed');
+    expect(updated.total_tokens).toBe(900);
+    // An empty-string status coerces the same way (not left as "").
+    expect(updateTrace(db, trace.id, { status: '' }).status).toBe('completed');
+  });
+});
+
+describe('startTrace', () => {
+  it('coerces an unknown trigger to manual instead of aborting trace creation', () => {
+    // trigger is a free string on the live `record` path; a producer's own
+    // vocabulary ("scheduled") must not violate the trigger CHECK — which the
+    // recorder swallows as a warning, losing the entire trace.
+    const trace = startTrace(db, { agent_name: 'a', status: 'running', trigger: 'scheduled' });
+    expect(trace.trigger).toBe('manual');
+    // A valid trigger is preserved.
+    expect(startTrace(db, { agent_name: 'a', status: 'running', trigger: 'cron' }).trigger).toBe('cron');
+  });
 });
 
 // ── deleteTrace ───────────────────────────────────────────────────────────

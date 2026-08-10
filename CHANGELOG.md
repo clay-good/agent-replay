@@ -98,6 +98,19 @@ trace schema is unchanged.
 
 ### Fixed
 
+- Live `record` capture no longer loses an entire trace (or its finalization)
+  when a producer uses a `trigger` or terminal `status` outside agent-replay's
+  vocabulary. Both are free strings in the event protocol, but the database
+  constrains them to fixed enums. A `trace_start` with an unknown `trigger` (say
+  `"scheduled"`) threw a CHECK-constraint error that the recorder swallowed as a
+  warning — the trace was never created, and every later event then failed with
+  "trace not found," so the whole run vanished. Likewise an unknown or empty
+  `trace_end` `status` (say `"success"`) dropped the finalization, discarding the
+  output/token/cost totals and leaving the trace stuck `running` (finalized as
+  `timeout` at EOF). Both are now coerced to a valid enum at the service boundary
+  — an unknown trigger to `manual`, an unknown status to `completed` — mirroring
+  the existing `decided_by` coercion. The `ingest` path still rejects these as a
+  usage error, so the coercion only ever applies to live-captured data.
 - OTLP-ingested **steps** with no output messages now persist `output: null`
   instead of a spurious empty `{}`. `messageContent` never returns null (it just
   omits the `messages` key), so a message-less step span — the common case for
