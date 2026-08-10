@@ -98,6 +98,13 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `show --tree` now renders the `⟵ caused by #N` annotations for a flat causal
+  trace — one whose steps record causality via `caused_by_step` without any
+  parent nesting (a normal shape, e.g. a decision followed by the steps it
+  caused). The tree renderer decided whether to run based only on
+  `parent_step_number`, so such a trace fell back to the plain timeline and
+  showed no causal links at all, silently defeating the whole point of `--tree`.
+  It now also runs when any step has a `caused_by` link.
 - `ingest` auto-detection no longer trusts a `.jsonl`/`.ndjson` extension over the
   file's actual content. `export --format json` (the default) into a
   `.jsonl`-named file writes a JSON array, and the detector used to short-circuit

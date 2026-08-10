@@ -121,16 +121,22 @@ export function renderTimeline(
 
 /**
  * Render steps as a hierarchy, nesting children under their `parent_step`
- * and annotating causal links. Falls back to the flat timeline when no step
- * declares a parent.
+ * and annotating causal links. Falls back to the flat timeline only when a
+ * trace has no causal structure at all — neither parent nesting nor
+ * `caused_by` links. A flat trace that records causality without nesting (every
+ * `parent_step` null but `caused_by_step` set — a normal shape, e.g. a decision
+ * followed by the steps it caused) still renders here so `--tree` actually shows
+ * its `⟵ caused by #N` annotations instead of a plain timeline that omits them.
  */
 export function renderTree(steps: TraceStep[], options: TimelineOptions = {}): string {
   if (steps.length === 0) {
     return chalk.dim('  No steps recorded.');
   }
 
-  const hasHierarchy = steps.some((s) => s.parent_step_number != null);
-  if (!hasHierarchy) {
+  const hasCausalStructure = steps.some(
+    (s) => s.parent_step_number != null || s.caused_by_step_number != null,
+  );
+  if (!hasCausalStructure) {
     return renderTimeline(steps, options);
   }
 

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { traceTable, evalTable, policyTable } from '../src/ui/table.js';
 import { formatScorePct } from '../src/ui/theme.js';
-import { renderTimeline } from '../src/ui/timeline.js';
+import { renderTimeline, renderTree } from '../src/ui/timeline.js';
 import { renderDiff } from '../src/ui/diff-renderer.js';
 import type { Trace, TraceStep, EvalResult, GuardrailPolicy, TraceDiffResult } from '../src/models/types.js';
 import type { StepType } from '../src/models/enums.js';
@@ -118,6 +118,39 @@ describe('renderTimeline edge cases', () => {
     const out = renderTimeline([step({ step_type: 'output', name: 'o', output: { text: big } })]);
     expect(out).toContain('...');
     expect(out.length).toBeLessThan(big.length); // truncated, not the full blob
+  });
+});
+
+describe('renderTree — causal annotations', () => {
+  it('shows "caused by" links for a flat trace with no parent nesting', () => {
+    // A decision followed by the steps it caused: every parent_step is null but
+    // caused_by_step is set. --tree must still render here (not fall back to the
+    // plain timeline) so its causal annotations actually appear.
+    const out = noAnsi(renderTree([
+      step({ step_number: 1, step_type: 'decision', name: 'pick' }),
+      step({ step_number: 2, step_type: 'tool_call', name: 'call', caused_by_step_number: 1 }),
+      step({ step_number: 3, step_type: 'output', name: 'done', caused_by_step_number: 2 }),
+    ]));
+    expect(out).toContain('caused by #1');
+    expect(out).toContain('caused by #2');
+  });
+
+  it('nests children under a parent and annotates their causal links', () => {
+    const out = noAnsi(renderTree([
+      step({ step_number: 1, step_type: 'decision', name: 'root' }),
+      step({ step_number: 2, step_type: 'tool_call', name: 'child', parent_step_number: 1, caused_by_step_number: 1 }),
+    ]));
+    expect(out).toContain('root');
+    expect(out).toContain('child');
+    expect(out).toContain('caused by #1');
+  });
+
+  it('falls back to a plain timeline only when there is no causal structure', () => {
+    const out = noAnsi(renderTree([
+      step({ step_number: 1, step_type: 'output', name: 'lonely' }),
+    ]));
+    expect(out).toContain('lonely');
+    expect(out).not.toContain('caused by');
   });
 });
 
