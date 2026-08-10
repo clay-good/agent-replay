@@ -98,6 +98,13 @@ trace schema is unchanged.
 
 ### Fixed
 
+- OTLP-ingested **steps** with no output messages now persist `output: null`
+  instead of a spurious empty `{}`. `messageContent` never returns null (it just
+  omits the `messages` key), so a message-less step span — the common case for
+  tool and thought spans — stored `{}`, which reads as truthy downstream (a
+  summary prints "OUTPUT: {}", golden export stores `{}` instead of null). The
+  trace root already guarded this; the step mapper now applies the same guard.
+  Input still keeps `{}` as its empty value, exactly like the root.
 - `show --tree` now renders the `⟵ caused by #N` annotations for a flat causal
   trace — one whose steps record causality via `caused_by_step` without any
   parent nesting (a normal shape, e.g. a decision followed by the steps it

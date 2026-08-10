@@ -91,6 +91,10 @@ describe('mapOtlpTraces (GenAI semconv)', () => {
     expect(tool.step_type).toBe('tool_call');
     expect(tool.name).toBe('search');
     expect(tool.parent_step).toBe(1); // execute_tool nested under chat
+    // A step span with no output messages must map to output null, not a bare
+    // {} — same guard as the trace root. A spurious {} reads as truthy
+    // downstream ("OUTPUT: {}" in summaries, golden stores {} not null).
+    expect(tool.output).toBeNull();
   });
 
   it('maps a root with no output messages to output null, not an empty {}', () => {

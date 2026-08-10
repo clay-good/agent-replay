@@ -200,13 +200,21 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
       totalTokens += tokens;
       const parent = s.parentSpanId ? stepNumberOf.get(s.parentSpanId) : undefined;
       const duration = s.end && s.start ? Math.round((s.end - s.start) / 1e6) : null;
+      // Same guard as the trace root below: messageContent never returns null (it
+      // omits the `messages` key when the span has no output messages), so a
+      // message-less step — the common case for tool/thought spans — must be
+      // mapped to null explicitly. Otherwise it persists a spurious `{}` that
+      // reads as truthy downstream ("OUTPUT: {}" in summaries, golden stores `{}`
+      // not null). Input keeps `{}` as its empty value, exactly like the root.
+      const outputContent = messageContent(s.attrs, 'output');
+      const output = 'messages' in outputContent ? outputContent : null;
 
       return {
         step_number: i + 1,
         step_type: stepType,
         name: str(s.attrs['gen_ai.tool.name']) ?? str(s.attrs['traceloop.entity.name']) ?? s.name,
         input: messageContent(s.attrs, 'input'),
-        output: messageContent(s.attrs, 'output'),
+        output,
         started_at: isoFromNanos(s.start),
         ended_at: s.end ? isoFromNanos(s.end) : null,
         duration_ms: duration,
