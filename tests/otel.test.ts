@@ -312,6 +312,32 @@ describe('OTLP receiver', () => {
     expect(trace.steps[1].parent_step_number).toBe(trace.steps[0].step_number);
   });
 
+  it('re-links a child whose parent span flushed in a later batch', () => {
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    // A parent span ends AFTER its children, so a deep child can flush in an
+    // earlier batch than the parent that owns it. Batch 1: the tool span B ends
+    // first; its parent llm span A has not flushed yet, so B lands parent-less.
+    handleTracesExport(db, JSON.stringify(otlp([
+      span({ traceId: 'td', spanId: 'B', parentSpanId: 'A', name: 'execute_tool', start: 3 * MS, end: 4 * MS, attrs: { 'gen_ai.operation.name': 'execute_tool', 'gen_ai.tool.name': 'search' } }),
+    ])), stats);
+    // Batch 2: the parent llm span A ends and flushes (its own parent is root).
+    handleTracesExport(db, JSON.stringify(otlp([
+      span({ traceId: 'td', spanId: 'A', parentSpanId: 'root', name: 'chat', start: 2 * MS, end: 7 * MS, attrs: { 'gen_ai.operation.name': 'chat' } }),
+    ])), stats);
+    // Batch 3: the agent root finally ends, upgrading the synthetic trace.
+    handleTracesExport(db, JSON.stringify(otlp([
+      span({ traceId: 'td', spanId: 'root', name: 'invoke_agent', start: 1 * MS, end: 20 * MS, attrs: { 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'deepbot' } }),
+    ])), stats);
+
+    expect(listTraces(db, {}).total).toBe(1);
+    const trace = getTrace(db, listTraces(db, {}).items[0].id)!;
+    const A = trace.steps.find((s) => s.name === 'chat')!;
+    const B = trace.steps.find((s) => s.name === 'search')!;
+    // B arrived before A but must be re-linked to A once A's batch arrives —
+    // otherwise a deep trace crossing a flush boundary loses its hierarchy.
+    expect(B.parent_step_number).toBe(A.step_number);
+  });
+
   it('keeps distinct OTel traces separate across batches', () => {
     const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
     handleTracesExport(db, JSON.stringify(otlp([

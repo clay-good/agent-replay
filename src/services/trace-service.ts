@@ -312,12 +312,15 @@ export function ingestTrace(
  *
  * New steps are renumbered after the existing steps, and their intra-batch
  * parent/caused-by references are offset to match; a step whose parent lives in
- * an earlier batch is re-linked by OTel span id. Trace-level aggregates (time
- * window, tokens, status) are recomputed, and a rootless synthetic trace is
- * upgraded in place (agent name, input/output, `synthetic_trace` flag cleared)
- * once the batch carrying the agent root finally arrives. Duplicate deliveries
- * of the same span are not de-duplicated — localhost OTLP delivery is
- * effectively exactly-once, and dedup would complicate cross-batch parentage.
+ * an earlier batch is re-linked by OTel span id, and — because a parent span
+ * ends after its children and so can flush in a *later* batch — an existing
+ * orphan is re-linked backward once the batch carrying its parent arrives.
+ * Trace-level aggregates (time window, tokens, status) are recomputed, and a
+ * rootless synthetic trace is upgraded in place (agent name, input/output,
+ * `synthetic_trace` flag cleared) once the batch carrying the agent root finally
+ * arrives. Duplicate deliveries of the same span are not de-duplicated —
+ * localhost OTLP delivery is effectively exactly-once, and dedup would
+ * complicate cross-batch parentage.
  */
 export function mergeBatchIntoTrace(
   db: Database.Database,
@@ -332,15 +335,23 @@ export function mergeBatchIntoTrace(
     );
 
     const existingSteps = db
-      .prepare('SELECT step_number, metadata FROM agent_trace_steps WHERE trace_id = ?')
-      .all(traceId) as { step_number: number; metadata: string | null }[];
+      .prepare('SELECT step_number, parent_step_number, metadata FROM agent_trace_steps WHERE trace_id = ?')
+      .all(traceId) as { step_number: number; parent_step_number: number | null; metadata: string | null }[];
 
     let maxStep = 0;
     const stepBySpan = new Map<string, number>();
+    // Existing steps still missing a parent whose OTel parent span had not yet
+    // arrived when they were stored — candidates for the backward re-link below.
+    const orphans: { step_number: number; parentSpan: string }[] = [];
     for (const s of existingSteps) {
       if (s.step_number > maxStep) maxStep = s.step_number;
-      const spanId = parseJson(s.metadata)?.otel_span_id;
+      const meta = parseJson(s.metadata);
+      const spanId = meta?.otel_span_id;
       if (typeof spanId === 'string') stepBySpan.set(spanId, s.step_number);
+      const parentSpan = meta?.otel_parent_span_id;
+      if (s.parent_step_number == null && typeof parentSpan === 'string') {
+        orphans.push({ step_number: s.step_number, parentSpan });
+      }
     }
 
     for (const step of input.steps ?? []) {
@@ -389,6 +400,23 @@ export function mergeBatchIntoTrace(
       // onto it by span id.
       const spanId = meta.otel_span_id;
       if (typeof spanId === 'string') stepBySpan.set(spanId, newNumber);
+    }
+
+    // Backward re-link: an OTel parent span ends *after* its children, so it can
+    // flush in a *later* batch than a child it owns. Such a child was stored with
+    // parent_step_number null (its parent span hadn't arrived yet) but kept its
+    // otel_parent_span_id. Now that this batch may carry that parent, resolve any
+    // orphan whose parent span id is finally known — otherwise a deep trace whose
+    // parent span crosses a flush boundary loses its hierarchy (`show --tree`,
+    // `why`) permanently. Only the forward direction was handled before.
+    const relink = db.prepare(
+      'UPDATE agent_trace_steps SET parent_step_number = ? WHERE trace_id = ? AND step_number = ?',
+    );
+    for (const orphan of orphans) {
+      const parent = stepBySpan.get(orphan.parentSpan);
+      if (parent != null && parent !== orphan.step_number) {
+        relink.run(parent, traceId, orphan.step_number);
+      }
     }
 
     // Recompute trace-level aggregates over both the existing trace and the

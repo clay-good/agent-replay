@@ -98,6 +98,17 @@ trace schema is unchanged.
 
 ### Fixed
 
+- Cross-batch OpenTelemetry trace assembly no longer loses a step's parent when
+  the parent span flushes in a later export batch than its child. A span is
+  exported when it ends, and a parent span ends *after* the children it owns, so
+  a deep child whose parent span crosses a `BatchSpanProcessor` flush boundary
+  arrives in an earlier batch than that parent. The child was stored with no
+  `parent_step_number` and never repaired — the merge only re-linked a *new* step
+  onto an already-present parent (the parent-first ordering), not an existing
+  orphan onto a parent that arrived later. Such a trace rendered flat under
+  `show --tree` and broke its `why` causal chain. The merge now also re-links
+  backward: once a batch supplies a previously-missing parent span, every orphan
+  that referenced it by OTel span id is reconnected.
 - `watch` no longer drops the final step(s) of a trace that completes. Each poll
   read the new steps and then, separately, the trace status; a producer (a
   different process) could commit a trailing step and flip the status to a
