@@ -98,6 +98,15 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `ingest` auto-detection no longer trusts a `.jsonl`/`.ndjson` extension over the
+  file's actual content. `export --format json` (the default) into a
+  `.jsonl`-named file writes a JSON array, and the detector used to short-circuit
+  on the extension, line-split the array, and fail with a misleading "Invalid JSON
+  on line 1" even though the JSON was valid. Detection now probes content: a file
+  whose entire contents parse as one JSON value is `json`, and only genuine
+  line-delimited data (whole-file parse fails) is `jsonl` — completing the
+  earlier fix that stopped a pretty-printed object being misread as JSONL. An
+  explicit `--format` still overrides detection.
 - `eval` no longer displays a score that contradicts its own pass/fail verdict.
   A stored score is rounded to three decimals and `passed` compares that value
   to the threshold, but every human-readable percentage rounded it to a whole

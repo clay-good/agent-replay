@@ -47,7 +47,7 @@ export function runIngest(filePath: string, opts: IngestOptions = {}): void {
   }
 
   // Auto-detect format
-  const format = opts.format ?? detectFormat(raw, absPath);
+  const format = opts.format ?? detectFormat(raw);
   spinner.text = `Parsing as ${format.toUpperCase()}...`;
 
   // Parse traces
@@ -156,13 +156,19 @@ export function runIngest(filePath: string, opts: IngestOptions = {}): void {
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-function detectFormat(raw: string, path: string): 'json' | 'jsonl' {
-  if (path.endsWith('.jsonl') || path.endsWith('.ndjson')) return 'jsonl';
-  // Anything whose entire contents parse as a single JSON value is `json` — a
-  // pretty-printed object spans many lines but is still one value. Only fall
-  // back to line-delimited when the whole-file parse fails (real JSONL, where
-  // each line is its own object). The old "starts with [" check misdetected a
-  // multi-line object as JSONL and then failed on "line 1".
+function detectFormat(raw: string): 'json' | 'jsonl' {
+  // Content, not extension, decides. Anything whose entire contents parse as a
+  // single JSON value is `json` — a pretty-printed array/object spans many lines
+  // but is still one value. Only fall back to line-delimited when the whole-file
+  // parse fails (real JSONL, where each line is its own object).
+  //
+  // The extension is deliberately NOT trusted: `export --format json` (the
+  // default) into a `.jsonl`-named file writes a JSON array, and short-circuiting
+  // on the extension made ingest line-split it and die with a misleading "Invalid
+  // JSON on line 1" even though the JSON was valid. Probing content is strictly
+  // safe — genuine multi-record JSONL still fails the whole-file parse and stays
+  // `jsonl`, and a file that is one valid JSON value ingests identically either
+  // way. `--format` still overrides detection for a deliberate mismatch.
   try {
     JSON.parse(raw);
     return 'json';

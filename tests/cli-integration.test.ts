@@ -120,6 +120,23 @@ describe('CLI integration', () => {
     expect(JSON.parse(run(['list', '--json']).stdout).total).toBe(1);
   });
 
+  it('ingests a JSON array written to a .jsonl-named file (extension not trusted over content)', () => {
+    // `export --format json` (the default) into a .jsonl-named file writes a JSON
+    // array. The old detector short-circuited on the extension, line-split the
+    // array, and died with a misleading "Invalid JSON on line 1". Content now
+    // decides, so a valid JSON array ingests regardless of the file name.
+    const file = join(dir, '..', 'mismatched.jsonl');
+    writeFileSync(file, JSON.stringify(
+      [
+        { agent_name: 'arr-bot', status: 'completed', steps: [{ step_number: 1, step_type: 'output', name: 'a' }] },
+        { agent_name: 'arr-bot', status: 'completed', steps: [{ step_number: 1, step_type: 'output', name: 'b' }] },
+      ],
+      null, 2,
+    ));
+    expect(run(['ingest', file]).code).toBe(0);
+    expect(JSON.parse(run(['list', '--json']).stdout).total).toBe(2);
+  });
+
   it('records a decision trace and explains it via decisions/why', () => {
     const stream = [
       '{"v":1,"type":"trace_start","trace_id":"tcli","agent_name":"b","session_id":"scli"}',
