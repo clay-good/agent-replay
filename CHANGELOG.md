@@ -98,6 +98,13 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `watch` no longer drops the final step(s) of a trace that completes. Each poll
+  read the new steps and then, separately, the trace status; a producer (a
+  different process) could commit a trailing step and flip the status to a
+  terminal value in the gap between those two reads, so the completion tick
+  stopped the tail without ever printing that step — the live view disagreed with
+  what `show` displayed. The tail now drains once more when it detects
+  completion, before announcing the final status.
 - `run` now records a wrapped child's trace even when the child generates its own
   `trace_id`. The wrapper owns the trace and is supposed to stamp its own id onto
   every child event, but the code only did so when the id was missing — a case

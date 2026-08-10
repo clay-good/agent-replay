@@ -74,6 +74,12 @@ export function runWatch(traceId: string | undefined, opts: WatchOptions = {}): 
 
   const finish = (status: TraceStatus): void => {
     clearInterval(timer);
+    // Drain once more before finishing. The producer is a separate process and
+    // can commit a final step AND flip status to a terminal value in the gap
+    // between this tick's printNew() and the status read that detected
+    // completion; without this last pass that step is dropped from the tail even
+    // though `show` displays it.
+    printNew();
     console.log('');
     console.log(`  ${chalk.dim('trace finished:')} ${statusBadge(status)}`);
     console.log('');

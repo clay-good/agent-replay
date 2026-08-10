@@ -1,6 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { runMigrations } from '../src/db/migrations.js';
+import { ensureDatabase } from '../src/db/index.js';
 import {
   startTrace,
   appendStep,
@@ -9,7 +13,7 @@ import {
   isPossiblyAbandoned,
   updateTrace,
 } from '../src/services/trace-service.js';
-import { renderStepLine, unseenSteps } from '../src/commands/watch.js';
+import { runWatch, renderStepLine, unseenSteps } from '../src/commands/watch.js';
 
 let db: Database.Database;
 
@@ -110,6 +114,61 @@ describe('isPossiblyAbandoned', () => {
 
   it('never flags finished traces', () => {
     expect(isPossiblyAbandoned({ status: 'completed', started_at: '2020-01-01T00:00:00Z' }, 30 * 60 * 1000, now)).toBe(false);
+  });
+});
+
+// ── runWatch completion-race drain ────────────────────────────────────────
+
+describe('runWatch drains the tail on completion', () => {
+  it('prints a step committed in the race window between the poll and the status check', () => {
+    // The producer is a separate process; it can commit a final step AND flip
+    // status to completed in the gap between a tick's step read (printNew) and
+    // its status read. finish() must drain once more, or that step is dropped
+    // from the tail even though `show` displays it.
+    const dir = mkdtempSync(join(tmpdir(), 'ar-watch-'));
+    const db = ensureDatabase(resolve(dir, 'traces.db')); // same singleton runWatch will open
+    const t = startTrace(db, { agent_name: 'w', status: 'running' }, { id: 'trc_watchrace' });
+    appendStep(db, t.id, { step_number: 1, step_type: 'thought', name: 'first' });
+
+    const logs: string[] = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((m?: unknown) => { logs.push(String(m ?? '')); });
+
+    // Interpose on the tick's status read: reading the status also commits the
+    // final step and completes the trace, reproducing the cross-process race.
+    const realPrepare = db.prepare.bind(db);
+    let raced = false;
+    const prepareSpy = vi.spyOn(db, 'prepare').mockImplementation(((sql: string) => {
+      const stmt = realPrepare(sql);
+      if (sql.includes('SELECT status')) {
+        const realGet = stmt.get.bind(stmt);
+        (stmt as unknown as { get: (...a: unknown[]) => unknown }).get = (...args: unknown[]) => {
+          if (!raced) {
+            raced = true;
+            appendStep(db, t.id, { step_number: 2, step_type: 'output', name: 'raced-final' });
+            updateTrace(db, t.id, { status: 'completed' });
+          }
+          return realGet(...args);
+        };
+      }
+      return stmt;
+    }) as typeof db.prepare);
+
+    vi.useFakeTimers();
+    try {
+      runWatch(t.id, { dir, interval: '20' });
+      vi.advanceTimersByTime(20); // one poll → race → completion → finish()
+    } finally {
+      vi.useRealTimers();
+      prepareSpy.mockRestore();
+      logSpy.mockRestore();
+      process.removeAllListeners('SIGINT');
+      rmSync(dir, { recursive: true, force: true });
+    }
+
+    const plain = logs.map((l) => l.replace(/\x1B\[[0-9;]*m/g, '')).join('\n');
+    expect(plain).toContain('first');        // the pre-race step
+    expect(plain).toContain('raced-final');  // the step committed at completion — dropped before the fix
+    expect(plain).toContain('finished');     // the completion badge still printed
   });
 });
 
