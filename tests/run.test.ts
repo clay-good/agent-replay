@@ -37,6 +37,30 @@ describe('runWrapped', () => {
     expect(trace.total_duration_ms).not.toBeNull();
   }, 15000);
 
+  it('re-homes events a child emits under its own trace_id onto the wrapper trace', async () => {
+    // A compliant child generates its own trace_id (the SDK does unless it
+    // threads AGENT_REPLAY_TRACE_ID). The wrapper owns the trace and must
+    // re-stamp its id onto every event, or each references an id the wrapper
+    // never created and is dropped as "trace not found" — an empty trace left
+    // stuck `running`.
+    const SELF_ID = `
+const fs = require('fs');
+const f = process.env.AGENT_REPLAY_EVENTS;
+fs.appendFileSync(f, JSON.stringify({ v: 1, type: 'trace_start', trace_id: 'trc_child_own', agent_name: 'c' }) + '\\n');
+fs.appendFileSync(f, JSON.stringify({ v: 1, type: 'step', trace_id: 'trc_child_own', step_number: 1, step_type: 'output', name: 'did-work' }) + '\\n');
+fs.appendFileSync(f, JSON.stringify({ v: 1, type: 'trace_end', trace_id: 'trc_child_own', status: 'completed' }) + '\\n');
+`;
+    const res = await runWrapped(db, { command: process.execPath, args: ['-e', SELF_ID], agentName: 'self-bot' });
+    expect(res.exitCode).toBe(0);
+    expect(res.eventsApplied).toBe(2); // step + trace_end; the child's trace_start is ignored
+
+    const trace = getTrace(db, res.traceId)!;
+    expect(trace.status).toBe('completed'); // not stuck `running`
+    expect(trace.steps.map((s) => s.name)).toEqual(['did-work']);
+    // The child's self-generated id is not persisted as a separate trace.
+    expect(getTrace(db, 'trc_child_own')).toBeNull();
+  }, 15000);
+
   it('finalizes as failed and propagates a non-zero exit code', async () => {
     const script = `
       const fs = require('fs');

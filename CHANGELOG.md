@@ -98,6 +98,16 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `run` now records a wrapped child's trace even when the child generates its own
+  `trace_id`. The wrapper owns the trace and is supposed to stamp its own id onto
+  every child event, but the code only did so when the id was missing — a case
+  the event validator already rejects — so the stamp never happened. A compliant
+  child (including one built on the `TraceRecorder` SDK, which generates its own
+  id unless it threads `AGENT_REPLAY_TRACE_ID`) therefore had every step and its
+  `trace_end` dropped as "trace not found," leaving an empty trace stuck
+  `running`. The wrapper now re-stamps its id unconditionally, and only treats a
+  child's terminal status as declared once it has actually persisted (so a
+  finalization that failed to apply can't suppress the exit-code fallback).
 - `fork` no longer reports "Modified input/context: Yes" for a payload that was
   not actually applied. A literal `null` passed to `--modify-input`/
   `--modify-context` parses to a value the fork service treats as a no-op (it

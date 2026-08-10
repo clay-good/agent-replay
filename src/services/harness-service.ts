@@ -63,20 +63,29 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
     const { event, warning } = parseEventLine(line);
     if (warning) process.stderr.write(`agent-replay run: ${warning}\n`);
     if (!event) return;
-    // The wrapper owns the trace; ignore child trace_start, and stamp our id.
+    // The wrapper owns the trace; ignore the child's trace_start and stamp our
+    // id onto every other event. Stamp UNCONDITIONALLY: a compliant child
+    // generates its own trace_id (the SDK does, unless it threads
+    // AGENT_REPLAY_TRACE_ID), and validateEvent already rejected any event
+    // missing a trace_id — so `if (!event.trace_id)` never fired and the child's
+    // events kept an id the wrapper never created, making every appendStep /
+    // updateTrace throw "trace not found" and leaving an empty, stuck-`running`
+    // trace.
     if (event.type === 'trace_start') return;
-    if (!event.trace_id) event.trace_id = trace.id;
-    // Note only an EXPLICIT terminal status from the child. A statusless
-    // trace_end is defaulted to 'completed' by the recorder, which is
-    // indistinguishable from the trace still being open — so it must not
-    // suppress the exit-code finalization below (a child that emits a bare
-    // trace_end then exits non-zero must still be recorded as failed).
-    if (event.type === 'trace_end' && typeof event.status === 'string' && event.status) {
-      childDeclaredStatus = true;
-    }
+    event.trace_id = trace.id;
     try {
       applyEvent(db, event);
       applied++;
+      // Note only an EXPLICIT terminal status, and only once it actually
+      // persisted. A statusless trace_end defaults to 'completed' (indistinct
+      // from still-open), so it must not suppress the exit-code finalization
+      // below — a child that emits a bare trace_end then exits non-zero must
+      // still be recorded as failed. Setting the flag only after a successful
+      // apply also means a trace_end that failed to persist can't wrongly
+      // suppress that finalization.
+      if (event.type === 'trace_end' && typeof event.status === 'string' && event.status) {
+        childDeclaredStatus = true;
+      }
     } catch (err) {
       process.stderr.write(`agent-replay run: skipped ${event.type}: ${(err as Error).message}\n`);
     }
