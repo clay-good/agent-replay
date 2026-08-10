@@ -370,8 +370,9 @@ agent-replay guard remove <policy-id>
 
 Patterns support `step_type`, `name_contains`, `name_regex`, `input_contains`, and
 `output_contains`. `guard add` rejects an unusable pattern (an invalid or unsafe
-`name_regex`, a non-string match value, or a pattern with no recognized match
-key — e.g. a typo'd key) so a blocking policy can never be stored in a form that
+`name_regex`, a non-string match value, a `step_type` that isn't a real step type
+— e.g. `"toolcall"` for `tool_call` — or a pattern with no recognized match key,
+e.g. a typo'd key) so a blocking policy can never be stored in a form that
 silently fails to match. If a malformed policy is somehow
 present anyway, a `deny`/`require_review` policy fails *closed* (treats the step
 as a match) rather than letting it through.
