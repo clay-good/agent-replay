@@ -514,7 +514,13 @@ export function appendStep(
       input.duration_ms ?? null,
       input.tokens_used ?? null,
       input.model ?? null,
-      input.error ?? null,
+      // Coerce error like the adjacent output: the live `record`/SDK path types
+      // error as a string, but a producer just as naturally puts a structured
+      // error ({message, code, …}) here — an unbindable object that would throw
+      // and (swallowed as a per-event warning) drop the whole step. jsonOrNull
+      // keeps a plain string as-is and JSON-stringifies an object, matching the
+      // hook adapter's existing error guard.
+      jsonOrNull(input.error),
       jsonStr(input.metadata),
       input.parent_step ?? input.parent_step_number ?? null,
       input.caused_by_step ?? input.caused_by_step_number ?? null,
@@ -595,7 +601,7 @@ export function updateStep(
   }
   if (patch.error !== undefined) {
     sets.push('error = ?');
-    params.push(patch.error);
+    params.push(jsonOrNull(patch.error)); // coerce a structured error to text, like output
   }
   if (patch.metadata !== undefined) {
     sets.push('metadata = ?');
@@ -928,7 +934,7 @@ export function updateTrace(
   }
   if (update.error !== undefined) {
     sets.push('error = ?');
-    params.push(update.error);
+    params.push(jsonOrNull(update.error)); // coerce a structured error to text, like output
   }
 
   if (sets.length === 0) {

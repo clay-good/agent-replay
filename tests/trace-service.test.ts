@@ -182,6 +182,22 @@ describe('appendStep', () => {
       appendStep(db, 'nonexistent', { step_number: 1, step_type: 'thought', name: 'x' }),
     ).toThrow(/not found/);
   });
+
+  it('persists a structured error object as JSON text instead of throwing', () => {
+    // The live record/SDK path is fed untyped JSON, so a producer can put a
+    // structured error ({message, code}) in a field typed as string. Binding it
+    // raw would throw and (swallowed by record's per-event catch) drop the whole
+    // step — so it must be coerced to text, like output.
+    const trace = ingestTrace(db, makeTrace({ status: 'running', steps: [] }));
+    const step = appendStep(db, trace.id, {
+      step_number: 1, step_type: 'error', name: 'boom',
+      error: { message: 'failed', code: 500 } as unknown as string,
+    });
+    expect(step.error).toBe('{"message":"failed","code":500}');
+    // A plain-string error is stored unchanged (not JSON-double-quoted).
+    const step2 = appendStep(db, trace.id, { step_number: 2, step_type: 'error', name: 'b', error: 'plain' });
+    expect(step2.error).toBe('plain');
+  });
 });
 
 // ── getTrace ──────────────────────────────────────────────────────────────
@@ -390,6 +406,18 @@ describe('updateTrace', () => {
     expect(updated.total_tokens).toBe(900);
     // An empty-string status coerces the same way (not left as "").
     expect(updateTrace(db, trace.id, { status: '' }).status).toBe('completed');
+  });
+
+  it('coerces a structured error object to JSON text on finalization', () => {
+    // A trace_end from the live path can carry a structured error; binding it raw
+    // would throw and lose the whole finalization (status/output/tokens).
+    const trace = ingestTrace(db, makeTrace({ status: 'running', steps: [] }));
+    const updated = updateTrace(db, trace.id, {
+      status: 'failed', total_tokens: 42, error: { message: 'crashed' } as unknown as string,
+    });
+    expect(updated.status).toBe('failed');
+    expect(updated.total_tokens).toBe(42);
+    expect(updated.error).toBe('{"message":"crashed"}');
   });
 });
 

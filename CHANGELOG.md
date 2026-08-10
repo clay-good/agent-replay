@@ -98,6 +98,16 @@ trace schema is unchanged.
 
 ### Fixed
 
+- Live `record`/SDK capture no longer drops a step or loses a trace's
+  finalization when a producer supplies a structured `error` object. The event
+  protocol types `error` as a string, but a harness just as naturally emits
+  `{ message, code, … }`, and — unlike the adjacent `output` — it was bound to
+  SQLite raw, so the object threw ("can only bind numbers, strings, …") and the
+  recorder swallowed it as a per-event warning: the step (with its decision and
+  snapshot) vanished, or a `trace_end` error dropped the whole finalization and
+  left the trace stuck `running` (finalized as `timeout` at EOF). The `error`
+  column is now coerced like `output` (a plain string is kept as-is, an object is
+  JSON-stringified), matching the hook adapter's existing error guard.
 - `guard add` now rejects a match pattern whose `step_type` is not one of the
   real step types, and a policy stored with such a value fails closed at match
   time. `step_type` is a closed enum, so a typo like `"toolcall"` (for
