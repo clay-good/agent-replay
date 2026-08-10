@@ -98,6 +98,16 @@ trace schema is unchanged.
 
 ### Fixed
 
+- Importing a Claude Code transcript now preserves a failed tool call. A
+  `tool_result` block flagged `is_error` (a `Bash` that exits non-zero, a `Read`
+  on a missing file — very common) had its flag dropped: the imported step was a
+  plain `tool_call` with a null error, indistinguishable from success, so an
+  error-aware consumer (`eval`'s error checks, `check --golden`, the timeline)
+  read a failed run as passing. The failure text now lands on the step's `error`
+  field (with a generic "tool failed" when the result carried no content),
+  matching how the live hook-capture path records a failed tool call. Both the
+  main transcript and subagent import paths are fixed. The result text still
+  appears in the step output as before.
 - `check --golden` (the bulk CI-gate path, run without `--trace`) now scans
   *every* candidate trace instead of only the newest 10,000. It passed
   `listTraces` a hard `limit: 10000`, so on a store with more than 10,000 traces

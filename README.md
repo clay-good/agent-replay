@@ -172,7 +172,7 @@ agent-replay import ~/.claude/projects/my-project/<session-uuid>.jsonl --format 
 agent-replay import ~/.codex/sessions/2026/07/02/rollout-abc.jsonl      --format codex-rollout
 ```
 
-For Claude Code, `tool_use`/`tool_result` blocks become paired `tool_call` steps, `thinking` blocks become `thought` steps, and `usage` counts aggregate into token totals. For Codex, `session_meta` supplies identity and git metadata, `function_call`/`function_call_output` pairs (by `call_id`) become `tool_call` steps, and `reasoning` becomes `thought` steps.
+For Claude Code, `tool_use`/`tool_result` blocks become paired `tool_call` steps (a result flagged `is_error` records its message on the step's error field, so a failed tool call stays distinguishable from a successful one), `thinking` blocks become `thought` steps, and `usage` counts aggregate into token totals. For Codex, `session_meta` supplies identity and git metadata, `function_call`/`function_call_output` pairs (by `call_id`) become `tool_call` steps, and `reasoning` becomes `thought` steps.
 
 #### Enforcement (block dangerous tool calls live)
 

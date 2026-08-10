@@ -85,6 +85,59 @@ describe('importClaudeTranscript', () => {
     const trace = getTrace(db, report.trace!.id)!;
     expect(trace.output).toEqual({ text: 'hello' });
   });
+
+  it('preserves a failed tool_result (is_error) as the step error', () => {
+    // Regression: the first pass indexed only tool_result `content` and dropped
+    // `is_error`, so a failed tool call (a common shape — a Bash exit 1, a Read
+    // on a missing file) imported as a plain `tool_call` with error=null,
+    // indistinguishable from success. The failure signal must survive on the
+    // `error` column, matching the live hook-adapter capture path.
+    const path = fixture([
+      {
+        type: 'assistant',
+        sessionId: 'sess-err',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', id: 'toolu_ok', name: 'Read', input: { path: 'a.txt' } },
+            { type: 'tool_use', id: 'toolu_bad', name: 'Bash', input: { command: 'exit 1' } },
+          ],
+        },
+      },
+      {
+        type: 'user',
+        sessionId: 'sess-err',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 'toolu_ok', content: 'ok data' },
+            { type: 'tool_result', tool_use_id: 'toolu_bad', is_error: true, content: 'Error: command failed, exit 1' },
+          ],
+        },
+      },
+    ]);
+
+    const report = importClaudeTranscript(db, path);
+    const trace = getTrace(db, report.trace!.id)!;
+    const ok = trace.steps.find((s) => s.name === 'Read')!;
+    const bad = trace.steps.find((s) => s.name === 'Bash')!;
+    // A successful tool call carries no error; the failed one does.
+    expect(ok.step_type).toBe('tool_call');
+    expect(ok.error).toBeNull();
+    expect(bad.step_type).toBe('tool_call');
+    expect(bad.error).toBe('Error: command failed, exit 1');
+  });
+
+  it('marks an is_error tool_result with no content as a generic tool failure', () => {
+    const path = fixture([
+      { type: 'assistant', sessionId: 'sess-e2', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_x', name: 'Bash', input: {} }] } },
+      { type: 'user', sessionId: 'sess-e2', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_x', is_error: true }] } },
+    ]);
+    const report = importClaudeTranscript(db, path);
+    const trace = getTrace(db, report.trace!.id)!;
+    const bad = trace.steps.find((s) => s.name === 'Bash')!;
+    expect(bad.error).toBe('tool failed');
+  });
 });
 
 describe('importClaudeTranscript — subagents', () => {
@@ -145,6 +198,29 @@ describe('importClaudeTranscript — subagents', () => {
     const grep = trace.steps.find((s) => s.name === 'Grep')!;
     expect(grep.parent_step_number).toBe(anchor.step_number);
     expect(grep.output).toEqual({ result: '3 matches' });
+  });
+
+  it('preserves a failed subagent tool_result (is_error) as the step error', () => {
+    const path = fixture([
+      { type: 'user', sessionId: 'sess-serr', message: { role: 'user', content: 'research' } },
+      { type: 'assistant', sessionId: 'sess-serr', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Task', input: {} }] } },
+      { type: 'user', sessionId: 'sess-serr', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'done' }] } },
+    ]);
+    const subDir = join(dir, 'transcript', 'subagents');
+    mkdirSync(subDir, { recursive: true });
+    writeFileSync(
+      join(subDir, 'agent-a1.jsonl'),
+      [
+        { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'st1', name: 'Grep', input: { pattern: 'x' } }] } },
+        { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'st1', is_error: true, content: 'grep: no such file' }] } },
+      ].map((r) => JSON.stringify(r)).join('\n'),
+    );
+
+    const report = importClaudeTranscript(db, path);
+    const trace = getTrace(db, report.trace!.id)!;
+    const grep = trace.steps.find((s) => s.name === 'Grep')!;
+    expect(grep.step_type).toBe('tool_call');
+    expect(grep.error).toBe('grep: no such file');
   });
 
   it('tolerates a corrupt line in a subagent file instead of discarding the whole file', () => {

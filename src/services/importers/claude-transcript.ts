@@ -35,6 +35,7 @@ interface Block {
   input?: Record<string, unknown>;
   tool_use_id?: string;
   content?: unknown;
+  is_error?: boolean;
 }
 
 function toText(content: unknown): string {
@@ -66,14 +67,20 @@ export function importClaudeTranscript(
     }
   }
 
-  // First pass: index tool_result content by tool_use_id.
+  // First pass: index tool_result content by tool_use_id, and remember which
+  // results were errors. A failed tool call carries `is_error: true` with the
+  // failure text in `content`; dropping that flag makes a failed tool step
+  // indistinguishable from a successful one (its `error` column stays null),
+  // which downstream error-aware consumers read as success.
   const toolResults = new Map<string, unknown>();
+  const toolErrors = new Set<string>();
   for (const rec of records) {
     const content = (rec.message as { content?: unknown } | undefined)?.content;
     if (Array.isArray(content)) {
       for (const block of content as Block[]) {
         if (block?.type === 'tool_result' && block.tool_use_id) {
           toolResults.set(block.tool_use_id, block.content);
+          if (block.is_error === true) toolErrors.add(block.tool_use_id);
         }
       }
     }
@@ -146,12 +153,18 @@ export function importClaudeTranscript(
           }
           case 'tool_use': {
             const result = block.id ? toolResults.get(block.id) : undefined;
+            const failed = block.id ? toolErrors.has(block.id) : false;
             steps.push({
               step_number: stepNumber++,
               step_type: 'tool_call',
               name: block.name ?? 'tool',
               input: block.input ?? {},
               output: result !== undefined ? { result: normalizeResult(result) } : null,
+              // Mirror the live capture paths (hook-adapter): a failed tool call
+              // keeps step_type 'tool_call' but populates `error` so the failure
+              // survives. The result content is the error text; fall back like
+              // the hook path when it's empty.
+              error: failed ? (normalizeResult(result) || 'tool failed') : undefined,
               metadata: { tool_use_id: block.id },
             });
             contributed = true;
@@ -253,11 +266,15 @@ function buildSubagentSteps(
   parentStep: number,
 ): { steps: IngestStepInput[]; tokens: number; imported: number; skipped: number } {
   const toolResults = new Map<string, unknown>();
+  const toolErrors = new Set<string>();
   for (const rec of records) {
     const content = (rec.message as { content?: unknown } | undefined)?.content;
     if (Array.isArray(content)) {
       for (const block of content as Block[]) {
-        if (block?.type === 'tool_result' && block.tool_use_id) toolResults.set(block.tool_use_id, block.content);
+        if (block?.type === 'tool_result' && block.tool_use_id) {
+          toolResults.set(block.tool_use_id, block.content);
+          if (block.is_error === true) toolErrors.add(block.tool_use_id);
+        }
       }
     }
   }
@@ -298,12 +315,15 @@ function buildSubagentSteps(
             steps.push({ step_number: n++, step_type: 'output', name: 'assistant_message', output: { text: block.text }, parent_step: parentStep });
           } else if (block?.type === 'tool_use') {
             const result = block.id ? toolResults.get(block.id) : undefined;
+            const failed = block.id ? toolErrors.has(block.id) : false;
             steps.push({
               step_number: n++,
               step_type: 'tool_call',
               name: block.name ?? 'tool',
               input: block.input ?? {},
               output: result !== undefined ? { result: normalizeResult(result) } : null,
+              // A failed subagent tool call keeps its error too (see main loop).
+              error: failed ? (normalizeResult(result) || 'tool failed') : undefined,
               parent_step: parentStep,
               metadata: { tool_use_id: block.id },
             });
