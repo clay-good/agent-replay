@@ -195,6 +195,10 @@ describe('malformed patterns fail closed, not open', () => {
     expect(validateMatchPattern({ name_regex: 42 })).toMatch(/must be a string/);
     expect(validateMatchPattern({ input_contains: 123 })).toMatch(/must be a string/);
     expect(validateMatchPattern({ step_type: true })).toMatch(/must be a string/);
+    // An out-of-enum step_type (a typo like "toolcall" for "tool_call") can never
+    // match a real step — reject it so a deny isn't saved as a silent no-op.
+    expect(validateMatchPattern({ step_type: 'toolcall' })).toMatch(/must be one of/);
+    expect(validateMatchPattern({ step_type: 'tool-call', name_contains: 'rm' })).toMatch(/must be one of/);
     // Usable patterns pass.
     expect(validateMatchPattern({ step_type: 'tool_call', name_regex: 'delete' })).toBeNull();
     expect(validateMatchPattern({ name_contains: 'rm' })).toBeNull();
@@ -221,6 +225,16 @@ describe('malformed patterns fail closed, not open', () => {
     addPolicy(db, { name: 'warn-badtype', action: 'warn', match_pattern: { step_type: true } });
     const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'anything' })));
     expect(v.action).toBe('allow');
+  });
+
+  it('a deny policy with an out-of-enum (but string) step_type blocks, not silently never matches', () => {
+    // "toolcall" (typo) is a string but not a real step_type, so it can never
+    // equal a real step's enum-constrained type. A deny keyed on it must fail
+    // closed, not become a silent no-op. Inserted directly (legacy row).
+    addPolicy(db, { name: 'legacy-typo', action: 'deny', match_pattern: { step_type: 'toolcall' } });
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'anything' })));
+    expect(v.action).toBe('deny');
+    expect(v.policy).toBe('legacy-typo');
   });
 
   it('a deny policy with an unusable regex blocks (fails closed) instead of being skipped', () => {

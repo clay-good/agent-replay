@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import type { GuardrailPolicy, TraceStep } from '../models/types.js';
 import type { GuardAction } from '../models/enums.js';
+import { STEP_TYPES } from '../models/enums.js';
 import { safeRegex } from '../utils/json.js';
 import { generateId } from '../utils/id.js';
 import { rowToStep } from './trace-service.js';
@@ -253,6 +254,14 @@ export function validateMatchPattern(pattern: Record<string, unknown>): string |
       return `${key} must be a string`;
     }
   }
+  // step_type is a closed enum: a real step's type is always one of STEP_TYPES
+  // (DB CHECK + guard-check input validation), so a pattern with an out-of-enum
+  // step_type (e.g. the typo "toolcall" for "tool_call") can never match any
+  // step — a saved deny would be a kill-switch that never fires. Validate the
+  // value like name_regex, mirroring the keyless-pattern rejection below.
+  if (pattern.step_type != null && !(STEP_TYPES as readonly string[]).includes(pattern.step_type as string)) {
+    return `step_type must be one of: ${STEP_TYPES.join(', ')}`;
+  }
   if (pattern.name_regex != null) {
     if (typeof pattern.name_regex !== 'string') {
       return 'name_regex must be a string';
@@ -286,7 +295,12 @@ function matchesPolicy(step: TraceStep, policy: GuardrailPolicy): string | null 
   // name_regex handling below. `guard add` now rejects it up front; this guards a
   // policy stored before that validation existed.
   if (pattern.step_type != null) {
-    if (typeof pattern.step_type !== 'string') {
+    // Unusable if non-string OR not a real step_type: either can never equal a
+    // real step's (enum-constrained) type, so a deny keyed on it would silently
+    // never fire. Fail closed for a blocking policy, mirroring name_regex.
+    // `guard add` now rejects both up front; this guards a policy stored before
+    // that validation existed.
+    if (typeof pattern.step_type !== 'string' || !(STEP_TYPES as readonly string[]).includes(pattern.step_type)) {
       if (!failsClosed) return null;
       reasons.push(`step_type '${String(pattern.step_type)}' is unusable — failing closed`);
     } else if (step.step_type !== pattern.step_type) {

@@ -98,6 +98,14 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `guard add` now rejects a match pattern whose `step_type` is not one of the
+  real step types, and a policy stored with such a value fails closed at match
+  time. `step_type` is a closed enum, so a typo like `"toolcall"` (for
+  `"tool_call"`) can never match any step — previously it was saved as an enabled
+  `deny` that silently never fired, a kill-switch the user believed was
+  protecting them. This mirrors the existing rejection of keyless patterns and
+  non-string `step_type`; a blocking policy with an unusable `step_type` now
+  blocks rather than being skipped.
 - Live `record` capture no longer loses an entire trace (or its finalization)
   when a producer uses a `trigger` or terminal `status` outside agent-replay's
   vocabulary. Both are free strings in the event protocol, but the database
