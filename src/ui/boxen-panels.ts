@@ -2,7 +2,7 @@ import boxen from 'boxen';
 import chalk from 'chalk';
 import type { Trace } from '../models/types.js';
 import type { TraceStatus } from '../models/enums.js';
-import { statusBadge, colors, label } from './theme.js';
+import { statusBadge, colors, label, formatScorePct } from './theme.js';
 import { effectiveDurationMs } from '../utils/time.js';
 
 /**
@@ -119,7 +119,7 @@ export function aiEvalPanel(evalResult: { evaluator_name: string; score: number;
     if (d.suggested_fix) {
       lines.push(`${label('Suggested fix:')} ${chalk.white(String(d.suggested_fix))}`);
     }
-    lines.push(`${label('Severity:')} ${chalk.white(String(d.severity ?? 'medium'))}  ${label('Confidence:')} ${chalk.white(Math.round(evalResult.score * 100) + '%')}`);
+    lines.push(`${label('Severity:')} ${chalk.white(String(d.severity ?? 'medium'))}  ${label('Confidence:')} ${chalk.white(formatScorePct(evalResult.score))}`);
 
   } else if (evalResult.evaluator_name === 'ai-quality-review') {
     const dims = ['relevance', 'completeness', 'coherence', 'accuracy'] as const;

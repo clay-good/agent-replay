@@ -57,9 +57,21 @@ export function statusBadge(status: TraceStatus): string {
 
 // ── Score badge (red→green gradient) ──────────────────────────────────────
 
+/**
+ * Render an eval score as a percentage that never rounds across a whole-percent
+ * boundary the verdict respects. Stored scores are rounded to 3 decimals (see
+ * eval-service `runEval`), so a score is exactly a one-decimal percent; showing
+ * that lossless value means a 0.695 score reads "69.5%" — below a 70% threshold
+ * it fails — rather than "70%", which would contradict its own `passed: false`.
+ * A whole-percent score (0.7 → "70%", 1 → "100%") is shown without a decimal.
+ */
+export function formatScorePct(score: number): string {
+  const pct = Math.round(score * 1000) / 10; // per-mille → one-decimal percent
+  return `${Number.isInteger(pct) ? pct : pct.toFixed(1)}%`;
+}
+
 export function scoreBadge(score: number): string {
-  const pct = Math.round(score * 100);
-  const display = `${pct}%`;
+  const display = formatScorePct(score);
   if (score >= 0.8) return chalk.greenBright.bold(display);
   if (score >= 0.6) return chalk.yellow(display);
   if (score >= 0.4) return chalk.rgb(255, 165, 0)(display); // orange

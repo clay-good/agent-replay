@@ -14,7 +14,7 @@ import { loadConfig, resolveProvider } from '../services/config-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { evalTable } from '../ui/table.js';
 import { aiEvalPanel } from '../ui/boxen-panels.js';
-import { heading } from '../ui/theme.js';
+import { heading, formatScorePct } from '../ui/theme.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage } from '../utils/json.js';
 import type { EvalResult } from '../models/types.js';
@@ -86,7 +86,7 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
         const result = runEval(db, trace.id, preset);
         results.push(result);
         const icon = result.passed ? chalk.greenBright('\u2714') : chalk.redBright('\u2718');
-        successSpinner(spinner, `${preset}: ${icon} ${Math.round(result.score * 100)}%`);
+        successSpinner(spinner, `${preset}: ${icon} ${formatScorePct(result.score)}`);
       } catch (err) {
         failSpinner(spinner, `${preset}: ${errorMessage(err)}`);
         // A preset that throws is a run failure, not a pass — set a non-zero
@@ -109,7 +109,7 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
       const result = runEval(db, trace.id, opts.preset);
       results.push(result);
       const icon = result.passed ? chalk.greenBright('\u2714') : chalk.redBright('\u2718');
-      successSpinner(spinner, `${opts.preset}: ${icon} ${Math.round(result.score * 100)}%`);
+      successSpinner(spinner, `${opts.preset}: ${icon} ${formatScorePct(result.score)}`);
     } catch (err) {
       failSpinner(spinner, `${opts.preset}: ${errorMessage(err)}`);
       process.exitCode = 1;
@@ -188,7 +188,7 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
         const result = await runAiEval(db, trace.id, presetName, llmOpts);
         results.push(result);
         const icon = result.passed ? chalk.greenBright('\u2714') : chalk.redBright('\u2718');
-        successSpinner(spinner, `${presetName}: ${icon} ${Math.round(result.score * 100)}%`);
+        successSpinner(spinner, `${presetName}: ${icon} ${formatScorePct(result.score)}`);
 
         cumulativeCost += Number(result.details?.cost_usd ?? 0);
 
@@ -218,7 +218,7 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
         const result = runEval(db, trace.id, preset);
         results.push(result);
         const icon = result.passed ? chalk.greenBright('\u2714') : chalk.redBright('\u2718');
-        successSpinner(spinner, `${preset}: ${icon} ${Math.round(result.score * 100)}%`);
+        successSpinner(spinner, `${preset}: ${icon} ${formatScorePct(result.score)}`);
       } catch (err) {
         failSpinner(spinner, `${preset}: ${errorMessage(err)}`);
         // A preset that throws is a run failure, not a pass — set a non-zero

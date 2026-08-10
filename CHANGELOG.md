@@ -98,6 +98,15 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `eval` no longer displays a score that contradicts its own pass/fail verdict.
+  A stored score is rounded to three decimals and `passed` compares that value
+  to the threshold, but every human-readable percentage rounded it to a whole
+  number — so a `0.695` score (which fails a `0.70` threshold) rendered "70%"
+  next to a `FAIL` badge. Scores now render losslessly (a three-decimal score is
+  exactly a one-decimal percent), so `0.695` reads "69.5%" and a whole-percent
+  score like `0.70` still reads "70%". `--json` output and exit codes were
+  already correct; this fixes only the terminal display (`eval` spinners, the
+  eval table's score badge, and the AI root-cause confidence line).
 - `getTrace` (the prefix resolver behind `show`/`diff`/`replay`/`fork`/`eval`/
   `guard`/`watch`) now escapes LIKE metacharacters in a partial trace id. Trace
   ids are `trc_` + `nanoid(12)` over an alphabet that includes `_`, so a copied

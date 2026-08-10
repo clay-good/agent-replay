@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { traceTable, evalTable, policyTable } from '../src/ui/table.js';
+import { formatScorePct } from '../src/ui/theme.js';
 import { renderTimeline } from '../src/ui/timeline.js';
 import { renderDiff } from '../src/ui/diff-renderer.js';
 import type { Trace, TraceStep, EvalResult, GuardrailPolicy, TraceDiffResult } from '../src/models/types.js';
@@ -165,5 +166,37 @@ describe('renderDiff', () => {
     const out = noAnsi(renderDiff(diff, trace(), trace()));
     expect(out).toContain('extra_step_xyz');
     expect(out).toContain('Right only');
+  });
+});
+
+describe('formatScorePct — display never contradicts the verdict', () => {
+  it('shows whole percents without a decimal', () => {
+    expect(formatScorePct(0.7)).toBe('70%');
+    expect(formatScorePct(1)).toBe('100%');
+    expect(formatScorePct(0)).toBe('0%');
+    expect(formatScorePct(0.85)).toBe('85%');
+  });
+
+  it('renders a sub-threshold score below the threshold, not rounded up to it', () => {
+    // The bug: `passed` derives from the 3-decimal score (0.695 < 0.7 → fail),
+    // but the badge rounded 0.695 to a whole "70%" that appeared to *meet* a 70%
+    // threshold. A 3-decimal score is exactly a one-decimal percent, so showing
+    // it losslessly keeps display and verdict consistent.
+    expect(formatScorePct(0.695)).toBe('69.5%');
+    expect(formatScorePct(0.695)).not.toBe('70%');
+    expect(formatScorePct(0.667)).toBe('66.7%');
+    expect(formatScorePct(0.001)).toBe('0.1%');
+  });
+
+  it('evalTable shows a failing boundary score honestly next to its FAIL badge', () => {
+    // 0.695 fails a 0.7 threshold; the row must read "69.5%", never "70%".
+    const boundary: EvalResult = {
+      id: 'e', trace_id: 't', evaluator_type: 'preset', evaluator_name: 'completeness-check',
+      score: 0.695, passed: false, details: { threshold: 0.7, criteria: [] }, evaluated_at: '',
+    };
+    const out = noAnsi(evalTable([boundary]));
+    expect(out).toContain('69.5%');
+    expect(out).not.toContain('70%');
+    expect(out).toContain('FAIL');
   });
 });
