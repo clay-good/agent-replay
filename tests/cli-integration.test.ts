@@ -455,6 +455,14 @@ describe('CLI integration', () => {
     expect(run(['fork', 'tfk', '--from-step', '2', '--modify-context', 'not json{']).code).toBe(2);
     expect(run(['fork', 'tfk', '--from-step', '2', '--modify-input', '[oops']).code).toBe(2);
 
+    // A literal `null` modify payload is a no-op (the service keeps the
+    // original), so the summary must not claim the modification was applied.
+    const nullCtx = run(['fork', 'tfk', '--from-step', '2', '--modify-context', 'null']);
+    expect(nullCtx.code).toBe(0);
+    expect(nullCtx.stdout).not.toMatch(/Modified context/);
+    // A real payload is reported as applied.
+    expect(run(['fork', 'tfk', '--from-step', '2', '--modify-context', '{"k":1}']).stdout).toMatch(/Modified context/);
+
     // --from-step is parsed with Number, not parseInt (matching show/replay):
     // `2.9`/`3abc` were silently truncated to a valid step 2/3 and forked at the
     // wrong point; they are now usage errors (exit 2), not a silent exit 0.

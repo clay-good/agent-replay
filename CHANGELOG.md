@@ -98,6 +98,12 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `fork` no longer reports "Modified input/context: Yes" for a payload that was
+  not actually applied. A literal `null` passed to `--modify-input`/
+  `--modify-context` parses to a value the fork service treats as a no-op (it
+  keeps the original), but the summary keyed off the presence of the raw option
+  string, so it falsely claimed the modification landed. The summary now mirrors
+  the service's own guards and reports the modification only when it was applied.
 - Live `record`/SDK capture no longer drops a step or loses a trace's
   finalization when a producer supplies a structured `error` object. The event
   protocol types `error` as a string, but a harness just as naturally emits

@@ -110,8 +110,12 @@ export function runFork(traceId: string, opts: ForkOptions): void {
         'Forked trace': result.forked_trace_id,
         'Forked from step': result.forked_from_step,
         'Steps copied': result.steps_copied,
-        ...(opts.modifyInput ? { 'Modified input': 'Yes' } : {}),
-        ...(opts.modifyContext ? { 'Modified context': 'Yes' } : {}),
+        // Report the modification as applied only when the parsed value actually
+        // is — mirroring forkTrace's own guards (input: truthy; context:
+        // `!= null`). Keying off the raw option string claimed "Yes" for a
+        // payload of literal `null`, which the service treats as a no-op.
+        ...(modifiedInput ? { 'Modified input': 'Yes' } : {}),
+        ...(modifiedContext != null ? { 'Modified context': 'Yes' } : {}),
         ...(opts.tag ? { Tag: opts.tag } : {}),
       }),
     );
