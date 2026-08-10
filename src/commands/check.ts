@@ -57,7 +57,13 @@ export function runCheck(opts: CheckOptions = {}): void {
     }
     candidates.push(t);
   } else {
-    const filter: Record<string, unknown> = { limit: 10000 };
+    // Gather EVERY matching candidate — a regression gate that silently stops
+    // at the newest N traces can pass green while a real regression sits in an
+    // older trace it never fetched. `listTraces` always emits `LIMIT ? OFFSET ?`;
+    // SQLite treats a negative LIMIT as unbounded, so -1 returns all matches.
+    // Mirrors `exportTraces`, which was moved off a fixed 10000 cap for the same
+    // reason (a truncated scan corrupts the very datasets built from it).
+    const filter: Record<string, unknown> = { limit: -1 };
     if (opts.agent) filter.agent_name = opts.agent;
     if (opts.since) {
       try {

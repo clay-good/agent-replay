@@ -98,6 +98,15 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `check --golden` (the bulk CI-gate path, run without `--trace`) now scans
+  *every* candidate trace instead of only the newest 10,000. It passed
+  `listTraces` a hard `limit: 10000`, so on a store with more than 10,000 traces
+  every candidate older than the newest 10,000 was never fetched, never diffed
+  against a golden baseline, and never appeared in the report — a real
+  regression living in an older trace produced zero failures and a green exit,
+  silently defeating the gate. It now passes an unbounded limit (`-1`), the same
+  fix already applied to `export`, so the "exits non-zero on any regression"
+  contract holds regardless of store size.
 - Cross-batch OpenTelemetry trace assembly no longer loses a step's parent when
   the parent span flushes in a later export batch than its child. A span is
   exported when it ends, and a parent span ends *after* the children it owns, so

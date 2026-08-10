@@ -1,9 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { runMigrations } from '../src/db/migrations.js';
 import { ingestTrace, getTrace, createEval } from '../src/services/trace-service.js';
 import { exportTraces } from '../src/services/export-service.js';
 import { checkGolden, inputHash, stableStringify } from '../src/services/check-service.js';
+import { ensureDatabase, resetConnection } from '../src/db/index.js';
+import { runCheck } from '../src/commands/check.js';
 import type { GoldenEntry } from '../src/services/export-service.js';
 import type { IngestTraceInput, TraceWithDetails } from '../src/models/types.js';
 
@@ -238,5 +243,63 @@ describe('exportTraces formats', () => {
     expect(lines).toHaveLength(N);
     // Exporting 10k+ traces means a getTrace per row, so give this real headroom
     // over the default 5s — the point is correctness (nothing dropped), not speed.
+  }, 30000);
+});
+
+// ── check command: candidate gathering has no fixed cap ──────────────────────
+
+describe('runCheck gathers every candidate trace', () => {
+  it('scans past the newest 10000 so a regression in an older trace cannot slip through green', () => {
+    // Regression: the bulk `check --golden` path passed `listTraces` a hard
+    // `limit: 10000` (the same defect already fixed in `exportTraces`). On a
+    // store with >10000 traces, every candidate older than the newest 10000 was
+    // never fetched or diffed — a real regression there produced 0 failures and a
+    // green exit, defeating the gate's core contract. It now scans unbounded.
+    const dir = mkdtempSync(join(tmpdir(), 'ar-check-cap-'));
+    try {
+      const cdb = ensureDatabase(resolve(dir, 'traces.db')); // the singleton runCheck reopens
+
+      // One real baseline candidate (matches the golden); build golden from it.
+      ingestTrace(cdb, baseline);
+      const golden = exportTraces(cdb, { agent_name: 'travel-bot' }, 'golden');
+      const goldenPath = join(dir, 'golden.json');
+      writeFileSync(goldenPath, golden);
+
+      // 10001 older traces (raw insert — fast, no step machinery). Their 2020
+      // timestamps sort them *below* the just-ingested baseline, so a 10000 cap
+      // (newest-first) would drop the oldest — exactly where a regression hides.
+      const N = 10001;
+      const insert = cdb.prepare(
+        `INSERT INTO agent_traces (id, agent_name, trigger, status, input, started_at, tags, metadata, created_at)
+         VALUES (?, 'bulk', 'manual', 'completed', '{}', ?, '[]', '{}', ?)`,
+      );
+      const now = new Date().toISOString();
+      cdb.transaction(() => {
+        for (let i = 0; i < N; i++) {
+          const ts = new Date(Date.UTC(2020, 0, 1) + i * 1000).toISOString();
+          insert.run(`trc_bulk_${String(i).padStart(6, '0')}`, ts, now);
+        }
+      })();
+
+      // Capture the --json report (one result per candidate scanned).
+      const out: string[] = [];
+      const prevExit = process.exitCode;
+      const spy = vi.spyOn(console, 'log').mockImplementation((m?: unknown) => {
+        out.push(String(m));
+      });
+      try {
+        runCheck({ golden: goldenPath, dir, json: true });
+      } finally {
+        spy.mockRestore();
+      }
+      const report = JSON.parse(out.join('\n')) as { results: unknown[] };
+      // Every one of the 10002 candidates (baseline + 10001 bulk) must be scanned.
+      // Under the old cap this capped at 10000 and silently dropped the oldest.
+      expect(report.results).toHaveLength(N + 1);
+      process.exitCode = prevExit; // runCheck sets exitCode; don't leak it to the runner
+    } finally {
+      resetConnection();
+      rmSync(dir, { recursive: true, force: true });
+    }
   }, 30000);
 });
