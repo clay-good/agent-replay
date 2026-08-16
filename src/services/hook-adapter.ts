@@ -81,11 +81,23 @@ function str(v: unknown): string | undefined {
   return typeof v === 'string' && v ? v : undefined;
 }
 
+/**
+ * An event's action, by OWN key only. `EVENT_ACTIONS` is an object literal, so
+ * it inherits from `Object.prototype`: a payload naming `constructor`,
+ * `toString`, `hasOwnProperty` or `__proto__` used to resolve to an inherited
+ * function. That value is truthy, so the `action === 'unknown'` guard was
+ * skipped, the returned `action` wasn't a `HookAction` at all, and every such
+ * event created a zombie `running` trace that nothing ever finalizes.
+ */
+function eventAction(eventName: string | undefined): HookAction | 'unknown' {
+  return eventName && Object.hasOwn(EVENT_ACTIONS, eventName) ? EVENT_ACTIONS[eventName] : 'unknown';
+}
+
 /** Detect the harness dialect from event name and payload shape. */
 export function detectDialect(payload: Record<string, unknown>, eventName?: string): HookDialect {
   if (eventName && GEMINI_EVENTS.has(eventName)) return 'gemini';
   if (payload.turn_id != null) return 'codex';
-  if (eventName && eventName in EVENT_ACTIONS) {
+  if (eventAction(eventName) !== 'unknown') {
     // SessionStart/SessionEnd are the only hook event names Gemini CLI shares
     // verbatim with Claude Code, so the GEMINI_EVENTS allowlist can't separate
     // them. Disambiguate by base-field shape (per the documented payloads): a
@@ -119,7 +131,7 @@ export function resolveHookRouting(
   eventArg?: string,
 ): { action: HookAction; dialect: HookDialect } {
   const eventName = str(payload.hook_event_name) ?? eventArg;
-  const action = (eventName && EVENT_ACTIONS[eventName]) || 'unknown';
+  const action = eventAction(eventName);
   const dialect = detectDialect(payload, eventName);
   return { action, dialect };
 }
@@ -230,7 +242,7 @@ export function applyHookPayload(
   opts: ApplyHookOptions = {},
 ): ApplyHookResult {
   const eventName = str(payload.hook_event_name) ?? opts.eventArg;
-  const action = (eventName && EVENT_ACTIONS[eventName]) || 'unknown';
+  const action = eventAction(eventName);
   const dialect = detectDialect(payload, eventName);
   const sessionId = str(payload.session_id) ?? 'unknown-session';
   const noInput = !!opts.noInput;

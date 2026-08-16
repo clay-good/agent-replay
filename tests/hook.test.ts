@@ -178,6 +178,33 @@ describe('correlation and privacy', () => {
   });
 });
 
+// ── Prototype-inherited event names ───────────────────────────────────────
+
+/**
+ * EVENT_ACTIONS is an object literal, so it inherits from Object.prototype. An
+ * unguarded lookup for an event named `constructor` / `toString` /
+ * `hasOwnProperty` / `__proto__` returned the INHERITED function — truthy, so
+ * the `action === 'unknown'` early return was skipped, the returned `action`
+ * was a function rather than a HookAction, and each such event created a zombie
+ * `running` trace that nothing ever finalizes.
+ */
+describe('event names inherited from Object.prototype', () => {
+  it('ignores them instead of creating a zombie trace', () => {
+    for (const name of ['constructor', 'toString', 'hasOwnProperty', '__proto__']) {
+      const r = apply({ hook_event_name: name, session_id: `s-${name}` });
+      expect(r.action).toBe('unknown');
+      expect(r.traceId).toBeNull();
+      expect(r.note).toContain('ignored event');
+    }
+    expect(listTraces(db, {}).total).toBe(0);
+  });
+
+  it('still detects a real event name', () => {
+    expect(detectDialect({}, 'PreToolUse')).toBe('claude-code');
+    expect(detectDialect({}, 'constructor')).toBe('unknown');
+  });
+});
+
 // ── runHook: no-payload handling (fail-closed under --enforce) ─────────────
 
 /**

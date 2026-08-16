@@ -98,6 +98,14 @@ trace schema is unchanged.
 
 ### Fixed
 
+- A hook payload whose event name collides with an `Object.prototype` member
+  (`constructor`, `toString`, `hasOwnProperty`, `__proto__`) is now ignored
+  instead of creating an unfinalizable trace. The event-name lookup table is an
+  object literal, so those names resolved to an inherited function — truthy,
+  which skipped the "unknown event" early return, made the reported action a
+  function rather than a hook action, and left behind a `running` trace with no
+  steps that nothing ever closes and that pollutes `list` and `stats`. Lookups
+  are now by own key only.
 - `hook --enforce` now fails closed when stdin carries no payload. An empty or
   unreadable stdin (a harness crash, a broken pipe) returned exit 0 before any
   of the fail-closed logic and without ever consulting `--enforce`, so the
