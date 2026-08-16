@@ -107,7 +107,8 @@ export function summarizeDiffForLlm(
       // gone; those render `null` (via truncateJson) instead.
       const leftVal = d.field === 'missing_left' ? '(missing)' : truncateJson(d.left_value, 80);
       const rightVal = d.field === 'missing_right' ? '(missing)' : truncateJson(d.right_value, 80);
-      lines.push(`- Step ${d.step_number}, ${d.field}: LEFT=${leftVal} | RIGHT=${rightVal}`);
+      const where = d.step_number === null ? 'Trace' : `Step ${d.step_number}`;
+      lines.push(`- ${where}, ${d.field}: LEFT=${leftVal} | RIGHT=${rightVal}`);
     }
     if (diff.diffs.length > 15) {
       lines.push(`  ... and ${diff.diffs.length - 15} more`);

@@ -497,6 +497,45 @@ describe('diffTraces', () => {
     expect(result.diffs).toHaveLength(0);
   });
 
+  // Regression: only step_type/name/input/output/model were compared — no step
+  // `error` and no trace-level field at all. So a run that failed and a run that
+  // succeeded, identical otherwise, produced zero diffs: the renderer printed
+  // "Traces are identical." directly under a header showing COMPLETED beside
+  // FAILED. This is the flagship "it worked before, what changed?" case.
+  it('reports a step error that differs between the two runs', () => {
+    const ok = ingestTrace(db, {
+      agent_name: 'bot', status: 'completed', input: { q: 1 }, output: { a: 'done' },
+      steps: [{ step_number: 1, step_type: 'tool_call', name: 'call_api', input: { u: 1 }, output: { r: 1 } }],
+    });
+    const bad = ingestTrace(db, {
+      agent_name: 'bot', status: 'completed', input: { q: 1 }, output: { a: 'done' },
+      steps: [{ step_number: 1, step_type: 'tool_call', name: 'call_api', input: { u: 1 }, output: { r: 1 }, error: 'HTTP 500' }],
+    });
+    const result = diffTraces(db, ok.id, bad.id);
+    const err = result.diffs.find((d) => d.field === 'error')!;
+    expect(err).toBeTruthy();
+    expect(err.step_number).toBe(1);
+    expect(err.right_value).toBe('HTTP 500');
+    // A step-level difference still pins the divergence point.
+    expect(result.divergence_step).toBe(1);
+  });
+
+  it('reports a trace-level status/error difference with a null step number', () => {
+    const steps = [{ step_number: 1, step_type: 'output' as const, name: 'respond', output: { t: 'x' } }];
+    const ok = ingestTrace(db, { agent_name: 'bot', status: 'completed', input: { q: 1 }, steps });
+    const bad = ingestTrace(db, { agent_name: 'bot', status: 'failed', input: { q: 1 }, error: 'Agent aborted', steps });
+
+    const result = diffTraces(db, ok.id, bad.id);
+    const status = result.diffs.find((d) => d.field === 'status')!;
+    expect(status.left_value).toBe('completed');
+    expect(status.right_value).toBe('failed');
+    expect(status.step_number).toBeNull();
+    expect(result.diffs.find((d) => d.field === 'trace_error')?.right_value).toBe('Agent aborted');
+    // A trace-level field belongs to no step, so it must not pin a divergence
+    // step (which means "the first step that went different").
+    expect(result.divergence_step).toBeNull();
+  });
+
   it('does not report a phantom input/output diff when only key order differs', () => {
     // Two traces carrying the same step data serialized with different object
     // key order (e.g. an OTLP trace vs. a hook-recorded one) must compare equal:

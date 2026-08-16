@@ -52,7 +52,7 @@ export async function runDiff(
     const allowedFields = opts.fields.split(',').map((f) => f.trim()).filter(Boolean);
     // Reject unknown field names so a typo doesn't silently hide real diffs and
     // imply the traces are more similar than they are.
-    const comparable = ['step_type', 'name', 'input', 'output', 'model'];
+    const comparable = ['step_type', 'name', 'input', 'output', 'model', 'error', 'status', 'trace_error', 'trace_output'];
     const unknown = allowedFields.filter((f) => !comparable.includes(f));
     if (unknown.length > 0) {
       console.error(chalk.red(`  Unknown --fields value(s): ${unknown.join(', ')}. Comparable fields: ${comparable.join(', ')}`));
@@ -70,9 +70,12 @@ export async function runDiff(
     // "DIVERGES AT STEP N" directly above "0 difference(s) found" (and --json
     // reports a divergence_step inconsistent with its own diffs). The earliest
     // remaining step is the first visible divergence; none left means none.
-    diff.divergence_step = diff.diffs.length
-      ? Math.min(...diff.diffs.map((d) => d.step_number))
-      : null;
+    // Only step-level diffs can pin a divergence step; a trace-level one has a
+    // null step_number, which Math.min would coerce to 0 and report as step 0.
+    const stepNumbers = diff.diffs
+      .map((d) => d.step_number)
+      .filter((n): n is number => n !== null);
+    diff.divergence_step = stepNumbers.length ? Math.min(...stepNumbers) : null;
   }
 
   // Raw JSON output

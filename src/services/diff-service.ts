@@ -117,6 +117,24 @@ export function diffTraces(
         });
       }
 
+      // Error — the whole point of "it worked before, what changed?". Without
+      // this, a step that failed on one side and succeeded on the other, with
+      // everything else equal, reported no differences at all: the renderer
+      // printed "Traces are identical." directly under a header showing
+      // COMPLETED beside FAILED. Every live capture path records a failed tool
+      // as a normal step with `error` set, so this is the common shape.
+      const leftErr = (left.error as string | null) ?? null;
+      const rightErr = (right.error as string | null) ?? null;
+      if (leftErr !== rightErr) {
+        if (divergence_step === null) divergence_step = stepNum;
+        diffs.push({
+          step_number: stepNum,
+          field: 'error',
+          left_value: leftErr,
+          right_value: rightErr,
+        });
+      }
+
       li++;
       ri++;
     } else if (ln < rn) {
@@ -141,6 +159,48 @@ export function diffTraces(
         right_value: (right as Record<string, unknown>).name,
       });
       ri++;
+    }
+  }
+
+  // Trace-level fields. Nothing outside the step list was compared, so two runs
+  // with identical steps but opposite outcomes — one completed, one failed with
+  // an error, or with different final outputs — were reported as identical.
+  // These carry `step_number: null`: they belong to the trace, not to a step,
+  // and must not pin `divergence_step`, which means "the first step that went
+  // different".
+  const leftTrace = db.prepare('SELECT status, error, output FROM agent_traces WHERE id = ?').get(leftTraceId) as
+    | Record<string, unknown>
+    | undefined;
+  const rightTrace = db.prepare('SELECT status, error, output FROM agent_traces WHERE id = ?').get(rightTraceId) as
+    | Record<string, unknown>
+    | undefined;
+
+  if (leftTrace && rightTrace) {
+    if (leftTrace.status !== rightTrace.status) {
+      diffs.push({
+        step_number: null,
+        field: 'status',
+        left_value: leftTrace.status ?? null,
+        right_value: rightTrace.status ?? null,
+      });
+    }
+    if ((leftTrace.error ?? null) !== (rightTrace.error ?? null)) {
+      diffs.push({
+        step_number: null,
+        field: 'trace_error',
+        left_value: leftTrace.error ?? null,
+        right_value: rightTrace.error ?? null,
+      });
+    }
+    const leftOut = safeParseJson(leftTrace.output as string | null) ?? null;
+    const rightOut = safeParseJson(rightTrace.output as string | null) ?? null;
+    if (stableStringify(leftOut) !== stableStringify(rightOut)) {
+      diffs.push({
+        step_number: null,
+        field: 'trace_output',
+        left_value: leftOut,
+        right_value: rightOut,
+      });
     }
   }
 

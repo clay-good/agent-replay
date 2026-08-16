@@ -204,7 +204,8 @@ export interface CreateEvalInput {
 // ── Diff Types ────────────────────────────────────────────────────────────
 
 export interface StepDiff {
-  step_number: number;
+  /** The step this difference is on, or null for a trace-level field. */
+  step_number: number | null;
   field: string;
   left_value: unknown;
   right_value: unknown;

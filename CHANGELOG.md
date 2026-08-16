@@ -98,6 +98,19 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `diff` no longer reports two runs as identical when one of them failed. Steps
+  were compared on `step_type`, `name`, `input`, `output`, and `model` only —
+  the step's `error` was never compared, and no trace-level field was compared
+  at all. So a run that succeeded and a run that failed with a 500 from the same
+  tool call produced zero differences: the renderer printed "Traces are
+  identical." directly beneath a header showing `COMPLETED` beside `FAILED`, and
+  `--json` agreed with `"diffs": []`. That is the flagship "it worked before,
+  what changed?" case, and every live capture path records a failed tool as an
+  ordinary step with `error` set, so it is the common shape rather than an edge
+  case. Steps now also compare `error`, and the trace itself compares `status`,
+  `trace_error`, and `trace_output`. A trace-level difference reports its step as
+  `trace` (`null` in `--json`) and does not set `divergence_step`, which still
+  means "the first step that went different".
 - A guardrail policy whose `input_contains` / `output_contains` value holds a
   quote, backslash, newline, or tab now matches. The haystack was the
   JSON-encoded step, where those characters appear escaped (`\"`, `\\`, `\n`,

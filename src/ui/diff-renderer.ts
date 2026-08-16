@@ -72,7 +72,8 @@ export function renderDiff(
     const rightVal = formatDiffValue(d.right_value, d.field);
 
     table.push([
-      chalk.white.bold(String(d.step_number)),
+      // A trace-level field belongs to the run, not to any step.
+      chalk.white.bold(d.step_number === null ? 'trace' : String(d.step_number)),
       fieldBadge(d.field),
       leftVal,
       rightVal,
