@@ -263,6 +263,19 @@ describe('CLI integration', () => {
     expect(out).not.toContain('1e3');
   });
 
+  // Regression: commander maps every usage error to exit 2, but in each
+  // supported harness exit 2 BLOCKS the pending tool call. A single typo'd hook
+  // line in settings.json therefore blocked every tool call in the session,
+  // from a capture-only hook documented never to affect the host agent.
+  it('a usage error on a capture-mode hook still exits 0', () => {
+    expect(run(['hook', 'PreToolUse', '--no-such-flag'], '{}').code).toBe(0);
+    expect(run(['hook', 'PreToolUse', 'extra-arg'], '{}').code).toBe(0);
+    // Under --enforce, blocking is the correct fail-closed answer.
+    expect(run(['hook', 'PreToolUse', '--no-such-flag', '--enforce'], '{}').code).toBe(2);
+    // A non-hook command still reports a usage error normally.
+    expect(run(['list', '--no-such-flag']).code).toBe(2);
+  });
+
   it('guard check rejects non-object JSON stdin cleanly (no crash)', () => {
     // `null`/array/primitive are valid JSON but not a step object; they must
     // yield a clean error + exit 1, not a raw TypeError from `null.step_type`.

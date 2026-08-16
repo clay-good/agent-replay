@@ -98,6 +98,19 @@ trace schema is unchanged.
 
 ### Fixed
 
+- A malformed `hook` command line no longer blocks the host agent in capture
+  mode. Commander reports every usage error (an unknown flag, a stray argument)
+  as exit 2 — but in each supported harness exit 2 *blocks* the pending tool
+  call, and the hook configuration is static, so one typo in `settings.json`
+  blocked every tool call for the whole session, from a capture-only hook that
+  is documented never to affect the host agent. `runHook` guarantees exit 0, but
+  commander's error handling runs before the action ever executes. A usage error
+  on `hook` without `--enforce` now exits 0. With `--enforce` it still exits 2,
+  since blocking is the correct fail-closed answer when the gate can't run.
+- `guard remove` no longer deletes a second policy. The lookup was
+  `WHERE id = ? OR name = ?` with the same value bound twice, so removing a
+  policy by id also removed any policy *named* after that id — and reported
+  success. Resolution is now by id first, then by name.
 - `fork` now keeps the original trace's `metadata` instead of replacing it. The
   fork provenance (`forked_from`, `forked_at_step`) overwrote the whole object,
   so anything a producer had attached — run/session correlation ids, cost tags,

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
-import { addPolicy, evaluateStep, verdictForMatches, resolveGuardExit, testPolicies, removePolicy, validateMatchPattern } from '../src/services/guard-service.js';
+import { addPolicy, evaluateStep, verdictForMatches, resolveGuardExit, testPolicies, removePolicy, validateMatchPattern, listPolicies } from '../src/services/guard-service.js';
 import { startTrace, ingestTrace } from '../src/services/trace-service.js';
 import type { TraceStep } from '../src/models/types.js';
 import type { StepType } from '../src/models/enums.js';
@@ -266,6 +266,34 @@ describe('malformed patterns fail closed, not open', () => {
     addPolicy(db, { name: 'obj-ic', action: 'deny', match_pattern: { input_contains: { eq: 'rm -rf' } } });
     const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'shell', input: { cmd: 'anything' } })));
     expect(v.action).toBe('deny');
+  });
+});
+
+// ── removePolicy targeting ─────────────────────────────────────────────────
+
+describe('removePolicy', () => {
+  // Regression: `WHERE id = ? OR name = ?` bound the same value twice, so a
+  // policy literally named after another policy's id deleted BOTH rows — and
+  // reported success.
+  it('removes only the policy matching the id, not one merely named after it', () => {
+    const a = addPolicy(db, { name: 'first', action: 'deny', match_pattern: { name_contains: 'x' } });
+    const b = addPolicy(db, { name: a.id, action: 'warn', match_pattern: { name_contains: 'y' } });
+
+    removePolicy(db, a.id);
+
+    const remaining = listPolicies(db);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].id).toBe(b.id);
+  });
+
+  it('still removes by name when no id matches', () => {
+    addPolicy(db, { name: 'by-name', action: 'deny', match_pattern: { name_contains: 'x' } });
+    removePolicy(db, 'by-name');
+    expect(listPolicies(db)).toHaveLength(0);
+  });
+
+  it('throws when nothing matches', () => {
+    expect(() => removePolicy(db, 'nope')).toThrow(/not found/);
   });
 });
 

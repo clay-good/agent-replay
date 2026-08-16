@@ -27,7 +27,17 @@ program
 // exit-code table. help/version still exit 0. Must be set BEFORE any .command()
 // so subcommands inherit the callback (commander copies it at creation time).
 program.exitOverride((err) => {
-  process.exit(err.exitCode === 0 ? 0 : 2);
+  if (err.exitCode === 0) process.exit(0);
+  // Exception: a usage error on `hook` in CAPTURE mode must still exit 0. In
+  // every supported harness exit 2 blocks the pending tool call, so a single
+  // typo'd hook line in settings.json would block every tool call in the
+  // session — from a capture-only hook that is documented never to affect the
+  // host agent. `runHook` guarantees exit 0, but commander's error handling
+  // runs before the action ever executes. `--enforce` is deliberately excluded:
+  // there, blocking is the correct fail-closed answer when we can't evaluate.
+  const argv = process.argv.slice(2);
+  if (argv[0] === 'hook' && !argv.includes('--enforce')) process.exit(0);
+  process.exit(2);
 });
 
 // --- init ---

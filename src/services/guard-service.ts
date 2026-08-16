@@ -88,10 +88,14 @@ export function listPolicies(db: Database.Database): GuardrailPolicy[] {
 }
 
 export function removePolicy(db: Database.Database, policyId: string): void {
-  const result = db
-    .prepare('DELETE FROM guardrail_policies WHERE id = ? OR name = ?')
-    .run(policyId, policyId);
-  if (result.changes === 0) {
+  // Resolve by id first, then by name — `WHERE id = ? OR name = ?` deleted BOTH
+  // rows when one policy happened to be named after another's id, and reported
+  // success. Names are UNIQUE, so each step deletes at most one row.
+  const byId = db.prepare('DELETE FROM guardrail_policies WHERE id = ?').run(policyId);
+  if (byId.changes > 0) return;
+
+  const byName = db.prepare('DELETE FROM guardrail_policies WHERE name = ?').run(policyId);
+  if (byName.changes === 0) {
     throw new Error(`Policy '${policyId}' not found`);
   }
 }
