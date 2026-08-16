@@ -98,6 +98,21 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `eval`'s deterministic error criteria now detect the failures that live
+  capture actually records, so `eval` works as a CI gate on the runs it exists
+  for. `hallucination-check`'s `no_error_steps` and `completeness-check`'s
+  `no_unresolved_errors` keyed only on a step whose `step_type` is `error` — but
+  every live capture path (`hook`, `record`, and the transcript importers)
+  records a failed tool as a `tool_call` step with the `error` field set, and
+  never emits a dedicated `error` step. Both criteria therefore scored a perfect
+  1.0 for every live-captured failure: a trace that `list` displays as
+  `✘ FAILED`, with a trace-level error and a tool call that returned 503, passed
+  all three presets and `eval --all` exited `0`. A step now counts as failed if
+  its `step_type` is `error` **or** it carries an `error` value, and
+  `no_unresolved_errors` additionally fails on a trace-level `error` — the
+  clearest "this run ended unresolved" signal there is, and the only marker left
+  by a run that died before emitting a final step. The change can only turn a
+  false pass into a failure; no passing trace starts failing.
 - Importing a Claude Code transcript now preserves a failed tool call. A
   `tool_result` block flagged `is_error` (a `Bash` that exits non-zero, a `Read`
   on a missing file — very common) had its flag dropped: the imported step was a

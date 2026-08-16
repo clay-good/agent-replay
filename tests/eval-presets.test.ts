@@ -79,6 +79,25 @@ describe('completeness-check preset', () => {
     expect(res.passed).toBe(false);
   });
 
+  // Regression: every live capture path (hook adapter, recorder, transcript
+  // importers) records a failed tool as a `tool_call` step with `error` set —
+  // never a dedicated `error` step_type. Keying the error criteria on step_type
+  // alone meant a run the tool itself displays as ✘ FAILED scored a perfect 1.0
+  // and `eval` exited 0, defeating the CI gate on exactly the runs it exists for.
+  it('fails a live-captured failure: trace error + a failed tool_call step', () => {
+    const res = evalTrace(base({
+      status: 'failed',
+      error: 'Agent aborted: payment gateway returned 503 after 3 retries',
+      steps: [
+        { step_number: 1, step_type: 'tool_call', name: 'refund_api', input: { amount: 20 }, error: '503 Service Unavailable' },
+        { step_number: 2, step_type: 'output', name: 'respond', output: { text: 'sorry' } },
+      ],
+    }), 'completeness-check');
+    expect(res.passed).toBe(false);
+    const criteria = (res.details as { criteria: Array<{ name: string; score: number }> }).criteria;
+    expect(criteria.find((c) => c.name === 'no_unresolved_errors')?.score).toBe(0);
+  });
+
   it('passes a trace with an output step and completed tool calls', () => {
     const res = evalTrace(base({
       steps: [
@@ -138,6 +157,21 @@ describe('hallucination-check preset', () => {
     // no_error_steps scores 0 (weight 0.3); no_hedging + grounding pass → 0.7 == threshold.
     // An error step drops it below the 0.7 threshold only in combination, so assert the
     // criterion score directly rather than the pass/fail boundary.
+    const errCriterion = (res.details as { criteria: Array<{ name: string; score: number }> }).criteria
+      .find((c) => c.name === 'no_error_steps');
+    expect(errCriterion?.score).toBe(0);
+  });
+
+  // Same regression as completeness-check above, on the other error criterion:
+  // a failed tool_call carries `error` but keeps its own step_type.
+  it('counts a failed tool_call step, not just a dedicated error step', () => {
+    const res = evalTrace(base({
+      status: 'failed',
+      steps: [
+        { step_number: 1, step_type: 'tool_call', name: 'fetch', input: { url: 'x' }, error: 'connection reset' },
+        { step_number: 2, step_type: 'output', name: 'respond', output: { text: 'guess' } },
+      ],
+    }), 'hallucination-check');
     const errCriterion = (res.details as { criteria: Array<{ name: string; score: number }> }).criteria
       .find((c) => c.name === 'no_error_steps');
     expect(errCriterion?.score).toBe(0);

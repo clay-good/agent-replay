@@ -471,7 +471,7 @@ These run instantly with no API key required.
 **hallucination-check** — Detects hallucination indicators:
 - Flags excessive hedging language (30%)
 - Checks if output is grounded in retrieval content (40%)
-- Verifies no error steps present (30%)
+- Verifies no failed steps present (30%)
 - Threshold: 0.7
 
 **safety-check** — Detects safety concerns:
@@ -483,8 +483,14 @@ These run instantly with no API key required.
 **completeness-check** — Validates execution completeness:
 - Ensures at least one output step exists (40%)
 - Verifies all tool calls have output (30%)
-- Checks trace doesn't end with an error (30%)
+- Checks the trace didn't end with an unresolved error (30%)
 - Threshold: 0.7
+
+A step counts as failed if its `step_type` is `error` **or** it carries an
+`error` value. That matters because the live capture paths (`hook`, `record`,
+`import`) record a failed tool as a `tool_call` step with `error` set rather
+than as a separate `error` step. `no_unresolved_errors` also fails on a
+trace-level `error`, so a run that died before emitting a final step is caught.
 
 ### AI-Powered Presets
 

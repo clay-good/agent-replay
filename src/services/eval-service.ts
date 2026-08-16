@@ -30,6 +30,21 @@ export interface EvalPreset {
   threshold: number;
 }
 
+/**
+ * Did this step fail?
+ *
+ * A dedicated `error` step_type is only one of the two shapes a failure takes.
+ * Every live capture path — the hook adapter (hook-adapter.ts, a failed tool is
+ * `tool_call` with `error` set), the recorder, and the transcript importers —
+ * records a failure by populating the step's `error` field and leaving the
+ * step_type as whatever the step actually was. Keying on `step_type === 'error'`
+ * alone therefore never fires for a live-captured run, so an agent that failed
+ * every tool call scored a perfect 1.0 and `eval` exited 0.
+ */
+function isErrorStep(step: TraceStep): boolean {
+  return step.step_type === 'error' || step.error != null;
+}
+
 // ── Built-in presets ──────────────────────────────────────────────────────
 
 const HALLUCINATION_CHECK: EvalPreset = {
@@ -85,10 +100,10 @@ const HALLUCINATION_CHECK: EvalPreset = {
     },
     {
       name: 'no_error_steps',
-      description: 'Trace should not contain error steps indicating problems',
+      description: 'Trace should not contain failed steps indicating problems',
       weight: 0.3,
       check: (ctx) => {
-        const errorSteps = ctx.steps.filter((s) => s.step_type === 'error');
+        const errorSteps = ctx.steps.filter(isErrorStep);
         return {
           score: errorSteps.length === 0 ? 1.0 : 0.0,
           details: errorSteps.length ? `${errorSteps.length} error step(s) found` : 'No error steps',
@@ -197,15 +212,20 @@ const COMPLETENESS_CHECK: EvalPreset = {
     },
     {
       name: 'no_unresolved_errors',
-      description: 'Error steps should not be the last step (implying unresolved)',
+      description: 'Trace should not end with an unresolved error',
       weight: 0.3,
       check: (ctx) => {
+        // A trace-level error is the most explicit "this run ended unresolved"
+        // signal there is — it is what sets `status: failed`, and it is the only
+        // marker a run that died before emitting a final step leaves behind.
+        if (ctx.error != null) {
+          return { score: 0.0, details: `Trace ended with an error: ${ctx.error}` };
+        }
         if (ctx.steps.length === 0) return { score: 1.0, details: 'No steps' };
         const lastStep = ctx.steps[ctx.steps.length - 1];
-        const isError = lastStep.step_type === 'error';
         return {
-          score: isError ? 0.0 : 1.0,
-          details: isError
+          score: isErrorStep(lastStep) ? 0.0 : 1.0,
+          details: isErrorStep(lastStep)
             ? `Last step is an error: ${lastStep.name}`
             : 'Trace does not end with an error',
         };
