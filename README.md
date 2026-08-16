@@ -375,7 +375,15 @@ Patterns support `step_type`, `name_contains`, `name_regex`, `input_contains`, a
 e.g. a typo'd key) so a blocking policy can never be stored in a form that
 silently fails to match. If a malformed policy is somehow
 present anyway, a `deny`/`require_review` policy fails *closed* (treats the step
-as a match) rather than letting it through.
+as a match) rather than letting it through. The one exception is a completely
+empty pattern, which stays inert even for a `deny`: it expresses no intent to
+filter, and blocking every step would be worse than the misconfiguration.
+
+`input_contains` and `output_contains` match against both the raw text and the
+JSON form of the step's input/output, so a pattern containing quotes,
+backslashes, newlines, or tabs matches as written — `rm -rf "/etc"` and
+`C:\Windows\System32` both work, as do patterns aimed at the JSON itself like
+`"cmd"`. Matching is case-insensitive.
 
 ### Export
 

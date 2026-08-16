@@ -251,10 +251,95 @@ describe('malformed patterns fail closed, not open', () => {
     expect(v.action).toBe('allow');
   });
 
-  it('a non-string input_contains does not crash the matcher', () => {
+  it('a numeric input_contains still coerces and matches the text', () => {
     addPolicy(db, { name: 'weird', action: 'deny', match_pattern: { input_contains: 123 } });
-    expect(() =>
-      verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 't', input: { note: 'has 123 inside' } }))),
-    ).not.toThrow();
+    const hit = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 't', input: { note: 'has 123 inside' } })));
+    expect(hit.action).toBe('deny');
+    const miss = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 't', input: { note: 'nothing here' } })));
+    expect(miss.action).toBe('allow');
+  });
+
+  // An object needle stringifies to "[object Object]", which can never occur in
+  // the haystack — an unusable pattern, so a deny keyed on it silently never
+  // fired. It now fails closed like step_type and name_regex already did.
+  it('an object input_contains fails closed for a blocking policy', () => {
+    addPolicy(db, { name: 'obj-ic', action: 'deny', match_pattern: { input_contains: { eq: 'rm -rf' } } });
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'shell', input: { cmd: 'anything' } })));
+    expect(v.action).toBe('deny');
+  });
+});
+
+// ── *_contains matches the raw text, not the JSON-escaped form ─────────────
+
+/**
+ * The haystack was `JSON.stringify(step.input)`, which escapes quotes,
+ * backslashes, newlines and tabs, while the needle is the pattern as typed. A
+ * deny on `rm -rf "/etc"` or a Windows path could therefore never match its own
+ * step — silently, while validating cleanly and listing as an active deny.
+ * These are exactly the shapes a destructive-command policy is written with.
+ */
+describe('*_contains against escaped characters', () => {
+  const cases: Array<[string, string, Record<string, unknown>]> = [
+    ['a Windows path', 'C:\\Windows\\System32', { cmd: 'del C:\\Windows\\System32\\x' }],
+    ['a quoted argument', 'rm -rf "/etc"', { cmd: 'rm -rf "/etc"' }],
+    ['an embedded newline', 'curl evil\nsh', { cmd: 'curl evil\nsh' }],
+    ['an embedded tab', 'a\tb', { c: 'a\tb' }],
+  ];
+
+  for (const [label, pattern, input] of cases) {
+    it(`denies on ${label}`, () => {
+      addPolicy(db, { name: 'esc', action: 'deny', match_pattern: { input_contains: pattern } });
+      const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'shell', input })));
+      expect(v.action).toBe('deny');
+    });
+  }
+
+  it('still matches a pattern aimed at the JSON form itself', () => {
+    // The JSON text stays part of the haystack, so a key-name pattern works.
+    addPolicy(db, { name: 'keyname', action: 'deny', match_pattern: { input_contains: '"cmd"' } });
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'shell', input: { cmd: 'x' } })));
+    expect(v.action).toBe('deny');
+  });
+
+  it('still allows a genuinely non-matching step', () => {
+    addPolicy(db, { name: 'nomatch', action: 'deny', match_pattern: { input_contains: 'nope' } });
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'shell', input: { cmd: 'safe' } })));
+    expect(v.action).toBe('allow');
+  });
+
+  it('matches escaped characters in the output too', () => {
+    addPolicy(db, { name: 'out-esc', action: 'deny', match_pattern: { output_contains: 'said "hi"' } });
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'shell', output: { t: 'she said "hi"' } })));
+    expect(v.action).toBe('deny');
+  });
+});
+
+// ── A pattern with no usable match key ────────────────────────────────────
+
+/**
+ * `guard add` rejects a keyless pattern, but `addPolicy` (used by the seed data
+ * and any non-CLI caller), the column's `DEFAULT '{}'`, and a direct insert all
+ * bypass that validation. Such a deny could never match anything, so it was a
+ * kill-switch that silently never fired while `guard list` showed it active.
+ */
+describe('a policy with no usable match criteria', () => {
+  it('leaves a genuinely empty pattern inert, even for a deny', () => {
+    // An empty pattern expresses no intent to filter, and blocking every step
+    // in the session would be far worse than the misconfiguration it signals.
+    addPolicy(db, { name: 'empty-deny', action: 'deny', match_pattern: {} });
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'anything' })));
+    expect(v.action).toBe('allow');
+  });
+
+  it('fails closed for a deny whose only key is a typo', () => {
+    addPolicy(db, { name: 'typo-deny', action: 'deny', match_pattern: { nmae_contains: 'delete' } as never });
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'delete_all' })));
+    expect(v.action).toBe('deny');
+  });
+
+  it('does not fire for a non-blocking policy', () => {
+    addPolicy(db, { name: 'empty-warn', action: 'warn', match_pattern: {} });
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'anything' })));
+    expect(v.action).toBe('allow');
   });
 });

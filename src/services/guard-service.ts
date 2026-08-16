@@ -280,6 +280,47 @@ export function validateMatchPattern(pattern: Record<string, unknown>): string |
   return null;
 }
 
+/**
+ * The text a `*_contains` pattern is searched against: the JSON form — what
+ * this has always matched, so patterns keyed on structure or key names still
+ * work — plus every raw string value inside it.
+ *
+ * `JSON.stringify` escapes quotes, backslashes, newlines and tabs (`\"`, `\\`,
+ * `\n`, `\t`), while the needle is the pattern exactly as the user typed it.
+ * So a deny on `rm -rf "/etc"`, or on a Windows path like
+ * `C:\Windows\System32`, could never match its own step — and did so silently,
+ * validating cleanly and listing as an active deny. Those are precisely the
+ * shapes a destructive-command policy is written with.
+ *
+ * Searching both forms only ever adds matches, never removes one, which is the
+ * safe direction for a kill-switch.
+ */
+function searchableText(value: unknown): string {
+  const parts: string[] = [JSON.stringify(value) ?? ''];
+  const walk = (v: unknown): void => {
+    if (typeof v === 'string') parts.push(v);
+    else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === 'object') Object.values(v).forEach(walk);
+  };
+  walk(value);
+  return parts.join('\n').toLowerCase();
+}
+
+/**
+ * The lower-cased needle for a `*_contains` pattern, or null when the value
+ * can't be searched for at all.
+ *
+ * A scalar still coerces (a policy written `input_contains: 123` means the text
+ * "123"), but an object or array stringifies to `"[object Object]"`, which can
+ * never occur in the haystack — an unusable pattern that made a deny silently
+ * never fire. Those return null so a blocking policy fails closed, matching how
+ * `step_type` and `name_regex` already behave.
+ */
+function containsNeedle(value: unknown): string | null {
+  if (typeof value === 'object') return null;
+  return String(value).toLowerCase();
+}
+
 function matchesPolicy(step: TraceStep, policy: GuardrailPolicy): string | null {
   const pattern = policy.match_pattern;
   const reasons: string[] = [];
@@ -333,29 +374,49 @@ function matchesPolicy(step: TraceStep, policy: GuardrailPolicy): string | null 
     }
   }
 
-  // Match by input field values
+  // Match by input field values.
   if (pattern.input_contains != null) {
-    const inputStr = JSON.stringify(step.input).toLowerCase();
-    const searchStr = String(pattern.input_contains).toLowerCase();
-    if (!inputStr.includes(searchStr)) {
+    const needle = containsNeedle(pattern.input_contains);
+    if (needle == null) {
+      if (!failsClosed) return null;
+      reasons.push(`input_contains '${String(pattern.input_contains)}' is unusable — failing closed`);
+    } else if (!searchableText(step.input).includes(needle)) {
       return null;
+    } else {
+      reasons.push(`input contains '${pattern.input_contains}'`);
     }
-    reasons.push(`input contains '${pattern.input_contains}'`);
   }
 
-  // Match by output pattern
+  // Match by output pattern (same needle handling as input_contains).
   if (pattern.output_contains != null) {
-    const outputStr = JSON.stringify(step.output ?? '').toLowerCase();
-    const searchStr = String(pattern.output_contains).toLowerCase();
-    if (!outputStr.includes(searchStr)) {
+    const needle = containsNeedle(pattern.output_contains);
+    if (needle == null) {
+      if (!failsClosed) return null;
+      reasons.push(`output_contains '${String(pattern.output_contains)}' is unusable — failing closed`);
+    } else if (!searchableText(step.output ?? '').includes(needle)) {
       return null;
+    } else {
+      reasons.push(`output contains '${pattern.output_contains}'`);
     }
-    reasons.push(`output contains '${pattern.output_contains}'`);
   }
 
-  // If we had any filter criteria and all matched (none returned null), it's a match
   if (reasons.length === 0) {
-    return null; // empty pattern matches nothing
+    // The pattern carries keys, but not one the matcher recognizes — a typo like
+    // `nmae_contains` or `tool_name`. The author clearly meant to filter on
+    // something, and the policy can never match anything, so a deny stored this
+    // way was a kill-switch that silently never fired while `guard list` showed
+    // it active. `guard add` rejects this, but `addPolicy` (used by the seed
+    // data and any non-CLI caller) and a direct insert bypass that validation.
+    // Fail closed for a blocking policy, like every other unusable-pattern
+    // branch above.
+    //
+    // A genuinely EMPTY pattern is deliberately left inert, even for a deny:
+    // it expresses no intent to filter, and blocking every step in the session
+    // would be far worse than the misconfiguration it signals.
+    if (failsClosed && Object.keys(pattern).length > 0) {
+      return 'policy has no usable match criteria — failing closed';
+    }
+    return null;
   }
 
   return reasons.join(', ');

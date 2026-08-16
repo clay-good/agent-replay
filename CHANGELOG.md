@@ -98,6 +98,25 @@ trace schema is unchanged.
 
 ### Fixed
 
+- A guardrail policy whose `input_contains` / `output_contains` value holds a
+  quote, backslash, newline, or tab now matches. The haystack was the
+  JSON-encoded step, where those characters appear escaped (`\"`, `\\`, `\n`,
+  `\t`), while the needle is the pattern exactly as written — so a `deny` on
+  `rm -rf "/etc"`, or on a Windows path like `C:\Windows\System32`, could never
+  match its own step. It failed silently: the policy validated cleanly, `guard
+  list` showed it as an active deny, and it never fired. These are precisely the
+  shapes a destructive-command policy is written with. Patterns are now matched
+  against the raw text as well as the JSON form, so patterns aimed at the JSON
+  itself (a key name like `"cmd"`) keep working.
+- Two further guardrail fail-opens now fail closed, matching what `step_type`
+  and `name_regex` already did. An `input_contains` / `output_contains` value
+  that is an object or array stringifies to `"[object Object]"`, which can never
+  occur in the haystack; and a pattern whose only keys are unrecognized (a typo
+  like `nmae_contains`) can never match anything. Both stored a `deny` that
+  silently never fired. `guard add` rejects them, but the service API used by
+  seed data and any non-CLI caller, and direct inserts, bypass that validation.
+  A scalar value still coerces, so `input_contains: 123` matches the text "123".
+  A genuinely empty pattern is deliberately left inert, as before.
 - `export --status <typo>` now exits 2 (a usage error) instead of 1. The bad
   value reached `listTraces` inside the export block, whose blanket catch
   reports every failure as a runtime error — so a CI script branching on the
