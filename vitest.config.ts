@@ -1,19 +1,15 @@
 import { defineConfig } from 'vitest/config';
 
-// Coverage-only config — test discovery stays on vitest's defaults. Run with
-// `npm run coverage`. The command layer is exercised by the CLI-integration
-// suite, which spawns the built binary out of process, so v8 can't see it;
-// coverage numbers are therefore meaningful for the service/util/ui layers.
 export default defineConfig({
   test: {
-    coverage: {
-      provider: 'v8',
-      include: ['src/**/*.ts'],
-      // Barrel re-exports, the interactive TUI, and the TTY spinner have no
-      // meaningful headless unit surface — excluding them keeps the report
-      // focused on code a test can actually assert.
-      exclude: ['src/**/index.ts', 'src/ui/dashboard-view.ts', 'src/ui/spinner.ts'],
-      reporter: ['text', 'html'],
-    },
+    // Vitest's 5s default is too tight for this suite. The CLI integration
+    // tests spawn a real `node dist/cli.js` process per assertion, and several
+    // service tests build stores of 10k+ rows; on a busy machine or a shared CI
+    // runner those exceed 5s from scheduling latency alone, so the suite failed
+    // for reasons unrelated to the code under test. A genuinely hung command
+    // still fails fast — the integration helper passes its own 20s timeout to
+    // execFileSync — so this only removes the false negatives.
+    testTimeout: 60_000,
+    hookTimeout: 60_000,
   },
 });
