@@ -63,7 +63,21 @@ export function forkTrace(
       ? JSON.stringify(modifiedInput)
       : (original.input as string);
 
+    // Keep the original's metadata and layer the fork provenance on top.
+    // Replacing it wholesale dropped everything a producer had attached
+    // (session/run correlation ids, cost tags, harness info) from every fork,
+    // while the rest of the trace — steps, decisions, snapshots, tags,
+    // session_id — is copied faithfully. The provenance keys win on collision,
+    // since `show`/`diff` rely on them to identify the fork point.
+    let originalMeta: Record<string, unknown> = {};
+    try {
+      const parsed = JSON.parse((original.metadata as string) ?? '{}');
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) originalMeta = parsed;
+    } catch {
+      // Unparseable metadata on the original: fall back to provenance only.
+    }
     const metadata = JSON.stringify({
+      ...originalMeta,
       forked_from: traceId,
       forked_at_step: fromStep,
     });

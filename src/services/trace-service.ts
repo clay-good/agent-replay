@@ -100,7 +100,12 @@ function parseJson(raw: string | null): Record<string, unknown> | null {
 function parseJsonArray(raw: string | null): string[] {
   if (!raw) return [];
   try {
-    return JSON.parse(raw);
+    // Must actually be an array. The column is contracted to hold one, but a
+    // legacy or directly-inserted row can hold any JSON, and returning that as
+    // `string[]` is a type lie every consumer then trips over — `fork --tag`
+    // crashed on `tags.push` after its fork had already been committed.
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
@@ -252,7 +257,11 @@ function insertTraceRow(
     input.total_tokens ?? null,
     input.total_cost_usd ?? null,
     input.error ?? null,
-    JSON.stringify(input.tags ?? []),
+    // Coerce to an array at the boundary, like `trigger` and `status` above:
+    // `ingest` validates tags, but the live event protocol doesn't type-check
+    // them, so a producer's `tags: {...}` would otherwise be stored verbatim in
+    // a column every reader treats as an array.
+    JSON.stringify(Array.isArray(input.tags) ? input.tags : []),
     jsonStr(input.metadata),
     null, // parent_trace_id
     null, // forked_from_step

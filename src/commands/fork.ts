@@ -95,7 +95,12 @@ export function runFork(traceId: string, opts: ForkOptions): void {
       const existing = db
         .prepare('SELECT tags FROM agent_traces WHERE id = ?')
         .get(result.forked_trace_id) as { tags: string } | undefined;
-      const tags = existing ? (safeJsonParse<string[]>(existing.tags) ?? []) : [];
+      // This runs AFTER forkTrace's transaction has committed, so a throw here
+      // would report "Fork failed" (exit 1) for a fork that actually exists —
+      // an orphan whose id was never printed, with a fresh one created on every
+      // retry. A non-array `tags` column made `tags.push` do exactly that.
+      const parsed = existing ? safeJsonParse<unknown>(existing.tags) : null;
+      const tags = Array.isArray(parsed) ? (parsed as string[]) : [];
       tags.push(opts.tag);
       db.prepare('UPDATE agent_traces SET tags = ? WHERE id = ?')
         .run(JSON.stringify(tags), result.forked_trace_id);

@@ -129,6 +129,17 @@ describe('ingestTrace', () => {
     expect(getTrace(db, trace.id)!.input).toEqual({ task: 'pre-serialized' });
   });
 
+  // The live event protocol doesn't type-check tags, so a producer could store
+  // a non-array in a column every reader treats as one. `fork --tag` then threw
+  // on `tags.push` AFTER its fork had already committed, reporting "Fork
+  // failed" for a fork that existed but whose id was never printed.
+  it('coerces a non-array tags value to an empty array', () => {
+    const live = startTrace(db, { agent_name: 'bot', tags: { weird: true } as never });
+    expect(getTrace(db, live.id)!.tags).toEqual([]);
+    const raw = (db.prepare('SELECT tags FROM agent_traces WHERE id = ?').get(live.id) as { tags: string }).tags;
+    expect(JSON.parse(raw)).toEqual([]);
+  });
+
   it('inserts steps correctly', () => {
     const trace = ingestTrace(db, makeTrace());
     const full = getTrace(db, trace.id);
@@ -635,6 +646,22 @@ describe('diffTraces', () => {
 // ── forkTrace ─────────────────────────────────────────────────────────────
 
 describe('forkTrace', () => {
+  // Regression: fork replaced metadata wholesale with the provenance keys, so
+  // everything a producer had attached (run/session correlation, cost tags,
+  // harness info) was dropped from every fork — while steps, decisions,
+  // snapshots, tags and session_id were all copied faithfully.
+  it('preserves the original metadata and layers fork provenance on top', () => {
+    const t = ingestTrace(db, makeTrace({ metadata: { custom: 'keepme', run_id: 'r-42' } }));
+    const f = forkTrace(db, t.id, 1);
+    const forked = getTrace(db, f.forked_trace_id)!;
+    expect(forked.metadata).toMatchObject({
+      custom: 'keepme',
+      run_id: 'r-42',
+      forked_from: t.id,
+      forked_at_step: 1,
+    });
+  });
+
   it('forks a trace at a given step', () => {
     const trace = ingestTrace(db, makeTrace());
     const result = forkTrace(db, trace.id, 2);

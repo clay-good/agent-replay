@@ -98,6 +98,19 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `fork` now keeps the original trace's `metadata` instead of replacing it. The
+  fork provenance (`forked_from`, `forked_at_step`) overwrote the whole object,
+  so anything a producer had attached — run/session correlation ids, cost tags,
+  harness info — was dropped from every fork, while steps, decisions, snapshots,
+  tags, and `session_id` were all copied faithfully. Provenance keys still win on
+  a name collision.
+- A non-array `tags` value from a producer no longer corrupts reads or breaks
+  `fork --tag`. `ingest` validates tags, but the live event protocol doesn't
+  type-check them, so `tags: {...}` was stored verbatim in a column every reader
+  treats as an array. `fork --tag` then threw on `tags.push` *after* its fork had
+  already been committed, reporting "Fork failed" (exit 1) for a fork that
+  existed but whose id was never printed — leaving an orphan behind, and another
+  one on every retry. Tags are now coerced to an array on write and on read.
 - `diff` no longer reports two runs as identical when one of them failed. Steps
   were compared on `step_type`, `name`, `input`, `output`, and `model` only —
   the step's `error` was never compared, and no trace-level field was compared
