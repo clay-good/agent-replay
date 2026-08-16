@@ -54,3 +54,54 @@ describe('safeRegex', () => {
     expect(safeRegex('read(_\\w+)?')!.test('read')).toBe(true);
   });
 });
+
+/**
+ * A `name_regex` runs on the guardrail path, so a pattern that backtracks
+ * exponentially doesn't merely run slowly — it stalls the check. In a harness
+ * that treats a timed-out hook as non-blocking, that DoS degrades into a
+ * fail-open, exactly what the kill-switch exists to prevent.
+ *
+ * The old check only caught a quantifier appearing immediately before the
+ * closing paren, so every form with the inner quantifier further left — or with
+ * an ambiguous alternation instead of a quantifier — slipped through and hung
+ * the matcher for seconds on a ~35-character input.
+ */
+describe('safeRegex catastrophic-backtracking rejection', () => {
+  const dangerous = [
+    '(a+)+',
+    '(a*)*',
+    '(a{2,})+',
+    '(x+){2,}',
+    '^(a|aa)+$',      // ambiguous alternation, no inner quantifier at all
+    '(\\s*\\w)*$',    // inner quantifier not adjacent to the paren
+    '^(.*,)*$',
+  ];
+  for (const pattern of dangerous) {
+    it(`rejects ${pattern}`, () => {
+      expect(safeRegex(pattern)).toBeNull();
+    });
+  }
+
+  const safe = [
+    '(\\d{3}){2}',    // bounded outer quantifier caps the work
+    '(a+){2}',
+    '(a+)?',          // 0-1 repetitions
+    '(abc)+',         // unambiguous body
+    '(?:abc)+',
+    '^(get|list)_x$', // alternation with no unbounded outer quantifier
+    '^delete_.*',
+    'rm\\s+-rf',
+    '[a|+*]+',        // those characters are literals inside a class
+    '\\(a\\+\\)\\+',  // and escaped outside one
+  ];
+  for (const pattern of safe) {
+    it(`still accepts ${pattern}`, () => {
+      expect(safeRegex(pattern)).not.toBeNull();
+    });
+  }
+
+  it('keeps a rejected pattern from stalling the matcher', () => {
+    // Before: ~11s for a 37-char input. Now the pattern never compiles.
+    expect(safeRegex('^(a|aa)+$')).toBeNull();
+  });
+});

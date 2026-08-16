@@ -83,23 +83,92 @@ export function safeParseFloat(str: string | undefined, fallback: number): numbe
 }
 
 /**
- * Compile a regex from user input with protection against ReDoS.
- * Returns null if the pattern is invalid or contains dangerous constructs.
+ * Does an unbounded quantifier (`+`, `*`, `{n,}`) start at `i`?
  *
- * Rejects patterns with nested quantifiers (e.g. `(a+)+`, `(a*)*`, `(a{2,})+`)
- * which are the most common cause of catastrophic backtracking.
+ * A *bounded* outer quantifier (`{n}`, `{n,m}`) caps total work, and `?` means
+ * 0–1 repetitions, so neither can drive catastrophic backtracking.
+ */
+function unboundedQuantifierAt(pattern: string, i: number): boolean {
+  const c = pattern[i];
+  if (c === '+' || c === '*') return true;
+  if (c !== '{') return false;
+  const close = pattern.indexOf('}', i);
+  return close !== -1 && /^\{\d+,\}$/.test(pattern.slice(i, close + 1));
+}
+
+/**
+ * Is this group body ambiguous — able to match one input in more than one way?
+ * That is what makes an unbounded outer quantifier explode: the engine has
+ * exponentially many ways to split the input across repetitions.
+ *
+ * Any quantifier inside (`a+`, `.*`, `\s*`) or any alternation (`a|aa`) creates
+ * that ambiguity. Escapes and character classes are skipped, since `\+` and
+ * `[+|]` are literals.
+ */
+function groupBodyIsAmbiguous(body: string): boolean {
+  let inClass = false;
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (c === '\\') { i++; continue; }
+    if (inClass) { if (c === ']') inClass = false; continue; }
+    if (c === '[') { inClass = true; continue; }
+    if (c === '|' || c === '+' || c === '*' || c === '{') return true;
+  }
+  return false;
+}
+
+/**
+ * Compile a regex from user input with protection against ReDoS.
+ * Returns null if the pattern is invalid or could backtrack catastrophically.
+ *
+ * A `name_regex` is evaluated on the guardrail path, so a pattern that
+ * backtracks exponentially doesn't just run slowly — it stalls the check. In a
+ * harness that treats a timed-out hook as non-blocking, that DoS degrades into
+ * a fail-open, which is exactly what the kill-switch exists to prevent.
+ *
+ * The rule: reject an unbounded quantifier applied to a group whose body is
+ * ambiguous (contains a quantifier or an alternation). That covers `(a+)+`,
+ * `(a|aa)+`, `(\s*\w)*` and `(.*,)*` alike — the previous check only caught a
+ * quantifier appearing immediately before the closing paren, so every form
+ * where the inner quantifier sat further left slipped through and hung the
+ * matcher for seconds on a ~35-character input.
+ *
+ * This is deliberately conservative: it can reject a pattern that would have
+ * been safe (`(foo|bar)+`, with disjoint branches). Rewriting a rejected
+ * pattern costs the user a minute; a stalled guardrail costs them the block.
  */
 export function safeRegex(pattern: string, flags = 'i'): RegExp | null {
-  // Reject nested quantifiers: a quantified group followed by an *unbounded*
-  // outer quantifier. Matches patterns like (x+)+, (x*)*, (x{1,3})+, (x+){2,}.
-  // The danger is the OUTER quantifier being open-ended (`+`, `*`, or `{n,}`):
-  // it lets a variable-length group repeat unboundedly, the source of
-  // catastrophic backtracking. A *bounded* outer quantifier (`{n}` or `{n,m}`,
-  // e.g. `(\d{3}){2}`) caps total work and is safe, so it must not be rejected —
-  // as is a trailing `?`, which makes the group optional (0–1 repetitions).
-  if (/([+*?]|\{\d+,?\d*\})\s*\)\s*([+*]|\{\d+,\})/.test(pattern)) {
-    return null;
+  const groupStarts: number[] = [];
+  let inClass = false;
+
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i];
+    if (c === '\\') { i++; continue; }
+    if (inClass) { if (c === ']') inClass = false; continue; }
+    if (c === '[') { inClass = true; continue; }
+
+    if (c === '(') {
+      // Skip the group-type prefix so `(?:`, `(?=`, `(?!`, `(?<=`, `(?<!` and
+      // `(?<name>` aren't read as quantifiers or alternations.
+      let bodyStart = i + 1;
+      if (pattern[bodyStart] === '?') {
+        const rest = pattern.slice(bodyStart);
+        const prefix = /^\?(:|=|!|<=|<!|<[A-Za-z_$][\w$]*>)/.exec(rest);
+        bodyStart += prefix ? prefix[0].length : 1;
+      }
+      groupStarts.push(bodyStart);
+      continue;
+    }
+
+    if (c === ')') {
+      const bodyStart = groupStarts.pop();
+      if (bodyStart === undefined) continue; // unbalanced; RegExp will reject it
+      if (unboundedQuantifierAt(pattern, i + 1) && groupBodyIsAmbiguous(pattern.slice(bodyStart, i))) {
+        return null;
+      }
+    }
   }
+
   try {
     return new RegExp(pattern, flags);
   } catch {

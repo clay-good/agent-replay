@@ -98,6 +98,18 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `name_regex` patterns that backtrack catastrophically are now rejected. The
+  check only caught a quantifier appearing immediately before a group's closing
+  paren, so `(a|aa)+`, `(\s*\w)*`, and `(.*,)*` all passed and then took seconds
+  — minutes, for a slightly longer name — to evaluate a ~35-character tool name.
+  Because `name_regex` runs on the guardrail path, that isn't merely slow: it
+  stalls the check, and a harness that treats a timed-out hook as non-blocking
+  turns the stall into a fail-open. The rule is now "an unbounded quantifier
+  applied to a group whose body contains a quantifier or an alternation", which
+  covers all of those forms. It is deliberately conservative and may reject a
+  pattern that would have been safe; bounded quantifiers (`(\d{3}){2}`),
+  unambiguous groups (`(abc)+`), and alternations without an unbounded outer
+  quantifier (`^(get|list)_x$`) are unaffected.
 - A malformed `hook` command line no longer blocks the host agent in capture
   mode. Commander reports every usage error (an unknown flag, a stray argument)
   as exit 2 — but in each supported harness exit 2 *blocks* the pending tool
