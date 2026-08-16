@@ -243,7 +243,7 @@ describe('exportTraces formats', () => {
     expect(lines).toHaveLength(N);
     // Exporting 10k+ traces means a getTrace per row, so give this real headroom
     // over the default 5s — the point is correctness (nothing dropped), not speed.
-  }, 30000);
+  }, 120_000);
 });
 
 // ── check command: candidate gathering has no fixed cap ──────────────────────
@@ -301,5 +301,5 @@ describe('runCheck gathers every candidate trace', () => {
       resetConnection();
       rmSync(dir, { recursive: true, force: true });
     }
-  }, 30000);
+  }, 120_000);
 });

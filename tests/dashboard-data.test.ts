@@ -55,6 +55,35 @@ describe('dashboardStats', () => {
     expect(s.totalCost).toBeCloseTo(0.04, 6);
   });
 
+  // Regression: `list` and `show` render duration via effectiveDurationMs, which
+  // falls back to ended_at - started_at. The aggregate averaged total_duration_ms
+  // alone, and the hook finalizer sets only ended_at — so on a store captured the
+  // normal way every trace showed a duration in `list` while `stats` reported
+  // "Avg duration: -", and a mixed store averaged only the explicit-total subset.
+  it('derives duration from start/end when total_duration_ms was never recorded', () => {
+    // 30s from timestamps only (the hook/record shape) + 10s explicit → 20s.
+    ingestTrace(db, trace({
+      started_at: '2026-08-16T10:00:00.000Z',
+      ended_at: '2026-08-16T10:00:30.000Z',
+    }));
+    ingestTrace(db, trace({
+      started_at: '2026-08-16T10:00:00.000Z',
+      ended_at: '2026-08-16T10:00:10.000Z',
+      total_duration_ms: 10000,
+    }));
+    expect(dashboardStats(db).avgDurationMs).toBe(20000);
+  });
+
+  it('excludes a trace with no usable duration rather than counting it as zero', () => {
+    ingestTrace(db, trace({
+      started_at: '2026-08-16T10:00:00.000Z',
+      ended_at: '2026-08-16T10:00:30.000Z',
+    }));
+    // Still running: no ended_at, no total — must not drag the average to 15s.
+    ingestTrace(db, trace({ status: 'running', started_at: '2026-08-16T10:00:00.000Z' }));
+    expect(dashboardStats(db).avgDurationMs).toBe(30000);
+  });
+
   it('returns null totals when there is nothing to aggregate', () => {
     const s = dashboardStats(db);
     expect(s).toMatchObject({ traces: 0, steps: 0, evals: 0, policies: 0, avgDurationMs: null, totalTokens: null, totalCost: null });

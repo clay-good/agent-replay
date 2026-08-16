@@ -43,7 +43,21 @@ export function dashboardStats(db: Database.Database, opts: StatsFilter = {}): D
     evals: count(`SELECT COUNT(*) as cnt FROM agent_trace_evals ${childWhere}`, p),
     // Active policies are current config, not historical events — never windowed.
     policies: count('SELECT COUNT(*) as cnt FROM guardrail_policies WHERE enabled = 1'),
-    avgDurationMs: scalar(`SELECT AVG(total_duration_ms) as v FROM agent_traces WHERE total_duration_ms IS NOT NULL ${traceAnd}`, p),
+    // Mirror effectiveDurationMs (utils/time.ts) in SQL: fall back to
+    // ended_at - started_at when the explicit total wasn't recorded. Averaging
+    // total_duration_ms alone disagreed with what `list` and `show` display,
+    // because the hook finalizer sets only ended_at — so on a store built the
+    // normal way (`hook` / `record`) every trace showed a duration in `list`
+    // while `stats` reported "Avg duration: -". AVG already skips NULLs, so the
+    // CASE yielding NULL for an unusable pair excludes that trace, as before.
+    avgDurationMs: scalar(
+      `SELECT ROUND(AVG(COALESCE(
+         total_duration_ms,
+         CASE WHEN ended_at IS NOT NULL AND julianday(ended_at) >= julianday(started_at)
+              THEN (julianday(ended_at) - julianday(started_at)) * 86400000.0 END
+       ))) as v FROM agent_traces ${traceWhere}`,
+      p,
+    ),
     totalTokens: scalar(`SELECT SUM(total_tokens) as v FROM agent_traces WHERE total_tokens IS NOT NULL ${traceAnd}`, p),
     totalCost: scalar(`SELECT SUM(total_cost_usd) as v FROM agent_traces WHERE total_cost_usd IS NOT NULL ${traceAnd}`, p),
   };

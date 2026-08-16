@@ -98,6 +98,15 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `stats` and the `dashboard` now report an average duration for traces that
+  carry only timestamps. The aggregate averaged `total_duration_ms` alone, while
+  `list` and `show` render duration via `effectiveDurationMs`, which falls back
+  to `ended_at - started_at`. The hook finalizer records only `ended_at`, so on a
+  store captured the normal way (`hook` or `record`) every trace showed a
+  duration in `list` while `stats` reported `Avg duration: -`; on a mixed store
+  the average covered only the subset with an explicit total. The aggregate now
+  applies the same fallback in SQL. A trace with no usable duration (still
+  running, or no `ended_at`) is still excluded rather than counted as zero.
 - `hook --enforce` now closes the `tool_call` step of a denied call, so a
   concurrent call's result can't be recorded against it. A denied call never
   runs, so no `PostToolUse` ever arrived to close its step — and left open it was
