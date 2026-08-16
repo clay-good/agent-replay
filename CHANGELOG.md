@@ -98,6 +98,18 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `hook --enforce` now closes the `tool_call` step of a denied call, so a
+  concurrent call's result can't be recorded against it. A denied call never
+  runs, so no `PostToolUse` ever arrived to close its step — and left open it was
+  the newest unclosed step for that tool name, which is exactly what the
+  post-tool handler looks for. The next `PostToolUse` for that name, belonging to
+  a different call allowed in the same parallel batch, therefore closed the
+  *blocked* step: the audit trail showed the blocked command completing
+  successfully with another call's output, while the call that really ran stayed
+  open forever. The denied step is now closed on the verdict with the blocking
+  policy recorded in its `error`. A `require_review` step is deliberately left
+  open, since it maps to `ask` and an approved call still runs and closes
+  normally.
 - `eval`'s deterministic error criteria now detect the failures that live
   capture actually records, so `eval` works as a CI gate on the runs it exists
   for. `hallucination-check`'s `no_error_steps` and `completeness-check`'s

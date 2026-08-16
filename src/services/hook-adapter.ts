@@ -299,6 +299,34 @@ export function applyHookPayload(
         return { action, dialect, traceId, note: `allowed tool_call "${toolName}"` };
       }
 
+      // A denied call never executes, so no PostToolUse will ever close its
+      // step. Left open it stays the newest unclosed step for that tool name,
+      // and findOpenToolStep (ORDER BY step_number DESC) then hands it the
+      // NEXT PostToolUse for that name — which belongs to a different, allowed
+      // call that ran concurrently (harnesses dispatch tools in parallel
+      // batches). The audit trail then shows the blocked command completing
+      // successfully with another call's output, while the call that really ran
+      // stays open forever. Close it here with the block recorded instead.
+      //
+      // Only `deny` is closed: `require_review` maps to `ask`, which the user
+      // can approve, so that call may still run and legitimately close later.
+      //
+      // Best-effort like the guard_check write below — a failure here must not
+      // abort the block and turn an infra error into a safety fail-open.
+      if (verdict.action === 'deny') {
+        try {
+          updateStep(db, traceId, toolStepNumber, {
+            ended_at: isoNow(),
+            duration_ms: 0,
+            error: `blocked by policy ${verdict.policy ?? '?'}${verdict.reason ? `: ${verdict.reason}` : ''}`,
+          });
+        } catch (err) {
+          process.stderr.write(
+            `agent-replay hook: could not close the denied tool_call step (still enforcing deny): ${err instanceof Error ? err.message : String(err)}\n`,
+          );
+        }
+      }
+
       // Record the guard_check for the audit trail — best-effort. A write
       // failure here must NOT abort the block: the verdict is already decided,
       // and letting the error propagate would let hook.ts swallow it and exit 0

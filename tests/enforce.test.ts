@@ -73,6 +73,77 @@ describe('enforcement recording', () => {
     expect(guard.output).toMatchObject({ action: 'deny', policy: 'no-delete' });
   });
 
+  // Regression: a denied call never runs, so no PostToolUse ever closes its step.
+  // Left open it was the newest unclosed step for that tool name, so the next
+  // PostToolUse — belonging to a different, allowed call running concurrently in
+  // the same parallel batch — closed the BLOCKED step with the allowed call's
+  // output. The audit trail then asserted the blocked command ran and succeeded,
+  // while the call that really ran stayed open forever.
+  it('closes a denied tool_call so a concurrent call\'s result cannot land on it', () => {
+    addPolicy(db, { name: 'no-rm', action: 'deny', match_pattern: { step_type: 'tool_call', input_contains: 'rm -rf' } });
+    const session = 'sess-parallel';
+    applyHookPayload(db, { hook_event_name: 'UserPromptSubmit', session_id: session, prompt: 'go' });
+
+    // Two Bash calls dispatched in one batch: the first is allowed and still
+    // running, the second is blocked.
+    applyHookPayload(
+      db,
+      { hook_event_name: 'PreToolUse', session_id: session, tool_name: 'Bash', tool_input: { command: 'sleep 30' } },
+      { enforce: true },
+    );
+    const denied = applyHookPayload(
+      db,
+      { hook_event_name: 'PreToolUse', session_id: session, tool_name: 'Bash', tool_input: { command: 'rm -rf /' } },
+      { enforce: true },
+    );
+    expect(denied.enforcement?.action).toBe('deny');
+
+    // The allowed call finishes; its result must land on the allowed step.
+    applyHookPayload(db, {
+      hook_event_name: 'PostToolUse',
+      session_id: session,
+      tool_name: 'Bash',
+      tool_output: { stdout: 'done sleeping' },
+    });
+
+    const trace = getTrace(db, listTraces(db, { session_id: session }).items[0].id)!;
+    const tools = trace.steps.filter((s) => s.step_type === 'tool_call');
+    const allowed = tools.find((s) => JSON.stringify(s.input).includes('sleep 30'))!;
+    const blocked = tools.find((s) => JSON.stringify(s.input).includes('rm -rf'))!;
+
+    // The blocked call never ran: no output, and the block is on the record.
+    expect(blocked.output).toBeNull();
+    expect(blocked.error).toContain('blocked by policy no-rm');
+    expect(blocked.ended_at).not.toBeNull();
+
+    // The call that actually ran got its own result.
+    expect(allowed.output).toEqual({ stdout: 'done sleeping' });
+  });
+
+  it('leaves a require_review tool_call open, since an approved call still runs', () => {
+    // require_review maps to `ask`: the user can approve, and the tool then runs
+    // and legitimately closes via PostToolUse. Closing it on the verdict would
+    // discard the real result.
+    addPolicy(db, { name: 'review-rm', action: 'require_review', match_pattern: { step_type: 'tool_call', input_contains: 'rm -rf' } });
+    const session = 'sess-review';
+    applyHookPayload(db, { hook_event_name: 'UserPromptSubmit', session_id: session, prompt: 'go' });
+    applyHookPayload(
+      db,
+      { hook_event_name: 'PreToolUse', session_id: session, tool_name: 'Bash', tool_input: { command: 'rm -rf /tmp/x' } },
+      { enforce: true },
+    );
+    applyHookPayload(db, {
+      hook_event_name: 'PostToolUse',
+      session_id: session,
+      tool_name: 'Bash',
+      tool_output: { stdout: 'approved and removed' },
+    });
+
+    const trace = getTrace(db, listTraces(db, { session_id: session }).items[0].id)!;
+    const tool = trace.steps.find((s) => s.step_type === 'tool_call')!;
+    expect(tool.output).toEqual({ stdout: 'approved and removed' });
+  });
+
   it('still enforces an input-based deny under --no-input, while redacting the stored input', () => {
     // --no-input is a privacy flag; it must not turn a content-based kill-switch
     // into a no-op. The policy is evaluated against the real arguments (so the
