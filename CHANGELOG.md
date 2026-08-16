@@ -98,6 +98,15 @@ trace schema is unchanged.
 
 ### Fixed
 
+- An interrupted `codex exec --json` run is no longer recorded as `completed`.
+  The translator never declared that its stream has a terminal event
+  (`turn.completed`), so reaching EOF without one still closed the trace cleanly
+  — a killed or crashed run looked like a successful one. It now stays `running`
+  so `record` finalizes it as `timeout`, matching the native protocol and the
+  gemini stream, which already behaved this way.
+- Codex token totals are summed numerically. `usage` was only *cast* to numbers,
+  so a producer sending `"5"` and `"7"` produced `0 + "5" + "7"` — the string
+  `"057"`, stored as 57 tokens instead of 12, silently and with no warning.
 - An OpenTelemetry span that captured its own exception is now recorded as a
   failure. Error detection keyed solely on `status.code`, missing the two other
   ways a failure arrives: an `exception` span event — what `recordException`

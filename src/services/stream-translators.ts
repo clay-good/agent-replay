@@ -89,6 +89,11 @@ const CODEX_ITEM_STEP_TYPE: Record<string, string> = {
 
 export class CodexExecTranslator extends BaseTranslator {
   protected agentName = 'codex';
+  // `turn.completed` is this stream's terminal event, so reaching EOF without
+  // it means the run was interrupted. Without this the trace was closed as
+  // `completed`, reporting a killed run as a clean one — the same defect
+  // already fixed for the gemini stream.
+  protected expectsTerminalEvent = true;
 
   translate(obj: Record<string, unknown>): CaptureEvent[] {
     const type = String(obj.type ?? '');
@@ -99,8 +104,12 @@ export class CodexExecTranslator extends BaseTranslator {
     }
 
     if (type === 'turn.completed') {
-      const usage = obj.usage as Record<string, number> | undefined;
-      if (usage) this.totalTokens += (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0);
+      this.sawTerminal = true;
+      const usage = obj.usage as Record<string, unknown> | undefined;
+      // Coerce: `usage` is only *cast* to numbers, so a producer sending
+      // "5"/"7" made `0 + "5" + "7"` concatenate to "057" and store 57 tokens
+      // instead of 12, silently and with no warning.
+      if (usage) this.totalTokens += toNum(usage.input_tokens) + toNum(usage.output_tokens);
       return [];
     }
 
@@ -238,6 +247,12 @@ export function makeTranslator(format: string): StreamTranslator | null {
   if (format === 'codex-exec') return new CodexExecTranslator();
   if (format === 'gemini-stream') return new GeminiStreamTranslator();
   return null;
+}
+
+/** A finite number from a producer value, or 0 — never a string to concatenate. */
+function toNum(v: unknown): number {
+  const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN;
+  return Number.isFinite(n) ? n : 0;
 }
 
 function str(v: unknown): string | undefined {

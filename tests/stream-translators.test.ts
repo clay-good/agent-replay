@@ -29,6 +29,43 @@ function run(t: StreamTranslator, inputs: Record<string, unknown>[], finalize = 
 // ── codex exec --json ──────────────────────────────────────────────────────
 
 describe('CodexExecTranslator', () => {
+  // Regression: `turn.completed` is this stream's terminal event, but the
+  // translator never declared it expected one, so finalize() closed the trace
+  // as `completed` at EOF — reporting a killed run as a clean one. The
+  // identical gemini case was already fixed; codex was left behind.
+  it('does not record a cut-off run as completed even when finalize runs at EOF', () => {
+    const t = makeTranslator('codex-exec')!;
+    const id = run(t, [
+      { type: 'thread.started', thread_id: 'th_cut' },
+      { type: 'item.completed', item: { item_type: 'agent_message', text: 'hi' } },
+    ], true);
+    // Stays running so `record` finalizes it as timeout, like the native path.
+    expect(getTrace(db, id)!.status).toBe('running');
+  });
+
+  it('records a clean run as completed once turn.completed arrives', () => {
+    const t = makeTranslator('codex-exec')!;
+    const id = run(t, [
+      { type: 'thread.started', thread_id: 'th_ok' },
+      { type: 'item.completed', item: { item_type: 'agent_message', text: 'hi' } },
+      { type: 'turn.completed', usage: { input_tokens: 5, output_tokens: 7 } },
+    ], true);
+    const trace = getTrace(db, id)!;
+    expect(trace.status).toBe('completed');
+    expect(trace.total_tokens).toBe(12);
+  });
+
+  // Regression: `usage` was only *cast* to numbers, so string counts made
+  // `0 + "5" + "7"` concatenate to "057" and store 57 instead of 12.
+  it('sums string token counts numerically, not by concatenation', () => {
+    const t = makeTranslator('codex-exec')!;
+    const id = run(t, [
+      { type: 'thread.started', thread_id: 'th_str' },
+      { type: 'turn.completed', usage: { input_tokens: '5', output_tokens: '7' } },
+    ], true);
+    expect(getTrace(db, id)!.total_tokens).toBe(12);
+  });
+
   it('maps a thread into a trace with typed steps and token totals', () => {
     const t = makeTranslator('codex-exec')!;
     const id = run(t, [
