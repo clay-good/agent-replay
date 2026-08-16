@@ -177,3 +177,77 @@ describe('correlation and privacy', () => {
     expect(listTraces(db, {}).total).toBe(0);
   });
 });
+
+// ── runHook: no-payload handling (fail-closed under --enforce) ─────────────
+
+/**
+ * `runHook` reads one payload from stdin. When stdin is empty or unreadable we
+ * never saw a payload and therefore could not evaluate policies — the same
+ * position as a throw before the verdict, which the command deliberately fails
+ * closed on. Both branches used to `return` with exit 0 above all the
+ * fail-closed logic, without ever consulting `--enforce`: a harness crash or a
+ * broken pipe silently ALLOWED the pending tool call on a gate that exists to
+ * stop it.
+ */
+describe('runHook with no payload', () => {
+  let stdout: string[];
+  let writeSpy: ReturnType<typeof vi.spyOn>;
+  let errSpy: ReturnType<typeof vi.spyOn>;
+  const realStdin = process.stdin;
+
+  function setStdin(chunks: string[]) {
+    Object.defineProperty(process, 'stdin', {
+      value: { async *[Symbol.asyncIterator]() { for (const c of chunks) yield c; } },
+      configurable: true,
+    });
+  }
+
+  beforeEach(() => {
+    stdout = [];
+    writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation((c: unknown) => {
+      stdout.push(String(c));
+      return true;
+    }) as unknown as ReturnType<typeof vi.spyOn>;
+    errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.exitCode = undefined;
+  });
+
+  afterEach(() => {
+    writeSpy.mockRestore();
+    errSpy.mockRestore();
+    Object.defineProperty(process, 'stdin', { value: realStdin, configurable: true });
+    process.exitCode = undefined;
+  });
+
+  it('blocks a gating event under --enforce when stdin is empty', async () => {
+    const { runHook } = await import('../src/commands/hook.js');
+    setStdin(['']);
+    await runHook('PreToolUse', { enforce: true, dir: '/nonexistent-should-not-be-touched' });
+
+    const decision = JSON.parse(stdout.join('')) as {
+      hookSpecificOutput: { permissionDecision: string; permissionDecisionReason: string };
+    };
+    expect(decision.hookSpecificOutput.permissionDecision).toBe('deny');
+    expect(decision.hookSpecificOutput.permissionDecisionReason).toContain('fail closed');
+  });
+
+  it('stays silent in capture mode when stdin is empty', async () => {
+    const { runHook } = await import('../src/commands/hook.js');
+    setStdin(['']);
+    await runHook('PreToolUse', { dir: '/nonexistent-should-not-be-touched' });
+
+    // Capture must never write to stdout — stdout is read as a hook decision.
+    expect(stdout.join('')).toBe('');
+    expect(process.exitCode).toBe(0);
+  });
+
+  it('allows a non-gating event under --enforce when stdin is empty', async () => {
+    const { runHook } = await import('../src/commands/hook.js');
+    setStdin(['']);
+    await runHook('Stop', { enforce: true, dir: '/nonexistent-should-not-be-touched' });
+
+    // Only pre_tool gates an action; blocking anything else would be noise.
+    expect(stdout.join('')).toBe('');
+    expect(process.exitCode).toBe(0);
+  });
+});

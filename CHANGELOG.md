@@ -98,6 +98,15 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `hook --enforce` now fails closed when stdin carries no payload. An empty or
+  unreadable stdin (a harness crash, a broken pipe) returned exit 0 before any
+  of the fail-closed logic and without ever consulting `--enforce`, so the
+  pending tool call was allowed on a gate that exists to stop it. Having seen no
+  payload is the same position as a throw before the verdict, which already
+  fails closed; a gating (`pre_tool`) route now emits the dialect's block, and
+  everything else still allows. The documented allow on a *malformed* payload is
+  unchanged — there the harness did send something, and that allow is a
+  deliberate choice.
 - A plain-string `input` or `output` is no longer silently discarded. Nothing
   requires a producer to send an object — `validateTraceInput` accepts
   `input: "summarize the doc"` and the live event protocol never type-checks

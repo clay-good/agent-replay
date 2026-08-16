@@ -17,11 +17,38 @@ export interface HookOptions {
  * failure is logged to stderr and swallowed so the host agent is never affected.
  */
 export async function runHook(eventArg: string | undefined, opts: HookOptions = {}): Promise<void> {
+  /**
+   * We never saw a payload, so we could not evaluate policies — the same
+   * position as a throw before the verdict below, which deliberately fails
+   * closed. Emit the dialect's block for a `pre_tool` route (the only event that
+   * gates an action) and allow otherwise. Returns true when it answered.
+   *
+   * Routing has to come from `eventArg` alone here: with no payload there is
+   * nothing to detect a dialect from, so this only ever fires for a hook
+   * registered as `agent-replay hook PreToolUse --enforce`, where the intent to
+   * gate is explicit.
+   */
+  function failClosedWithoutPayload(reason: string): boolean {
+    if (!opts.enforce) return false;
+    const { action, dialect } = resolveHookRouting({}, eventArg);
+    if (action !== 'pre_tool') return false;
+    const resp = formatEnforcementResponse(
+      dialect,
+      { action: 'deny', policy: null, reason: `agent-replay received no hook payload (${reason}); blocking to fail closed` },
+      eventArg ?? 'PreToolUse',
+    );
+    if (resp.stdout) process.stdout.write(`${JSON.stringify(resp.stdout)}\n`);
+    if (resp.stderrReason) console.error(`agent-replay hook: BLOCK (fail-closed) — ${resp.stderrReason}`);
+    process.exitCode = resp.exitCode;
+    return true;
+  }
+
   let raw = '';
   try {
     for await (const chunk of process.stdin) raw += chunk;
   } catch (err) {
     console.error(`agent-replay hook: failed to read stdin: ${errorMessage(err)}`);
+    if (failClosedWithoutPayload(`stdin read failed: ${errorMessage(err)}`)) return;
     process.exitCode = 0;
     return;
   }
@@ -29,6 +56,7 @@ export async function runHook(eventArg: string | undefined, opts: HookOptions = 
   const trimmed = raw.trim();
   if (!trimmed) {
     console.error('agent-replay hook: empty payload, nothing to record');
+    if (failClosedWithoutPayload('empty stdin')) return;
     process.exitCode = 0;
     return;
   }
@@ -43,7 +71,9 @@ export async function runHook(eventArg: string | undefined, opts: HookOptions = 
     console.error(`agent-replay hook: invalid JSON payload: ${errorMessage(err)}`);
     // Not a real, actionable tool call — capture-only, allow. (A malformed
     // payload is the harness misbehaving, not a policy decision; blocking every
-    // event on garbage input would be worse than the capture gap.)
+    // event on garbage input would be worse than the capture gap.) Deliberately
+    // NOT routed through failClosedWithoutPayload above: unlike empty stdin, the
+    // harness did send something, and this allow is an explicit design choice.
     process.exitCode = 0;
     return;
   }
