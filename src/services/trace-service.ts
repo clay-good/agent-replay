@@ -42,15 +42,48 @@ function now(): string {
   return new Date().toISOString();
 }
 
+/**
+ * A string bound to a JSON TEXT column is passed through only when it already
+ * IS JSON — that passthrough exists for callers handing us a pre-serialized
+ * payload. Anything else has to be encoded: raw text written into a JSON column
+ * fails `parseJson` on the way back out, so every reader (show, diff, export,
+ * replay, the golden gate) saw `{}` or `null` where the data used to be.
+ *
+ * Nothing validates that a producer sends an object — `validateTraceInput`
+ * accepts `input: "summarize the doc"` and the event protocol never type-checks
+ * `input`/`output` — so `ingest` and live `record`/`hook` capture all took a
+ * plain-string prompt and silently dropped it, exit 0, no warning.
+ */
+function isJsonText(val: string): boolean {
+  try {
+    JSON.parse(val);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function jsonStr(val: unknown): string {
   if (val === undefined || val === null) return '{}';
+  if (typeof val === 'string') return isJsonText(val) ? val : JSON.stringify(val);
+  return JSON.stringify(val);
+}
+
+/**
+ * For the plain-TEXT `error` column, which is read back raw rather than through
+ * `parseJson`: a string is stored as-is and a structured error is flattened to
+ * JSON text. Do NOT use this for a JSON column — see `jsonColOrNull`.
+ */
+function jsonOrNull(val: unknown): string | null {
+  if (val === undefined || val === null) return null;
   if (typeof val === 'string') return val;
   return JSON.stringify(val);
 }
 
-function jsonOrNull(val: unknown): string | null {
+/** `jsonStr`'s nullable form, for a nullable JSON column (`output`). */
+function jsonColOrNull(val: unknown): string | null {
   if (val === undefined || val === null) return null;
-  if (typeof val === 'string') return val;
+  if (typeof val === 'string') return isJsonText(val) ? val : JSON.stringify(val);
   return JSON.stringify(val);
 }
 
@@ -212,7 +245,7 @@ function insertTraceRow(
     (TRIGGER_TYPES as readonly string[]).includes(input.trigger as string) ? input.trigger : 'manual',
     status,
     jsonStr(input.input),
-    jsonOrNull(input.output),
+    jsonColOrNull(input.output),
     input.started_at ?? timestamp,
     input.ended_at ?? null,
     input.total_duration_ms ?? null,
@@ -258,7 +291,7 @@ export function ingestTrace(
         step.step_type,
         step.name,
         jsonStr(step.input),
-        jsonOrNull(step.output),
+        jsonColOrNull(step.output),
         step.started_at ?? timestamp,
         step.ended_at ?? null,
         step.duration_ms ?? null,
@@ -382,7 +415,7 @@ export function mergeBatchIntoTrace(
         step.step_type,
         step.name,
         jsonStr(step.input),
-        jsonOrNull(step.output),
+        jsonColOrNull(step.output),
         step.started_at ?? timestamp,
         step.ended_at ?? null,
         step.duration_ms ?? null,
@@ -462,7 +495,7 @@ export function mergeBatchIntoTrace(
       agentName,
       status,
       jsonStr(traceInput),
-      jsonOrNull(traceOutput),
+      jsonColOrNull(traceOutput),
       startedAt,
       endedAt,
       duration ?? null,
@@ -536,7 +569,7 @@ export function appendStep(
       input.step_type,
       input.name,
       jsonStr(input.input),
-      jsonOrNull(input.output),
+      jsonColOrNull(input.output),
       input.started_at ?? timestamp,
       input.ended_at ?? null,
       input.duration_ms ?? null,
@@ -609,7 +642,7 @@ export function updateStep(
 
   if (patch.output !== undefined) {
     sets.push('output = ?');
-    params.push(jsonOrNull(patch.output));
+    params.push(jsonColOrNull(patch.output));
   }
   if (patch.ended_at !== undefined) {
     sets.push('ended_at = ?');

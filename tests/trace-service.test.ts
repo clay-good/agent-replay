@@ -94,6 +94,41 @@ describe('ingestTrace', () => {
     expect(trace.tags).toEqual(['test']);
   });
 
+  // Regression: nothing rejects a plain-string input/output — validateTraceInput
+  // accepts it and the event protocol never type-checks these fields — and the
+  // encode helper passed any string through unquoted into a JSON TEXT column.
+  // parseJson then failed on the way back out, so the prompt and the answer read
+  // as `{}` / `null` from every consumer (show, diff, export, the golden gate),
+  // silently, with exit 0.
+  it('preserves a plain-string input/output instead of reading it back as {}', () => {
+    const trace = ingestTrace(db, {
+      agent_name: 'strbot',
+      status: 'completed',
+      input: 'summarize the quarterly report' as unknown as Record<string, unknown>,
+      output: 'here is the summary' as unknown as Record<string, unknown>,
+      steps: [{
+        step_number: 1,
+        step_type: 'tool_call',
+        name: 'search',
+        input: 'query text' as unknown as Record<string, unknown>,
+      }],
+    });
+    const full = getTrace(db, trace.id)!;
+    expect(full.input).toBe('summarize the quarterly report');
+    expect(full.output).toBe('here is the summary');
+    expect(full.steps[0].input).toBe('query text');
+  });
+
+  it('still passes an already-serialized JSON string through unchanged', () => {
+    const trace = ingestTrace(db, {
+      agent_name: 'strbot',
+      status: 'completed',
+      input: '{"task":"pre-serialized"}' as unknown as Record<string, unknown>,
+      steps: [{ step_number: 1, step_type: 'output', name: 'o' }],
+    });
+    expect(getTrace(db, trace.id)!.input).toEqual({ task: 'pre-serialized' });
+  });
+
   it('inserts steps correctly', () => {
     const trace = ingestTrace(db, makeTrace());
     const full = getTrace(db, trace.id);

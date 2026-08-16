@@ -98,6 +98,20 @@ trace schema is unchanged.
 
 ### Fixed
 
+- A plain-string `input` or `output` is no longer silently discarded. Nothing
+  requires a producer to send an object — `validateTraceInput` accepts
+  `input: "summarize the doc"` and the live event protocol never type-checks
+  these fields — but the encode helper wrote any string into the JSON column
+  unquoted. Parsing it back then failed, so the user's prompt and the agent's
+  answer read as `{}` and `null` from every consumer (`show`, `diff`, `export`,
+  `replay`), with exit 0 and no warning. The damage carried into the regression
+  gate too: every affected trace hashed to the same empty input, collapsing
+  unrelated cases into one golden bucket and comparing `{}` against `{}`, so a
+  real tool-input regression passed green. A string is now passed through only
+  when it already is valid JSON (the case that passthrough exists for) and
+  otherwise encoded. Affects `ingest`, `record`, and `hook` alike. The plain-TEXT
+  `error` column is unchanged — it is read back raw, so a string error is still
+  stored as-is.
 - `stats` and the `dashboard` now report an average duration for traces that
   carry only timestamps. The aggregate averaged `total_duration_ms` alone, while
   `list` and `show` render duration via `effectiveDurationMs`, which falls back
