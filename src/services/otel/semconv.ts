@@ -213,7 +213,10 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
     const stepNumberOf = new Map<string, number>();
     stepSpans.forEach((s, i) => stepNumberOf.set(s.spanId, i + 1));
 
-    let totalTokens = 0;
+    // The root's own usage counts toward the trace. It is excluded from
+    // stepSpans, so summing only those dropped it: a single-span agent trace
+    // reported `total_tokens: null` despite carrying 150 tokens.
+    let totalTokens = root ? inputTokens(root.attrs) + outputTokens(root.attrs) : 0;
     const anyError = group.some((s) => s.errorMessage);
 
     const steps: IngestStepInput[] = stepSpans.map((s, i) => {
@@ -222,7 +225,16 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
       const stepType = classify(s.name, s.attrs).stepType ?? 'thought';
       const tokens = inputTokens(s.attrs) + outputTokens(s.attrs);
       totalTokens += tokens;
-      const parent = s.parentSpanId ? stepNumberOf.get(s.parentSpanId) : undefined;
+      // Step numbers follow start-time order, but parentage is resolved by span
+      // id regardless of order — so a child that STARTS BEFORE its parent
+      // (clock skew, or an async wrapper) resolved to a forward reference, and
+      // a span naming itself as parent resolved to itself. `validateTraceInput`
+      // rejects both, so `otel serve` was persisting rows that `ingest` refuses
+      // — an export → ingest round-trip of an OTel trace failed. Keep only a
+      // strictly-earlier parent; `otel_parent_span_id` stays in metadata either
+      // way, which is what the cross-batch re-link uses.
+      const resolvedParent = s.parentSpanId ? stepNumberOf.get(s.parentSpanId) : undefined;
+      const parent = resolvedParent != null && resolvedParent < i + 1 ? resolvedParent : undefined;
       const duration = s.end && s.start ? Math.round((s.end - s.start) / 1e6) : null;
       // Same guard as the trace root below: messageContent never returns null (it
       // omits the `messages` key when the span has no output messages), so a
@@ -290,7 +302,16 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
       total_duration_ms:
         maxEnd != null && minStart != null ? Math.round((maxEnd - minStart) / 1e6) : null,
       total_tokens: totalTokens || null,
-      metadata: { source_format: 'otel-genai', otel_trace_id: group[0].traceId, ...(root ? {} : { synthetic_trace: true }) },
+      // Carry the root's own attributes (model, provider, and any unmapped
+      // gen_ai.* keys) the way every step already does — they were dropped
+      // entirely, so a single-span trace recorded no model or provider at all.
+      // The source keys are written last so they can't be shadowed.
+      metadata: {
+        ...(root ? stepMetadata(root.attrs, root.spanId, root.parentSpanId) : {}),
+        source_format: 'otel-genai',
+        otel_trace_id: group[0].traceId,
+        ...(root ? {} : { synthetic_trace: true }),
+      },
       steps,
     });
   }

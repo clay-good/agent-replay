@@ -4,6 +4,7 @@ import { runMigrations } from '../src/db/migrations.js';
 import { ingestTrace, getTrace, listTraces } from '../src/services/trace-service.js';
 import { mapOtlpTraces, attrsToMap, decodeAnyValue } from '../src/services/otel/semconv.js';
 import { handleTracesExport, startOtelReceiver, type OtelStats } from '../src/services/otel/receiver.js';
+import { validateTraceInput } from '../src/utils/validators.js';
 
 let db: Database.Database;
 
@@ -446,5 +447,71 @@ describe('mapOtlpTraces — failures not written to status', () => {
     const traces = mapOtlpTraces(otlp([spanWith({})]) as never);
     expect(traces[0].status).toBe('completed');
     expect(traces[0].steps![0].error).toBeNull();
+  });
+});
+
+// ── Root-span data and out-of-order parentage ─────────────────────────────
+
+describe('mapOtlpTraces — root span and parent ordering', () => {
+  // Regression: totalTokens summed only the step spans, and stepMetadata was
+  // never called for the root — so a single-span agent trace reported
+  // total_tokens: null and recorded no model or provider at all.
+  it("counts the root span's own tokens and keeps its attributes", () => {
+    const traces = mapOtlpTraces(otlp([
+      span({
+        traceId: 't1', spanId: 'a', name: 'invoke_agent', start: MS, end: 2 * MS,
+        attrs: {
+          'gen_ai.usage.input_tokens': 100,
+          'gen_ai.usage.output_tokens': 50,
+          'gen_ai.request.model': 'claude-opus-5',
+          'gen_ai.provider.name': 'anthropic',
+        },
+      }),
+    ]) as never);
+
+    expect(traces[0].total_tokens).toBe(150);
+    expect(traces[0].metadata).toMatchObject({
+      provider: 'anthropic',
+      source_format: 'otel-genai',
+    });
+  });
+
+  // Regression: step numbers follow start-time order while parentage resolves
+  // by span id, so a child that STARTS BEFORE its parent produced a forward
+  // reference — which validateTraceInput rejects. `otel serve` was persisting
+  // rows `ingest` refuses, breaking an export → ingest round-trip.
+  it('drops a forward parent reference when a child starts before its parent', () => {
+    const traces = mapOtlpTraces(otlp([
+      span({ traceId: 't1', spanId: 'a', name: 'invoke_agent', start: MS, end: 9 * MS, attrs: {} }),
+      span({ traceId: 't1', spanId: 'p', parentSpanId: 'a', name: 'chat', start: 1.5 * MS, end: 8 * MS, attrs: {} }),
+      // Starts before its parent `p` (clock skew / async wrapper).
+      span({ traceId: 't1', spanId: 'c', parentSpanId: 'p', name: 'execute_tool', start: 1.4 * MS, end: 7 * MS, attrs: {} }),
+    ]) as never);
+
+    const child = traces[0].steps!.find((s) => s.name === 'execute_tool')!;
+    expect(child.step_number).toBe(1);
+    expect(child.parent_step).toBeNull();
+    // The span id is still there, so a cross-batch re-link can repair it later.
+    expect(child.metadata).toMatchObject({ otel_parent_span_id: 'p' });
+    expect(validateTraceInput(traces[0]).valid).toBe(true);
+  });
+
+  it('drops a self-referencing parent', () => {
+    const traces = mapOtlpTraces(otlp([
+      span({ traceId: 't1', spanId: 'x', parentSpanId: 'x', name: 'chat', start: MS, end: 2 * MS, attrs: {} }),
+    ]) as never);
+    expect(traces[0].steps![0].parent_step).toBeNull();
+    expect(validateTraceInput(traces[0]).valid).toBe(true);
+  });
+
+  it('still nests a normally-ordered child under its parent', () => {
+    const traces = mapOtlpTraces(otlp([
+      span({ traceId: 't1', spanId: 'a', name: 'invoke_agent', start: MS, end: 9 * MS, attrs: {} }),
+      span({ traceId: 't1', spanId: 'p', parentSpanId: 'a', name: 'chat', start: 2 * MS, end: 8 * MS, attrs: {} }),
+      span({ traceId: 't1', spanId: 'c', parentSpanId: 'p', name: 'execute_tool', start: 3 * MS, end: 7 * MS, attrs: {} }),
+    ]) as never);
+    const child = traces[0].steps!.find((s) => s.name === 'execute_tool')!;
+    const parent = traces[0].steps!.find((s) => s.name === 'chat')!;
+    expect(child.parent_step).toBe(parent.step_number);
   });
 });

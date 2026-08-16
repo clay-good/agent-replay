@@ -98,6 +98,18 @@ trace schema is unchanged.
 
 ### Fixed
 
+- An OpenTelemetry root span's own tokens and attributes are no longer dropped.
+  The token total summed only the child spans and the root's attributes were
+  never carried, so a single-span agent trace reported no tokens, no model, and
+  no provider despite the span carrying all three.
+- An OpenTelemetry child span that starts *before* its parent no longer produces
+  an unusable parent reference. Step numbers follow start-time order while
+  parentage resolves by span id, so clock skew or an async wrapper yielded a
+  forward reference (and a self-referencing span pointed at itself) — shapes
+  `validateTraceInput` rejects, meaning `otel serve` persisted rows that `ingest`
+  refuses and an export → ingest round-trip of an OTel trace failed. Only a
+  strictly-earlier parent is kept; `otel_parent_span_id` still rides along in
+  metadata, so the cross-batch re-link can repair the link later.
 - An interrupted `codex exec --json` run is no longer recorded as `completed`.
   The translator never declared that its stream has a terminal event
   (`turn.completed`), so reaching EOF without one still closed the trace cleanly
