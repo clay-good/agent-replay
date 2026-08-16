@@ -381,3 +381,70 @@ describe('mapOtlpTraces (OpenLLMetry traceloop.*)', () => {
     expect(trace.total_tokens).toBe(48);
   });
 });
+
+// ── Failures that never touched span.status ───────────────────────────────
+
+/**
+ * Error detection keyed solely on `status.code`, missing the two other ways a
+ * failure reaches us: an `exception` span event (what `recordException` writes,
+ * and several instrumentations call it WITHOUT also setting the status) and an
+ * `error.type` attribute (what GenAI semconv sets on a failed operation). A
+ * span that captured its own exception was stored as a completed step on a
+ * completed trace, with the exception text preserved nowhere at all.
+ */
+describe('mapOtlpTraces — failures not written to status', () => {
+  function spanWith(extra: Record<string, unknown>) {
+    return {
+      traceId: 't1', spanId: 'b', name: 'execute_tool',
+      startTimeUnixNano: String(MS), endTimeUnixNano: String(2 * MS),
+      attributes: [], ...extra,
+    };
+  }
+
+  it('treats an exception span event as a failure', () => {
+    const traces = mapOtlpTraces(otlp([spanWith({
+      events: [{
+        name: 'exception',
+        attributes: [attr('exception.type', 'ValueError'), attr('exception.message', 'boom')],
+      }],
+    })]) as never);
+    expect(traces[0].status).toBe('failed');
+    expect(traces[0].steps![0].error).toBe('boom');
+  });
+
+  it('falls back to the exception type when it carries no message', () => {
+    const traces = mapOtlpTraces(otlp([spanWith({
+      events: [{ name: 'exception', attributes: [attr('exception.type', 'ValueError')] }],
+    })]) as never);
+    expect(traces[0].steps![0].error).toBe('ValueError');
+  });
+
+  it('treats a bare error.type attribute as a failure', () => {
+    const traces = mapOtlpTraces(otlp([spanWith({ attributes: [attr('error.type', '429')] })]) as never);
+    expect(traces[0].status).toBe('failed');
+    expect(traces[0].steps![0].error).toBe('429');
+  });
+
+  it('lets an explicit OK status win over the weaker signals', () => {
+    const traces = mapOtlpTraces(otlp([spanWith({
+      attributes: [attr('error.type', '429')],
+      status: { code: 1 },
+    })]) as never);
+    expect(traces[0].status).toBe('completed');
+    expect(traces[0].steps![0].error).toBeNull();
+  });
+
+  it('still prefers the status message when the status says ERROR', () => {
+    const traces = mapOtlpTraces(otlp([spanWith({
+      status: { code: 2, message: 'upstream 500' },
+      events: [{ name: 'exception', attributes: [attr('exception.message', 'boom')] }],
+    })]) as never);
+    expect(traces[0].steps![0].error).toBe('upstream 500');
+  });
+
+  it('leaves a clean span alone', () => {
+    const traces = mapOtlpTraces(otlp([spanWith({})]) as never);
+    expect(traces[0].status).toBe('completed');
+    expect(traces[0].steps![0].error).toBeNull();
+  });
+});

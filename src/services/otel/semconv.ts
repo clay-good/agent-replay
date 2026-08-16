@@ -124,7 +124,29 @@ export function flattenSpans(otlp: Record<string, unknown>): FlatSpan[] {
         const s = sp as Record<string, unknown>;
         const status = s.status as { code?: unknown; message?: string } | undefined;
         const attrs = attrsToMap(s.attributes as unknown[]);
-        const isError = String(status?.code) === '2' || String(status?.code) === 'STATUS_CODE_ERROR';
+        // A failure reaches us three ways, and keying on `status` alone missed
+        // two of them:
+        //   1. status.code = ERROR — the explicit case
+        //   2. an `exception` span event — what `recordException` records, and
+        //      several instrumentations call it WITHOUT also setting the status
+        //   3. an `error.type` attribute — what GenAI semconv sets on a failed
+        //      operation
+        // Missing 2 and 3 meant a span that captured its own exception was
+        // stored as a completed step on a completed trace, with the exception
+        // text preserved nowhere at all.
+        const exception = ((s.events as unknown[]) ?? [])
+          .map((e) => e as { name?: unknown; attributes?: unknown[] })
+          .find((e) => String(e.name ?? '') === 'exception');
+        const exAttrs = exception ? attrsToMap(exception.attributes) : {};
+        const exceptionMessage = str(exAttrs['exception.message']) ?? str(exAttrs['exception.type']);
+        const errorType = str(attrs['error.type']);
+        // An explicit OK status is a deliberate statement that the operation
+        // succeeded, so it wins over the weaker signals.
+        const explicitOk = String(status?.code) === '1' || String(status?.code) === 'STATUS_CODE_OK';
+        const isError =
+          String(status?.code) === '2' ||
+          String(status?.code) === 'STATUS_CODE_ERROR' ||
+          (!explicitOk && (exceptionMessage != null || errorType != null));
         out.push({
           traceId: String(s.traceId ?? ''),
           spanId: String(s.spanId ?? ''),
@@ -139,7 +161,9 @@ export function flattenSpans(otlp: Record<string, unknown>): FlatSpan[] {
           // would read as falsy in `anyError` below — silently recording the
           // failure as a completed trace. `str` treats '' as absent, so this
           // falls through to error.type, then a generic 'error'.
-          errorMessage: isError ? (str(status?.message) ?? str(attrs['error.type']) ?? 'error') : null,
+          errorMessage: isError
+            ? (str(status?.message) ?? exceptionMessage ?? errorType ?? 'error')
+            : null,
         });
       }
     }

@@ -39,6 +39,8 @@ export function span(opts: {
   end: bigint;
   attrs: Buffer[];
   error?: string;
+  /** Span.Event entries (field 11), e.g. a `recordException` event. */
+  events?: Array<{ name: string; attrs: Buffer[] }>;
 }): Buffer {
   const parts = [
     lenField(1, Buffer.from(opts.traceId, 'hex')),
@@ -48,6 +50,10 @@ export function span(opts: {
     fixed64Field(7, opts.start),
     fixed64Field(8, opts.end),
     ...opts.attrs.map((a) => lenField(9, a)),
+    // Span.Event{ name=2, attributes=3 } carried on Span.events=11
+    ...(opts.events ?? []).map((e) =>
+      lenField(11, Buffer.concat([strField(2, e.name), ...e.attrs.map((a) => lenField(3, a))])),
+    ),
     ...(opts.error ? [lenField(15, Buffer.concat([strField(2, opts.error), varintField(3, 2)]))] : []),
   ];
   return Buffer.concat(parts);

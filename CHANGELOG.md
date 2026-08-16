@@ -98,6 +98,16 @@ trace schema is unchanged.
 
 ### Fixed
 
+- An OpenTelemetry span that captured its own exception is now recorded as a
+  failure. Error detection keyed solely on `status.code`, missing the two other
+  ways a failure arrives: an `exception` span event — what `recordException`
+  writes, and several instrumentations call it *without* also setting the status
+  — and an `error.type` attribute, which GenAI semconv sets on a failed
+  operation. Such a span was stored as a completed step on a completed trace,
+  with the exception text preserved nowhere at all. Span events are also decoded
+  on the protobuf transport now (field 11 was skipped entirely, so protobuf
+  could not report this class of failure even in principle, while JSON could).
+  An explicit `OK` status still wins over both weaker signals.
 - Failures captured over the OpenTelemetry **logs** path are no longer invisible.
   That path had no error handling at all: the trace status was hardcoded
   `completed`, no step ever received an `error`, and `.api_error` records matched

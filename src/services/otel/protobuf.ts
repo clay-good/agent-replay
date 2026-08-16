@@ -136,10 +136,11 @@ function decodeKeyValues(buf: Buffer): unknown[] {
 }
 
 // Span: trace_id=1, span_id=2, parent_span_id=4, name=5, start=7 (fixed64),
-// end=8 (fixed64), attributes=9, status=15
+// end=8 (fixed64), attributes=9, events=11, status=15
 function decodeSpan(buf: Buffer): Record<string, unknown> {
   const span: Record<string, unknown> = {};
   const attributes: unknown[] = [];
+  const events: unknown[] = [];
   eachField(buf, (field, wire, r) => {
     switch (field) {
       case 1: span.traceId = r.bytes().toString('hex'); return true;
@@ -149,12 +150,31 @@ function decodeSpan(buf: Buffer): Record<string, unknown> {
       case 7: span.startTimeUnixNano = r.fixed64Str(); return true;
       case 8: span.endTimeUnixNano = r.fixed64Str(); return true;
       case 9: attributes.push(decodeKeyValue(r.bytes())); return true;
+      // Events carry `recordException`, which the mapper reads to detect a
+      // failure that was never written to `status`. Without decoding them the
+      // protobuf transport could not report such a failure at all, while the
+      // JSON transport could.
+      case 11: events.push(decodeSpanEvent(r.bytes())); return true;
       case 15: span.status = decodeStatus(r.bytes()); return true;
       default: return false;
     }
   });
   span.attributes = attributes;
+  span.events = events;
   return span;
+}
+
+// Span.Event: time_unix_nano=1 (fixed64), name=2, attributes=3
+function decodeSpanEvent(buf: Buffer): Record<string, unknown> {
+  const event: Record<string, unknown> = {};
+  const attributes: unknown[] = [];
+  eachField(buf, (field, wire, r) => {
+    if (field === 2) { event.name = r.string(); return true; }
+    if (field === 3) { attributes.push(decodeKeyValue(r.bytes())); return true; }
+    return false;
+  });
+  event.attributes = attributes;
+  return event;
 }
 
 // Status: message=2, code=3

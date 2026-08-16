@@ -197,3 +197,47 @@ describe('decodeLogsData → mapOtlpLogs', () => {
     expect(res.status).toBe(400);
   });
 });
+
+// ── Span events over the protobuf transport ───────────────────────────────
+
+/**
+ * The decoder skipped Span.events (field 11) entirely, so a failure recorded
+ * only via `recordException` — no `status` set — could not be reported at all
+ * over protobuf, while the JSON transport could. The two transports must agree.
+ */
+describe('Span.events decoding', () => {
+  it('surfaces a recordException failure sent as protobuf', () => {
+    const body = tracesData([
+      span({
+        traceId: 'aa'.repeat(16), spanId: 'bb'.repeat(8), name: 'execute_tool',
+        start: 1_000_000n, end: 2_000_000n,
+        attrs: [keyValue('gen_ai.tool.name', anyStr('write'))],
+        events: [{
+          name: 'exception',
+          attrs: [
+            keyValue('exception.type', anyStr('ValueError')),
+            keyValue('exception.message', anyStr('boom')),
+          ],
+        }],
+      }),
+    ]);
+
+    const decoded = decodeTracesData(body) as Record<string, unknown>;
+    const traces = mapOtlpTraces(decoded);
+    expect(traces[0].status).toBe('failed');
+    expect(traces[0].steps![0].error).toBe('boom');
+  });
+
+  it('leaves a span with no events alone', () => {
+    const body = tracesData([
+      span({
+        traceId: 'aa'.repeat(16), spanId: 'cc'.repeat(8), name: 'execute_tool',
+        start: 1_000_000n, end: 2_000_000n,
+        attrs: [keyValue('gen_ai.tool.name', anyStr('read'))],
+      }),
+    ]);
+    const traces = mapOtlpTraces(decodeTracesData(body) as Record<string, unknown>);
+    expect(traces[0].status).toBe('completed');
+    expect(traces[0].steps![0].error).toBeNull();
+  });
+});
