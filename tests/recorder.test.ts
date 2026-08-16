@@ -395,3 +395,57 @@ describe('malformed producer scalars', () => {
     expect(getTrace(db, 'trc_ns')!.steps[0].tokens_used).toBe(1234);
   });
 });
+
+// ── Causal references must point strictly earlier ─────────────────────────
+
+/**
+ * `ingest` validates that parent_step / caused_by_step reference an earlier
+ * step, but the live record/SDK path passed producer values straight through —
+ * and causalWalk's contract ("references are validated to point strictly
+ * earlier, so the walk is acyclic") depends on it. A forward reference made
+ * `why` present time-travelling causality as fact: step 1 rendered
+ * "caused by #2", a step that had not happened yet.
+ */
+describe('step reference validation on the live path', () => {
+  function twoSteps(firstCausedBy: number): TraceWithDetails {
+    applyEvent(db, { v: 1, type: 'trace_start', trace_id: 'trc_ref', agent_name: 'a' } as CaptureEvent);
+    applyEvent(db, {
+      v: 1, type: 'step', trace_id: 'trc_ref', step_number: 1, step_type: 'llm_call', name: 'one',
+      caused_by_step: firstCausedBy,
+    } as CaptureEvent);
+    applyEvent(db, {
+      v: 1, type: 'step', trace_id: 'trc_ref', step_number: 2, step_type: 'tool_call', name: 'two',
+      caused_by_step: 1,
+    } as CaptureEvent);
+    return getTrace(db, 'trc_ref')!;
+  }
+
+  it('drops a forward caused_by reference', () => {
+    const t = twoSteps(2);
+    expect(t.steps[0].caused_by_step_number).toBeNull();
+    // The legitimate backward reference on step 2 is untouched.
+    expect(t.steps[1].caused_by_step_number).toBe(1);
+  });
+
+  it('drops a self reference', () => {
+    expect(twoSteps(1).steps[0].caused_by_step_number).toBeNull();
+  });
+
+  it('drops a forward parent_step reference', () => {
+    applyEvent(db, { v: 1, type: 'trace_start', trace_id: 'trc_par', agent_name: 'a' } as CaptureEvent);
+    applyEvent(db, {
+      v: 1, type: 'step', trace_id: 'trc_par', step_number: 1, step_type: 'tool_call', name: 'child',
+      parent_step: 5,
+    } as CaptureEvent);
+    expect(getTrace(db, 'trc_par')!.steps[0].parent_step_number).toBeNull();
+  });
+
+  it('keeps a valid earlier parent_step', () => {
+    applyEvent(db, { v: 1, type: 'trace_start', trace_id: 'trc_ok', agent_name: 'a' } as CaptureEvent);
+    applyEvent(db, { v: 1, type: 'step', trace_id: 'trc_ok', step_number: 1, step_type: 'thought', name: 'p' } as CaptureEvent);
+    applyEvent(db, {
+      v: 1, type: 'step', trace_id: 'trc_ok', step_number: 2, step_type: 'tool_call', name: 'c', parent_step: 1,
+    } as CaptureEvent);
+    expect(getTrace(db, 'trc_ok')!.steps[1].parent_step_number).toBe(1);
+  });
+});

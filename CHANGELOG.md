@@ -98,6 +98,14 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `why` no longer presents time-travelling causality as fact. `ingest` validates
+  that `parent_step` / `caused_by_step` reference an earlier step, but the live
+  `record`/SDK path passed producer values straight through — and the causal
+  walk's contract depends on that invariant. A forward reference made step 1
+  render as "caused by #2", a step that hadn't happened yet. A reference that
+  isn't a positive integer strictly earlier than its own step (including a
+  self-reference) is now dropped at the write boundary, matching what the
+  OpenTelemetry mapper does with an out-of-order parent span.
 - An OpenTelemetry root span's own tokens and attributes are no longer dropped.
   The token total summed only the child spans and the root's attributes were
   never carried, so a single-span agent trace reported no tokens, no model, and

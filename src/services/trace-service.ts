@@ -121,6 +121,16 @@ function numOrNull(val: unknown): number | null {
   return null;
 }
 
+/**
+ * A step reference (`parent_step` / `caused_by_step`) that is safe to store:
+ * a positive integer strictly earlier than the referring step, or null.
+ */
+function earlierRef(ref: unknown, stepNumber: number): number | null {
+  const n = numOrNull(ref);
+  if (n == null || !Number.isInteger(n) || n < 1 || n >= stepNumber) return null;
+  return n;
+}
+
 /** Parse a JSON TEXT column back into an object. */
 function parseJson(raw: string | null): Record<string, unknown> | null {
   if (raw === null || raw === undefined) return null;
@@ -626,8 +636,15 @@ export function appendStep(
       // hook adapter's existing error guard.
       jsonOrNull(input.error),
       jsonStr(input.metadata),
-      input.parent_step ?? input.parent_step_number ?? null,
-      input.caused_by_step ?? input.caused_by_step_number ?? null,
+      // Keep only a strictly-earlier reference. `ingest` validates this, but the
+      // live record/SDK path passes producer values straight through — and
+      // causalWalk's contract ("references are validated to point strictly
+      // earlier, so the walk is acyclic") depends on it. A forward reference
+      // made `why` present time-travelling causality as fact: step 1 rendered
+      // "caused by #2", a step that hadn't happened yet. A self-reference is
+      // dropped for the same reason.
+      earlierRef(input.parent_step ?? input.parent_step_number, input.step_number),
+      earlierRef(input.caused_by_step ?? input.caused_by_step_number, input.step_number),
     );
 
     if (input.decision) {
