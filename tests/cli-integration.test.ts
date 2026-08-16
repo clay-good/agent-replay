@@ -327,6 +327,14 @@ describe('CLI integration', () => {
     expect(run(['export', real, '--agent', 'solo']).code).toBe(2);
     // unknown id → runtime failure.
     expect(run(['export', 'trc_does_not_exist']).code).toBe(1);
+
+    // A bad --status is a usage error, like everywhere else. It used to reach
+    // listTraces inside the export block, whose blanket catch reported exit 1 —
+    // so a CI script branching on 1 vs 2 read a typo as a runtime failure,
+    // while `list` returned 2 for the identical error.
+    expect(run(['export', '--status', 'faield']).code).toBe(2);
+    expect(run(['list', '--status', 'faield']).code).toBe(2);
+    expect(run(['export', '--status', 'completed']).code).toBe(0);
   });
 
   it('rejects malformed numeric options instead of silently falling back', () => {

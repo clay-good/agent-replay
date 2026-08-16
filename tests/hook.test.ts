@@ -178,6 +178,37 @@ describe('correlation and privacy', () => {
   });
 });
 
+// ── Structured tool-failure errors ────────────────────────────────────────
+
+describe('PostToolUseFailure with a structured error', () => {
+  // Regression: str() returns undefined for a non-string, so a harness that
+  // reports {message, code, stderr} had the whole object collapsed to the
+  // generic "tool failed" — unrecoverably, since a post-tool payload is stored
+  // nowhere else (rawMeta is attached only to the pre-tool step).
+  it('preserves the detail instead of collapsing it to "tool failed"', () => {
+    const session = 'sess-structured-err';
+    apply({ hook_event_name: 'PreToolUse', session_id: session, tool_name: 'Bash', tool_input: { c: 'x' } });
+    apply({
+      hook_event_name: 'PostToolUseFailure',
+      session_id: session,
+      tool_name: 'Bash',
+      error: { message: 'boom', code: 1, stderr: 'stack trace here' },
+    });
+    const trace = getTrace(db, listTraces(db, { session_id: session }).items[0].id)!;
+    const err = trace.steps[0].error!;
+    expect(err).toContain('boom');
+    expect(err).toContain('stack trace here');
+  });
+
+  it('still falls back to "tool failed" when there is no error detail', () => {
+    const session = 'sess-no-err';
+    apply({ hook_event_name: 'PreToolUse', session_id: session, tool_name: 'Bash', tool_input: { c: 'x' } });
+    apply({ hook_event_name: 'PostToolUseFailure', session_id: session, tool_name: 'Bash' });
+    const trace = getTrace(db, listTraces(db, { session_id: session }).items[0].id)!;
+    expect(trace.steps[0].error).toBe('tool failed');
+  });
+});
+
 // ── Prototype-inherited event names ───────────────────────────────────────
 
 /**

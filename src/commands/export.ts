@@ -2,6 +2,7 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import chalk from 'chalk';
 import type { ListTracesFilter } from '../models/types.js';
+import { TRACE_STATUSES } from '../models/enums.js';
 import { exportTraces, type ExportFormat } from '../services/export-service.js';
 import { getTrace } from '../services/trace-service.js';
 import { ensureDatabase } from '../db/index.js';
@@ -57,7 +58,21 @@ export function runExport(traceId: string | undefined, opts: ExportOptions = {})
     filter.id = full.id;
   }
 
-  if (opts.status) filter.status = opts.status;
+  if (opts.status) {
+    // Validate here rather than letting listTraces throw inside the export
+    // block below, whose blanket catch reports every failure as exit 1. A bad
+    // argument value is a usage error (exit 2) — what `list` returns for this
+    // exact error, what the README documents, and what the --since / --format
+    // checks around it already do. A CI script branching on 1 vs 2 otherwise
+    // reads a typo as a runtime failure.
+    if (!(TRACE_STATUSES as readonly string[]).includes(opts.status)) {
+      console.error(chalk.red(`  Invalid status: ${opts.status}`));
+      console.error(chalk.dim(`  Valid statuses: ${TRACE_STATUSES.join(', ')}`));
+      process.exitCode = 2;
+      return;
+    }
+    filter.status = opts.status;
+  }
   if (opts.agent) filter.agent_name = opts.agent;
   if (opts.tag) filter.tag = opts.tag;
   if (opts.since) {

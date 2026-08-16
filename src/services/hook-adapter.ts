@@ -82,6 +82,20 @@ function str(v: unknown): string | undefined {
 }
 
 /**
+ * A harness may report a tool failure as a structured error
+ * (`{message, code, stderr}`) rather than a string. `str()` returns undefined
+ * for that, so the whole object collapsed to the generic "tool failed" — and
+ * irrecoverably, because a post-tool payload is not retained anywhere else
+ * (`rawMeta` is only attached to the pre-tool step). Flatten it to JSON text,
+ * the same coercion `trace-service` applies when binding a structured error.
+ */
+function errorText(v: unknown): string | undefined {
+  if (typeof v === 'string') return v || undefined;
+  if (v == null) return undefined;
+  return JSON.stringify(v);
+}
+
+/**
  * An event's action, by OWN key only. `EVENT_ACTIONS` is an object literal, so
  * it inherits from `Object.prototype`: a payload naming `constructor`,
  * `toString`, `hasOwnProperty` or `__proto__` used to resolve to an inherited
@@ -385,7 +399,7 @@ export function applyHookPayload(
         output: result ?? null,
         ended_at: ended,
         duration_ms: duration,
-        error: action === 'post_tool_fail' ? (str(payload.error) ?? 'tool failed') : undefined,
+        error: action === 'post_tool_fail' ? (errorText(payload.error) ?? 'tool failed') : undefined,
       });
       return { action, dialect, traceId, note: `closed tool_call "${toolName ?? '?'}"` };
     }

@@ -98,6 +98,18 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `export --status <typo>` now exits 2 (a usage error) instead of 1. The bad
+  value reached `listTraces` inside the export block, whose blanket catch
+  reports every failure as a runtime error — so a CI script branching on the
+  exit code read a typo as a genuine failure, while `list` returned 2 for the
+  identical error. `--status` is now validated up front, like the `--since` and
+  `--format` checks beside it.
+- A tool failure reported as a structured error (`{message, code, stderr}`)
+  rather than a string is no longer discarded by `hook`. The whole object
+  collapsed to the generic "tool failed", and irrecoverably, since a post-tool
+  payload isn't retained anywhere else. It is now flattened to JSON text, the
+  same coercion applied elsewhere when binding a structured error. A failure
+  with no detail still falls back to "tool failed".
 - A hook payload whose event name collides with an `Object.prototype` member
   (`constructor`, `toString`, `hasOwnProperty`, `__proto__`) is now ignored
   instead of creating an unfinalizable trace. The event-name lookup table is an
