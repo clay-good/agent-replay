@@ -95,6 +95,7 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
           input: parseArgs(a.function_args),
           output: a.success != null ? { success: a.success } : null,
           duration_ms: numOrNull(a.duration_ms),
+          error: toolError(a),
           metadata: { source: 'gemini_cli' },
         });
         const decision = str(a.decision);
@@ -116,6 +117,8 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
           step_type: 'tool_call',
           name: str(a.tool_name) ?? str(a.name) ?? 'tool',
           output: a.success != null ? { success: a.success } : null,
+          duration_ms: numOrNull(a.duration_ms),
+          error: toolError(a),
           metadata: { source: 'claude_code' },
         });
         continue;
@@ -135,6 +138,26 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
         continue;
       }
 
+      // A failed model call. Previously this matched no branch at all, so the
+      // record vanished: a batch of only api_error events mapped to zero traces
+      // and still answered 200. Recorded as the llm_call it is, with the failure
+      // on `error` — the same shape every other capture path uses for a failure.
+      if (evt.endsWith('.api_error')) {
+        steps.push({
+          step_number: stepNumber++,
+          step_type: 'llm_call',
+          name: str(a['gen_ai.request.model']) ?? str(a.model) ?? 'api_error',
+          error:
+            str(a.error) ??
+            str(a.error_message) ??
+            str(a.error_type) ??
+            (a.status_code != null ? `status ${String(a.status_code)}` : 'api error'),
+          duration_ms: numOrNull(a.duration_ms),
+          metadata: { source: isGemini ? 'gemini_cli' : 'claude_code' },
+        });
+        continue;
+      }
+
       if (evt.endsWith('.api_response') || evt.endsWith('.api_request')) {
         totalTokens +=
           num(a.input_token_count ?? a['gen_ai.usage.input_tokens'] ?? a.input_tokens) +
@@ -148,7 +171,11 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
     traces.push({
       agent_name: isGemini ? 'gemini' : 'claude-code',
       trigger: 'user_message',
-      status: 'completed',
+      // Derived, not hardcoded. `completed` was unconditional, so a session
+      // whose tool calls or model calls all failed was still reported as a
+      // clean run — the failure was invisible to `list`, `check --golden`, and
+      // eval's error criteria alike.
+      status: steps.some((st) => st.error != null) ? 'failed' : 'completed',
       session_id: sid === '__nosession__' ? null : sid,
       input: input ?? {},
       started_at: startedAt,
@@ -167,6 +194,20 @@ function geminiDecision(decision: string): IngestDecisionInput {
     chosen: decision,
     decided_by: decision === 'auto_accept' ? 'policy' : 'user',
   };
+}
+
+/**
+ * The failure text for a tool-call log record, or undefined if it succeeded.
+ *
+ * `success: false` used to produce only `output: {success: false}` — the error
+ * text and error_type were dropped and the step carried no `error` at all, so
+ * every error-aware consumer (eval's error criteria, `check --golden`, the
+ * timeline) read a failed run as a clean one. A failed tool is recorded as a
+ * `tool_call` step with `error` set, matching every other capture path.
+ */
+function toolError(a: Record<string, unknown>): string | undefined {
+  if (a.success !== false) return undefined;
+  return str(a.error) ?? str(a.error_message) ?? str(a.error_type) ?? 'tool failed';
 }
 
 function str(v: unknown): string | undefined {

@@ -98,6 +98,17 @@ trace schema is unchanged.
 
 ### Fixed
 
+- Failures captured over the OpenTelemetry **logs** path are no longer invisible.
+  That path had no error handling at all: the trace status was hardcoded
+  `completed`, no step ever received an `error`, and `.api_error` records matched
+  no branch, so they vanished entirely — a batch containing only those produced
+  zero traces and still answered `200`. A session whose every tool call failed
+  therefore looked like a clean run to `list`, `check --golden`, and `eval`'s
+  error criteria alike. A tool record with `success: false` now carries its
+  `error` text (falling back to `error_type`, then a generic message), an
+  `api_error` record becomes an `llm_call` step with the failure on `error`, and
+  the trace status is derived from its steps rather than assumed. A
+  `claude_code.tool_result` also keeps its `duration_ms`, which was dropped.
 - A single malformed scalar from a producer no longer costs a whole trace, step,
   or finalization during live capture. SQLite refuses to bind an object or array,
   and `record` swallows that error as a per-event warning, so the damage went far

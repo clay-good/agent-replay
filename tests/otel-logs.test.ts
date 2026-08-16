@@ -183,3 +183,70 @@ describe('handleLogsExport (/v1/logs ingest)', () => {
     expect(toolNames).toEqual(['first', 'second']);
   });
 });
+
+// ── Failures must be visible ──────────────────────────────────────────────
+
+/**
+ * The log path had no error handling at all: `status` was hardcoded
+ * `completed`, no step ever received an `error`, and `.api_error` records
+ * matched no branch so they vanished entirely (a batch of only those produced
+ * zero traces and still answered 200). A session whose every tool call failed
+ * therefore looked like a clean run to `list`, `check --golden`, and eval's
+ * error criteria alike.
+ */
+describe('mapOtlpLogs — failure mapping', () => {
+  it('records a failed Gemini tool call as a step error and fails the trace', () => {
+    const traces = mapOtlpLogs(otlpLogs([
+      logRecord('gemini_cli.user_prompt', { 'session.id': 'f1', prompt: 'do it' }),
+      logRecord('gemini_cli.tool_call', {
+        'session.id': 'f1', function_name: 'write', success: false,
+        error: 'disk full', error_type: 'FileError',
+      }),
+    ]) as never);
+
+    expect(traces).toHaveLength(1);
+    expect(traces[0].status).toBe('failed');
+    expect(traces[0].steps![0].error).toBe('disk full');
+  });
+
+  it('records a failed Claude Code tool result, including its duration', () => {
+    const traces = mapOtlpLogs(otlpLogs([
+      logRecord('claude_code.tool_result', {
+        'session.id': 'f2', tool_name: 'Bash', success: false, error: 'exit 1', duration_ms: 12,
+      }),
+    ]) as never);
+
+    expect(traces[0].status).toBe('failed');
+    expect(traces[0].steps![0].error).toBe('exit 1');
+    expect(traces[0].steps![0].duration_ms).toBe(12);
+  });
+
+  it('keeps an api_error record instead of dropping it', () => {
+    const traces = mapOtlpLogs(otlpLogs([
+      logRecord('claude_code.api_error', {
+        'session.id': 'f3', error: 'rate limited', model: 'claude-opus-5',
+      }),
+    ]) as never);
+
+    expect(traces).toHaveLength(1);
+    expect(traces[0].status).toBe('failed');
+    expect(traces[0].steps![0].step_type).toBe('llm_call');
+    expect(traces[0].steps![0].error).toBe('rate limited');
+  });
+
+  it('falls back to a generic message when a failure carries no detail', () => {
+    const traces = mapOtlpLogs(otlpLogs([
+      logRecord('gemini_cli.tool_call', { 'session.id': 'f4', function_name: 'write', success: false }),
+    ]) as never);
+    expect(traces[0].steps![0].error).toBe('tool failed');
+  });
+
+  it('still reports a fully successful session as completed', () => {
+    const traces = mapOtlpLogs(otlpLogs([
+      logRecord('gemini_cli.user_prompt', { 'session.id': 'ok1', prompt: 'go' }),
+      logRecord('gemini_cli.tool_call', { 'session.id': 'ok1', function_name: 'read', success: true }),
+    ]) as never);
+    expect(traces[0].status).toBe('completed');
+    expect(traces[0].steps![0].error).toBeUndefined();
+  });
+});
