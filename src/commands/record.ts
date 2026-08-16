@@ -47,7 +47,12 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
 
   const apply = (event: CaptureEvent): void => {
     if (event.type === 'trace_start' && extraTags.length > 0) {
-      event.tags = [...(event.tags ?? []), ...extraTags];
+      // Only merge into an actual array. Spreading a producer's non-array
+      // `tags` threw here — OUTSIDE the per-event try below — which aborted the
+      // whole stream and lost every trace in it, not just the bad event. A
+      // string would also have spread into one tag per character.
+      const own = Array.isArray(event.tags) ? event.tags : [];
+      event.tags = [...own, ...extraTags];
     }
     try {
       const { traceId } = applyEvent(db, event);

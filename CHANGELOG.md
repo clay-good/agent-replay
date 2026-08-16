@@ -98,6 +98,31 @@ trace schema is unchanged.
 
 ### Fixed
 
+- A single malformed scalar from a producer no longer costs a whole trace, step,
+  or finalization during live capture. SQLite refuses to bind an object or array,
+  and `record` swallows that error as a per-event warning, so the damage went far
+  beyond the offending field:
+  - `agent_version`, `session_id`, or `started_at` sent as an object on
+    `trace_start` lost the **entire trace** — every later event then failed with
+    "trace not found", and the command still exited 0.
+  - `total_tokens`, `total_duration_ms`, `total_cost_usd`, or `ended_at` sent as
+    an object on `trace_end` lost the **finalization**: a run that reported
+    `failed` with an error was persisted as `timeout` with no error, turning a
+    crash into an apparent hang.
+  - `model`, `tokens_used`, `duration_ms`, or a decision's `rationale` /
+    `confidence` sent as an object dropped the **whole step**. On `step_end`,
+    where one combined `UPDATE` carries every field, a bad duration silently took
+    the step's `output` with it.
+
+  These are now coerced at the bind boundary, like `trigger`, `status`, and
+  `tags` already were: a non-scalar becomes null and everything else is kept. A
+  numeric string (`"1234"`) is accepted for a numeric column. `ingest` validates
+  these fields upstream, so the coercion only ever applies to live-captured data.
+- `record --tags` no longer aborts the entire stream when a producer sends a
+  non-array `tags`. The merge spread `tags` *outside* the per-event error
+  handler, so the spread threw, the process exited 1, and every trace in the
+  stream was lost — not just the bad event. A string value would also have
+  spread into one tag per character.
 - `name_regex` patterns that backtrack catastrophically are now rejected. The
   check only caught a quantifier appearing immediately before a group's closing
   paren, so `(a|aa)+`, `(\s*\w)*`, and `(.*,)*` all passed and then took seconds

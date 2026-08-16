@@ -87,6 +87,40 @@ function jsonColOrNull(val: unknown): string | null {
   return JSON.stringify(val);
 }
 
+/**
+ * Coerce a producer value bound to a plain TEXT column.
+ *
+ * better-sqlite3 refuses to bind an object or array, and on the live `record`
+ * path that throw is swallowed as a per-event warning — so a single malformed
+ * scalar (`agent_version: {maj: 1}`, `model: {id: 'x'}`) destroyed the entire
+ * trace or dropped the whole step, exit 0. The ingest path validates these
+ * upstream, so this only ever fires on live-captured data. Same principle as
+ * the `trigger` / `status` / `tags` coercions: one bad field must not cost the
+ * run. A non-scalar is dropped to null rather than guessed at.
+ */
+function textOrNull(val: unknown): string | null {
+  if (val === undefined || val === null) return null;
+  if (typeof val === 'string') return val;
+  if (typeof val === 'number' || typeof val === 'boolean') return String(val);
+  return null;
+}
+
+/**
+ * Coerce a producer value bound to a numeric column, for the same reason as
+ * `textOrNull`. A numeric string is accepted (producers commonly emit
+ * `"1234"`); anything non-finite or non-scalar becomes null, so a bad token
+ * count can't cost the finalization that carries it.
+ */
+function numOrNull(val: unknown): number | null {
+  if (val === undefined || val === null) return null;
+  if (typeof val === 'number') return Number.isFinite(val) ? val : null;
+  if (typeof val === 'string' && val.trim() !== '') {
+    const n = Number(val);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
 /** Parse a JSON TEXT column back into an object. */
 function parseJson(raw: string | null): Record<string, unknown> | null {
   if (raw === null || raw === undefined) return null;
@@ -191,8 +225,8 @@ function insertDecision(
     stepId,
     JSON.stringify(decision.options ?? []),
     decision.chosen,
-    decision.rationale ?? null,
-    decision.confidence ?? null,
+    textOrNull(decision.rationale),
+    numOrNull(decision.confidence),
     decidedBy,
   );
 }
@@ -240,7 +274,7 @@ function insertTraceRow(
   ).run(
     traceId,
     input.agent_name,
-    input.agent_version ?? null,
+    textOrNull(input.agent_version),
     // Coerce trigger to a valid enum value, like decided_by below. The live
     // `record` path types trigger as a free string, so a producer's own
     // vocabulary ("scheduled") would otherwise violate the CHECK constraint and
@@ -251,12 +285,12 @@ function insertTraceRow(
     status,
     jsonStr(input.input),
     jsonColOrNull(input.output),
-    input.started_at ?? timestamp,
-    input.ended_at ?? null,
-    input.total_duration_ms ?? null,
-    input.total_tokens ?? null,
-    input.total_cost_usd ?? null,
-    input.error ?? null,
+    textOrNull(input.started_at) ?? timestamp,
+    textOrNull(input.ended_at),
+    numOrNull(input.total_duration_ms),
+    numOrNull(input.total_tokens),
+    numOrNull(input.total_cost_usd),
+    jsonOrNull(input.error),
     // Coerce to an array at the boundary, like `trigger` and `status` above:
     // `ingest` validates tags, but the live event protocol doesn't type-check
     // them, so a producer's `tags: {...}` would otherwise be stored verbatim in
@@ -265,7 +299,7 @@ function insertTraceRow(
     jsonStr(input.metadata),
     null, // parent_trace_id
     null, // forked_from_step
-    input.session_id ?? null,
+    textOrNull(input.session_id),
     timestamp,
   );
 }
@@ -301,11 +335,11 @@ export function ingestTrace(
         step.name,
         jsonStr(step.input),
         jsonColOrNull(step.output),
-        step.started_at ?? timestamp,
-        step.ended_at ?? null,
-        step.duration_ms ?? null,
-        step.tokens_used ?? null,
-        step.model ?? null,
+        textOrNull(step.started_at) ?? timestamp,
+        textOrNull(step.ended_at),
+        numOrNull(step.duration_ms),
+        numOrNull(step.tokens_used),
+        textOrNull(step.model),
         step.error ?? null,
         jsonStr(step.metadata),
         step.parent_step ?? step.parent_step_number ?? null,
@@ -328,7 +362,7 @@ export function ingestTrace(
           jsonStr(step.snapshot.context_window),
           jsonStr(step.snapshot.environment),
           jsonStr(step.snapshot.tool_state),
-          step.snapshot.token_count ?? 0,
+          numOrNull(step.snapshot.token_count) ?? 0,
         );
       }
     }
@@ -425,11 +459,11 @@ export function mergeBatchIntoTrace(
         step.name,
         jsonStr(step.input),
         jsonColOrNull(step.output),
-        step.started_at ?? timestamp,
-        step.ended_at ?? null,
-        step.duration_ms ?? null,
-        step.tokens_used ?? null,
-        step.model ?? null,
+        textOrNull(step.started_at) ?? timestamp,
+        textOrNull(step.ended_at),
+        numOrNull(step.duration_ms),
+        numOrNull(step.tokens_used),
+        textOrNull(step.model),
         step.error ?? null,
         jsonStr(step.metadata),
         parent,
@@ -579,11 +613,11 @@ export function appendStep(
       input.name,
       jsonStr(input.input),
       jsonColOrNull(input.output),
-      input.started_at ?? timestamp,
-      input.ended_at ?? null,
-      input.duration_ms ?? null,
-      input.tokens_used ?? null,
-      input.model ?? null,
+      textOrNull(input.started_at) ?? timestamp,
+      textOrNull(input.ended_at),
+      numOrNull(input.duration_ms),
+      numOrNull(input.tokens_used),
+      textOrNull(input.model),
       // Coerce error like the adjacent output: the live `record`/SDK path types
       // error as a string, but a producer just as naturally puts a structured
       // error ({message, code, …}) here — an unbindable object that would throw
@@ -612,7 +646,7 @@ export function appendStep(
         jsonStr(input.snapshot.context_window),
         jsonStr(input.snapshot.environment),
         jsonStr(input.snapshot.tool_state),
-        input.snapshot.token_count ?? 0,
+        numOrNull(input.snapshot.token_count) ?? 0,
       );
     }
 
@@ -655,19 +689,19 @@ export function updateStep(
   }
   if (patch.ended_at !== undefined) {
     sets.push('ended_at = ?');
-    params.push(patch.ended_at);
+    params.push(textOrNull(patch.ended_at));
   }
   if (patch.duration_ms !== undefined) {
     sets.push('duration_ms = ?');
-    params.push(patch.duration_ms);
+    params.push(numOrNull(patch.duration_ms));
   }
   if (patch.tokens_used !== undefined) {
     sets.push('tokens_used = ?');
-    params.push(patch.tokens_used);
+    params.push(numOrNull(patch.tokens_used));
   }
   if (patch.model !== undefined) {
     sets.push('model = ?');
-    params.push(patch.model);
+    params.push(textOrNull(patch.model));
   }
   if (patch.error !== undefined) {
     sets.push('error = ?');
@@ -739,7 +773,7 @@ export function attachSnapshot(
       jsonStr(snapshot.context_window),
       jsonStr(snapshot.environment),
       jsonStr(snapshot.tool_state),
-      snapshot.token_count ?? 0,
+      numOrNull(snapshot.token_count) ?? 0,
     );
   })();
 }
@@ -984,23 +1018,23 @@ export function updateTrace(
   }
   if (update.output !== undefined) {
     sets.push('output = ?');
-    params.push(JSON.stringify(update.output));
+    params.push(jsonColOrNull(update.output));
   }
   if (update.ended_at !== undefined) {
     sets.push('ended_at = ?');
-    params.push(update.ended_at);
+    params.push(textOrNull(update.ended_at));
   }
   if (update.total_duration_ms !== undefined) {
     sets.push('total_duration_ms = ?');
-    params.push(update.total_duration_ms);
+    params.push(numOrNull(update.total_duration_ms));
   }
   if (update.total_tokens !== undefined) {
     sets.push('total_tokens = ?');
-    params.push(update.total_tokens);
+    params.push(numOrNull(update.total_tokens));
   }
   if (update.total_cost_usd !== undefined) {
     sets.push('total_cost_usd = ?');
-    params.push(update.total_cost_usd);
+    params.push(numOrNull(update.total_cost_usd));
   }
   if (update.error !== undefined) {
     sets.push('error = ?');

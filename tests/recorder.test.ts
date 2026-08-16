@@ -312,3 +312,86 @@ describe('recorder honors the persisted-column aliases', () => {
     expect(viaStep.caused_by_step_number).toBe(2);
   });
 });
+
+// ── Malformed producer scalars must not cost the run ──────────────────────
+
+/**
+ * better-sqlite3 refuses to bind an object or array, and `record` swallows that
+ * throw as a per-event warning. So a single malformed scalar from a producer
+ * destroyed far more than the field it was on: an object `agent_version` on
+ * `trace_start` lost the WHOLE trace (every later event then failed with "trace
+ * not found", exit 0), and an object `total_tokens` on `trace_end` lost the
+ * finalization — a run that reported `failed` with an error was persisted as
+ * `timeout` with no error, misattributing a crash as a hang.
+ *
+ * These fields are coerced at the bind boundary now, like `trigger`, `status`
+ * and `tags` already were. The ingest path validates them upstream, so the
+ * coercion only ever applies to live-captured data.
+ */
+describe('malformed producer scalars', () => {
+  it('keeps the trace when trace_start carries an object-valued scalar', () => {
+    for (const field of ['agent_version', 'session_id', 'started_at']) {
+      const ev = {
+        v: 1, type: 'trace_start', trace_id: `trc_${field}`, agent_name: 'a',
+        [field]: { nested: 1 },
+      } as unknown as CaptureEvent;
+      expect(() => applyEvent(db, ev)).not.toThrow();
+      const t = getTrace(db, `trc_${field}`);
+      expect(t).not.toBeNull();
+      expect(t!.agent_name).toBe('a');
+    }
+  });
+
+  it('preserves a failed status and its error when trace_end carries a bad total', () => {
+    applyEvent(db, { v: 1, type: 'trace_start', trace_id: 'trc_fin', agent_name: 'a' } as CaptureEvent);
+    applyEvent(db, {
+      v: 1, type: 'trace_end', trace_id: 'trc_fin', status: 'failed', error: 'crashed',
+      total_tokens: { in: 5 },
+    } as unknown as CaptureEvent);
+
+    const t = getTrace(db, 'trc_fin')!;
+    expect(t.status).toBe('failed');
+    expect(t.error).toBe('crashed');
+    expect(t.total_tokens).toBeNull(); // the bad field alone is dropped
+  });
+
+  it('keeps the step and its output when step_end carries a bad duration', () => {
+    applyEvent(db, { v: 1, type: 'trace_start', trace_id: 'trc_se', agent_name: 'a' } as CaptureEvent);
+    applyEvent(db, {
+      v: 1, type: 'step', trace_id: 'trc_se', step_number: 1, step_type: 'tool_call', name: 't',
+    } as CaptureEvent);
+    applyEvent(db, {
+      v: 1, type: 'step_end', trace_id: 'trc_se', step_number: 1,
+      duration_ms: { x: 1 }, output: { o: 1 },
+    } as unknown as CaptureEvent);
+
+    // updateStep builds one combined UPDATE, so a bad duration used to take the
+    // output down with it.
+    const step = getTrace(db, 'trc_se')!.steps[0];
+    expect(step.output).toEqual({ o: 1 });
+    expect(step.duration_ms).toBeNull();
+  });
+
+  it('keeps a step whose model or tokens_used is an object', () => {
+    applyEvent(db, { v: 1, type: 'trace_start', trace_id: 'trc_sm', agent_name: 'a' } as CaptureEvent);
+    applyEvent(db, {
+      v: 1, type: 'step', trace_id: 'trc_sm', step_number: 1, step_type: 'llm_call', name: 'chat',
+      model: { id: 'x' }, tokens_used: [1, 2],
+    } as unknown as CaptureEvent);
+
+    const steps = getTrace(db, 'trc_sm')!.steps;
+    expect(steps).toHaveLength(1);
+    expect(steps[0].name).toBe('chat');
+    expect(steps[0].model).toBeNull();
+    expect(steps[0].tokens_used).toBeNull();
+  });
+
+  it('accepts a numeric string for a numeric column', () => {
+    applyEvent(db, { v: 1, type: 'trace_start', trace_id: 'trc_ns', agent_name: 'a' } as CaptureEvent);
+    applyEvent(db, {
+      v: 1, type: 'step', trace_id: 'trc_ns', step_number: 1, step_type: 'llm_call', name: 'chat',
+      tokens_used: '1234',
+    } as unknown as CaptureEvent);
+    expect(getTrace(db, 'trc_ns')!.steps[0].tokens_used).toBe(1234);
+  });
+});
