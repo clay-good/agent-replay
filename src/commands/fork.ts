@@ -122,7 +122,7 @@ export function runFork(traceId: string, opts: ForkOptions): void {
     console.log(
       chalk.dim('  Compare:       ') +
         chalk.white(
-          `agent-replay diff ${result.original_trace_id.slice(0, 8)} ${result.forked_trace_id.slice(0, 8)}`,
+          `agent-replay diff ${safeText(result.original_trace_id.slice(0, 8))} ${result.forked_trace_id.slice(0, 8)}`,
         ),
     );
     console.log('');

@@ -48,13 +48,13 @@ export function runDecisions(traceId: string, opts: DecisionsOptions = {}): void
 
   if (decisions.length === 0) {
     console.log('');
-    console.log(chalk.dim(`  No decision steps recorded in trace ${trace.id}.`));
+    console.log(chalk.dim(`  No decision steps recorded in trace ${safeText(trace.id)}.`));
     console.log('');
     return;
   }
 
   console.log('');
-  console.log(heading(`  ${decisions.length} decision point(s) in ${trace.id}`));
+  console.log(heading(`  ${decisions.length} decision point(s) in ${safeText(trace.id)}`));
   console.log('');
 
   for (const { step, decision } of decisions) {
@@ -83,7 +83,10 @@ export function runDecisions(traceId: string, opts: DecisionsOptions = {}): void
         const bullet = chosen ? chalk.greenBright('✔') : chalk.dim('•');
         const score = opt.score != null ? chalk.dim(` [${opt.score}]`) : '';
         const rationale = opt.rationale ? chalk.dim(` — ${safeText(opt.rationale)}`) : '';
-        const optionText = safeText(opt.option);
+        // Defensive for records stored before options were validated at the
+        // boundary: a bare string element made this a TypeError that aborted the
+        // command and lost every later decision point in the trace.
+        const optionText = safeText(typeof opt?.option === 'string' ? opt.option : String(opt ?? ''));
         console.log(`        ${bullet} ${chosen ? chalk.white(optionText) : chalk.dim(optionText)}${score}${rationale}`);
       }
     }

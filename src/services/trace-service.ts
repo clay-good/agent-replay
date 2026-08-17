@@ -808,8 +808,13 @@ export function startTrace(
   // list, watch, why, decisions, fork, eval, check and the dashboard, and is
   // copied into `parent_trace_id` by `fork`, so one that can address the
   // terminal must not be storable by ANY route.
-  if (opts.id != null && CONTROL_CHARS.test(opts.id)) {
-    throw new Error('trace id must not contain control characters');
+  // Reject anything that is not an identifier, not just control characters. An
+  // EMPTY id is not nullish, so `?? generateId` did not replace it: the row was
+  // stored with `id = ''`, and since every later event needs a non-empty
+  // trace_id, that trace was unreachable forever — finalized `timeout`, counted
+  // by `list` and by `check`'s candidate scan, and openable by nothing.
+  if (opts.id != null && (!opts.id.trim() || CONTROL_CHARS.test(opts.id))) {
+    throw new Error('trace id must be a non-empty identifier without control characters');
   }
   const traceId = opts.id ?? generateId('trc');
   const timestamp = now();

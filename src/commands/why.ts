@@ -53,7 +53,7 @@ export function runWhy(traceId: string, opts: WhyOptions = {}): void {
   // means the requested step number doesn't exist. Treat it like trace-not-found
   // above (stderr + exit 1) rather than printing to stdout and succeeding.
   if (chain.length === 0) {
-    console.error(chalk.red(`  Step ${stepNumber} not found in trace ${trace.id}.`));
+    console.error(chalk.red(`  Step ${stepNumber} not found in trace ${safeText(trace.id)}.`));
     console.error(chalk.dim(`  This trace has ${trace.steps.length} step(s).`));
     process.exitCode = 1;
     return;

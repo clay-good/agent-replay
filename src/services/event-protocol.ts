@@ -206,8 +206,8 @@ export function validateEvent(obj: unknown): ParseResult {
   // contains an escape sequence, a NUL or a newline. Everything downstream is
   // then safe by construction, which is what the schema does for `trigger` and
   // `status`.
-  if (typeof e.trace_id === 'string' && CONTROL_CHARS.test(e.trace_id)) {
-    return { event: null, warning: `skipped: ${type} trace_id contains control characters` };
+  if (typeof e.trace_id === 'string' && (!e.trace_id.trim() || CONTROL_CHARS.test(e.trace_id))) {
+    return { event: null, warning: `skipped: ${type} trace_id must be a non-empty identifier without control characters` };
   }
 
   const needsStep: EventType[] = ['step_start', 'step_end', 'step', 'decision', 'snapshot'];
@@ -229,6 +229,21 @@ export function validateEvent(obj: unknown): ParseResult {
   }
   if (type === 'decision' && (typeof e.chosen !== 'string' || !e.chosen)) {
     return { event: null, warning: 'skipped: decision requires chosen' };
+  }
+  // Each option must be `{option: string, ...}`. `chosen` was validated and the
+  // options array was not, so the most obvious wrong guess at this schema — a
+  // plain array of strings — was stored verbatim and then CRASHED `decisions`
+  // with a bare TypeError on `opt.option.replace`, aborting the command whose
+  // whole job is that output and losing every later decision point in the trace.
+  const optionsOf = (v: unknown): unknown =>
+    type === 'decision' ? v : ((v as Record<string, unknown> | null)?.options);
+  const opts = type === 'decision' ? e.options
+    : type === 'step' && e.decision != null ? optionsOf(e.decision)
+    : undefined;
+  if (opts != null) {
+    if (!Array.isArray(opts) || opts.some((o) => typeof o !== 'object' || o === null || Array.isArray(o) || typeof (o as Record<string, unknown>).option !== 'string')) {
+      return { event: null, warning: `skipped: ${type} decision options must each be an object with a string "option"` };
+    }
   }
   // A `step` event may carry an INLINE decision (StepEvent.decision). Validate
   // its `chosen` exactly as the top-level `decision` event above — the same

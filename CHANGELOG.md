@@ -2156,6 +2156,21 @@ between them, and nothing else.
 
 ### Security
 
+- A decision whose `options` were not option objects crashed `decisions`. The
+  `chosen` field was validated and the options array was not, so a plain array of
+  strings — the most obvious wrong guess at this schema — was accepted by
+  `record` and then aborted the command with a bare `TypeError`, losing every
+  LATER decision point in the trace and naming neither the field nor the step.
+  Options are validated at the boundary now, and a record stored before that
+  renders instead of aborting.
+
+- A trace id of `''` was stored rather than replaced. An empty string is not
+  nullish, so it slipped past `?? generateId`, and because every later event
+  requires a non-empty `trace_id` that trace was unreachable forever — finalized
+  `timeout`, counted by `list` and by `check`'s candidate scan, openable by
+  nothing. The id is now required to be an identifier, not merely free of
+  control characters.
+
 - A trace id chosen by a producer can no longer carry control characters.
   `record`'s native protocol lets the producer set `trace_start.trace_id`, and
   that id is then rendered by `show`, `list`, `watch`, `why`, `decisions`,
@@ -2169,7 +2184,8 @@ between them, and nothing else.
   WRITE (`startTrace`), not only on the protocol parser: the programmatic
   `TraceRecorder.startTrace` builds an event and applies it directly, so the
   parser is not a door every route passes through. Every render site is
-  escaped as well, so a store that already holds such an id is safe to inspect.
+  escaped as well — all seventeen of them, enumerated rather than taken from
+  the last report — so a store that already holds such an id is safe to inspect.
 
 - A Gemini stream's unreadable exit code fabricated a run failure. `Number()` of
   an unparseable value is `NaN`, which is `!== 0`, so a non-numeric code — a

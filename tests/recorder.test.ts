@@ -610,6 +610,46 @@ describe('a producer-chosen trace id cannot carry control characters', () => {
     expect(ok.event).not.toBeNull();
   });
 
+  it('refuses an id that is not an identifier at all, not just one with controls', () => {
+    // An EMPTY id is not nullish, so `?? generateId` did not replace it: the row
+    // stored `id = ''`, and since every later event needs a non-empty trace_id
+    // that trace was unreachable forever — finalized `timeout`, counted by
+    // `list` and by `check`'s candidate scan, openable by nothing.
+    expect(validateEvent({ v: 1, type: 'trace_start', trace_id: '', agent_name: 'a' }).event).toBeNull();
+    expect(validateEvent({ v: 1, type: 'trace_start', trace_id: '   ', agent_name: 'a' }).event).toBeNull();
+    expect(() =>
+      startTrace(db, { agent_name: 'a', status: 'running', input: {} }, { id: '  ' }),
+    ).toThrow(/non-empty identifier/);
+  });
+
+  it('rejects decision options that are not option objects', () => {
+    // `chosen` was validated and the options array was not, so a plain array of
+    // strings — the most obvious wrong guess at this schema — was stored and then
+    // crashed `decisions` with a bare TypeError, aborting the command whose whole
+    // job is that output and losing every LATER decision point in the trace.
+    const bad = validateEvent({
+      v: 1, type: 'step', trace_id: 'trc_d', step_number: 1, step_type: 'decision', name: 'pick',
+      decision: { options: ['a', 'b'], chosen: 'a' },
+    });
+    expect(bad.event).toBeNull();
+    expect(bad.warning).toMatch(/options must each be an object/);
+
+    // The top-level decision event is held to the same rule...
+    expect(validateEvent({
+      v: 1, type: 'decision', trace_id: 'trc_d', step_number: 1, chosen: 'a', options: [{ label: 'x' }],
+    }).event).toBeNull();
+
+    // ...and the correct shape still passes, with options absent also fine.
+    expect(validateEvent({
+      v: 1, type: 'step', trace_id: 'trc_d', step_number: 1, step_type: 'decision', name: 'pick',
+      decision: { options: [{ option: 'a', score: 1 }], chosen: 'a' },
+    }).event).not.toBeNull();
+    expect(validateEvent({
+      v: 1, type: 'step', trace_id: 'trc_d', step_number: 2, step_type: 'decision', name: 'pick',
+      decision: { chosen: 'a' },
+    }).event).not.toBeNull();
+  });
+
   it('is refused on the programmatic path too, which skips the protocol parser', () => {
     // `TraceRecorder.startTrace` builds an event and calls `applyEvent`
     // directly, so `validateEvent` never sees it — the protocol parser is not

@@ -26,8 +26,8 @@ export function renderDiff(
 
   // Header panel with both traces
   const headerContent = [
-    `${colors.primary('LEFT')}   ${chalk.dim(diff.left_trace_id.slice(0, 12))}  ${chalk.white(safeText(leftTrace.agent_name))}  ${statusBadge(leftTrace.status as TraceStatus)}  ${chalk.dim(`${diff.left_step_count} steps`)}`,
-    `${colors.secondary('RIGHT')}  ${chalk.dim(diff.right_trace_id.slice(0, 12))}  ${chalk.white(safeText(rightTrace.agent_name))}  ${statusBadge(rightTrace.status as TraceStatus)}  ${chalk.dim(`${diff.right_step_count} steps`)}`,
+    `${colors.primary('LEFT')}   ${chalk.dim(safeText(diff.left_trace_id.slice(0, 12)))}  ${chalk.white(safeText(leftTrace.agent_name))}  ${statusBadge(leftTrace.status as TraceStatus)}  ${chalk.dim(`${diff.left_step_count} steps`)}`,
+    `${colors.secondary('RIGHT')}  ${chalk.dim(safeText(diff.right_trace_id.slice(0, 12)))}  ${chalk.white(safeText(rightTrace.agent_name))}  ${statusBadge(rightTrace.status as TraceStatus)}  ${chalk.dim(`${diff.right_step_count} steps`)}`,
   ].join('\n');
 
   lines.push(
