@@ -310,14 +310,21 @@ agent-replay diff <a> <b> --compact
 agent-replay diff <a> <b> --ai
 ```
 
-Steps are compared on `step_type`, `name`, `input`, `output`, `model`, and
-`error`; the trace itself is compared on `trace_input`, `status`, `trace_error`,
-and `trace_output` — so a fork made with `--modify-input` shows the input you
+Steps are compared on `step_type`, `name`, `input`, `output`, `model`,
+`error`, and `decision`; the trace itself is compared on `trace_input`, `status`,
+`trace_error`, and `trace_output` — so a fork made with `--modify-input` shows the input you
 changed. Trace-level differences report a step of `trace` (`null` in `--json`)
 and never set `divergence_step`, which means "the first step that went
 different". Steps are paired by `step_number`, so gaps don't misalign the
 comparison. Narrow the comparison with `--fields`; when a filter leaves nothing,
-the verdict says so rather than claiming the traces are identical.
+the verdict says so rather than claiming the traces are identical, and a filter
+naming no field at all is a usage error.
+
+`decision` compares the chosen option, its rationale, and who decided — so two
+runs that took opposite actions at the same step are reported as different even
+when every other field matches. Confidence and the option list are deliberately
+excluded: they are the model's self-report and vary run to run without the agent
+having acted differently.
 
 ### Fork
 
