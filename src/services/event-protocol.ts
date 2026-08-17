@@ -23,6 +23,14 @@ export const EVENT_TYPES = [
   'snapshot',
   'trace_end',
 ] as const;
+/**
+ * C0 controls, DEL and C1. An identifier never contains one; an escape sequence,
+ * a NUL or a stray carriage return in one is either a mistake or an attempt to
+ * address the terminal of whoever later inspects the trace.
+ */
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/;
+
 export type EventType = (typeof EVENT_TYPES)[number];
 
 // ── Event shapes ────────────────────────────────────────────────────────────
@@ -188,6 +196,18 @@ export function validateEvent(obj: unknown): ParseResult {
     if (typeof e.trace_id !== 'string' || !e.trace_id) {
       return { event: null, warning: `skipped: ${type} requires trace_id` };
     }
+  }
+  // A producer may CHOOSE the trace id (`trace_start.trace_id`), and the id is
+  // then rendered by `show`, `list`, `watch`, `why`, `decisions`, `fork` and
+  // `check`, and copied into `parent_trace_id` by `fork`. Escaping it at each of
+  // those render sites was tried and drifted four times — a new site, or a new
+  // copy of the id, kept being missed. So reject a control character HERE, where
+  // there is exactly one door: an id is an identifier, and no legitimate one
+  // contains an escape sequence, a NUL or a newline. Everything downstream is
+  // then safe by construction, which is what the schema does for `trigger` and
+  // `status`.
+  if (typeof e.trace_id === 'string' && CONTROL_CHARS.test(e.trace_id)) {
+    return { event: null, warning: `skipped: ${type} trace_id contains control characters` };
   }
 
   const needsStep: EventType[] = ['step_start', 'step_end', 'step', 'decision', 'snapshot'];

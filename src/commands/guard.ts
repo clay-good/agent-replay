@@ -216,7 +216,7 @@ export function runGuardTest(traceId: string, opts: GuardTestOptions = {}): void
     return;
   }
 
-  const spinner = startSpinner(`Testing policies against ${trace.id.slice(0, 12)}...`);
+  const spinner = startSpinner(`Testing policies against ${safeText(trace.id.slice(0, 12))}...`);
 
   let results: StepPolicyResult[];
   try {

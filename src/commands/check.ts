@@ -206,10 +206,10 @@ export function runCheck(opts: CheckOptions = {}): void {
     fail(
       2,
       excluded > 0
-        ? `No comparable runs — ${excluded} matching trace(s) were excluded as forks or still running.`
+        ? `No comparable runs — ${excluded} matching trace(s) were excluded (forks, still running, or gone from the store).`
         : 'No traces matched — nothing to check against the baseline.',
       excluded > 0
-        ? 'A fork is a never-executed copy and a running trace is mid-flight, so neither can show a regression — and `--trace` compares whatever it names, so pointing it at one of these turns the gate red on a run that never executed. Wait for the run to finish, check the store the runs actually record into with --dir, or pass --allow-empty if this window is expected to have no comparable runs.'
+        ? 'A fork is a never-executed copy, a running trace is mid-flight, and a trace deleted while this ran is gone, so none can show a regression — and `--trace` compares whatever it names, so pointing it at one of these turns the gate red on a run that never executed. Wait for the run to finish, check the store the runs actually record into with --dir, or pass --allow-empty if this window is expected to have no comparable runs.'
         : 'A check with no candidates cannot detect a regression. Widen --agent/--since, confirm --dir points at the store the run recorded into, or pass --allow-empty if a run with no traces is expected (a quiet nightly window, a matrix job where this agent did not run).',
     );
     return;
@@ -263,13 +263,13 @@ export function runCheck(opts: CheckOptions = {}): void {
 
   for (const r of report.results) {
     if (!r.matched) {
-      console.log(`  ${chalk.dim('○')} ${chalk.dim(r.trace_id.slice(0, 12))} ${safeText(r.agent_name)} — ${chalk.yellow('unmatched')}${opts.strict ? chalk.red(' (strict: fail)') : ''}`);
+      console.log(`  ${chalk.dim('○')} ${chalk.dim(safeText(r.trace_id.slice(0, 12)))} ${safeText(r.agent_name)} — ${chalk.yellow('unmatched')}${opts.strict ? chalk.red(' (strict: fail)') : ''}`);
       continue;
     }
     if (r.passed) {
-      console.log(`  ${chalk.green('✔')} ${chalk.dim(r.trace_id.slice(0, 12))} ${safeText(r.agent_name)} — ${chalk.green('pass')}`);
+      console.log(`  ${chalk.green('✔')} ${chalk.dim(safeText(r.trace_id.slice(0, 12)))} ${safeText(r.agent_name)} — ${chalk.green('pass')}`);
     } else {
-      console.log(`  ${chalk.redBright('✘')} ${chalk.dim(r.trace_id.slice(0, 12))} ${safeText(r.agent_name)} — ${chalk.redBright('REGRESSED')}`);
+      console.log(`  ${chalk.redBright('✘')} ${chalk.dim(safeText(r.trace_id.slice(0, 12)))} ${safeText(r.agent_name)} — ${chalk.redBright('REGRESSED')}`);
       for (const d of r.divergences) {
         const at = d.step_number != null ? chalk.dim(` @step ${d.step_number}`) : '';
         console.log(`      ${chalk.white(d.field)}${at}: golden ${chalk.green(short(d.golden))} → got ${chalk.redBright(short(d.candidate))}`);

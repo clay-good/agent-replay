@@ -589,3 +589,25 @@ describe('validateEvent — total_cost_usd', () => {
     expect((event as unknown as { total_cost_usd: number }).total_cost_usd).toBe(0.0002);
   });
 });
+
+describe('a producer-chosen trace id cannot carry control characters', () => {
+  it('rejects the event rather than storing an id that addresses the terminal', () => {
+    // The id is rendered by show, list, watch, why, decisions, fork and check,
+    // and copied into parent_trace_id by fork. Escaping it at each render site
+    // was tried and drifted four times — a new site, or a new copy of the id,
+    // kept being missed. One door instead: an identifier never contains a
+    // control character, so reject it where it enters.
+    const evil = `trc_\u001b]0;PWNED\u0007x`;
+    const start = validateEvent({ v: 1, type: 'trace_start', trace_id: evil, agent_name: 'a' });
+    expect(start.event).toBeNull();
+    expect(start.warning).toMatch(/control characters/);
+
+    const step = validateEvent({ v: 1, type: 'step', trace_id: evil, step_number: 1, step_type: 'output', name: 'n' });
+    expect(step.event).toBeNull();
+
+    // A normal id is untouched.
+    const ok = validateEvent({ v: 1, type: 'trace_start', trace_id: 'trc_normal-01', agent_name: 'a' });
+    expect(ok.event).not.toBeNull();
+  });
+});
+

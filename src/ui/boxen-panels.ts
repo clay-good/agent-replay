@@ -65,7 +65,7 @@ export function traceHeaderPanel(trace: Trace): string {
     lines.push(`${label('Error:')}     ${chalk.redBright(safeText(trace.error))}`);
   }
   if (trace.parent_trace_id) {
-    lines.push(`${label('Fork of:')}   ${chalk.dim(trace.parent_trace_id)} ${chalk.dim(`(step ${trace.forked_from_step})`)}`);
+    lines.push(`${label('Fork of:')}   ${chalk.dim(safeText(trace.parent_trace_id))} ${chalk.dim(`(step ${trace.forked_from_step})`)}`);
   }
   if (trace.session_id) {
     lines.push(`${label('Session:')}   ${chalk.white(safeText(trace.session_id))}`);

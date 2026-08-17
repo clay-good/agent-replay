@@ -2156,6 +2156,18 @@ between them, and nothing else.
 
 ### Security
 
+- A trace id chosen by a producer can no longer carry control characters.
+  `record`'s native protocol lets the producer set `trace_start.trace_id`, and
+  that id is then rendered by `show`, `list`, `watch`, `why`, `decisions`,
+  `fork`, `eval`, `guard test`, `check` and the dashboard, and copied verbatim
+  into `parent_trace_id` by `fork`. Escaping it at each render site was tried
+  and drifted four times — a new site, or a new copy of the id under a different
+  column name, kept being missed. It is now rejected where it enters, which is a
+  single door: an identifier never legitimately contains an escape sequence, a
+  NUL or a newline, so everything downstream is safe by construction, the way
+  the schema already constrains `trigger` and `status`. Every render site is
+  escaped as well, so a store that already holds such an id is safe to inspect.
+
 - A Gemini stream's unreadable exit code fabricated a run failure. `Number()` of
   an unparseable value is `NaN`, which is `!== 0`, so a non-numeric code — a
   Node-style `code: "ENOENT"`, or an object — marked the whole run failed and

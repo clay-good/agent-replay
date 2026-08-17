@@ -14,7 +14,7 @@ import { loadConfig, resolveProvider } from '../services/config-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { evalTable } from '../ui/table.js';
 import { aiEvalPanel } from '../ui/boxen-panels.js';
-import { heading, formatScorePct } from '../ui/theme.js';
+import { heading, formatScorePct, safeText } from '../ui/theme.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage, safeRegex } from '../utils/json.js';
 import type { EvalResult } from '../models/types.js';
@@ -303,7 +303,7 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
   }
 
   console.log('');
-  console.log(heading(`  Evaluation Results for ${trace.id.slice(0, 12)}`));
+  console.log(heading(`  Evaluation Results for ${safeText(trace.id.slice(0, 12))}`));
   console.log('');
   console.log(evalTable(results));
   console.log('');

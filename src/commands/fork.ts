@@ -7,6 +7,7 @@ import { summaryPanel } from '../ui/boxen-panels.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage } from '../utils/json.js';
 import { resolveDataDir } from '../utils/paths.js';
+import { safeText } from '../ui/theme.js';
 
 export interface ForkOptions {
   fromStep: string;
@@ -85,7 +86,7 @@ export function runFork(traceId: string, opts: ForkOptions): void {
   }
 
   const spinner = startSpinner(
-    `Forking trace ${trace.id.slice(0, 12)} at step ${fromStep}...`,
+    `Forking trace ${safeText(trace.id.slice(0, 12))} at step ${fromStep}...`,
   );
 
   try {

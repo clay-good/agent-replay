@@ -44,7 +44,7 @@ export function traceTable(traces: Trace[]): string {
       ? `${statusBadge(t.status as TraceStatus)} ${chalk.yellow('⚠ abandoned?')}`
       : statusBadge(t.status as TraceStatus);
     table.push([
-      chalk.dim(t.id.slice(0, 12)),
+      chalk.dim(safeText(t.id.slice(0, 12))),
       chalk.white(safeText(t.agent_name)),
       status,
       chalk.white(stepCountStr(t)),

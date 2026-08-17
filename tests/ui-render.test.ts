@@ -442,6 +442,11 @@ describe('the trace header escapes every producer field, not just some', () => {
       // `record`'s native protocol lets the PRODUCER choose the trace id, so it
       // is no more trustworthy than the fields beside it.
       id: 'trc_\u001b]0;PWNED_ID\u0007x',
+      // `fork` copies the parent's id verbatim into this column, so it is the
+      // same untrusted value under a different name — the copy three lines below
+      // the field that was just escaped.
+      parent_trace_id: 'trc_\u001b]0;PWNED_PARENT\u0007y',
+      forked_from_step: 1,
     });
     expect(panel).not.toContain('\u001b[5m');
     expect(panel).not.toContain('\u001b[31m');
@@ -451,6 +456,7 @@ describe('the trace header escapes every producer field, not just some', () => {
     // The content is still shown, just neutralized.
     expect(panel).toContain('PWNED');
     expect(panel).toContain('TITLE');
+    expect(panel).toContain('PWNED_PARENT');
     expect(panel).toContain('RED');
   });
 });
@@ -469,6 +475,17 @@ describe('summaryPanel escapes its values', () => {
     expect(panel).not.toContain('\u0007');
     expect(panel).toContain('IMPORTPWN');
     expect(panel).toContain('3'); // a number still renders as itself
+  });
+});
+
+describe('the trace table escapes the id it renders', () => {
+  it('does not echo control bytes from a producer-chosen id', () => {
+    // `record`'s native protocol lets the producer choose the trace id, and
+    // `list` is the most-run command in the tool. The id is truncated to 12
+    // chars, which is not a defense: a short payload survives the slice intact.
+    const rows = traceTable([{ ...trace(), id: 't\u001b]0;AB\u0007' }] as never);
+    expect(rows).not.toContain('\u001b]0;');
+    expect(rows).not.toContain('\u0007');
   });
 });
 
