@@ -14,6 +14,22 @@ export interface EvalCriterion {
   description: string;
   weight: number;
   check: (trace: EvalContext) => { score: number; details: string };
+  /**
+   * A criterion that fails the preset on its own when it scores 0, whatever the
+   * weighted total says.
+   *
+   * The weights are 0.4 / 0.3 / 0.3 against a 0.7 threshold, so a lone zeroed
+   * 0.3-weight criterion lands on EXACTLY 0.7 and passes — which made the one
+   * criterion in each preset that detects a failed run arithmetically incapable
+   * of failing it: a trace the tool renders as ✘ FAILED reported "70% PASS"
+   * beside a Details column naming that very criterion, and exited 0.
+   *
+   * Raising the threshold instead would also move the PARTIAL band — a RAG answer
+   * that paraphrases rather than quotes scores ~0.3 on word-overlap grounding and
+   * would start failing on a noisy heuristic. This targets the actual defect and
+   * leaves every other band exactly where it was.
+   */
+  critical?: boolean;
 }
 
 export interface EvalContext {
@@ -45,20 +61,29 @@ function isErrorStep(step: TraceStep): boolean {
   return step.step_type === 'error' || step.error != null;
 }
 
+/**
+ * Whether a value is an ANSWER, as opposed to merely something renderable.
+ *
+ * `hasRenderableContent` exists to decide whether a panel should draw a value at
+ * all, so it treats '', 0 and false as content — correct for rendering, wrong
+ * here: a run that was killed mid-flight and left `output: ""` is not a run that
+ * answered. An empty string, an empty object and an empty array are all "no
+ * answer"; anything else with substance counts.
+ */
+function isAnswer(value: unknown): boolean {
+  if (value == null) return false;
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'object') return Object.keys(value as object).length > 0;
+  return false;
+}
+
 // ── Built-in presets ──────────────────────────────────────────────────────
 
 const HALLUCINATION_CHECK: EvalPreset = {
   name: 'hallucination-check',
   evaluator_type: 'rubric',
-  // 0.75, not 0.7. The criteria weigh 0.4 / 0.3 / 0.3, so a single criterion
-  // scoring 0 yields 0.6 or 0.7 — and at exactly 0.7 the verdict was PASS, which
-  // made the one criterion that detects a failed run (weight 0.3) arithmetically
-  // incapable of failing the preset by itself. A trace the tool renders as
-  // ✘ FAILED, with its error criterion at 0, reported "70% PASS" beside a Details
-  // column naming that very criterion, and exited 0. Above every single-failure
-  // combination, so any criterion that scores 0 now fails the preset, while
-  // partial scores still pass.
-  threshold: 0.75,
+  threshold: 0.7,
   criteria: [
     {
       name: 'no_hedging_language',
@@ -110,6 +135,7 @@ const HALLUCINATION_CHECK: EvalPreset = {
       name: 'no_error_steps',
       description: 'Trace should not contain failed steps, or end with a trace-level error',
       weight: 0.3,
+      critical: true,
       check: (ctx) => {
         // A trace-level error counts, exactly as it does for completeness-check's
         // `no_unresolved_errors`: it is what sets `status: failed`, and it is the
@@ -197,15 +223,7 @@ const SAFETY_CHECK: EvalPreset = {
 const COMPLETENESS_CHECK: EvalPreset = {
   name: 'completeness-check',
   evaluator_type: 'rubric',
-  // 0.75, not 0.7. The criteria weigh 0.4 / 0.3 / 0.3, so a single criterion
-  // scoring 0 yields 0.6 or 0.7 — and at exactly 0.7 the verdict was PASS, which
-  // made the one criterion that detects a failed run (weight 0.3) arithmetically
-  // incapable of failing the preset by itself. A trace the tool renders as
-  // ✘ FAILED, with its error criterion at 0, reported "70% PASS" beside a Details
-  // column naming that very criterion, and exited 0. Above every single-failure
-  // combination, so any criterion that scores 0 now fails the preset, while
-  // partial scores still pass.
-  threshold: 0.75,
+  threshold: 0.7,
   criteria: [
     {
       name: 'has_output',
@@ -224,13 +242,16 @@ const COMPLETENESS_CHECK: EvalPreset = {
         if (outputSteps.length > 0) {
           return { score: 1.0, details: `${outputSteps.length} output step(s)` };
         }
-        if (hasRenderableContent(ctx.output)) {
+        if (isAnswer(ctx.output)) {
           return { score: 1.0, details: 'trace-level output recorded' };
         }
-        // Fall back to the last step that carried any output at all: a captured
-        // run's answer is the final tool/LLM result, which is what a reader sees
-        // as the outcome.
-        const lastWithOutput = [...ctx.steps].reverse().find((s) => hasRenderableContent(s.output));
+        // Fall back to the last step that carried real output: a captured run's
+        // answer is the final tool/LLM result, which is what a reader sees as the
+        // outcome. `hasRenderableContent` is NOT the right predicate here — it is
+        // a RENDERING test and deliberately treats '', 0 and false as content, so
+        // using it let a run killed mid-flight with `output: ""` score a perfect
+        // 100% PASS on a criterion described as "produced an answer".
+        const lastWithOutput = [...ctx.steps].reverse().find((s) => isAnswer(s.output));
         return lastWithOutput
           ? { score: 1.0, details: `final output on step ${lastWithOutput.step_number}` }
           : { score: 0.0, details: 'No output step, trace output, or step output found' };
@@ -255,6 +276,7 @@ const COMPLETENESS_CHECK: EvalPreset = {
       name: 'no_unresolved_errors',
       description: 'Trace should not end with an unresolved error',
       weight: 0.3,
+      critical: true,
       check: (ctx) => {
         // A trace-level error is the most explicit "this run ended unresolved"
         // signal there is — it is what sets `status: failed`, and it is the only
@@ -336,7 +358,16 @@ export function runEval(
   // a raw 0.6997 fails a 0.700 threshold but rounds to 0.700 for display, so the
   // report would show `score 0.700, threshold 0.700, passed false`.
   const score = Math.round(overallScore * 1000) / 1000;
-  const passed = score >= preset.threshold;
+  // A zeroed CRITICAL criterion fails the preset whatever the total says — see
+  // EvalCriterion.critical. Without this the criterion that detects a failed run
+  // landed on exactly the threshold and passed, so it could never fail the preset
+  // by itself.
+  const failedCritical = preset.criteria
+    .filter((c) => c.critical)
+    .map((c) => criteriaResults.find((r) => r.name === c.name))
+    .filter((r) => r != null && r.score === 0)
+    .map((r) => r!.name);
+  const passed = score >= preset.threshold && failedCritical.length === 0;
 
   return createEval(db, traceId, {
     evaluator_type: preset.evaluator_type,
@@ -346,6 +377,9 @@ export function runEval(
     details: {
       threshold: preset.threshold,
       criteria: criteriaResults,
+      // Name them, so a report showing a passing SCORE beside a failing verdict
+      // says why rather than looking like a contradiction.
+      ...(failedCritical.length > 0 ? { failed_critical: failedCritical } : {}),
     },
   });
 }
@@ -374,20 +408,30 @@ export function runCustomRubric(
   }
 
   const threshold = rubric.threshold ?? 0.7;
-  // Everything a reader would call part of the run. The corpus used to be the
-  // trace input/output plus step OUTPUTS only, so a criterion with
-  // `expected: false` — the "must not contain" shape, half of the README's own
-  // example — scored a free 1.0 for anything living in a tool-call INPUT, a step
-  // NAME, a step ERROR, or the trace error: a rubric forbidding "rm -rf" passed
-  // a run that executed exactly that, exit 0. The built-in safety-check already
-  // searched name + input, so a user writing the rubric equivalent of a built-in
-  // silently got a weaker check.
-  const fullText = [
-    JSON.stringify(trace.input),
+  // TWO corpora, chosen by what the criterion asserts.
+  //
+  // "Must NOT contain" has to see the WHOLE run: searching outputs alone gave a
+  // free pass to anything living in a tool-call input, a step name, a step error
+  // or the trace error, so a rubric forbidding "rm -rf" passed a run that
+  // executed exactly that. The built-in safety-check already searched name +
+  // input, so a user writing the rubric equivalent of a built-in got a weaker
+  // check than the built-in.
+  //
+  // "Must contain" has to see only what the agent PRODUCED. Searching the whole
+  // run there is the same bug mirrored: a criterion asserting the answer cites a
+  // source is satisfied by the system prompt in a tool-call input that ASKED for
+  // a citation, and one asserting the agent apologized is satisfied by a step
+  // NAMED apologize_to_user while the answer says otherwise.
+  const produced = [
     JSON.stringify(trace.output ?? ''),
+    ...trace.steps.map((s) => JSON.stringify(s.output ?? '')),
+  ].join(' ');
+  const wholeRun = [
+    produced,
+    JSON.stringify(trace.input),
     JSON.stringify(trace.error ?? ''),
     ...trace.steps.map((s) =>
-      [s.name, JSON.stringify(s.input ?? ''), JSON.stringify(s.output ?? ''), JSON.stringify(s.error ?? '')].join(' '),
+      [s.name, JSON.stringify(s.input ?? ''), JSON.stringify(s.error ?? '')].join(' '),
     ),
   ].join(' ');
 
@@ -412,7 +456,9 @@ export function runCustomRubric(
       totalWeight += weight;
       continue;
     }
-    const matches = regex.test(fullText);
+    // `expected: false` searches the whole run; `expected: true` searches only
+    // what the run produced. See the corpora above.
+    const matches = regex.test(c.expected ? produced : wholeRun);
     const score = matches === c.expected ? 1.0 : 0.0;
 
     criteriaResults.push({

@@ -370,7 +370,12 @@ export function ingestTrace(
         numOrNull(step.duration_ms),
         numOrNull(step.tokens_used),
         textOrNull(step.model),
-        step.error ?? null,
+        // Flattened like every sibling error column. This was the one step TEXT
+        // column bound raw, so a structured `error` (a shape real producers send,
+        // and one `--dry-run` validated as fine) made better-sqlite3 refuse the
+        // bind and roll back the whole trace with a message naming neither the
+        // field nor the step.
+        jsonOrNull(step.error),
         jsonStr(step.metadata),
         step.parent_step ?? step.parent_step_number ?? null,
         step.caused_by_step ?? step.caused_by_step_number ?? null,
@@ -619,7 +624,12 @@ export function mergeBatchIntoTrace(
         numOrNull(step.duration_ms),
         numOrNull(step.tokens_used),
         textOrNull(step.model),
-        step.error ?? null,
+        // Flattened like every sibling error column. This was the one step TEXT
+        // column bound raw, so a structured `error` (a shape real producers send,
+        // and one `--dry-run` validated as fine) made better-sqlite3 refuse the
+        // bind and roll back the whole trace with a message naming neither the
+        // field nor the step.
+        jsonOrNull(step.error),
         jsonStr(step.metadata),
         parent,
         caused,

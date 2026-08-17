@@ -581,7 +581,10 @@ describe('untrusted-trace fence', () => {
 describe('rubric scoring', () => {
   it('a boundary score and its verdict agree (both use the rounded score)', () => {
     const db = createTestDb();
-    const trace = ingestTrace(db, { agent_name: 'r', status: 'completed', input: { task: 'alpha' } });
+    // `expected: true` asserts about what the run PRODUCED, so the token has to
+    // be in the output — matching it in the INPUT would mean a criterion asserting
+    // "the answer cites a source" is satisfied by the prompt that asked for one.
+    const trace = ingestTrace(db, { agent_name: 'r', status: 'completed', input: { task: 'q' }, output: { text: 'alpha' } });
     // Raw score = 6997/10000 = 0.6997, which rounds to the displayed 0.700, so it
     // must pass the 0.700 threshold — not report "score 0.700 ... passed: false".
     const result = runCustomRubric(db, trace.id, {

@@ -397,8 +397,11 @@ async function parseRubric(raw: string, path: string): Promise<{
     // exit 1, on a correct run.
     if (!safeRegex(String(c.pattern), 'i')) {
       throw new Error(
-        `criteria[${i}] "pattern" could not be compiled safely: ${JSON.stringify(c.pattern)}. ` +
-          'Patterns are rejected when they risk catastrophic backtracking (nested or adjacent quantifiers).',
+        `criteria[${i}] "pattern" could not be used: ${JSON.stringify(c.pattern)}. ` +
+          'Either it is not a valid regular expression, or it was refused as a backtracking risk — ' +
+          'a quantified group containing alternation (`(a|b)+`) or nested quantifiers. ' +
+          'The check is deliberately conservative, so a safe pattern of that shape is refused too; ' +
+          'rewrite it (for example as a character class) if so.',
       );
     }
   }

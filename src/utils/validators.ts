@@ -100,6 +100,14 @@ export function validateTraceInput(input: unknown): ValidationResult {
   }
 
   // Session correlation key — opaque string
+  // The writer coerces a non-scalar to null so one bad field can't cost a live
+  // capture the whole run, on the stated assumption that "the ingest path
+  // validates these upstream" — which it did not, so an object-valued
+  // agent_version or model was silently DROPPED at exit 0. On this path,
+  // naming the field is the right answer.
+  if (data.agent_version != null && typeof data.agent_version !== 'string') {
+    errors.push({ field: 'agent_version', message: 'agent_version must be a string' });
+  }
   if (data.session_id != null && typeof data.session_id !== 'string') {
     errors.push({ field: 'session_id', message: 'session_id must be a string' });
   }
@@ -110,9 +118,20 @@ export function validateTraceInput(input: unknown): ValidationResult {
       errors.push({ field: 'steps', message: 'steps must be an array' });
     } else {
       const stepNumbers = new Set<number>();
+      const duplicates = new Set<number>();
       for (const s of data.steps) {
         const n = (s as Record<string, unknown>)?.step_number;
-        if (typeof n === 'number' && Number.isInteger(n)) stepNumbers.add(n);
+        if (typeof n === 'number' && Number.isInteger(n)) {
+          if (stepNumbers.has(n)) duplicates.add(n);
+          stepNumbers.add(n);
+        }
+      }
+      // The schema has UNIQUE(trace_id, step_number), so a duplicate validated
+      // clean and then failed at INSERT — `ingest --dry-run` (documented as
+      // "validate without inserting") answered exit 0 for a file the real run
+      // could never load.
+      for (const n of duplicates) {
+        errors.push({ field: 'steps', message: `step_number ${n} appears more than once; step numbers must be unique within a trace` });
       }
       for (let i = 0; i < data.steps.length; i++) {
         const stepResult = validateStepInput(data.steps[i], i);
@@ -168,6 +187,14 @@ export function validateStepInput(input: unknown, index?: number): ValidationRes
 
   if (!data.name || typeof data.name !== 'string') {
     errors.push({ field: `${prefix}name`, message: 'name is required and must be a string' });
+  }
+
+  // Same reasoning as agent_version above: the writer coerces a non-scalar model
+  // to null so a live capture never loses a step over one bad field, on the
+  // assumption that ingest validates it. It did not, so the value vanished at
+  // exit 0.
+  if (data.model != null && typeof data.model !== 'string') {
+    errors.push({ field: `${prefix}model`, message: 'model must be a string' });
   }
 
   // Optional numeric fields — must be finite non-negative

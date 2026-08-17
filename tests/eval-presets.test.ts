@@ -282,3 +282,112 @@ describe('custom rubric corpus', () => {
     expect(runCustomRubric(db, t.id, rubric('format c:')).passed).toBe(true);
   });
 });
+
+describe('"produced an answer" means a real answer', () => {
+  // The fallback used `hasRenderableContent`, which is a RENDERING predicate and
+  // deliberately treats '', 0 and false as content. Reused as an
+  // answer-existence test it let a run killed mid-flight score a perfect 100%
+  // PASS on a criterion described as "produced an answer" — a false PASS worse
+  // than the false FAIL it replaced.
+  for (const [label, output] of [
+    ['an empty string', ''],
+    ['an empty object', {}],
+    ['an empty array', []],
+    ['nothing at all', null],
+  ] as const) {
+    it(`fails completeness-check when the run produced ${label}`, () => {
+      const res = evalTrace(base({
+        status: 'running',
+        output: output as never,
+        steps: [{ step_number: 1, step_type: 'tool_call', name: 'search', input: { q: 'x' }, output: output as never }],
+      }), 'completeness-check');
+      expect(res.passed).toBe(false);
+    });
+  }
+
+  it('still passes when the answer is the final tool result', () => {
+    const res = evalTrace(base({
+      status: 'completed',
+      output: null,
+      steps: [{ step_number: 1, step_type: 'tool_call', name: 'Bash', input: { command: 'ls' }, output: { stdout: 'a b c' } }],
+    }), 'completeness-check');
+    expect(res.passed).toBe(true);
+  });
+});
+
+describe('a critical criterion fails the preset without moving anyone else', () => {
+  // Raising the threshold to 0.75 would also have moved the PARTIAL band: a RAG
+  // answer that paraphrases rather than quotes scores ~0.3 on the word-overlap
+  // grounding heuristic and would start failing. The failure criterion is
+  // decisive instead, so every other band sits exactly where it did.
+  it('a partial score in the 0.70-0.75 band still passes', () => {
+    // 1 of 7 tool calls completed → all_tool_calls_completed = 0.143, total
+    // 0.743: above the 0.7 threshold, below the 0.75 a threshold bump would have
+    // required. Raising the threshold would have failed this run; making the
+    // failure criterion decisive does not touch it.
+    const res = evalTrace(base({
+      status: 'completed',
+      steps: [
+        { step_number: 1, step_type: 'output', name: 'respond', output: { text: 'done' } },
+        ...Array.from({ length: 7 }, (_, i) => ({
+          step_number: i + 2, step_type: 'tool_call' as const, name: `t${i}`,
+          input: { i }, output: i === 0 ? { ok: true } : null,
+        })),
+      ],
+    }), 'completeness-check');
+    expect(res.score).toBeGreaterThan(0.7);
+    expect(res.score).toBeLessThan(0.75);
+    expect(res.passed).toBe(true);
+  });
+
+  it('names the criterion that forced the verdict', () => {
+    const res = evalTrace(base({
+      status: 'failed',
+      error: 'AgentTimeout: aborted before finishing',
+    }), 'hallucination-check');
+    expect(res.passed).toBe(false);
+    expect((res.details as { failed_critical?: string[] }).failed_critical).toContain('no_error_steps');
+  });
+});
+
+describe('rubric corpus depends on what the criterion asserts', () => {
+  const t = () => base({
+    status: 'completed',
+    input: { task: 'Always end your reply with SOURCE: <url>' },
+    output: { text: 'The service was down for an hour.' },
+    steps: [{ step_number: 1, step_type: 'tool_call', name: 'apologize_to_user', input: { note: 'say sorry' }, output: { ok: true } }],
+  });
+
+  // "Must contain" asserts about what the agent PRODUCED. Searching the whole
+  // run there is the false-PASS bug mirrored: the criterion is satisfied by the
+  // prompt that ASKED for a citation, or by a step NAME.
+  for (const pattern of ['SOURCE:', 'apologize']) {
+    it(`does not satisfy "must contain ${pattern}" from the input or a step name`, () => {
+      const trace = ingestTrace(db, t());
+      const res = runCustomRubric(db, trace.id, {
+        name: 'r', threshold: 1.0,
+        criteria: [{ name: 'c', pattern, expected: true, weight: 1 }],
+      });
+      expect(res.passed).toBe(false);
+    });
+  }
+
+  it('satisfies "must contain" from the answer itself', () => {
+    const trace = ingestTrace(db, t());
+    const res = runCustomRubric(db, trace.id, {
+      name: 'r', threshold: 1.0,
+      criteria: [{ name: 'c', pattern: 'service was down', expected: true, weight: 1 }],
+    });
+    expect(res.passed).toBe(true);
+  });
+
+  // "Must NOT contain" still sees the whole run.
+  it('catches forbidden text in a step name', () => {
+    const trace = ingestTrace(db, t());
+    const res = runCustomRubric(db, trace.id, {
+      name: 'r', threshold: 1.0,
+      criteria: [{ name: 'c', pattern: 'apologize', expected: false, weight: 1 }],
+    });
+    expect(res.passed).toBe(false);
+  });
+});

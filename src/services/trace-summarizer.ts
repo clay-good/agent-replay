@@ -183,9 +183,11 @@ function summarizeSteps(steps: TraceStep[], charBudget: number): string[] {
   const keep = new Set<number>();
   const rendered = new Map<number, string>();
   let used = 0;
-  const MIN_LINE = 40; // no useful step line is shorter; below this, stop looking
   for (const i of order) {
-    if (charBudget - used < MIN_LINE) break;
+    // No fixed minimum line length: a `1. [thought] plan` line is 17 characters,
+    // so a 40-char floor dropped steps that FIT and then reported them as
+    // omitted — a trace that fits entirely was handed to the judge as truncated.
+    if (used >= charBudget) break;
     const line = renderStepSummary(steps[i], outputLimit);
     if (used + line.length + 1 > charBudget) continue;
     rendered.set(i, line);
@@ -250,7 +252,11 @@ function renderStepSummary(step: TraceStep, outputLimit: number): string {
     const d = step.decision;
     const conf = d.confidence != null ? ` (confidence ${d.confidence})` : '';
     const by = d.decided_by ? ` by ${d.decided_by}` : '';
-    line += `\n   chose: ${d.chosen}${conf}${by}`;
+    // Bounded like the rationale beside it: this was the only unbounded field
+    // left, so a decision carrying a multi-kilobyte `chosen` — claimed first
+    // when it sits on the failing step — could eat the whole budget and leave a
+    // summary of three steps.
+    line += `\n   chose: ${truncate(d.chosen, 150)}${conf}${by}`;
     if (d.rationale) line += `\n   rationale: ${truncate(d.rationale, 150)}`;
   }
 

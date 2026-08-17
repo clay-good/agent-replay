@@ -124,16 +124,20 @@ between them, and nothing else.
 
 ### Changed
 
-- `hallucination-check` and `completeness-check` now require **0.75** rather than
-  0.7. Their criteria weigh 0.4 / 0.3 / 0.3, so a single criterion scoring 0 lands
-  on exactly 0.7 — which passed. The one criterion in each preset that detects a
-  failed run (weight 0.3) was therefore arithmetically incapable of failing the
-  preset by itself: a trace the tool renders as `✘ FAILED` reported "70% PASS"
-  beside a Details column naming that very criterion, and exited 0. The new
-  threshold sits above every single-failure combination, so any criterion that
-  scores 0 fails the preset while partial scores still pass. **A run that was
-  passing on a zeroed criterion will now fail** — which is the point, but it is a
-  visible change to an existing gate.
+- A criterion that detects a failed run can now fail its preset on its own.
+  `hallucination-check` and `completeness-check` weigh their criteria 0.4 / 0.3 /
+  0.3 against a 0.7 threshold, so a lone zeroed 0.3-weight criterion landed on
+  EXACTLY 0.7 and passed: the one criterion in each preset that detects a failed
+  run was arithmetically incapable of failing it, and a trace the tool renders as
+  `✘ FAILED` reported "70% PASS" beside a Details column naming that criterion,
+  exit 0. Those two criteria are now marked critical — scoring 0 fails the preset
+  whatever the total says, and the report names which one forced the verdict.
+  **A run that was passing on a zeroed error criterion will now fail**, which is
+  the point. Raising the threshold instead would have moved the PARTIAL band too:
+  a retrieval answer that paraphrases rather than quotes scores about 0.3 on the
+  word-overlap grounding heuristic, and a run with 1 of 7 tool calls completed
+  scores 0.743 — both would have started failing on arithmetic unrelated to the
+  defect. Every other band is exactly where it was.
 
 - **Exit codes are now consistent across the CLI**, so scripts and CI can gate
   on `$?`: every failure exits non-zero — `1` for a runtime failure (not found,
@@ -168,10 +172,11 @@ between them, and nothing else.
 ### Fixed
 
 - `completeness-check` was unsatisfiable for every live-captured trace. Its
-  heaviest criterion keyed on `step_type === 'output'`, which no capture path
-  emits — not the hook adapter, not the OTel log path, not the span mapper — so a
-  flawless hook capture capped at 0.6 against a 0.7 threshold and `eval <id>`
-  exited 1 for every hook-captured run, clean or not. A gate that is always red
+  heaviest criterion keyed on `step_type === 'output'`, which the hook adapter,
+  the OTel log path and the span mapper never emit (the Gemini stream translator
+  and the transcript importers do), so a flawless hook capture capped at 0.6
+  against a 0.7 threshold and `eval <id>` exited 1 for every hook-captured run,
+  clean or not. A gate that is always red
   gets ignored. A trace-level output, or the final step that carried one, now
   counts as the answer. Same defect class the error criteria were already fixed
   for: a criterion keyed on something the capture path never produces.
@@ -182,13 +187,16 @@ between them, and nothing else.
   marker a run that died before emitting a final step leaves behind"). The two
   now agree.
 
-- A custom rubric searched a narrower corpus than the built-in it mirrors: the
-  trace input/output plus step OUTPUTS only. A criterion with `expected: false` —
-  the "must not contain" shape, half of the README's own example — therefore
-  scored a free 1.0 for anything living in a tool-call input, a step name, a step
-  error, or the trace error. A rubric forbidding `rm -rf` passed a run that
-  executed exactly that, exit 0. Step names, inputs, errors and the trace error
-  are now searched too.
+- A custom rubric matched against one corpus for both polarities, which is wrong
+  in each direction. "Must not contain" saw only the trace input/output and step
+  OUTPUTS, so it scored a free 1.0 for anything living in a tool-call input, a
+  step name, a step error or the trace error — a rubric forbidding `rm -rf`
+  passed a run that executed exactly that, exit 0. "Must contain" saw the trace
+  INPUT, so a criterion asserting the answer cites a source was satisfied by the
+  prompt that asked for one, and one asserting the agent apologized was satisfied
+  by a step named `apologize_to_user` while the answer said otherwise. Each
+  polarity now searches what it is actually asserting about: "must not contain"
+  sees the whole run, "must contain" sees only what the run produced.
 
 - A rubric pattern the ReDoS filter rejects was scored 0 with its full weight
   rather than refused, and the table prints only the criterion name — so a valid,
@@ -211,8 +219,10 @@ between them, and nothing else.
   Gemini import attaches a decision record to every tool call, and a retry storm
   is all errors — because the prioritized fill was itself in-order. The step that
   ended the run is now claimed before anything else competes for the budget.
-  Rendering is also lazy again, restoring the early exit the rewrite had lost
-  (a 20,000-step trace went from 3 ms to 420 ms).
+  Rendering is lazy again rather than rendering every step up front, which
+  recovers the early exit for traces of small steps (20,000 tiny steps: 420 ms →
+  1 ms). With payloads at the 200-character render limit the scan still visits
+  every step, at roughly the cost of the version before the rewrite.
 
 - `diff --fields ""` and `check --fields ""` bypassed the guard that rejects a
   list naming no fields — `diff` silently suppressed every field comparison and
