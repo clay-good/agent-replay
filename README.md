@@ -209,6 +209,11 @@ agent-replay list --tag production --sort tokens --limit 10
 agent-replay list --json
 ```
 
+`--agent` and `--session` match by substring, so `--agent travel` finds
+`travel-bot` and `travel-assistant` alike. That is convenient for browsing, but
+worth knowing wherever the selection decides a verdict: `check --golden --agent
+travel-bot` in a store that also holds `travel-bot-v2` traces checks both.
+
 ### Inspect
 
 ```bash
