@@ -26,7 +26,14 @@ export function traceHeaderPanel(trace: Trace): string {
     lines.push(`${label('Tokens:')}    ${chalk.white(trace.total_tokens.toLocaleString())}`);
   }
   if (trace.total_cost_usd != null) {
-    lines.push(`${label('Cost:')}      ${chalk.white('$' + trace.total_cost_usd.toFixed(4))}`);
+    // A per-trace cost is routinely a fraction of a cent, and toFixed(4)
+    // rendered anything under $0.00005 as "$0.0000" — reporting zero where real
+    // spend exists. Widen the precision only for those values, so the common
+    // case keeps its familiar 4-decimal form. (aiEvalPanel in this file already
+    // uses 6 decimals for the same reason.)
+    const cost = trace.total_cost_usd;
+    const costStr = cost > 0 && cost < 0.0001 ? cost.toFixed(8) : cost.toFixed(4);
+    lines.push(`${label('Cost:')}      ${chalk.white('$' + costStr)}`);
   }
 
   lines.push(`${label('Started:')}   ${chalk.white(trace.started_at)}`);

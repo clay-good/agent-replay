@@ -109,6 +109,14 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `show --json` now carries a `step_window` object when `--from-step`/`--to-step`
+  narrowed the result. The human output already printed what it omitted; the
+  JSON did not, so a consumer received a complete-looking trace — trace-level
+  totals intact, evals unwindowed — whose steps were silently a subset. An
+  unwindowed `show --json` is unchanged. Separately, a trace cost under
+  $0.00005 no longer renders as `$0.0000`; sub-cent costs are routine, and the
+  panel was reporting zero where real spend existed.
+
 - An AI evaluator that was skipped as not applicable no longer counts as a
   measured 100% pass. Such a preset is stored with a score of 1.0 so it cannot
   fail a gate, but it makes no measurements — yet the `eval` tally and average,

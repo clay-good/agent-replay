@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { traceTable, evalTable, policyTable } from '../src/ui/table.js';
+import { traceHeaderPanel } from '../src/ui/boxen-panels.js';
 import { formatScorePct } from '../src/ui/theme.js';
 import { renderTimeline, renderTree } from '../src/ui/timeline.js';
 import { renderDiff } from '../src/ui/diff-renderer.js';
@@ -269,5 +270,17 @@ describe('renderTimeline / renderTree fidelity', () => {
     ]));
     expect(out).toMatch(/caused by #1/);
     expect(out).toMatch(/RATE_LIMIT: upstream rejected/);
+  });
+});
+
+describe('traceHeaderPanel cost precision', () => {
+  it('does not render a real sub-cent cost as $0.0000', () => {
+    // Regression: toFixed(4) turned anything under $0.00005 into "$0.0000" —
+    // zero where real spend exists. A per-trace cost is routinely that small.
+    const small = noAnsi(traceHeaderPanel(trace({ total_cost_usd: 1.23e-6 })));
+    expect(small).toMatch(/\$0\.00000123/);
+    expect(small).not.toMatch(/\$0\.0000\b/);
+    // The ordinary case keeps its familiar 4-decimal form.
+    expect(noAnsi(traceHeaderPanel(trace({ total_cost_usd: 0.1972 })))).toMatch(/\$0\.1972/);
   });
 });

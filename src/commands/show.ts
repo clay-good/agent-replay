@@ -77,9 +77,16 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
   const omitted = trace.steps.length - windowed.length;
   trace.steps = windowed;
 
-  // Raw JSON output (respects the window)
+  // Raw JSON output (respects the window). The human path prints what it left
+  // out; the JSON path said nothing, so a consumer received a complete-looking
+  // trace — trace-level totals intact, evals unwindowed — whose `steps` was
+  // silently a subset, indistinguishable from a trace that really has that many
+  // steps. Additive: an unwindowed `show --json` is byte-for-byte unchanged.
   if (opts.json) {
-    console.log(JSON.stringify(trace, null, 2));
+    const payload = omitted > 0
+      ? { ...trace, step_window: { from: fromStep ?? null, to: toStep ?? null, shown: windowed.length, omitted } }
+      : trace;
+    console.log(JSON.stringify(payload, null, 2));
     return;
   }
 

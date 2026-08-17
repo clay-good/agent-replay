@@ -782,6 +782,23 @@ describe('CLI integration', () => {
     expect(run(['record'], partial).code).toBe(0);
   });
 
+  it('marks a windowed show --json so a subset cannot read as the whole trace', () => {
+    // The human path prints "Showing 2 of 4 steps"; the JSON path said nothing,
+    // so a consumer received a complete-looking trace — trace-level totals
+    // intact, evals unwindowed — whose `steps` was silently a subset.
+    const stream = ['{"v":1,"type":"trace_start","trace_id":"twin","agent_name":"w"}'];
+    for (let i = 1; i <= 4; i++) stream.push(`{"v":1,"type":"step","trace_id":"twin","step_number":${i},"step_type":"thought","name":"s${i}"}`);
+    stream.push('{"v":1,"type":"trace_end","trace_id":"twin","status":"completed"}');
+    run(['record'], stream.join('\n'));
+
+    const windowed = JSON.parse(run(['show', 'twin', '--from-step', '2', '--to-step', '3', '--json']).stdout);
+    expect(windowed.steps.map((s: { step_number: number }) => s.step_number)).toEqual([2, 3]);
+    expect(windowed.step_window).toEqual({ from: 2, to: 3, shown: 2, omitted: 2 });
+
+    // An unwindowed trace carries no marker at all.
+    expect(JSON.parse(run(['show', 'twin', '--json']).stdout).step_window).toBeUndefined();
+  });
+
   it('reports the steps this record run captured, not the traces lifetime total', () => {
     // Regression: "Total steps" summed getTrace(...).steps.length over every
     // touched trace, so resuming an existing trace by id — which the protocol
