@@ -16,6 +16,7 @@ function setStdin(chunks: string[]): void {
   });
 }
 import { parseEventLine, validateEvent } from '../src/services/event-protocol.js';
+import { validateStepInput } from '../src/utils/validators.js';
 import { applyEvent, TraceRecorder } from '../src/services/recorder.js';
 import type { CaptureEvent } from '../src/services/event-protocol.js';
 import type { IngestTraceInput, TraceWithDetails } from '../src/models/types.js';
@@ -632,7 +633,7 @@ describe('a producer-chosen trace id cannot carry control characters', () => {
       decision: { options: ['a', 'b'], chosen: 'a' },
     });
     expect(bad.event).toBeNull();
-    expect(bad.warning).toMatch(/options must each be an object/);
+    expect(bad.warning).toMatch(/each option must be an object/);
 
     // The top-level decision event is held to the same rule...
     expect(validateEvent({
@@ -647,6 +648,26 @@ describe('a producer-chosen trace id cannot carry control characters', () => {
     expect(validateEvent({
       v: 1, type: 'step', trace_id: 'trc_d', step_number: 2, step_type: 'decision', name: 'pick',
       decision: { chosen: 'a' },
+    }).event).not.toBeNull();
+
+    // The live path applies the SAME rule ingest does, from one exported
+    // function — otherwise `record` stores what `ingest` refuses and a trace
+    // cannot be restored from its own export. These two are the cases the first
+    // version of the live check missed.
+    for (const options of [[{ option: '' }], [{ option: 'a', score: Number.NaN }]]) {
+      expect(validateEvent({
+        v: 1, type: 'step', trace_id: 'trc_d', step_number: 3, step_type: 'decision', name: 'pick',
+        decision: { options, chosen: 'a' },
+      }).event, JSON.stringify(options)).toBeNull();
+      expect(validateStepInput({
+        step_number: 3, step_type: 'decision', name: 'pick',
+        decision: { chosen: 'a', decided_by: 'agent', options },
+      }).valid).toBe(false);
+    }
+    // A score of 0 is legitimate and must pass both.
+    expect(validateEvent({
+      v: 1, type: 'step', trace_id: 'trc_d', step_number: 4, step_type: 'decision', name: 'pick',
+      decision: { options: [{ option: 'a', score: 0 }], chosen: 'a' },
     }).event).not.toBeNull();
   });
 

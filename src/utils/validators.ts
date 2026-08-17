@@ -268,6 +268,32 @@ export function validateStepInput(input: unknown, index?: number): ValidationRes
 
 // ── Decision record validation ───────────────────────────────────────────────
 
+/**
+ * Why one option is not a valid decision option, or null if it is.
+ *
+ * Exported so the LIVE capture path (`event-protocol`) applies the identical
+ * rule. `record` used to accept an options array `ingest` rejects — a plain
+ * array of strings, an empty `option`, a non-finite `score` — so a trace this
+ * tool wrote could not be restored from its own export, and a bare string
+ * element additionally crashed `decisions`. Two copies of this rule would drift;
+ * there is one.
+ */
+export function decisionOptionProblem(
+  opt: unknown,
+): { suffix: string; message: string } | null {
+  if (opt == null || typeof opt !== 'object' || Array.isArray(opt)) {
+    return { suffix: '', message: 'each option must be an object' };
+  }
+  const o = opt as Record<string, unknown>;
+  if (!o.option || typeof o.option !== 'string') {
+    return { suffix: '.option', message: 'option.option is required and must be a string' };
+  }
+  if (o.score != null && (typeof o.score !== 'number' || !Number.isFinite(o.score))) {
+    return { suffix: '.score', message: 'option.score must be a finite number' };
+  }
+  return null;
+}
+
 function validateDecision(input: unknown, prefix: string): ValidationError[] {
   const errors: ValidationError[] = [];
   const field = `${prefix}decision`;
@@ -298,17 +324,10 @@ function validateDecision(input: unknown, prefix: string): ValidationError[] {
       errors.push({ field: `${field}.options`, message: 'decision.options must be an array' });
     } else {
       d.options.forEach((opt: unknown, i: number) => {
-        if (opt == null || typeof opt !== 'object') {
-          errors.push({ field: `${field}.options[${i}]`, message: 'each option must be an object' });
-          return;
-        }
-        const o = opt as Record<string, unknown>;
-        if (!o.option || typeof o.option !== 'string') {
-          errors.push({ field: `${field}.options[${i}].option`, message: 'option.option is required and must be a string' });
-        }
-        if (o.score != null && (typeof o.score !== 'number' || !Number.isFinite(o.score))) {
-          errors.push({ field: `${field}.options[${i}].score`, message: 'option.score must be a finite number' });
-        }
+        // The suffix keeps the error pointing at the exact sub-field
+        // (`.options[0].option`), which callers and tests rely on.
+        const problem = decisionOptionProblem(opt);
+        if (problem) errors.push({ field: `${field}.options[${i}]${problem.suffix}`, message: problem.message });
       });
     }
   }

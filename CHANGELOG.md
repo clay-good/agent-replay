@@ -2161,8 +2161,10 @@ between them, and nothing else.
   strings — the most obvious wrong guess at this schema — was accepted by
   `record` and then aborted the command with a bare `TypeError`, losing every
   LATER decision point in the trace and naming neither the field nor the step.
-  Options are validated at the boundary now, and a record stored before that
-  renders instead of aborting.
+  Options are validated at the boundary now — by the same exported function
+  `ingest` uses, not a second copy of the rule, so `record` cannot store an
+  options array `ingest` refuses and leave a trace unrestorable from its own
+  export. A record stored before that renders instead of aborting.
 
 - A trace id of `''` was stored rather than replaced. An empty string is not
   nullish, so it slipped past `?? generateId`, and because every later event

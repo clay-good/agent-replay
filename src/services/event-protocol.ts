@@ -1,5 +1,6 @@
 import type { IngestDecisionInput, IngestSnapshotInput } from '../models/types.js';
 import { STEP_TYPES } from '../models/enums.js';
+import { decisionOptionProblem } from '../utils/validators.js';
 
 /**
  * Versioned JSONL event protocol for incremental trace capture.
@@ -241,8 +242,15 @@ export function validateEvent(obj: unknown): ParseResult {
     : type === 'step' && e.decision != null ? optionsOf(e.decision)
     : undefined;
   if (opts != null) {
-    if (!Array.isArray(opts) || opts.some((o) => typeof o !== 'object' || o === null || Array.isArray(o) || typeof (o as Record<string, unknown>).option !== 'string')) {
-      return { event: null, warning: `skipped: ${type} decision options must each be an object with a string "option"` };
+    if (!Array.isArray(opts)) {
+      return { event: null, warning: `skipped: ${type} decision options must be an array` };
+    }
+    // The SAME rule `ingest` applies (one exported function, not a second copy):
+    // otherwise `record` stores an options array `ingest` rejects, and a trace
+    // this tool wrote cannot be restored from its own export.
+    for (const o of opts) {
+      const problem = decisionOptionProblem(o);
+      if (problem) return { event: null, warning: `skipped: ${type} decision options: ${problem.message}` };
     }
   }
   // A `step` event may carry an INLINE decision (StepEvent.decision). Validate
