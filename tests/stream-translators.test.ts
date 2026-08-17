@@ -103,6 +103,48 @@ describe('CodexExecTranslator', () => {
     expect(steps[1].error).toBeNull();
   });
 
+  it('names the real reason a codex item failed, never its success status', () => {
+    // The first version was a nested ternary whose OR-ed trigger and `??`
+    // fallback did not line up: an item failing by exit code fell through to the
+    // status string and was stored with the error text "completed" — the SUCCESS
+    // status displayed as the failure reason — and `{is_error: true}` with no
+    // exit code produced the literal "exited with code undefined".
+    const t = makeTranslator('codex-exec')!;
+    const id = run(t, [
+      { type: 'thread.started', thread_id: 'th_msg' },
+      { type: 'item.completed', item: { item_type: 'command_execution', command: 'a', status: 'completed', exit_code: 1 } },
+      { type: 'item.completed', item: { item_type: 'command_execution', command: 'b', is_error: true } },
+      { type: 'item.completed', item: { item_type: 'command_execution', command: 'c', exit_code: '2' } },
+      { type: 'item.completed', item: { item_type: 'command_execution', command: 'd', status: 'Failed' } },
+      { type: 'item.completed', item: { item_type: 'command_execution', command: 'e', status: 'completed', exit_code: 0 } },
+      { type: 'turn.completed', usage: {} },
+    ]);
+    const errs = getTrace(db, id)!.steps.filter((s) => s.step_type === 'tool_call').map((s) => s.error);
+    expect(errs[0]).toBe('exited with code 1');   // not "completed"
+    expect(errs[1]).toBe('tool failed');          // not "exited with code undefined"
+    expect(errs[2]).toBe('exited with code 2');   // stringified exit code counts
+    expect(errs[3]).toBe('tool failed');          // "Failed" counts, like isTrueish
+    expect(errs[4]).toBeNull();                   // a clean item stays clean
+    for (const e of errs) expect(String(e)).not.toContain('undefined');
+  });
+
+  it('treats an empty container error field as success, like "" and false', () => {
+    // Same fabricated-failure class as `error: ""`, via a different empty value:
+    // `{}` is a plausible "no error" encoding for a structured error field.
+    const t = makeTranslator('gemini-stream')!;
+    const id = run(t, [
+      { type: 'init', session_id: 'g_empty' },
+      { type: 'tool_use', id: 't1', name: 'read', input: {} },
+      { type: 'tool_result', id: 't1', error: {}, result: 'fine' },
+      { type: 'tool_use', id: 't2', name: 'read', input: {} },
+      { type: 'tool_result', id: 't2', error: [], result: 'fine too' },
+      { type: 'result', exit_code: 0 },
+    ], false);
+    for (const step of getTrace(db, id)!.steps.filter((s) => s.step_type === 'tool_call')) {
+      expect(step.error).toBeNull();
+    }
+  });
+
   it('marks the trace failed on turn.failed', () => {
     const t = makeTranslator('codex-exec')!;
     const id = run(t, [

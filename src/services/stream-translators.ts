@@ -130,12 +130,7 @@ export class CodexExecTranslator extends BaseTranslator {
       // scores a 100% PASS; a golden step_errors baseline has no failure to
       // regress against). Only unambiguous, shape-generic signals are read, and
       // the whole item is preserved as `output` either way.
-      const itemError =
-        isTrueish(item.is_error) ||
-        str(item.status) === 'failed' ||
-        (typeof item.exit_code === 'number' && Number.isFinite(item.exit_code) && item.exit_code !== 0)
-          ? (errText(item.error) ?? str(item.status) ?? `exited with code ${String(item.exit_code)}`)
-          : errText(item.error);
+      const itemError = codexItemError(item);
       return [
         ...pre,
         {
@@ -304,12 +299,51 @@ function str(v: unknown): string | undefined {
  * generic "tool failed".
  */
 function errText(v: unknown): string | undefined {
-  // `false` and `''` are the SUCCESS values of an always-present error field —
-  // never error text. 0 is likewise the success exit code.
+  // `false`, `''`, `[]` and `{}` are all SUCCESS values of an always-present
+  // error field — never error text. Treating any of them as an error fabricates
+  // a failing step, which feeds `check --golden` step_errors and the eval error
+  // criteria and fails a clean run. 0 is likewise the success exit code.
   if (typeof v === 'string') return v.trim() ? v : undefined;
   if (v === false || v === 0) return undefined;
   if (v == null) return undefined;
+  if (Array.isArray(v)) return v.length > 0 ? JSON.stringify(v) : undefined;
+  if (typeof v === 'object') {
+    const json = JSON.stringify(v);
+    return json && json !== '{}' ? json : undefined;
+  }
   return JSON.stringify(v);
+}
+
+/**
+ * A codex item's error text, or undefined when it did not fail.
+ *
+ * Written out rather than inlined because the first attempt was a nested ternary
+ * whose OR-ed trigger and `??` fallback chain did not line up: an item that
+ * failed by exit code fell through to `str(item.status)` and was recorded with
+ * the error text "completed" — the SUCCESS status shown as the failure reason by
+ * `show`, `watch`, `why` and the ai-root-cause prompt — and `{is_error: true}`
+ * with no exit code produced the literal "exited with code undefined". Decide
+ * whether it failed first, then say the most specific true thing about it.
+ */
+function codexItemError(item: Record<string, unknown>): string | undefined {
+  const explicit = errText(item.error);
+  // Lower-cased for the same reason `isTrueish` is: an exporter that stringifies
+  // its values may send "Failed".
+  const status = str(item.status)?.trim().toLowerCase();
+  // A stringified exit code counts too — same shape-tolerance, same reason.
+  const rawExit = item.exit_code;
+  const exit =
+    typeof rawExit === 'number' ? rawExit
+    : typeof rawExit === 'string' && rawExit.trim() !== '' ? Number(rawExit)
+    : NaN;
+  const failedByExit = Number.isFinite(exit) && exit !== 0;
+
+  if (explicit == null && !isTrueish(item.is_error) && status !== 'failed' && !failedByExit) {
+    return undefined;
+  }
+  if (explicit != null) return explicit;
+  if (failedByExit) return `exited with code ${String(rawExit)}`;
+  return 'tool failed';
 }
 
 /** `true`, or the `"true"` an exporter that stringifies its values sends. */

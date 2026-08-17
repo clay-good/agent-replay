@@ -2156,8 +2156,25 @@ between them, and nothing else.
 
 ### Security
 
-- `show` and `replay` echoed three producer-authored header fields raw —
-  `agent_version`, `tags` and `session_id` — beside `agent_name` and `error`,
+- `record --format codex-exec` recorded a failed item with the wrong reason —
+  including its own SUCCESS status. Detection triggered on any of three signals
+  but picked its message from an unrelated fallback chain, so an item failing by
+  exit code was stored with the error text `completed`, which is what `show`,
+  `watch`, `why` and the AI root-cause prompt then displayed as the failure; an
+  item flagged only by `is_error` produced the literal `exited with code
+  undefined`. A stringified exit code and a capitalized `Failed` now count too,
+  matching the tolerance already applied to `is_error`.
+
+- An `error` field holding an empty array or object still fabricated a failing
+  step — the same class as `error: ""` and `error: false`, via a different empty
+  value that a producer with a structured error field plausibly sends.
+
+- `check` reported "No traces matched" when traces DID match and were then
+  excluded as forks or still-running, sending the reader to widen `--agent` and
+  `--since` — advice that cannot help. The two cases now read differently.
+
+- `show` and `replay` echoed five producer-authored header fields raw —
+  `agent_version`, `tags`, `session_id`, `started_at` and `ended_at` — beside `agent_name` and `error`,
   which were already escaped. Ingest validation only checks that these are
   strings, so an ESC or OSC sequence survived it and reached the terminal of
   whoever inspected the trace: setting the window title, leaving an attribute set

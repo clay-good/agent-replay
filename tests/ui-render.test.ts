@@ -435,6 +435,10 @@ describe('the trace header escapes every producer field, not just some', () => {
       agent_version: '1\u001b[5m',
       tags: ['t\u001b[31mRED', 'aaa\rbbb'],
       session_id: 's\u001b]0;PWNED\u0007',
+      // Held to the same "must be a string" check as the rest, so a first pass
+      // that fixed the other three and left these was still injectable.
+      started_at: '2026-08-17T00:00:00Z\u001b]0;TITLE\u0007',
+      ended_at: '2026-08-17T00:00:01Z\u001b[5m',
     });
     expect(panel).not.toContain('\u001b[5m');
     expect(panel).not.toContain('\u001b[31m');
@@ -443,6 +447,7 @@ describe('the trace header escapes every producer field, not just some', () => {
     expect(panel).not.toMatch(/\r(?!\n)/);
     // The content is still shown, just neutralized.
     expect(panel).toContain('PWNED');
+    expect(panel).toContain('TITLE');
     expect(panel).toContain('RED');
   });
 });

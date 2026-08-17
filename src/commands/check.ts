@@ -132,6 +132,9 @@ export function runCheck(opts: CheckOptions = {}): void {
 
   // Gather candidate traces.
   const candidates: TraceWithDetails[] = [];
+  // Traces that matched the filters but are not comparable runs (see below), so
+  // a zero-candidate refusal can say which of the two things happened.
+  let excluded = 0;
   if (opts.trace) {
     const t = getTrace(db, opts.trace);
     if (!t) {
@@ -169,9 +172,14 @@ export function runCheck(opts: CheckOptions = {}): void {
         // lookup, the OTel merge target, and the running-trace lookup `watch` uses.
         //
         // A RUNNING trace is excluded for the same reason: it is mid-flight, so
-        // its partial shape is not a regression. A run that hangs still reaches
-        // the gate once it finalizes as `timeout`.
-        if (item.parent_trace_id != null || item.status === 'running') continue;
+        // its partial shape is not a regression. A run that HANGS is refused
+        // rather than compared: nothing transitions an abandoned `running` trace
+        // to `timeout` on its own, so it simply never becomes a candidate — the
+        // gate answers exit 2, never a false green.
+        if (item.parent_trace_id != null || item.status === 'running') {
+          excluded++;
+          continue;
+        }
         const full = getTrace(db, item.id);
         if (full) candidates.push(full);
       }
@@ -188,10 +196,17 @@ export function runCheck(opts: CheckOptions = {}): void {
   // recording step, or a --dir typo (ensureDatabase creates a fresh empty store
   // on the spot) all land here, and the gate then stays green forever.
   if (candidates.length === 0 && !opts.allowEmpty) {
+    // Say which of the two things happened. "No traces matched" sent the reader
+    // to widen --agent/--since when traces DID match and were then excluded as
+    // not-comparable — advice that cannot work.
     fail(
       2,
-      'No traces matched — nothing to check against the baseline.',
-      'A check with no candidates cannot detect a regression. Widen --agent/--since, confirm --dir points at the store the run recorded into, or pass --allow-empty if a run with no traces is expected (a quiet nightly window, a matrix job where this agent did not run).',
+      excluded > 0
+        ? `No comparable runs — ${excluded} matching trace(s) were excluded as forks or still running.`
+        : 'No traces matched — nothing to check against the baseline.',
+      excluded > 0
+        ? 'A fork is a never-executed copy and a running trace is mid-flight, so neither can show a regression. Wait for the run to finish, name a trace with --trace, or pass --allow-empty.'
+        : 'A check with no candidates cannot detect a regression. Widen --agent/--since, confirm --dir points at the store the run recorded into, or pass --allow-empty if a run with no traces is expected (a quiet nightly window, a matrix job where this agent did not run).',
     );
     return;
   }

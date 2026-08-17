@@ -8,10 +8,13 @@ import { effectiveTokens } from '../utils/totals.js';
 
 /**
  * Trace metadata header panel (shown at top of `show` command).
- */
-/**
- * Every producer-authored field here is escaped. `agent_version`, `tags` and
- * `session_id` were not: `validateTraceInput` only checks that they are strings,
+ *
+ * Every producer-authored field here is escaped. `agent_version`, `tags`,
+ * `session_id`, `started_at` and `ended_at` were not — the timestamps are held
+ * to the same "must be a string" check as the rest, so they carry an escape
+ * sequence just as easily; a first pass fixed the other three and left them,
+ * while the comment claimed the panel was covered. `validateTraceInput` only
+ * checks that these are strings,
  * so an ESC/OSC sequence survives `ingest` untouched and reached the terminal of
  * whoever ran `show` or `replay` — setting the window title, leaving a colour or
  * blink attribute set past the command, or (a lone CR) overwriting the line it
@@ -43,9 +46,9 @@ export function traceHeaderPanel(trace: Trace): string {
     lines.push(`${label('Cost:')}      ${chalk.white(formatCostUsd(trace.total_cost_usd))}`);
   }
 
-  lines.push(`${label('Started:')}   ${chalk.white(trace.started_at)}`);
+  lines.push(`${label('Started:')}   ${chalk.white(safeText(trace.started_at))}`);
   if (trace.ended_at) {
-    lines.push(`${label('Ended:')}     ${chalk.white(trace.ended_at)}`);
+    lines.push(`${label('Ended:')}     ${chalk.white(safeText(trace.ended_at))}`);
   }
   if (trace.tags.length > 0) {
     lines.push(
@@ -123,7 +126,7 @@ export function aiEvalPanel(evalResult: { evaluator_name: string; score: number;
   if (evalResult.evaluator_name === 'ai-root-cause') {
     lines.push(`${label('Root cause:')}  ${chalk.white(safeText(String(d.root_cause ?? 'Unknown')))}`);
     if (d.failing_step != null) {
-      lines.push(`${label('Failing step:')} ${chalk.white(String(d.failing_step))}`);
+      lines.push(`${label('Failing step:')} ${chalk.white(safeText(String(d.failing_step)))}`);
     }
     const factors = d.contributing_factors as string[] | undefined;
     if (factors && factors.length > 0) {
@@ -162,8 +165,8 @@ export function aiEvalPanel(evalResult: { evaluator_name: string; score: number;
       lines.push('');
       lines.push(`${label('Findings:')}`);
       for (const f of findings) {
-        const sev = f.severity ? chalk.dim(` [${f.severity}]`) : '';
-        const step = f.step != null ? chalk.dim(` (step ${f.step})`) : '';
+        const sev = f.severity ? chalk.dim(` [${safeText(String(f.severity))}]`) : '';
+        const step = f.step != null ? chalk.dim(` (step ${safeText(String(f.step))})`) : '';
         lines.push(`  ${chalk.dim('-')} ${chalk.white(safeText(String(f.description)))}${step}${sev}`);
       }
     }
@@ -175,7 +178,7 @@ export function aiEvalPanel(evalResult: { evaluator_name: string; score: number;
     }
 
   } else if (evalResult.evaluator_name === 'ai-optimization') {
-    lines.push(`${label('Efficiency:')} ${chalk.white(String(d.efficiency_score ?? 0) + '/10')}  ${label('Est. waste:')} ${chalk.white(String(d.total_waste_estimate_pct ?? 0) + '%')}`);
+    lines.push(`${label('Efficiency:')} ${chalk.white(safeText(String(d.efficiency_score ?? 0)) + '/10')}  ${label('Est. waste:')} ${chalk.white(safeText(String(d.total_waste_estimate_pct ?? 0)) + '%')}`);
     const opts = d.optimizations as Array<string | { step: number; type: string; description: string; estimated_savings?: string }> | undefined;
     if (opts && opts.length > 0) {
       lines.push('');
@@ -188,8 +191,8 @@ export function aiEvalPanel(evalResult: { evaluator_name: string; score: number;
           lines.push(`  ${chalk.dim('-')} ${chalk.white(safeText(o))}`);
           continue;
         }
-        const savings = o.estimated_savings ? chalk.dim(` (save ~${o.estimated_savings})`) : '';
-        lines.push(`  ${chalk.dim('-')} Step ${o.step}: ${chalk.white(safeText(String(o.description)))}${savings}`);
+        const savings = o.estimated_savings ? chalk.dim(` (save ~${safeText(String(o.estimated_savings))})`) : '';
+        lines.push(`  ${chalk.dim('-')} Step ${safeText(String(o.step))}: ${chalk.white(safeText(String(o.description)))}${savings}`);
       }
     }
     if (d.summary) {
