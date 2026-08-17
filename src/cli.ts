@@ -313,6 +313,7 @@ guardCmd
       'A guardrail, not a complete boundary — use OS sandboxing for hard isolation.',
   )
   .option('--dir <path>', 'Custom data directory')
+  .option('--allow-empty', 'Answer allow against a store with no enabled policies (default: deny, since such a gate can never fire)')
   .action(async (opts) => {
     const { runGuardCheck } = await import('./commands/guard.js');
     await runGuardCheck(opts);

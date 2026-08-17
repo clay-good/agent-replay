@@ -254,19 +254,38 @@ describe('CLI integration', () => {
     rmSync(fresh, { recursive: true, force: true });
   });
 
-  it('rejects a blank --priority the way every other numeric option does', () => {
-    // `Number('')` and `Number(' ')` are 0, which IS an integer, so the blank
-    // string was the one input this guard accepted where its siblings refuse it:
-    // `--priority "$UNSET_VAR"` silently stored the default instead of failing.
-    expect(run(['guard', 'add', '--name', 'pblank', '--action', 'deny',
-      '--pattern', '{"input_contains":"x"}', '--priority', '']).code).toBe(2);
-    expect(run(['guard', 'add', '--name', 'pblank2', '--action', 'deny',
-      '--pattern', '{"input_contains":"x"}', '--priority', '   ']).code).toBe(2);
-    // A real value, and an absent flag, still work.
-    expect(run(['guard', 'add', '--name', 'pok', '--action', 'deny',
-      '--pattern', '{"input_contains":"x"}', '--priority', '5']).code).toBe(0);
-    expect(run(['guard', 'add', '--name', 'pdefault', '--action', 'deny',
-      '--pattern', '{"input_contains":"x"}']).code).toBe(0);
+  it('will not answer allow from a store with no enabled policies', () => {
+    // Sibling of the `hook --enforce` gate: the store is created by `init` or by
+    // any capture hook, so the "brand-new empty policy set" scenario reached
+    // `guard check` — the documented gate for harnesses without hooks — through
+    // that door, answering allow at exit 0.
+    const fresh = mkdtempSync(join(tmpdir(), 'ar-gc-'));
+    const check = (args: string[]) => {
+      try {
+        const stdout = execFileSync(process.execPath, [CLI, 'guard', 'check', ...args, '--dir', fresh], {
+          encoding: 'utf8',
+          input: JSON.stringify({ step_type: 'tool_call', name: 'Bash', input: { command: 'rm -rf /' } }),
+          stdio: ['pipe', 'pipe', 'pipe'], timeout: 20000,
+        });
+        return { stdout, code: 0 };
+      } catch (e) {
+        const err = e as { stdout?: string; status?: number };
+        return { stdout: err.stdout ?? '', code: err.status ?? 1 };
+      }
+    };
+    // `init` creates the store, so the missing-store guard does not apply.
+    execFileSync(process.execPath, [CLI, 'init', '--dir', fresh], { encoding: 'utf8' });
+
+    const denied = check([]);
+    expect(denied.code).toBe(2); // the documented block signal, not a bare error
+    expect(JSON.parse(denied.stdout).action).toBe('deny'); // --json contract kept
+    expect(check(['--allow-empty']).code).toBe(0);
+
+    // With a policy present, both directions behave normally again.
+    execFileSync(process.execPath, [CLI, 'guard', 'add', '--name', 'rmrf', '--action', 'deny',
+      '--pattern', '{"input_contains":"rm -rf"}', '--dir', fresh], { encoding: 'utf8' });
+    expect(check([]).code).toBe(2);
+    rmSync(fresh, { recursive: true, force: true });
   });
 
   it('reports eval results this store cannot restore instead of dropping them silently', () => {
@@ -442,8 +461,14 @@ describe('CLI integration', () => {
       expect(JSON.parse(r.stdout).action).toBe('deny');
     }
 
-    // A well-formed step no policy denies still passes.
+    // A well-formed step no policy denies still passes — with at least one
+    // policy present. A store with NO enabled policy is a gate that can never
+    // fire, and now denies rather than waving everything through (the same rule
+    // `hook --enforce` follows); this assertion used to run against an empty
+    // store, so it was pinning that fail-open.
+    run(['guard', 'add', '--name', 'gc-present', '--action', 'deny', '--pattern', '{"name_contains":"zzz-no-match"}']);
     expect(run(['guard', 'check'], JSON.stringify({ step_type: 'thought', name: 'ok' })).code).toBe(0);
+    run(['guard', 'remove', 'gc-present']);
   });
 
   it('runs a golden regression check with correct exit codes', () => {

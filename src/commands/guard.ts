@@ -108,12 +108,10 @@ export function runGuardAdd(opts: GuardAddOptions): void {
   // silently stored 0 and `--priority 1e3` stored 1. Priority orders policy
   // evaluation and breaks ties, so a rule the author meant to rank first ranked
   // last and `guard check` cited the wrong policy.
-  // The blank string is the one input `Number()` accepts where the siblings
-  // refuse it: `Number('')` and `Number(' ')` are 0, which IS an integer, so
-  // `--priority "$UNSET_VAR"` stored the default silently instead of being the
-  // usage error `--limit ""` is.
-  const rawPriority = opts.priority == null ? null : String(opts.priority).trim();
-  const priority = rawPriority == null ? 0 : rawPriority === '' ? NaN : Number(rawPriority);
+  // An empty value coerces to 0, which is a legal priority (the default) — the
+  // same convention `--max-cost ""` follows as a $0 budget, pinned by test.
+  // `--limit ""` is a usage error only because 0 is not a legal limit.
+  const priority = opts.priority == null ? 0 : Number(opts.priority);
   if (!Number.isInteger(priority)) {
     console.error(chalk.red(`  Invalid --priority: ${opts.priority} (must be an integer).`));
     process.exitCode = 2;
@@ -288,6 +286,8 @@ export function runGuardTest(traceId: string, opts: GuardTestOptions = {}): void
 export interface GuardCheckOptions {
   json?: boolean;
   dir?: string;
+  /** Allow the check to run against a store with no enabled policies. */
+  allowEmpty?: boolean;
 }
 
 /**
@@ -392,6 +392,19 @@ export async function runGuardCheck(opts: GuardCheckOptions = {}): Promise<void>
   let verdict: ReturnType<typeof verdictForMatches>;
   try {
     const db = ensureDatabase(dbPath);
+    // A store that EXISTS but holds no enabled policy is the same failure with
+    // the file present: a gate that cannot fire. The store is created by `init`
+    // or by any capture hook, so the "brand-new empty policy set answers allow"
+    // scenario survived the missing-store check above through that door — in the
+    // command the README documents as the gate for harnesses without hooks.
+    // Same rule and same opt-out as `hook --enforce`.
+    if (!opts.allowEmpty && listPolicies(db).filter((p) => p.enabled).length === 0) {
+      denied(
+        `no enabled guardrail policies in ${dbPath} — add one with "agent-replay guard add", ` +
+        'point the check at the right store with --dir, or pass --allow-empty to run unguarded',
+      );
+      return;
+    }
     verdict = verdictForMatches(evaluateStep(db, step));
   } catch (err) {
     console.error(chalk.redBright(`  DENY: cannot evaluate policies — ${errorMessage(err)}`));

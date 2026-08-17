@@ -226,10 +226,29 @@ function upsertOtelTrace(db: Database.Database, input: MappedOtelTrace, stats: O
     // A SYNTHETIC target is the exception: it was opened by a rootless batch and
     // the merge adopts this root as its identity, so adding it as a step too
     // would duplicate it.
-    const targetSynthetic = (db
-      .prepare(`SELECT json_extract(metadata, '$.synthetic_trace') AS s FROM agent_traces WHERE id = ?`)
-      .get(target) as { s: unknown } | undefined)?.s;
-    const rootStep = targetSynthetic ? undefined : input.otel_identity_root_step;
+    const targetRow = db
+      .prepare(`SELECT json_extract(metadata, '$.synthetic_trace') AS synthetic,
+                       json_extract(metadata, '$.otel_span_id') AS span_id
+                  FROM agent_traces WHERE id = ?`)
+      .get(target) as { synthetic: unknown; span_id: unknown } | undefined;
+
+    const candidate = input.otel_identity_root_step;
+    const candidateSpan = candidate?.metadata?.otel_span_id;
+    // Never add a span that is ALREADY on this trace — as the trace's own
+    // identity, or as a step. An OTLP exporter retries a batch it did not get a
+    // 200 for, so without this the batch that OPENED the trace would, on
+    // redelivery, add its own root back as a step: a trace containing a step
+    // that is itself.
+    const alreadyPresent =
+      typeof candidateSpan === 'string' &&
+      (targetRow?.span_id === candidateSpan ||
+        db
+          .prepare(
+            `SELECT 1 FROM agent_trace_steps
+              WHERE trace_id = ? AND json_extract(metadata, '$.otel_span_id') = ? LIMIT 1`,
+          )
+          .get(target, candidateSpan) != null);
+    const rootStep = targetRow?.synthetic || alreadyPresent ? undefined : candidate;
     const steps = rootStep ? [...(input.steps ?? []), rootStep] : input.steps;
     mergeBatchIntoTrace(db, target, { ...input, steps: steps ?? [] });
     stats.acceptedSpans += steps?.length ?? 0;

@@ -88,6 +88,21 @@ describe('CodexExecTranslator', () => {
     expect(cmd.input).toEqual({ command: 'ls' });
   });
 
+  it('records a failed item as a step error', () => {
+    // Same gap the gemini tool_result branch had, in the same file: a failed
+    // command was stored as a clean step, so nothing downstream could see it.
+    const t = makeTranslator('codex-exec')!;
+    const id = run(t, [
+      { type: 'thread.started', thread_id: 'th_err' },
+      { type: 'item.completed', item: { item_type: 'command_execution', command: 'false', exit_code: 1, status: 'failed' } },
+      { type: 'item.completed', item: { item_type: 'command_execution', command: 'true', exit_code: 0, status: 'completed' } },
+      { type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } },
+    ]);
+    const steps = getTrace(db, id)!.steps.filter((s) => s.step_type === 'tool_call');
+    expect(steps[0].error).toBeTruthy();
+    expect(steps[1].error).toBeNull();
+  });
+
   it('marks the trace failed on turn.failed', () => {
     const t = makeTranslator('codex-exec')!;
     const id = run(t, [
@@ -171,6 +186,37 @@ describe('GeminiStreamTranslator', () => {
     ], false);
     const tool = getTrace(db, id)!.steps.find((s) => s.step_type === 'tool_call')!;
     expect(tool.error).toBe('{"message":"boom","code":"E1"}');
+  });
+
+  it('does not invent a failure from a success-valued error field', () => {
+    // The opposite-direction bug in my own first fix: keying on `error != null`
+    // turned a producer that ALWAYS emits the key (`error: ""`, `error: false`)
+    // into fabricated failing steps — which feed `check --golden` step_errors
+    // and the eval error criteria, so a clean run exits 1.
+    const t = makeTranslator('gemini-stream')!;
+    const id = run(t, [
+      { type: 'init', session_id: 'g_ok2' },
+      { type: 'tool_use', id: 't1', name: 'read_file', input: {} },
+      { type: 'tool_result', id: 't1', error: '', result: 'file contents here' },
+      { type: 'tool_use', id: 't2', name: 'read_file', input: {} },
+      { type: 'tool_result', id: 't2', error: false, result: 'ok2' },
+      { type: 'result', exit_code: 0 },
+    ], false);
+    for (const step of getTrace(db, id)!.steps.filter((s) => s.step_type === 'tool_call')) {
+      expect(step.error).toBeNull();
+    }
+  });
+
+  it('reads a stringified is_error, like the OTel log mapper does', () => {
+    // An exporter that stringifies attribute values sends "true".
+    const t = makeTranslator('gemini-stream')!;
+    const id = run(t, [
+      { type: 'init', session_id: 'g_str_err' },
+      { type: 'tool_use', id: 't1', name: 'write_file', input: {} },
+      { type: 'tool_result', id: 't1', is_error: 'true', result: 'boom' },
+      { type: 'result', exit_code: 0 },
+    ], false);
+    expect(getTrace(db, id)!.steps.find((s) => s.step_type === 'tool_call')!.error).toBe('boom');
   });
 
   it('leaves a successful gemini tool_result with no error', () => {

@@ -124,6 +124,18 @@ export class CodexExecTranslator extends BaseTranslator {
       const itemType = str(item.item_type) ?? str(item.type) ?? 'item';
       const stepType = CODEX_ITEM_STEP_TYPE[itemType] ?? 'thought';
       const pre = this.ensureStart();
+      // Same gap the gemini tool_result branch had, in the same file: a failed
+      // item was stored as a clean step, so nothing downstream could see the
+      // failure (ai-root-cause is "not applicable" without a failing step and
+      // scores a 100% PASS; a golden step_errors baseline has no failure to
+      // regress against). Only unambiguous, shape-generic signals are read, and
+      // the whole item is preserved as `output` either way.
+      const itemError =
+        isTrueish(item.is_error) ||
+        str(item.status) === 'failed' ||
+        (typeof item.exit_code === 'number' && Number.isFinite(item.exit_code) && item.exit_code !== 0)
+          ? (errText(item.error) ?? str(item.status) ?? `exited with code ${String(item.exit_code)}`)
+          : errText(item.error);
       return [
         ...pre,
         {
@@ -135,6 +147,7 @@ export class CodexExecTranslator extends BaseTranslator {
           name: itemType,
           input: item.command != null ? { command: item.command } : {},
           output: item as Record<string, unknown>,
+          error: itemError,
           metadata: { source: 'codex-exec', item_type: itemType },
         } as CaptureEvent,
       ];
@@ -198,11 +211,19 @@ export class GeminiStreamTranslator extends BaseTranslator {
       // "not applicable" and scored a 100% PASS, and a `check --golden`
       // step_errors baseline had no failure to regress against.
       //
-      // Only unambiguous, shape-generic signals are read (`is_error: true` and
-      // a non-null `error`), per this file's rule of not guessing vendor-internal
-      // field names: the whole result object is preserved in `output` either way,
-      // so a stream that signals failure some other way is no worse off than before.
-      const failed = obj.is_error === true || obj.error != null;
+      // Only unambiguous, shape-generic signals are read, per this file's rule
+      // of not guessing vendor-internal field names: the whole result object is
+      // preserved in `output` either way, so a stream that signals failure some
+      // other way is no worse off than before.
+      //
+      // Both signals are read the way `otel/log-events.toolError` reads its
+      // own: an exporter that stringifies values sends `"true"`, and — the
+      // dangerous direction — a producer that always emits the key sends
+      // `error: ""` or `error: false` on SUCCESS. Keying on `!= null` turned
+      // those into fabricated failing steps, which feed `check --golden`
+      // step_errors and the eval error criteria: exit 1 on a clean run. An
+      // error must be a non-empty value to count.
+      const failed = isTrueish(obj.is_error) || errText(obj.error) != null;
       return [
         {
           v: 1,
@@ -283,7 +304,16 @@ function str(v: unknown): string | undefined {
  * generic "tool failed".
  */
 function errText(v: unknown): string | undefined {
-  if (typeof v === 'string') return v || undefined;
+  // `false` and `''` are the SUCCESS values of an always-present error field —
+  // never error text. 0 is likewise the success exit code.
+  if (typeof v === 'string') return v.trim() ? v : undefined;
+  if (v === false || v === 0) return undefined;
   if (v == null) return undefined;
   return JSON.stringify(v);
+}
+
+/** `true`, or the `"true"` an exporter that stringifies its values sends. */
+function isTrueish(v: unknown): boolean {
+  if (v === true) return true;
+  return typeof v === 'string' && v.trim().toLowerCase() === 'true';
 }

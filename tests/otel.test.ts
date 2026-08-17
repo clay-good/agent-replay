@@ -408,6 +408,24 @@ describe('OTLP receiver', () => {
     expect(stats.acceptedSpans).toBe(2);
   });
 
+  it('does not re-add its own identity root when a batch is redelivered', () => {
+    // An OTLP exporter retries a batch it did not get a 200 for. Keeping a late
+    // root as a step must not make the batch that OPENED the trace add its own
+    // root back on redelivery — a trace containing a step that is itself.
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    const batch = JSON.stringify(otlp([
+      span({ traceId: 'tA', spanId: '1', name: 'invoke_agent', start: 1 * MS, end: 9 * MS, attrs: { 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'solo' } }),
+      span({ traceId: 'tA', spanId: '2', parentSpanId: '1', name: 'execute_tool', start: 2 * MS, end: 3 * MS, attrs: { 'gen_ai.operation.name': 'execute_tool', 'gen_ai.tool.name': 'search' } }),
+    ]));
+    handleTracesExport(db, batch, stats);
+    handleTracesExport(db, batch, stats); // redelivery
+
+    const trace = getTrace(db, listTraces(db, {}).items[0].id)!;
+    expect(trace.metadata.otel_span_id).toBe('1');
+    // The trace's own identity span never appears as one of its steps.
+    expect(trace.steps.some((s) => s.metadata.otel_span_id === '1')).toBe(false);
+  });
+
   it('upgrades a rootless synthetic trace in place when the root batch arrives last', () => {
     const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
     // Batch 1: two children flush before the root ends → a synthetic trace.

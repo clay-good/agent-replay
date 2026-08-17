@@ -114,7 +114,11 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
         // session grows); the rest are retained as metadata, since there is no
         // step type for a user turn.
         if (prompt) {
-          if (!input) input = { prompt };
+          // Trimmed, like `trace-service.hasPromptValue` and both importers: a
+          // whitespace-only first prompt is truthy, so it claimed the input slot
+          // and demoted the REAL question to a follow-up. Third site of the same
+          // defect.
+          if (!input || !String((input as { prompt?: unknown }).prompt ?? '').trim()) input = { prompt };
           else followUpPrompts.push(prompt);
         }
         continue;

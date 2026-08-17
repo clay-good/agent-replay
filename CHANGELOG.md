@@ -258,6 +258,25 @@ between them, and nothing else.
   contributing only an end in the past inverted the window. The mapper already
   guards its own window this way; the merge now does too.
 
+- The Gemini stream's new failure detection read `error != null`, so a producer
+  that always emits the key — `error: ""` or `error: false` on success — got
+  fabricated failing steps, which feed `check --golden` `step_errors` and the
+  eval error criteria and fail a clean run. An error must now be a non-empty
+  value, and a stringified `is_error: "true"` counts, the way the OTel log
+  mapper already reads its own signals.
+
+- `record --format codex-exec` recorded a failed item as a clean step — the same
+  gap in the same file as the Gemini one, so the fix now covers both streams.
+
+- A redelivered OTLP batch added the trace's own identity root back as a step, so
+  the trace contained a step that was itself. An exporter retries any batch it did
+  not get a 200 for; a span already present as the trace's identity, or as a step,
+  is never added again.
+
+- The OTLP log mapper let a whitespace-only first prompt claim the input slot and
+  demote the real question to a follow-up — the third site of a defect already
+  fixed in both importers and in the cross-batch path.
+
 - A failed tool call in a Gemini stream (`record --format gemini-stream`) was
   recorded as a clean one. The gemini translator's `tool_result` branch had no
   error path at all, while every sibling capture path (`hook`, the Claude
@@ -2136,6 +2155,13 @@ between them, and nothing else.
   error instead of a raw `SqliteError` stack trace.
 
 ### Security
+
+- `guard check` answered `allow` at exit 0 against a store holding no enabled
+  policies — the same fail-open as `hook --enforce`, in the command documented
+  as the gate for harnesses without hooks, and reachable through the same door
+  (`init`, or any capture hook, creates the store). It now denies with the
+  reason at exit 2, the block signal, keeping its `--json` contract, and takes
+  `--allow-empty` when an empty policy set is deliberate.
 
 - `hook --enforce` allowed every tool call, silently, when it ran against a
   store holding no policies. A previous fix stopped an enforcing event from
