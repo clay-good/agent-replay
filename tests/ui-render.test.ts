@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { traceTable, evalTable, policyTable } from '../src/ui/table.js';
-import { traceHeaderPanel } from '../src/ui/boxen-panels.js';
+import { traceHeaderPanel, summaryPanel } from '../src/ui/boxen-panels.js';
 import { formatScorePct, formatCostUsd } from '../src/ui/theme.js';
 import { formatDuration } from '../src/utils/time.js';
 import { renderTimeline, renderTree } from '../src/ui/timeline.js';
@@ -449,6 +449,23 @@ describe('the trace header escapes every producer field, not just some', () => {
     expect(panel).toContain('PWNED');
     expect(panel).toContain('TITLE');
     expect(panel).toContain('RED');
+  });
+});
+
+describe('summaryPanel escapes its values', () => {
+  it('does not echo raw control bytes from an imported session id', () => {
+    // The keys are literals at every call site; the values are not. `import`
+    // puts the transcript file's own session_id here, and a transcript is
+    // producer output like any other — so the shared panel escapes values.
+    const panel = summaryPanel('Import Summary', {
+      'Trace ID': 'trc_x',
+      Session: 's\u001b]0;IMPORTPWN\u0007',
+      Steps: 3,
+    });
+    expect(panel).not.toContain('\u001b]0;');
+    expect(panel).not.toContain('\u0007');
+    expect(panel).toContain('IMPORTPWN');
+    expect(panel).toContain('3'); // a number still renders as itself
   });
 });
 

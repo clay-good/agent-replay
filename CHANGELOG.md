@@ -2156,6 +2156,12 @@ between them, and nothing else.
 
 ### Security
 
+- The summary panel shared by `import`, `record`, `ingest`, `fork`, `diff` and
+  `stats` echoed its values raw. The keys are literals at every call site, but
+  the values are not — `import` puts the transcript file's own `session_id`
+  there, and a transcript is producer output like any other. Values are escaped
+  at the panel, so every current and future caller is covered.
+
 - `record --format codex-exec` recorded a failed item with the wrong reason —
   including its own SUCCESS status. Detection triggered on any of three signals
   but picked its message from an unrelated fallback chain, so an item failing by

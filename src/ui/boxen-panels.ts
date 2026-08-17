@@ -103,8 +103,13 @@ export function summaryPanel(
   title: string,
   stats: Record<string, string | number>,
 ): string {
+  // Escape the VALUES: the keys are literals at every call site, but the values
+  // are not — `import` puts the transcript file's own `session_id` here, and a
+  // transcript is producer output like any other. Escaping a number or one of our
+  // own ids is a no-op, so this costs nothing at the call sites that are already
+  // safe, and it covers the ones added later.
   const lines = Object.entries(stats).map(
-    ([k, v]) => `${label(k + ':')}  ${chalk.white(String(v))}`,
+    ([k, v]) => `${label(k + ':')}  ${chalk.white(safeText(String(v)))}`,
   );
 
   return boxen(lines.join('\n'), {
