@@ -98,6 +98,12 @@ export function exportTraces(
   }).filter(Boolean);
 
   if (format === 'jsonl') {
+    // A zero-match export must be an EMPTY file, not one blank line. `[].join()`
+    // is '', so the unconditional trailing newline made the output exactly "\n":
+    // a strict streaming consumer doing `line => JSON.parse(line)` threw
+    // "Unexpected end of JSON input" on it, and `wc -l` reported one record. The
+    // repo's own test worked around this rather than relying on it.
+    if (traces.length === 0) return '';
     return traces.map((t) => JSON.stringify(t)).join('\n') + '\n';
   }
 

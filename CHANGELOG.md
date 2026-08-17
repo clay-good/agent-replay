@@ -98,6 +98,12 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `export --format jsonl` with no matches now writes an empty file instead of
+  one blank line, which a strict streaming consumer rejected as malformed JSON.
+  `export --format golden` also warns that `--with-evals` / `--with-snapshots`
+  do nothing there — the golden shape is fixed, always carrying eval criteria
+  and never snapshots — rather than accepting the flags and ignoring them.
+
 - The OTel *logs* path no longer loses or fabricates data. A flush window
   carrying only model-call events has no steps and no prompt but does have
   token counts, and the whole group was discarded — so a session's token total

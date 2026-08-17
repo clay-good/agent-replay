@@ -356,3 +356,22 @@ describe('runCheck refuses an empty golden baseline', () => {
     }
   });
 });
+
+// ── export: an empty jsonl export is an empty file ──────────────────────────
+
+describe('exportTraces jsonl with no matches', () => {
+  it('emits an empty file, not one blank line', () => {
+    // Regression: `[].map(...).join('\n') + '\n'` is exactly "\n", so a
+    // zero-match export produced a one-line file. A strict streaming consumer
+    // (`line => JSON.parse(line)`) threw "Unexpected end of JSON input" on it,
+    // and `wc -l` reported one record where there were none. The json format
+    // correctly emits "[]".
+    ingestTrace(db, baseline);
+    expect(exportTraces(db, { agent_name: 'no-such-agent' }, 'jsonl')).toBe('');
+    expect(exportTraces(db, { agent_name: 'no-such-agent' }, 'json').trim()).toBe('[]');
+    // A non-empty export is unchanged: one JSON object per line, trailing NL.
+    const some = exportTraces(db, { agent_name: 'travel-bot' }, 'jsonl');
+    expect(some.endsWith('\n')).toBe(true);
+    expect(some.trim().split('\n')).toHaveLength(1);
+  });
+});

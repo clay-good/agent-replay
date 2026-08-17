@@ -94,6 +94,18 @@ export function runExport(traceId: string | undefined, opts: ExportOptions = {})
     return;
   }
 
+  // The golden format has a fixed shape: it always carries eval criteria and
+  // never carries snapshots, and `exportGolden` takes no options at all. Both
+  // flags were accepted and then silently did nothing, so a user asking for
+  // snapshots got a success message and a file without them.
+  if (format === 'golden' && (opts.withEvals || opts.withSnapshots)) {
+    const ignored = [opts.withEvals && '--with-evals', opts.withSnapshots && '--with-snapshots']
+      .filter(Boolean)
+      .join(' and ');
+    console.error(chalk.yellow(`  ⚠ ${ignored} has no effect with --format golden.`));
+    console.error(chalk.dim('    A golden entry always includes eval criteria, and never includes snapshots.'));
+  }
+
   const spinner = startSpinner(`Exporting as ${format.toUpperCase()}...`);
 
   try {
