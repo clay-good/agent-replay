@@ -175,16 +175,21 @@ describe('otel serve (end-to-end)', () => {
         { hostname: u.hostname, port: u.port, path: u.pathname, method: 'POST', headers: { 'content-type': 'application/json' } },
         (res) => { responded = true; res.resume(); resolve(res.statusCode ?? 0); },
       );
-      // A write error can surface BEFORE the response callback runs: the server
-      // answers and closes while the 33 MB body is still uploading, so the
-      // socket error and the response race. Give the response a moment to land
-      // before treating the error as a failure — otherwise this test flakes
-      // under parallel load and reads as a real regression in the receiver.
-      req.on('error', (e) => {
+      // A write error is EXPECTED here and is not the thing under test: the
+      // server answers 413 and closes while the 33 MB body is still uploading,
+      // so the upload takes EPIPE/ECONNRESET. Racing that error against the
+      // response on a fixed timer flaked under parallel load (the response can
+      // take longer than any timer to be scheduled) and read as a receiver
+      // regression. Instead, remember the error and only fail once the socket is
+      // fully closed with no response — by then a sent response has already been
+      // emitted, so this is deterministic rather than timing-dependent.
+      let writeError: Error | undefined;
+      req.on('error', (e) => { writeError = e; });
+      req.on('close', () => {
         if (responded) return;
-        setTimeout(() => {
-          if (!responded) reject(e);
-        }, 1000).unref();
+        setImmediate(() => {
+          if (!responded) reject(writeError ?? new Error('socket closed with no response'));
+        });
       });
       req.end(big);
     });

@@ -25,6 +25,25 @@ between them, and nothing else.
 
 ### Fixed
 
+- Everything a later OpenTelemetry log batch carried was dropped at the merge. A
+  log processor flushes each turn in its own batch, so for a multi-turn session:
+  `total_cost_usd` was missing from the merge's UPDATE, leaving only the first
+  batch's cost (and null forever if that batch reported none), and a later turn's
+  prompt was discarded along with its `follow_up_prompts`, so the store kept only
+  the session's first question. Cost now sums like tokens, and later turns are
+  retained as follow-ups.
+
+- One record with an impossible timestamp nulled a whole log-derived session's end
+  time and duration: the maximum was taken over raw nanoseconds and the formatter
+  then rejected it, discarding timing every other record in the session defined.
+  The span path had the same gap in the other direction — its duration came from
+  raw nanoseconds while `ended_at` was guarded, so a single absurd
+  `endTimeUnixNano` produced a ~31-million-year duration beside a null end time.
+
+- A tool failure reported as the string `"False"` — what an exporter built on the
+  OTel Python SDK sends, since `str(False)` capitalizes — read as a clean call,
+  dropping the error text. The check is now case-insensitive.
+
 - `demo --reset` could delete a working tree that merely looked like a store. The
   guard accepted any directory whose name starts with `agent-replay`, which a
   source checkout called `agent-replay-project` does, and then removed the tree

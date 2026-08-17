@@ -5,6 +5,7 @@ import { getTrace, listTraces } from '../src/services/trace-service.js';
 import { mapOtlpLogs } from '../src/services/otel/log-events.js';
 import { ingestTrace } from '../src/services/trace-service.js';
 import { handleLogsExport, type OtelStats } from '../src/services/otel/receiver.js';
+import { effectiveDurationMs } from '../src/utils/time.js';
 
 let db: Database.Database;
 
@@ -181,6 +182,62 @@ describe('handleLogsExport (/v1/logs ingest)', () => {
     const t = getTrace(db, traces.items[0].id)!;
     const toolNames = t.steps.filter((s) => s.step_type === 'tool_call').map((s) => s.name);
     expect(toolNames).toEqual(['first', 'second']);
+  });
+
+  // A log processor flushes each turn in its own batch (turns are minutes apart),
+  // so everything a later batch carries has to survive the merge. Cost was absent
+  // from the merge UPDATE entirely, and a later turn's prompt was dropped because
+  // the input is only adopted for a synthetic trace.
+  it('sums cost across batches and keeps every later turn\'s prompt', () => {
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    handleLogsExport(db, JSON.stringify(otlpLogs([
+      logRecord('claude_code.user_prompt', { 'session.id': 'sc', prompt: 'first question' }, 1_000_000),
+      logRecord('claude_code.api_request', { 'session.id': 'sc', cost_usd: 0.5, input_tokens: 10, output_tokens: 10 }, 2_000_000),
+    ])), stats);
+    handleLogsExport(db, JSON.stringify(otlpLogs([
+      logRecord('claude_code.user_prompt', { 'session.id': 'sc', prompt: 'second question' }, 3_000_000),
+      logRecord('claude_code.api_request', { 'session.id': 'sc', cost_usd: 0.25, input_tokens: 10, output_tokens: 10 }, 4_000_000),
+    ])), stats);
+
+    const t = getTrace(db, listTraces(db, { session_id: 'sc' }).items[0].id)!;
+    expect(t.total_cost_usd).toBeCloseTo(0.75, 8);
+    // The run still started from the first question; the later turn is retained
+    // rather than discarded (there is no step type for a user turn).
+    expect(t.input).toEqual({ prompt: 'first question' });
+    expect((t.metadata as { follow_up_prompts?: string[] }).follow_up_prompts).toEqual(['second question']);
+  });
+
+  // One out-of-range stamp used to poison the whole session's aggregate: the max
+  // was taken over RAW nanos, and the formatter then rejected it, so ended_at and
+  // total_duration_ms went null even though every other record was properly timed.
+  it('keeps the session end time when one record carries an impossible timestamp', () => {
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    const res = handleLogsExport(db, JSON.stringify(otlpLogs([
+      logRecord('gemini_cli.user_prompt', { 'session.id': 'skew', prompt: 'go' }, 1_000_000_000),
+      logRecord('gemini_cli.tool_call', { 'session.id': 'skew', function_name: 'a', function_args: '{}', success: true }, 1_050_000_000),
+      // Nanos so large the four-digit-year window cannot render them.
+      logRecord('gemini_cli.tool_call', { 'session.id': 'skew', function_name: 'b', function_args: '{}', success: true }, 9e21),
+    ])), stats);
+    expect(res.status).toBe(200);
+
+    const t = getTrace(db, listTraces(db, { session_id: 'skew' }).items[0].id)!;
+    expect(t.ended_at).toBe('1970-01-01T00:00:01.050Z');
+    // The log mapper carries no explicit total; the duration is derived from the
+    // window, so the recovered end time is what makes it measurable at all.
+    expect(effectiveDurationMs(t)).toBe(50);
+  });
+
+  // An exporter built on the OTel Python SDK stringifies with `str(False)` →
+  // "False", which an exact 'false' comparison missed: the error text was dropped
+  // and a failed tool call read as a clean one.
+  it('treats a stringified "False" success as a failure, whatever its case', () => {
+    for (const value of ['False', 'FALSE', 'false', ' false ']) {
+      const [t] = mapOtlpLogs(otlpLogs([
+        logRecord('claude_code.tool_result', { 'session.id': 'pyf', name: 'Bash', success: value, error: 'permission denied' }, 1_000_000),
+      ]));
+      expect(t.steps![0].error).toBe('permission denied');
+      expect(t.status).toBe('failed');
+    }
   });
 });
 

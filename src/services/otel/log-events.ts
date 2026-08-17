@@ -88,14 +88,20 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
     let endedAtNanos = 0;
 
     for (const l of group) {
-      if (!startedAt && l.time) startedAt = isoFromNanos(l.time);
       // The record's own event time. No log-derived step set `started_at`, and
       // the writer falls back to the ingest wall-clock, so every step of an
       // imported session carried the same fabricated timestamp — the moment the
       // batch happened to arrive. Timelines showed every step as simultaneous,
       // and the trace never gained a duration at all.
       const at = isoFromNanos(l.time);
-      if (l.time) endedAtNanos = Math.max(endedAtNanos, l.time);
+      if (!startedAt && at) startedAt = at;
+      // Only fold in a stamp that can actually be rendered. Maxing the RAW nanos
+      // let ONE out-of-range record (a skewed clock, a stamp in the wrong unit)
+      // poison the aggregate: isoFromNanos then returned undefined for the max,
+      // so the whole session's ended_at and duration went null even though every
+      // other record was properly timed. The span path filters its start/end sets
+      // for exactly this reason.
+      if (at) endedAtNanos = Math.max(endedAtNanos, l.time);
       const a = l.attrs;
       const evt = l.eventName;
 
@@ -271,7 +277,10 @@ function toolError(a: Record<string, unknown>): string | undefined {
   // An exporter that stringifies attribute values sends `"false"`, and the same
   // record still carries the error text — so keying on `!== false` alone read a
   // failed tool call as clean, reopening the exact class this function closed.
-  const failed = a.success === false || a.success === 'false' || a.success === 0 || a.success === '0';
+  // Case-insensitively, because an exporter built on the OTel Python SDK
+  // stringifies with `str(False)` → "False", which an exact 'false' missed.
+  const asText = typeof a.success === 'string' ? a.success.trim().toLowerCase() : undefined;
+  const failed = a.success === false || a.success === 0 || asText === 'false' || asText === '0';
   if (!failed) return undefined;
   return str(a.error) ?? str(a.error_message) ?? str(a.error_type) ?? 'tool failed';
 }

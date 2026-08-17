@@ -321,7 +321,9 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
         input: messageContent(s.attrs, 'input'),
         output,
         started_at: isoFromNanos(s.start),
-        ended_at: s.end ? isoFromNanos(s.end) : null,
+        // `?? null` because isoFromNanos returns undefined for a stamp it cannot
+        // render; the column's "no end" value is null, not an absent key.
+        ended_at: (s.end ? isoFromNanos(s.end) : null) ?? null,
         duration_ms: duration,
         tokens_used: tokens || null,
         model: str(s.attrs['gen_ai.request.model']) ?? str(s.attrs['gen_ai.response.model']) ?? str(s.attrs['llm.model_name']) ?? null,
@@ -334,12 +336,17 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
     // The trace spans from the earliest span start (group is sorted by start)
     // to the latest span end; derive the trace-level end time and duration so
     // OTel-ingested traces show a duration instead of "-".
-    const spanEnds = group.map((s) => s.end).filter((e): e is number => e != null);
+    // Only stamps `isoFromNanos` can actually render count. It rejects a value
+    // outside the four-digit-year window, so keeping such a stamp in this set
+    // produced a trace with `ended_at: null` and a ~31-million-year
+    // `total_duration_ms` on the same row — the duration was derived from the raw
+    // nanos while the formatting guard silently dropped the timestamp.
+    const spanEnds = group.map((s) => s.end).filter((e): e is number => e != null && isoFromNanos(e) != null);
     const maxEnd = spanEnds.length ? Math.max(...spanEnds) : undefined;
     // Earliest VALID start (a span missing startTimeUnixNano flattens to 0, which
     // is not a real 1970 timestamp), so one start-less span can't null the whole
     // trace's start/duration when other spans are properly timed.
-    const spanStarts = group.map((s) => s.start).filter((st): st is number => st > 0);
+    const spanStarts = group.map((s) => s.start).filter((st): st is number => st > 0 && isoFromNanos(st) != null);
     const minStart = spanStarts.length ? Math.min(...spanStarts) : undefined;
 
     // messageContent always returns an object (never null) — it just omits the

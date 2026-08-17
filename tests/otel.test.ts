@@ -539,6 +539,23 @@ describe('OTLP receiver', () => {
 
 // ── OpenLLMetry (traceloop.*) fallback ─────────────────────────────────────
 
+describe('mapOtlpTraces — an unrenderable span timestamp', () => {
+  // The end/start sets were built from RAW nanos while the formatter rejects a
+  // stamp outside the four-digit-year window, so one absurd endTimeUnixNano gave
+  // a trace with `ended_at: null` and a ~31-million-year duration on the same row.
+  it('ignores a stamp it cannot render instead of deriving a duration from it', () => {
+    const [trace] = mapOtlpTraces(otlp([
+      span({ traceId: 'tz', spanId: 'z0', name: 'invoke_agent', start: 1 * MS, end: 5 * MS, attrs: { 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'bot' } }),
+      span({ traceId: 'tz', spanId: 'z1', parentSpanId: 'z0', name: 'chat', start: 2 * MS, end: 9e21, attrs: { 'gen_ai.operation.name': 'chat' } }),
+    ]));
+
+    expect(trace.ended_at).toBe('1970-01-01T00:00:00.005Z');
+    expect(trace.total_duration_ms).toBe(4);
+    // The step itself still reports no end rather than a fabricated one.
+    expect(trace.steps![0].ended_at).toBeNull();
+  });
+});
+
 describe('mapOtlpTraces — span names inherited from Object.prototype', () => {
   // The step-type tables are plain object literals and their keys come from
   // untrusted telemetry: `gen_ai.operation.name`, and the span NAME's leading

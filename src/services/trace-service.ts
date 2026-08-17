@@ -70,6 +70,25 @@ function jsonStr(val: unknown): string {
   return JSON.stringify(val);
 }
 
+/** Stored `follow_up_prompts` as a list of strings — anything else reads as none. */
+function asPromptList(val: unknown): string[] {
+  return Array.isArray(val) ? val.filter((p): p is string => typeof p === 'string' && p !== '') : [];
+}
+
+/**
+ * The incoming batch's prompt when it is a LATER turn of a trace that already
+ * has one — the merge keeps the first prompt as the trace input, so a subsequent
+ * turn belongs in `follow_up_prompts` (there is no step type for a user turn).
+ * Empty when the trace has no prompt yet, or when the batch repeats the same one.
+ */
+function promptOf(existingInput: unknown, incomingInput: unknown): string[] {
+  const prompt = (incomingInput as { prompt?: unknown } | undefined)?.prompt;
+  const kept = (existingInput as { prompt?: unknown } | undefined)?.prompt;
+  if (typeof prompt !== 'string' || !prompt) return [];
+  if (typeof kept !== 'string' || !kept || kept === prompt) return [];
+  return [prompt];
+}
+
 /**
  * For the plain-TEXT `error` column, which is read back raw rather than through
  * `parseJson`: a string is stored as-is and a structured error is flattened to
@@ -646,6 +665,12 @@ export function mergeBatchIntoTrace(
       ? Math.round(Date.parse(endedAt) - Date.parse(startedAt))
       : existing.total_duration_ms;
     const totalTokens = (existing.total_tokens ?? 0) + (input.total_tokens ?? 0);
+    // Cost sums across batches exactly like tokens. It was absent from the UPDATE
+    // below, so only the FIRST batch's cost survived — and a session whose first
+    // batch carried no cost record stayed null forever, which for the usual
+    // multi-flush processor meant `stats` and `list --sort cost` never saw the
+    // spend at all.
+    const totalCost = (existing.total_cost_usd ?? 0) + (input.total_cost_usd ?? 0);
     const status =
       existing.status === 'failed' || input.status === 'failed' ? 'failed' : existing.status;
 
@@ -666,11 +691,25 @@ export function mergeBatchIntoTrace(
       traceOutput = input.output;
     }
 
+    // Carry the incoming batch's later user turns across the merge. A session's
+    // turns are minutes apart, so a log processor flushes each one in its own
+    // batch: the mapper correctly put turn 2 in `input` (it is the first prompt
+    // IT saw) and turn 3+ in `follow_up_prompts`, and both were then discarded
+    // here, because the input is only adopted for a synthetic trace and the
+    // metadata was copied from the existing trace alone. A multi-turn session
+    // kept only its first question, with the rest nowhere in the store.
+    const followUps = [
+      ...asPromptList(existing.metadata.follow_up_prompts),
+      ...promptOf(traceInput, input.input),
+      ...asPromptList(input.metadata?.follow_up_prompts),
+    ];
+    if (followUps.length > 0) mergedMeta.follow_up_prompts = followUps;
+
     db.prepare(
       `UPDATE agent_traces SET
          agent_name = ?, status = ?, input = ?, output = ?, started_at = ?,
-         ended_at = ?, total_duration_ms = ?, total_tokens = ?, metadata = ?,
-         session_id = ?
+         ended_at = ?, total_duration_ms = ?, total_tokens = ?, total_cost_usd = ?,
+         metadata = ?, session_id = ?
        WHERE id = ?`,
     ).run(
       agentName,
@@ -681,6 +720,7 @@ export function mergeBatchIntoTrace(
       endedAt,
       duration ?? null,
       totalTokens || null,
+      totalCost || null,
       jsonStr(mergedMeta),
       existing.session_id ?? input.session_id ?? null,
       traceId,
