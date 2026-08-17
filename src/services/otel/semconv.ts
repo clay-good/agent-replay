@@ -173,9 +173,30 @@ export function flattenSpans(otlp: Record<string, unknown>): FlatSpan[] {
 
 // ── Mapping ─────────────────────────────────────────────────────────────────
 
-function isoFromNanos(nanos: number): string | undefined {
-  if (!nanos) return undefined;
-  return new Date(nanos / 1e6).toISOString();
+/**
+ * An ISO timestamp from OTLP nanoseconds, or undefined when the value is not a
+ * usable instant.
+ *
+ * Two failures came from converting unguarded. A value beyond the Date range
+ * (a producer sending `Date.now() * 1e9`, or a negative) threw `RangeError:
+ * Invalid time value` — and because the mapper runs inside the receiver's
+ * try, the WHOLE batch was answered 400 ("resourceSpans must be arrays",
+ * blaming the wrong thing) and every well-formed span alongside it was
+ * discarded, permanently, since 400 is not retryable. A value merely far in
+ * the future stayed in range but produced the expanded-year form
+ * (`+057583-09-27T…`), which `julianday()` cannot parse — so that trace sorted
+ * LAST in `list`, vanished from every `--since` window, and had no computable
+ * duration. Bound it to four-digit years, the range every reader can handle.
+ */
+export function isoFromNanos(nanos: number): string | undefined {
+  if (!nanos || !Number.isFinite(nanos)) return undefined;
+  const ms = nanos / 1e6;
+  // Date's own range is ±8.64e15 ms; the four-digit-year window is narrower.
+  const MIN_MS = Date.UTC(1000, 0, 1);
+  const MAX_MS = Date.UTC(9999, 11, 31, 23, 59, 59, 999);
+  if (ms < MIN_MS || ms > MAX_MS) return undefined;
+  const iso = new Date(ms).toISOString();
+  return iso.startsWith('+') || iso.startsWith('-') ? undefined : iso;
 }
 
 /** Map an OTLP/JSON traces payload into one IngestTraceInput per OTel trace ID. */

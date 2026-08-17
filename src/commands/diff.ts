@@ -4,7 +4,7 @@ import { getTrace } from '../services/trace-service.js';
 import { diffTraces, aiDiffAnalysis } from '../services/diff-service.js';
 import { loadConfig, resolveProvider } from '../services/config-service.js';
 import { ensureDatabase } from '../db/index.js';
-import { renderDiff } from '../ui/diff-renderer.js';
+import { renderDiff, describeFilteredCount } from '../ui/diff-renderer.js';
 import { summaryPanel, aiDiffPanel } from '../ui/boxen-panels.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage } from '../utils/json.js';
@@ -95,8 +95,11 @@ export async function runDiff(
       'Right trace': `${traceB.agent_name} (${traceB.id.slice(0, 12)})`,
       'Left steps': diff.left_step_count,
       'Right steps': diff.right_step_count,
+      // Name the scope honestly — `--fields` keeps step-presence rows whatever
+      // the allowlist says, so labelling the whole count "in <fields> only"
+      // claimed a scope it did not have.
       Differences: appliedFields && appliedFields.length > 0
-        ? `${diff.diffs.length} (in ${appliedFields.join(', ')} only)`
+        ? describeFilteredCount(diff.diffs, appliedFields)
         : diff.diffs.length,
       'Divergence at': diff.divergence_step != null ? `Step ${diff.divergence_step}` : 'N/A',
     };
@@ -137,3 +140,4 @@ export async function runDiff(
     }
   }
 }
+

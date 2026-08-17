@@ -64,7 +64,15 @@ export function renderDiff(
 
   // Diff table
   lines.push('');
-  lines.push(heading(`  ${diff.diffs.length} difference(s) found:`));
+  // Same honesty as `--compact`: presence rows survive any --fields allowlist,
+  // so a filtered run must not present its total as field-scoped.
+  lines.push(
+    heading(
+      fields && fields.length > 0
+        ? `  ${describeFilteredCount(diff.diffs, fields)} difference(s) found:`
+        : `  ${diff.diffs.length} difference(s) found:`,
+    ),
+  );
   lines.push('');
 
   const table = new Table({
@@ -166,4 +174,21 @@ function safeCut(s: string, index: number): number {
 function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
   return s.slice(0, safeCut(s, max - 3)) + '...';
+}
+
+/**
+ * "3 in model, 5 step presence" — a count the label can stand behind.
+ *
+ * Presence rows (a step existing on one side only) survive any `--fields`
+ * allowlist, because they are not field differences. Folding them into a total
+ * labelled "in <fields> only" claimed a scope the number did not have: on a fork
+ * pair, `--fields model` reported "8 (in model only)" when none of the eight was
+ * a model difference.
+ */
+export function describeFilteredCount(diffs: { field: string }[], fields: string[]): string {
+  const presence = diffs.filter((d) => d.field === 'missing_left' || d.field === 'missing_right').length;
+  const inFields = diffs.length - presence;
+  if (presence === 0) return `${inFields} (in ${fields.join(', ')})`;
+  if (inFields === 0) return `${presence} (step presence only; none in ${fields.join(', ')})`;
+  return `${inFields} in ${fields.join(', ')}, ${presence} step presence`;
 }

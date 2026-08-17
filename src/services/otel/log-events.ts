@@ -1,5 +1,9 @@
 import type { IngestTraceInput, IngestStepInput, IngestDecisionInput } from '../../models/types.js';
 import { attrsToMap, decodeAnyValue } from './semconv.js';
+import { isoFromNanos } from './semconv.js';
+
+/** Bucket key for a record with no session.id — never persisted as one. */
+const NO_SESSION_PREFIX = '!nosession:';
 
 /**
  * Map the OTLP log events emitted by the two CLIs that carry richer signal as
@@ -58,7 +62,7 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
     // across unrelated services — into a single trace with summed tokens and
     // one arbitrary agent name. The span path refuses the same fusion for the
     // same reason: the correlation key is absent, so correlate nothing.
-    const sid = str(l.attrs['session.id']) ?? `!nosession:${i}`;
+    const sid = str(l.attrs['session.id']) ?? `${NO_SESSION_PREFIX}${i}`;
     const list = bySession.get(sid) ?? [];
     list.push(l);
     bySession.set(sid, list);
@@ -75,27 +79,38 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
     const isGemini = group.some((l) => l.eventName.startsWith('gemini_cli.'));
 
     let input: Record<string, unknown> | undefined;
+    const followUpPrompts: string[] = [];
     let totalTokens = 0;
+    let totalCost = 0;
     const steps: IngestStepInput[] = [];
     let stepNumber = 1;
     let startedAt: string | undefined;
     let endedAtNanos = 0;
 
     for (const l of group) {
-      if (!startedAt && l.time) startedAt = new Date(l.time / 1e6).toISOString();
+      if (!startedAt && l.time) startedAt = isoFromNanos(l.time);
       // The record's own event time. No log-derived step set `started_at`, and
       // the writer falls back to the ingest wall-clock, so every step of an
       // imported session carried the same fabricated timestamp — the moment the
       // batch happened to arrive. Timelines showed every step as simultaneous,
       // and the trace never gained a duration at all.
-      const at = l.time ? new Date(l.time / 1e6).toISOString() : undefined;
+      const at = isoFromNanos(l.time);
       if (l.time) endedAtNanos = Math.max(endedAtNanos, l.time);
       const a = l.attrs;
       const evt = l.eventName;
 
       if (evt.endsWith('.user_prompt')) {
         const prompt = str(a.prompt) ?? str(a.prompt_text) ?? (typeof l.body === 'string' ? l.body : undefined);
-        if (prompt) input = { prompt };
+        // A session shares one session.id across every turn, and each later
+        // prompt OVERWROTE the trace input — so a multi-turn session kept only
+        // the LAST question and nothing anywhere carried the earlier ones. The
+        // first prompt is what the run started from (and stays stable as the
+        // session grows); the rest are retained as metadata, since there is no
+        // step type for a user turn.
+        if (prompt) {
+          if (!input) input = { prompt };
+          else followUpPrompts.push(prompt);
+        }
         continue;
       }
 
@@ -185,6 +200,12 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
         totalTokens +=
           num(a.input_token_count ?? a['gen_ai.usage.input_tokens'] ?? a.input_tokens) +
           num(a.output_token_count ?? a['gen_ai.usage.output_tokens'] ?? a.output_tokens);
+        // The same record carries the spend when the emitter reports it. It was
+        // read by nothing, so `stats` printed "Total cost: -" and
+        // `list --sort cost` was inert for every OTel-captured trace, with the
+        // number sitting unread in the payload. Absent or unusable → no change.
+        const cost = num(a.cost_usd ?? a.cost ?? a['gen_ai.usage.cost']);
+        if (cost > 0) totalCost += cost;
         continue;
       }
     }
@@ -203,14 +224,25 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
       // clean run — the failure was invisible to `list`, `check --golden`, and
       // eval's error criteria alike.
       status: steps.some((st) => st.error != null) ? 'failed' : 'completed',
-      session_id: sid === '__nosession__' ? null : sid,
+      // Must match the placeholder actually used above. It still tested the OLD
+      // sentinel, so the synthetic key was PERSISTED as the session id — and
+      // since the receiver merges log batches on (session_id, source_format),
+      // every batch's first session-less record carried the same
+      // `!nosession:0` and merged into the previous batch's trace: unrelated
+      // sessions fused, with a bogus id that `list`/`show` displayed and
+      // `--session` matched.
+      session_id: sid.startsWith(NO_SESSION_PREFIX) ? null : sid,
       input: input ?? {},
       started_at: startedAt,
       // The session spans its first event to its last. Without this the trace
       // had no ended_at and no total_duration_ms, so `list` showed "-" forever.
-      ended_at: endedAtNanos ? new Date(endedAtNanos / 1e6).toISOString() : null,
+      ended_at: isoFromNanos(endedAtNanos) ?? null,
       total_tokens: totalTokens || null,
-      metadata: { source_format: isGemini ? 'gemini-cli-logs' : 'claude-code-logs' },
+      total_cost_usd: totalCost || null,
+      metadata: {
+        source_format: isGemini ? 'gemini-cli-logs' : 'claude-code-logs',
+        ...(followUpPrompts.length > 0 ? { follow_up_prompts: followUpPrompts } : {}),
+      },
       steps,
     });
   }
@@ -236,7 +268,11 @@ function geminiDecision(decision: string): IngestDecisionInput {
  * `tool_call` step with `error` set, matching every other capture path.
  */
 function toolError(a: Record<string, unknown>): string | undefined {
-  if (a.success !== false) return undefined;
+  // An exporter that stringifies attribute values sends `"false"`, and the same
+  // record still carries the error text — so keying on `!== false` alone read a
+  // failed tool call as clean, reopening the exact class this function closed.
+  const failed = a.success === false || a.success === 'false' || a.success === 0 || a.success === '0';
+  if (!failed) return undefined;
   return str(a.error) ?? str(a.error_message) ?? str(a.error_type) ?? 'tool failed';
 }
 

@@ -341,3 +341,51 @@ describe('handleLogsExport — an unrecognized batch is reported, not swallowed'
     expect(handleLogsExport(db, JSON.stringify({ resourceLogs: [] }), stats).payload).toEqual({});
   });
 });
+
+describe('log-event mapper robustness', () => {
+  it('keeps session-less batches apart instead of fusing them on a placeholder id', () => {
+    // The bucket key changed to `!nosession:<i>` but the "is this a placeholder?"
+    // test still compared the OLD sentinel, so the synthetic key was PERSISTED
+    // as the session id — and the receiver merges log batches on
+    // (session_id, source_format), so every batch's first session-less record
+    // carried `!nosession:0` and merged into the previous batch's trace.
+    const one = mapOtlpLogs(otlpLogs([
+      logRecord('gemini_cli.tool_call', { function_name: 'alpha', success: true }, 1_000_000),
+    ]));
+    expect(one).toHaveLength(1);
+    expect(one[0].session_id).toBeNull();
+  });
+
+  it('treats a stringified success:false as a failure', () => {
+    // An exporter that stringifies attribute values sends "false" while the same
+    // record still carries the error text; keying on `!== false` read the failed
+    // tool call as clean.
+    const [trace] = mapOtlpLogs(otlpLogs([
+      logRecord('gemini_cli.tool_call', { function_name: 'rm', success: 'false', error: 'nope' }, 1_000_000),
+    ]));
+    expect(trace.steps![0].error).toBe('nope');
+    expect(trace.status).toBe('failed');
+  });
+
+  it('drops an out-of-range timestamp instead of throwing away the whole batch', () => {
+    // `new Date(nanos/1e6).toISOString()` threw RangeError on an absurd stamp,
+    // and the mapper runs inside the receiver's try — so the batch was answered
+    // 400 (not retryable) and every well-formed record alongside it was lost.
+    expect(() =>
+      mapOtlpLogs(otlpLogs([
+        logRecord('gemini_cli.tool_call', { function_name: 'ok', success: true }, 99999999999999999999999),
+      ])),
+    ).not.toThrow();
+  });
+
+  it('keeps every user prompt of a multi-turn session', () => {
+    // A session shares one session.id across turns and each later prompt
+    // OVERWROTE the input, so only the last question survived anywhere.
+    const [trace] = mapOtlpLogs(otlpLogs([
+      logRecord('gemini_cli.user_prompt', { 'session.id': 's1', prompt: 'first question' }, 1_000_000),
+      logRecord('gemini_cli.user_prompt', { 'session.id': 's1', prompt: 'second question' }, 2_000_000),
+    ]));
+    expect(trace.input).toEqual({ prompt: 'first question' });
+    expect((trace.metadata as { follow_up_prompts?: string[] }).follow_up_prompts).toEqual(['second question']);
+  });
+});
