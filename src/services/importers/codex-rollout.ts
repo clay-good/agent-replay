@@ -205,7 +205,10 @@ export function importCodexRollout(
   // alone let the empty case through, because a header record supplies the id.
   // A file that captured a prompt but no steps still imports — the prompt is
   // real content worth keeping.
-  if (steps.length === 0 && !input) {
+  // `hasPrompt`, not `!input` — same reason as the claude-transcript importer:
+  // `{prompt: ''}` from an empty first user record is truthy, so a file that
+  // captured nothing still produced a trace and exited 0.
+  if (steps.length === 0 && !hasPrompt(input)) {
     return { trace: null as Trace | null, imported, skipped, steps: 0 };
   }
 

@@ -353,7 +353,12 @@ export function importClaudeTranscript(
   // alone let the empty case through, because a header record supplies the id.
   // A file that captured a prompt but no steps still imports — the prompt is
   // real content worth keeping.
-  if (steps.length === 0 && !input) {
+  // `hasPrompt`, not `!input`: an empty first user record still SETS `input` to
+  // `{prompt: ''}`, which is truthy, so a file whose only content was an empty
+  // prompt reported "0 record(s) imported, 1 skipped" and then created a trace
+  // with an empty prompt and no steps, exiting 0 — a success verdict for an
+  // import that captured nothing.
+  if (steps.length === 0 && !hasPrompt(input)) {
     // Warn BEFORE this early return, not after: "nothing importable" plus
     // "0 record(s) skipped" is exactly when the user most needs to hear that a
     // permissions problem, not an empty session, caused it.

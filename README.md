@@ -562,7 +562,7 @@ Every command exits non-zero on failure, so it drops cleanly into scripts and CI
 | Code | Meaning |
 | ---- | ------- |
 | `0`  | Success — including "no matches" for queries like `list` and empty exports. |
-| `1`  | Runtime failure — trace not found, a malformed ingest, a `record` stream whose every event was rejected, a `check --golden` regression, or an `eval` that fails (a rubric below its threshold or a built-in preset that fails). |
+| `1`  | Runtime failure — trace not found, a malformed ingest, a `record` stream whose every event was rejected, an `import` that found nothing to import (no steps and no prompt), a `check --golden` regression, or an `eval` that fails (a rubric below its threshold or a built-in preset that fails). |
 | `2`  | Usage error — an unknown flag, an unknown command, a missing or bad argument value, or an unexpected extra argument (a typo'd second id or a bare word meant to be a flag is rejected, not silently ignored). Also the **guard block** signal: `guard check` exits `2` when a policy denies a step (the harness "block" convention), as does `hook --enforce --dialect other`. `guard check` fails closed, so it also answers `2` — with a `deny` verdict on stdout — for a step it cannot evaluate at all: unreadable or malformed stdin, a payload that isn't a step object, a missing `step_type`, or a store it cannot open. For a detected harness dialect, `hook --enforce` answers with that harness's own JSON on stdout and exits `0` — the block is the JSON, not the code — so don't gate a script on `$?` there. |
 
 Two commands instead propagate a child's own status: `run` exits with the wrapped command's exit code, and `hook` (capture mode) always exits `0` so it can never interfere with the host agent.

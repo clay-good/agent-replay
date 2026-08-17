@@ -189,3 +189,18 @@ describe('an empty first prompt never eats the real one (codex-rollout)', () => 
   }
 });
 
+describe('a rollout that captured nothing is a failed import', () => {
+  it('refuses a rollout whose only message is an empty prompt', () => {
+    const path = fixture([
+      { type: 'session_meta', payload: { id: 'roll-none', timestamp: '2026-07-02T00:00:00Z' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: '' } },
+    ]);
+    const report = importCodexRollout(db, path);
+    expect(report.trace).toBeNull();
+    expect(report.steps).toBe(0);
+    // The one response_item is accounted for either way (session_meta is a
+    // header, not a tallied record), so the invariant still holds.
+    expect(report.imported + report.skipped).toBe(1);
+  });
+});
+

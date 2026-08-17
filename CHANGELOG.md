@@ -182,6 +182,14 @@ between them, and nothing else.
   scales linearly. This is the same class of defect the schema v4 expression
   index exists to fix, on the path that builds golden datasets and backups.
 
+- An import that captured nothing exited 0 and stored an empty trace. The
+  "nothing importable" guard in both importers keyed on `!input`, but an empty
+  first user record still sets the input to `{prompt: ''}`, which is truthy —
+  so a file reporting "0 records imported" went on to create a trace with an
+  empty prompt and no steps, and `import X && use-trace` proceeded against
+  content-free data. A file that captured a real prompt but no steps still
+  imports, as before.
+
 - The `codex-rollout` importer discarded the real first prompt when the record
   before it was empty. `{prompt: ''}` is truthy, so `!input` read an empty first
   user message as "input captured", the next real prompt fell through to the

@@ -518,3 +518,25 @@ describe('the subagent path tallies like the main loop it mirrors', () => {
     expect(report.imported + report.skipped).toBe(3);
   });
 });
+
+describe('a file that captured nothing is a failed import in both importers', () => {
+  it('refuses a transcript whose only record is an empty prompt', () => {
+    // The guard used `!input`, but an empty first user record still SETS input
+    // to `{prompt: ''}` — truthy — so the file reported "0 imported, 1 skipped"
+    // and then created a trace with an empty prompt and no steps, exiting 0.
+    const file = join(dir, 'onlyempty.jsonl');
+    writeFileSync(file, JSON.stringify({ type: 'user', message: { content: '' } }));
+    const report = importClaudeTranscript(db, file);
+    expect(report.trace).toBeNull();
+    expect(report.imported).toBe(0);
+  });
+
+  it('still imports a transcript that captured a real prompt but no steps', () => {
+    const file = join(dir, 'promptonly.jsonl');
+    writeFileSync(file, JSON.stringify({ type: 'user', message: { content: 'a real question' } }));
+    const report = importClaudeTranscript(db, file);
+    expect(report.trace).not.toBeNull();
+    expect((report.trace?.input as { prompt?: string })?.prompt).toBe('a real question');
+  });
+});
+
