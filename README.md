@@ -343,7 +343,7 @@ Comparable fields: `step_count`, `step_types`, `step_names`, `tool_inputs`, `sta
 
 Matches are made by agent name and a hash of the input, so each run is compared to its own golden counterpart. A divergence report names the trace, the step, and the differing field.
 
-A golden file with no entries is rejected (exit `2`) rather than passing green: an empty baseline can never detect a regression, and the usual cause is an export filter that matched nothing. The export warns about this too, so a mistyped `--tag` surfaces where you can still fix it.
+A gate that cannot do its job fails loudly (exit `2`) instead of passing green. That covers a golden file with no entries — an empty baseline can never detect a regression, and the usual cause is an export filter that matched nothing, which the export warns about too — a file that isn't a golden dataset at all (`--format json` output is a common mix-up), and a run where no trace matched the filters, whether from a mistyped `--agent`, a `--since` window that outran the recording, or a `--dir` pointing somewhere the runs were never recorded.
 
 ### Evaluate
 

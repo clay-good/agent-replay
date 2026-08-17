@@ -64,6 +64,29 @@ describe('checkGolden', () => {
     expect(report.failed).toBe(0);
   });
 
+  it('flags a baseline tool call the candidate replaced with another step type', () => {
+    // The tool_inputs guard used to skip whenever the CANDIDATE was not a
+    // tool_call, so the disappearance of a baseline tool call — the thing this
+    // field exists to catch — was invisible. Under the default allowlist
+    // step_types happened to catch it; with --fields tool_inputs, nothing did.
+    const golden = makeGolden();
+    const swapped: IngestTraceInput = {
+      ...baseline,
+      steps: [
+        { step_number: 1, step_type: 'thought', name: 'plan' },
+        { step_number: 2, step_type: 'llm_call', name: 'search_flights', input: { origin: 'SFO', dest: 'JFK' } },
+        { step_number: 3, step_type: 'output', name: 'confirm' },
+      ],
+    };
+
+    const report = checkGolden(golden, [candidate(swapped)], { fields: ['tool_inputs'] });
+    expect(report.ok).toBe(false);
+    expect(report.failed).toBe(1);
+    expect(report.results[0].divergences[0].field).toBe('tool_inputs');
+    // A faithful reproduction still passes on the same field.
+    expect(checkGolden(golden, [candidate(baseline)], { fields: ['tool_inputs'] }).ok).toBe(true);
+  });
+
   it('pairs distinct candidates that share an agent+input key without false regressions', () => {
     // Two runs of the same agent with the same input but different shapes — an
     // original and its fork, say. A plain golden index kept only the last, so
@@ -350,6 +373,71 @@ describe('runCheck refuses an empty golden baseline', () => {
       }
       expect(process.exitCode).toBe(0);
       process.exitCode = prev2;
+    } finally {
+      resetConnection();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('runCheck refuses a gate with nothing to check', () => {
+  function checkWith(opts: Record<string, unknown>): { exit: number | undefined; errs: string } {
+    const prevExit = process.exitCode;
+    process.exitCode = 0;
+    const errs: string[] = [];
+    const errSpy = vi.spyOn(console, 'error').mockImplementation((m?: unknown) => void errs.push(String(m)));
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      runCheck(opts);
+    } finally {
+      errSpy.mockRestore();
+      logSpy.mockRestore();
+    }
+    const exit = process.exitCode;
+    process.exitCode = prevExit;
+    return { exit, errs: errs.join('\n') };
+  }
+
+  it('exits 2 when no candidate trace matches the filters', () => {
+    // The empty-baseline failure from the other side: with zero candidates the
+    // report is "0 passed, 0 regressed", ok, exit 0 — and --strict doesn't help,
+    // since `unmatched` only counts candidates that were fetched. A mistyped
+    // --agent or a --since window that outran the run leaves the gate green.
+    const dir = mkdtempSync(join(tmpdir(), 'ar-check-nocand-'));
+    try {
+      const cdb = ensureDatabase(resolve(dir, 'traces.db'));
+      ingestTrace(cdb, baseline);
+      const goldenPath = join(dir, 'golden.json');
+      writeFileSync(goldenPath, exportTraces(cdb, { agent_name: 'travel-bot' }, 'golden'));
+
+      const typo = checkWith({ golden: goldenPath, dir, agent: 'no-such-agent' });
+      expect(typo.exit).toBe(2);
+      expect(typo.errs).toMatch(/no traces matched/i);
+      // Even with --strict, which was the flag users reached for to harden this.
+      expect(checkWith({ golden: goldenPath, dir, agent: 'no-such-agent', strict: true }).exit).toBe(2);
+      // The same gate with a matching filter still passes.
+      expect(checkWith({ golden: goldenPath, dir, agent: 'travel-bot' }).exit).toBe(0);
+    } finally {
+      resetConnection();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('exits 2 with a diagnosis when handed a full JSON export instead of a golden one', () => {
+    // `--format json` and `--format golden` are one flag apart. The full export
+    // has no steps_summary, so the comparison died on `.length` with a bare
+    // "Cannot read properties of undefined", naming neither file nor cause.
+    const dir = mkdtempSync(join(tmpdir(), 'ar-check-wrongfmt-'));
+    try {
+      const cdb = ensureDatabase(resolve(dir, 'traces.db'));
+      ingestTrace(cdb, baseline);
+      const wrongPath = join(dir, 'traces.json');
+      writeFileSync(wrongPath, exportTraces(cdb, { agent_name: 'travel-bot' }, 'json'));
+
+      const r = checkWith({ golden: wrongPath, dir });
+      expect(r.exit).toBe(2);
+      expect(r.errs).toMatch(/not a golden dataset/i);
+      expect(r.errs).toMatch(/steps_summary/);
     } finally {
       resetConnection();
       rmSync(dir, { recursive: true, force: true });

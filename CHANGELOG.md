@@ -117,6 +117,23 @@ nothing else.
 
 ### Fixed
 
+- `check --golden` no longer passes green when it had nothing to check. A run
+  where no trace matched the filters produced "0 passed, 0 regressed" and exit
+  `0` — even under `--strict`, which only counts candidates that were actually
+  fetched — so a mistyped `--agent`, a `--since` window that outran the
+  recording, or a `--dir` typo (which quietly creates an empty store) left the
+  gate green forever. It now exits `2`, like the empty-baseline case it
+  mirrors. Being handed a full `--format json` export instead of a golden one
+  is also diagnosed by name, rather than dying on "Cannot read properties of
+  undefined".
+
+- `check --golden` now catches a baseline tool call that the candidate replaced
+  with a different step type. The `tool_inputs` comparison skipped whenever the
+  *candidate* step was not a `tool_call`, so the disappearance of a tool call —
+  the regression that field exists to catch — was invisible under
+  `--fields tool_inputs`; the default field set caught it only incidentally, via
+  `step_types`.
+
 - Writers that share a store no longer collide. Three problems, one cause —
   reading before writing without holding the write lock:
   - `otel serve` answered `500 {"error":"database is locked"}` and dropped a

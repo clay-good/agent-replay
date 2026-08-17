@@ -157,10 +157,20 @@ function diffAgainstGolden(trace: TraceWithDetails, golden: GoldenEntry, fields:
     // may start above 1 or skip values). That mismatch made a tool_call's number
     // land on an unrelated golden step, so a real tool-input regression slipped
     // through the gate while the positional checks reported a perfect match.
+    //
+    // The guard keys off the GOLDEN side. Skipping when the *candidate* is not a
+    // tool_call meant the one case this field exists to catch — a baseline tool
+    // call the candidate replaced with something else — was invisible: with
+    // `--fields tool_inputs` (no step_types to catch it), "the tool call became
+    // an llm_call with different arguments" reported a clean pass.
     for (let i = 0; i < n; i++) {
       const g = gSteps[i];
       const step = cSteps[i];
-      if (step.step_type !== 'tool_call' || g.input === undefined) continue;
+      if (g.step_type !== 'tool_call' || g.input === undefined) continue;
+      if (step.step_type !== 'tool_call') {
+        divergences.push({ field: 'tool_inputs', step_number: step.step_number, golden: g.input, candidate: null });
+        break;
+      }
       if (stableStringify(g.input) !== stableStringify(step.input)) {
         divergences.push({ field: 'tool_inputs', step_number: step.step_number, golden: g.input, candidate: step.input });
         break;

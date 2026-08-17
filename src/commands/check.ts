@@ -49,6 +49,20 @@ export function runCheck(opts: CheckOptions = {}): void {
   // golden` writes `[]` happily when its filter matches nothing (a mistyped
   // --tag is enough), so this is a mistake a user can make silently and never
   // hear about again. Refuse it, like an unreadable file.
+  // `export --format json` and `export --format golden` differ by one flag and
+  // produce files that look alike, so feeding the wrong one is an easy mistake.
+  // Without this the run died inside the comparison on `steps_summary.length`
+  // with a bare "Cannot read properties of undefined", naming neither the file
+  // nor the problem — and one bad entry in a hand-edited baseline aborted the
+  // whole check rather than being reported.
+  const bad = golden.findIndex((g) => !g || !Array.isArray((g as GoldenEntry).steps_summary));
+  if (bad !== -1) {
+    console.error(chalk.red(`  Not a golden dataset: ${opts.golden} (entry ${bad + 1} has no steps_summary).`));
+    console.error(chalk.dim('  Golden files come from "agent-replay export --format golden"; "--format json" exports full traces, which this gate cannot compare.'));
+    process.exitCode = 2;
+    return;
+  }
+
   if (golden.length === 0) {
     console.error(
       chalk.red(`  Golden file has no entries: ${opts.golden}`),
@@ -96,6 +110,19 @@ export function runCheck(opts: CheckOptions = {}): void {
       const full = getTrace(db, item.id);
       if (full) candidates.push(full);
     }
+  }
+
+  // Zero candidates is the empty-baseline failure from the other side, and just
+  // as silent: nothing to compare means `0 passed, 0 regressed`, `ok: true`,
+  // exit 0 — even under --strict, which only counts candidates that were
+  // actually fetched. A mistyped --agent, a --since window that outran the
+  // recording step, or a --dir typo (ensureDatabase creates a fresh empty store
+  // on the spot) all land here, and the gate then stays green forever.
+  if (candidates.length === 0) {
+    console.error(chalk.red('  No traces matched — nothing to check against the baseline.'));
+    console.error(chalk.dim('  A check with no candidates cannot detect a regression. Widen --agent/--since, or confirm --dir points at the store the run recorded into.'));
+    process.exitCode = 2;
+    return;
   }
 
   const fields = opts.fields ? opts.fields.split(',').map((s) => s.trim()).filter(Boolean) : undefined;
