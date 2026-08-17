@@ -402,9 +402,10 @@ describe('OTLP receiver', () => {
     expect(names).toContain('search');
     // The late root survives as a step rather than vanishing.
     expect(trace.steps.some((s) => s.metadata.otel_span_id === '1')).toBe(true);
-    // All three spans are stored, and the count reports what was stored.
+    // All three spans are stored: one as the trace, two as steps. The counter
+    // reports STEPS STORED (how `otel serve` labels it), and must match.
     expect(trace.steps).toHaveLength(2); // spans 3 and 1; span 2 is the trace
-    expect(stats.acceptedSpans).toBe(3);
+    expect(stats.acceptedSpans).toBe(2);
   });
 
   it('upgrades a rootless synthetic trace in place when the root batch arrives last', () => {

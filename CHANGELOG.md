@@ -226,9 +226,8 @@ between them, and nothing else.
   (GenAI emits `create_agent` before `invoke_agent`; multi-agent runs nest
   `invoke_agent`) naturally splits with a root in a later batch, which then
   promoted itself to an identity the trace already had. Merging inserts only
-  steps, so that span produced no row at all — while the accepted-span count
-  still counted it. Whether a span survives no longer depends on where the
-  exporter cut its batches. A rootless synthetic trace still adopts a late root
+  steps, so that span produced no row at all. Whether a span survives no longer
+  depends on where the exporter cut its batches. A rootless synthetic trace still adopts a late root
   as its identity rather than duplicating it as a step.
 
 - The OTLP **logs** path stored counters that `ingest` rejects. `intValue` is a

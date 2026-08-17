@@ -237,9 +237,10 @@ function upsertOtelTrace(db: Database.Database, input: MappedOtelTrace, stats: O
   }
   ingestTrace(db, input);
   stats.acceptedTraces++;
-  // The identity root is the trace itself here, not a step — but it WAS a span
-  // the client sent, so it counts as accepted.
-  stats.acceptedSpans += (input.steps?.length ?? 0) + (input.otel_identity_root_step ? 1 : 0);
+  // Counts STEPS STORED, which is how `otel serve` reports it ("Accepted N
+  // trace(s), M step(s)"). The identity root became the trace itself, not a
+  // step, so it is deliberately not counted here — the trace it opened is.
+  stats.acceptedSpans += input.steps?.length ?? 0;
 }
 
 function ingestOtlpTraces(
