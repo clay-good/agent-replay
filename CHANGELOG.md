@@ -182,6 +182,31 @@ between them, and nothing else.
   scales linearly. This is the same class of defect the schema v4 expression
   index exists to fix, on the path that builds golden datasets and backups.
 
+- The `codex-rollout` importer discarded the real first prompt when the record
+  before it was empty. `{prompt: ''}` is truthy, so `!input` read an empty first
+  user message as "input captured", the next real prompt fell through to the
+  follow-up branch, and the trace kept no question at all — while the empty
+  record still counted as imported. The identical construct was fixed in both
+  branches of the Claude transcript importer; this sibling was missed.
+
+- `guard add --priority ""` silently stored the default instead of refusing.
+  `Number('')` is 0, which is an integer, so the blank string was the one input
+  this check accepted where every sibling numeric option rejects it — so
+  `--priority "$UNSET_VAR"` ranked a policy 0 rather than failing.
+
+- `ingest` now reports eval results it cannot restore. `export --with-evals`
+  writes an `evals` array that `ingest` has no field for, so on the documented
+  backup/restore path — for data the user explicitly opted in to keeping — the
+  evals were dropped with an exit 0 and no mention. Restoring them is a schema
+  change; saying they were dropped is not, and the traces themselves round-trip
+  faithfully.
+
+- `eval --json` now answers in JSON when a rubric or a deterministic preset
+  throws while running. Both paths returned before the empty-results JSON
+  fallback, so a `| jq` pipeline got a parse error instead of a verdict. (No new
+  test: reaching either catch requires an internal store failure rather than any
+  user input.)
+
 - **Security (fail-open):** `hook --enforce` allowed every tool call, silently,
   when it ran against a store holding no policies. A previous fix stopped an
   enforcing event from *creating* the store, but that only closes the hole if

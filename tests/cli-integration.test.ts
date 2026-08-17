@@ -254,6 +254,40 @@ describe('CLI integration', () => {
     rmSync(fresh, { recursive: true, force: true });
   });
 
+  it('rejects a blank --priority the way every other numeric option does', () => {
+    // `Number('')` and `Number(' ')` are 0, which IS an integer, so the blank
+    // string was the one input this guard accepted where its siblings refuse it:
+    // `--priority "$UNSET_VAR"` silently stored the default instead of failing.
+    expect(run(['guard', 'add', '--name', 'pblank', '--action', 'deny',
+      '--pattern', '{"input_contains":"x"}', '--priority', '']).code).toBe(2);
+    expect(run(['guard', 'add', '--name', 'pblank2', '--action', 'deny',
+      '--pattern', '{"input_contains":"x"}', '--priority', '   ']).code).toBe(2);
+    // A real value, and an absent flag, still work.
+    expect(run(['guard', 'add', '--name', 'pok', '--action', 'deny',
+      '--pattern', '{"input_contains":"x"}', '--priority', '5']).code).toBe(0);
+    expect(run(['guard', 'add', '--name', 'pdefault', '--action', 'deny',
+      '--pattern', '{"input_contains":"x"}']).code).toBe(0);
+  });
+
+  it('reports eval results this store cannot restore instead of dropping them silently', () => {
+    // `export --with-evals` writes an `evals` array that `ingest` has no field
+    // for, so it is dropped — on the documented backup/restore path, for data
+    // the user explicitly opted in to keeping, with an exit 0 and no mention.
+    const evalDir = mkdtempSync(join(tmpdir(), 'ar-evals-'));
+    const file = join(evalDir, 'withevals.json');
+    writeFileSync(file, JSON.stringify([{
+      agent_name: 'evalbot',
+      status: 'completed',
+      input: { task: 'x' },
+      steps: [{ step_number: 1, step_type: 'output', name: 'answer' }],
+      evals: [{ evaluator_type: 'rubric', evaluator_name: 'r1', score: 1, passed: true }],
+    }]));
+    const res = run(['ingest', file]);
+    expect(res.code).toBe(0); // the traces themselves restore faithfully
+    expect(`${res.stdout}${res.stderr}`).toMatch(/1 stored eval result\(s\).*not restored/);
+    rmSync(evalDir, { recursive: true, force: true });
+  });
+
   it('warns that a blocking output_contains policy cannot block live', () => {
     // Live enforcement evaluates a PROPOSED tool call — before it runs, so it
     // has no output — and every match key must match. A deny keyed on

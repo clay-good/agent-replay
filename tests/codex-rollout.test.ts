@@ -163,3 +163,29 @@ describe('codex-rollout robustness', () => {
     }
   });
 });
+
+describe('an empty first prompt never eats the real one (codex-rollout)', () => {
+  // The identical construct was fixed in BOTH branches of the claude-transcript
+  // importer and left untouched here: `{prompt: ''}` is truthy, so `!input`
+  // read an empty first user record as "input captured", the next REAL prompt
+  // fell to the follow-up branch and was discarded, and the empty record was
+  // counted as imported.
+  for (const [label, first] of [
+    ['an empty string', ''],
+    ['a whitespace-only string', '   \n'],
+    ['empty content blocks', []],
+  ] as const) {
+    it(`keeps the real question when the first message is ${label}`, () => {
+      const path = fixture([
+        { type: 'session_meta', payload: { id: 'roll-empty', timestamp: '2026-07-02T00:00:00Z' } },
+        { type: 'response_item', payload: { type: 'message', role: 'user', content: first } },
+        { type: 'response_item', payload: { type: 'message', role: 'user', content: 'THE REAL QUESTION' } },
+      ]);
+      const report = importCodexRollout(db, path);
+      expect((report.trace?.input as { prompt?: string })?.prompt).toBe('THE REAL QUESTION');
+      // And the empty record counts as skipped, keeping imported + skipped = records.
+      expect(report.imported + report.skipped).toBe(2);
+    });
+  }
+});
+

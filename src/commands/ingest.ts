@@ -140,6 +140,29 @@ export function runIngest(filePath: string, opts: IngestOptions = {}): void {
     }
   }
 
+  // `export --with-evals` writes an `evals` array that `ingest` has no field
+  // for, so it is dropped — silently, on the documented backup/restore path,
+  // for data the user opted in to keeping. Restoring it is a schema change and
+  // a maintainer call; reporting the loss is not, and a restore that reads as
+  // complete while it is not is exactly what the rest of this command refuses
+  // to do. The traces themselves restore faithfully.
+  const withEvals = valid.reduce(
+    (n, t) => n + (Array.isArray((t as unknown as { evals?: unknown[] }).evals)
+      ? (t as unknown as { evals: unknown[] }).evals.length
+      : 0),
+    0,
+  );
+  if (withEvals > 0) {
+    // On stdout, like the sibling "Continuing with N valid trace(s)" note:
+    // `ingest` has no --json mode, so stdout is the report.
+    console.log(
+      chalk.yellow(
+        `  Note: ${withEvals} stored eval result(s) in this file were not restored — ` +
+        'ingest has no evals field. Re-run `agent-replay eval` to regenerate them.',
+      ),
+    );
+  }
+
   if (failedIds.length > 0) {
     failSpinner(
       spinner,

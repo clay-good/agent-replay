@@ -84,8 +84,19 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
       results.push(result);
       successSpinner(evalSpinner, `Rubric "${rubric.name}" complete.`);
     } catch (err) {
-      failSpinner(evalSpinner, `Rubric error: ${errorMessage(err)}`);
-      process.exitCode = 1;
+      // Answer in the shape that was asked for. These two execution failures
+      // returned before the `results.length === 0` JSON fallback below, so
+      // `eval --rubric … --json | jq` got a parse error on stdout — the same
+      // broken contract the sibling `refuse()` paths were introduced to fix.
+      // The human path is unchanged.
+      const msg = `Rubric error: ${errorMessage(err)}`;
+      if (opts.json) {
+        evalSpinner.stop();
+        refuse(1, msg);
+      } else {
+        failSpinner(evalSpinner, msg);
+        process.exitCode = 1;
+      }
       return;
     }
   }
@@ -125,8 +136,14 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
       const icon = result.passed ? chalk.greenBright('\u2714') : chalk.redBright('\u2718');
       successSpinner(spinner, `${opts.preset}: ${icon} ${formatScorePct(result.score)}`);
     } catch (err) {
-      failSpinner(spinner, `${opts.preset}: ${errorMessage(err)}`);
-      process.exitCode = 1;
+      const msg = `${opts.preset}: ${errorMessage(err)}`;
+      if (opts.json) {
+        spinner.stop();
+        refuse(1, msg);
+      } else {
+        failSpinner(spinner, msg);
+        process.exitCode = 1;
+      }
       return;
     }
   }

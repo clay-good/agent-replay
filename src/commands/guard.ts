@@ -108,7 +108,12 @@ export function runGuardAdd(opts: GuardAddOptions): void {
   // silently stored 0 and `--priority 1e3` stored 1. Priority orders policy
   // evaluation and breaks ties, so a rule the author meant to rank first ranked
   // last and `guard check` cited the wrong policy.
-  const priority = opts.priority == null ? 0 : Number(opts.priority);
+  // The blank string is the one input `Number()` accepts where the siblings
+  // refuse it: `Number('')` and `Number(' ')` are 0, which IS an integer, so
+  // `--priority "$UNSET_VAR"` stored the default silently instead of being the
+  // usage error `--limit ""` is.
+  const rawPriority = opts.priority == null ? null : String(opts.priority).trim();
+  const priority = rawPriority == null ? 0 : rawPriority === '' ? NaN : Number(rawPriority);
   if (!Number.isInteger(priority)) {
     console.error(chalk.red(`  Invalid --priority: ${opts.priority} (must be an integer).`));
     process.exitCode = 2;

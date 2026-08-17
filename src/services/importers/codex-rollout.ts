@@ -16,6 +16,12 @@ import type { ImportReport } from './claude-transcript.js';
  * source format/version is stamped in trace metadata.
  */
 
+/** Mirrors the claude-transcript importer: `{prompt: ''}` is truthy, so an
+ *  empty first user record must not count as the captured input. */
+function hasPrompt(input: Record<string, unknown> | undefined): boolean {
+  return typeof input?.prompt === 'string' && input.prompt.trim().length > 0;
+}
+
 const SOURCE_FORMAT = 'codex-rollout';
 const SOURCE_VERSION = '2025-07';
 
@@ -154,9 +160,15 @@ export function importCodexRollout(
         // `||` for the same reason as the reasoning case above: an empty
         // `content: []` is not nullish, so `??` would drop text carried in `text`.
         const text = asText(it.content) || asText(it.text);
-        if (role === 'user' && !input) {
+        // `!input` alone treated an EMPTY first user record as "input
+        // captured", because `{prompt: ''}` is truthy — so the next, REAL
+        // prompt fell to the follow-up branch and was discarded, leaving the
+        // trace with no question at all, and counted the empty record as
+        // imported. Same defect, same shape, as the one already fixed in both
+        // branches of the claude-transcript importer; this sibling was missed.
+        if (role === 'user' && !hasPrompt(input)) {
           input = { prompt: text };
-          contributed = true;
+          contributed = text.trim().length > 0;
         } else if (role === 'assistant' && text) {
           lastAssistantText = text;
           steps.push({ step_number: stepNumber++, step_type: 'output', name: 'assistant_message', output: { text } });
