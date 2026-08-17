@@ -105,6 +105,16 @@ function countSpans(otlp: Record<string, unknown>): number {
   return n;
 }
 
+function countLogRecords(otlp: Record<string, unknown>): number {
+  let n = 0;
+  for (const rl of (otlp.resourceLogs as unknown[]) ?? []) {
+    for (const sl of ((rl as { scopeLogs?: unknown[] }).scopeLogs) ?? []) {
+      n += (((sl as { logRecords?: unknown[] }).logRecords) ?? []).length;
+    }
+  }
+  return n;
+}
+
 /** Handle one OTLP/JSON traces export. Returns the response body to send. */
 export function handleTracesExport(
   db: Database.Database,
@@ -252,13 +262,32 @@ function ingestOtlpLogs(
   // As in ingestOtlpTraces: a malformed body (non-array resourceLogs/scopeLogs/
   // logRecords) throws in the pure mapping step and must answer 400, not 500.
   let traces: IngestTraceInput[];
+  let totalRecords: number;
   try {
+    totalRecords = countLogRecords(otlp);
     traces = mapOtlpLogs(otlp);
   } catch {
     return { status: 400, payload: { error: 'invalid OTLP body: resourceLogs/scopeLogs/logRecords must be arrays' } };
   }
   for (const t of traces) {
     upsertOtelTrace(db, t, stats);
+  }
+  // The traces endpoint reports partial_success when a batch mapped to nothing;
+  // this one answered a bare 200 unconditionally. mapOtlpLogs keeps only
+  // `gemini_cli.*` / `claude_code.*` events, so an emitter whose event names
+  // drift — a CLI version change, a generic OTel logger — got a clean 200
+  // forever while the store stayed empty and shutdown printed "Accepted 0
+  // trace(s)", with nothing anywhere to debug against.
+  if (traces.length === 0 && totalRecords > 0) {
+    return {
+      status: 200,
+      payload: {
+        partialSuccess: {
+          rejectedLogRecords: totalRecords,
+          errorMessage: 'no recognized log events in batch (expected gemini_cli.* or claude_code.*)',
+        },
+      },
+    };
   }
   return { status: 200, payload: {} };
 }

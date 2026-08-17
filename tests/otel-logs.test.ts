@@ -297,3 +297,36 @@ describe('mapOtlpLogs — data fidelity', () => {
     ]);
   });
 });
+
+describe('handleLogsExport — an unrecognized batch is reported, not swallowed', () => {
+  it('answers partial_success when nothing in the batch mapped', () => {
+    // Regression: the logs endpoint answered a bare 200 unconditionally, while
+    // the traces endpoint reports partial_success for the same situation.
+    // mapOtlpLogs keeps only gemini_cli.* / claude_code.* events, so an emitter
+    // whose event names drift got a clean 200 forever while the store stayed
+    // empty — nothing to debug against.
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    const res = handleLogsExport(db, JSON.stringify(otlpLogs([
+      logRecord('some_other_tool.tool_call', { 'session.id': 's', function_name: 'x' }),
+      logRecord('generic.log', {}),
+    ])), stats);
+
+    expect(res.status).toBe(200); // still not a retryable error — the batch was understood
+    expect(res.payload).toMatchObject({ partialSuccess: { rejectedLogRecords: 2 } });
+    expect(listTraces(db, {}).total).toBe(0);
+  });
+
+  it('answers a bare 200 when the batch did map', () => {
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    const res = handleLogsExport(db, JSON.stringify(otlpLogs([
+      logRecord('gemini_cli.tool_call', { 'session.id': 'ok', function_name: 'ls' }),
+    ])), stats);
+    expect(res.payload).toEqual({});
+    expect(listTraces(db, {}).total).toBe(1);
+  });
+
+  it('answers a bare 200 for a genuinely empty batch', () => {
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    expect(handleLogsExport(db, JSON.stringify({ resourceLogs: [] }), stats).payload).toEqual({});
+  });
+});

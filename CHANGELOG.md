@@ -109,6 +109,13 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `otel serve` now reports `partial_success` when a `/v1/logs` batch mapped to
+  nothing, instead of a bare `200`. Only `gemini_cli.*` and `claude_code.*`
+  events are recognized, so an emitter whose event names drift — a CLI version
+  change, or a generic OTel logger pointed at the endpoint — got a clean `200`
+  forever while the store stayed empty and shutdown printed "Accepted 0
+  trace(s)". The traces endpoint already reported this.
+
 - `export --format jsonl` with no matches now writes an empty file instead of
   one blank line, which a strict streaming consumer rejected as malformed JSON.
   `export --format golden` also warns that `--with-evals` / `--with-snapshots`
