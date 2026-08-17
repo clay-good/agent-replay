@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { applySchemaV1, applySchemaV2, SCHEMA_VERSION } from '../src/db/schema.js';
+import { applySchemaV1, applySchemaV2, applySchemaV3, SCHEMA_VERSION } from '../src/db/schema.js';
 import { runMigrations } from '../src/db/migrations.js';
 import { getSchemaVersion } from '../src/db/schema.js';
 import { ingestTrace, getTrace, listTraces, attachDecision } from '../src/services/trace-service.js';
@@ -66,6 +66,41 @@ describe('v1 → v2 migration', () => {
   it('is idempotent when already current', () => {
     runMigrations(db);
     expect(runMigrations(db)).toBe(SCHEMA_VERSION);
+  });
+
+  it('serves the parsed-instant ordering from an index, on new and upgraded stores', () => {
+    // `list`, the dashboard and every candidate fetch order by
+    // julianday(started_at), which the plain started_at index cannot serve — the
+    // default page became a full scan plus a temp B-tree, linear in store size.
+    // v4 adds the matching expression index; assert the planner really uses it,
+    // since a silently unused index is the same regression with an index in it.
+    runMigrations(db);
+    const plan = () =>
+      (db
+        .prepare(
+          `EXPLAIN QUERY PLAN SELECT * FROM agent_traces
+             ORDER BY julianday(started_at) DESC, started_at DESC LIMIT 25`,
+        )
+        .all() as { detail: string }[])
+        .map((r) => r.detail)
+        .join(' ');
+    expect(plan()).toContain('idx_agent_traces_started_instant');
+
+    // And an existing v3 store picks it up on upgrade, not just a fresh one.
+    const old = new Database(':memory:');
+    try {
+      applySchemaV1(old);
+      applySchemaV2(old);
+      applySchemaV3(old);
+      expect(getSchemaVersion(old)).toBe(3);
+      expect(runMigrations(old)).toBe(SCHEMA_VERSION);
+      const idx = old
+        .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_agent_traces_started_instant'")
+        .get();
+      expect(idx).toBeTruthy();
+    } finally {
+      old.close();
+    }
   });
 
   it('does not crash re-applying v2 when the columns already exist (upgrade race)', () => {

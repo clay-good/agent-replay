@@ -19,7 +19,7 @@ correctness of the comparison, evaluation, and golden-regression paths
 the content, timing, and identity its dialects carry.
 
 The recorded trace *data* model is unchanged — same tables and columns, so
-existing stores and exports keep working. Schema v3 adds two indexes and
+existing stores and exports keep working. Schema v4 adds three indexes and
 nothing else.
 
 ### Added
@@ -427,6 +427,10 @@ nothing else.
   vanished the same way. `show --tree` also now prints a step's error: the tree
   is only reached when a trace has causal structure, so on a failed trace — the
   case the view exists for — it was hiding the failure message.
+
+- Schema v4 adds an expression index on `julianday(started_at)` so the
+  parsed-instant ordering `list` and the dashboard use is an index seek rather
+  than a full scan plus a temp B-tree. Additive, like v3.
 
 - Schema v3 adds two indexes for lookups that were full table scans. `otel
   serve` resolves every incoming batch against
