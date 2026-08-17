@@ -114,6 +114,20 @@ export function runGuardAdd(opts: GuardAddOptions): void {
 
     successSpinner(spinner, `Policy "${opts.name}" added.`);
     console.log(chalk.dim(`  ID: ${policy.id}`));
+
+    // Live enforcement evaluates a *proposed* tool call — before it runs, so it
+    // has no output yet — and every match key must match. So a blocking policy
+    // keyed on `output_contains` can never fire under `hook --enforce`, however
+    // correct it looks in `guard list`. It still matches in post-hoc evaluation
+    // (`guard test`, recorded traces), which is a real use, so this is a warning
+    // rather than a rejection — but a user writing a kill switch deserves to
+    // hear that it will not block anything.
+    if ((opts.action === 'deny' || opts.action === 'require_review') && matchPattern.output_contains != null) {
+      console.log('');
+      console.log(chalk.yellow('  ⚠ This policy matches on output, so it cannot block live.'));
+      console.log(chalk.dim('    Enforcement runs before a tool call, when there is no output yet;'));
+      console.log(chalk.dim('    the policy still matches in `guard test` and recorded traces.'));
+    }
     console.log('');
   } catch (err) {
     failSpinner(spinner, `Failed: ${errorMessage(err)}`);

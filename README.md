@@ -388,6 +388,14 @@ as a match) rather than letting it through. The one exception is a completely
 empty pattern, which stays inert even for a `deny`: it expresses no intent to
 filter, and blocking every step would be worse than the misconfiguration.
 
+**`output_contains` cannot block live.** Enforcement evaluates a *proposed* tool
+call — before it runs, so it has no output yet — and every match key in a pattern
+must match. A `deny` or `require_review` keyed on `output_contains` therefore
+never fires under `hook --enforce`, no matter how it looks in `guard list`. It
+still matches in post-hoc evaluation (`guard test`, and `guard check` on a
+recorded step), so it is a useful auditing pattern, not a blocking one; `guard
+add` warns when you write one as a blocking policy.
+
 `input_contains` and `output_contains` match against both the raw text and the
 JSON form of the step's input/output, so a pattern containing quotes,
 backslashes, newlines, or tabs matches as written — `rm -rf "/etc"` and

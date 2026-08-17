@@ -98,6 +98,13 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `guard add` now warns when a `deny` or `require_review` policy matches on
+  `output_contains`. Enforcement evaluates a *proposed* tool call — before it
+  runs, so there is no output yet — and every match key must match, so such a
+  policy can never block live, however active it looks in `guard list`. It
+  remains valid for post-hoc evaluation (`guard test`, recorded steps), which
+  is why this warns rather than rejects. Documented in the README as well.
+
 - `guard check` now fails closed when it cannot evaluate policies at all.
   Opening the store and running the policy match were unguarded, so an
   infrastructure error — an unopenable or read-only store, or `SQLITE_BUSY`

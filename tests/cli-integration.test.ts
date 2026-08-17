@@ -194,6 +194,26 @@ describe('CLI integration', () => {
     expect(run(['guard', 'check'], '{"step_type":"tool_call","name":"safe"}').code).toBe(0);
   });
 
+  it('warns that a blocking output_contains policy cannot block live', () => {
+    // Live enforcement evaluates a PROPOSED tool call — before it runs, so it
+    // has no output — and every match key must match. A deny keyed on
+    // output_contains therefore never fires under `hook --enforce`, however
+    // active it looks in `guard list`. The demo ships such a policy, so users
+    // copy the shape. It stays valid (it matches post-hoc in `guard test`), but
+    // writing one as a kill switch now says so.
+    const blocking = run(['guard', 'add', '--name', 'out-deny', '--action', 'deny', '--pattern', '{"output_contains":"http"}']);
+    expect(blocking.code).toBe(0);
+    expect(blocking.stdout).toMatch(/cannot block live/);
+
+    // A non-blocking policy on the same key is a normal auditing pattern.
+    const warnOnly = run(['guard', 'add', '--name', 'out-warn', '--action', 'warn', '--pattern', '{"output_contains":"http"}']);
+    expect(warnOnly.stdout).not.toMatch(/cannot block live/);
+
+    // And a blocking policy that CAN match a proposed call says nothing.
+    const inputDeny = run(['guard', 'add', '--name', 'in-deny', '--action', 'deny', '--pattern', '{"input_contains":"rm -rf"}']);
+    expect(inputDeny.stdout).not.toMatch(/cannot block live/);
+  });
+
   it('enforce mode fails CLOSED when the store cannot be read', () => {
     // Corrupt the store so opening/reading it throws part-way through the
     // enforcement evaluation (the real-world case is a transient SQLITE_BUSY on
