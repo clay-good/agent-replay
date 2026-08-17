@@ -139,8 +139,15 @@ export interface EvalPoint {
 
 /** Most recent eval scores, oldest first so the line chart reads left→right in time. */
 export function recentEvalScores(db: Database.Database, limit = 20): EvalPoint[] {
+  // Exclude an evaluator that was skipped as not applicable: it is stored with
+  // score 1.0 so it can't fail a gate, but it measured nothing, and plotting it
+  // put a fabricated 100% on the score trend.
   const rows = db
-    .prepare('SELECT score, evaluated_at FROM agent_trace_evals ORDER BY evaluated_at DESC LIMIT ?')
+    .prepare(
+      `SELECT score, evaluated_at FROM agent_trace_evals
+        WHERE COALESCE(json_extract(details, '$.skipped'), 0) = 0
+        ORDER BY evaluated_at DESC LIMIT ?`,
+    )
     .all(limit) as EvalPoint[];
   rows.reverse();
   return rows;

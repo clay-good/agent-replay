@@ -261,10 +261,19 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
   console.log(evalTable(results));
   console.log('');
 
-  // Overall summary
-  const passed = results.filter((r) => r.passed).length;
-  const failed = results.length - passed;
-  const avgScore = results.reduce((sum, r) => sum + r.score, 0) / results.length;
+  // Overall summary.
+  //
+  // A preset whose `applicable` predicate said no is stored with score 1.0 and
+  // passed:true so it doesn't fail a gate — but it measured NOTHING, and
+  // counting it as a pass reported "1 passed, avg score: 100%" for a run in
+  // which no evaluator ever looked at the trace. Report those separately.
+  const skipped = results.filter((r) => r.details?.skipped === true);
+  const measured = results.filter((r) => r.details?.skipped !== true);
+  const passed = measured.filter((r) => r.passed).length;
+  const failed = measured.length - passed;
+  const avgScore = measured.length
+    ? measured.reduce((sum, r) => sum + r.score, 0) / measured.length
+    : 0;
 
   const totalCost = results.reduce(
     (sum, r) => sum + (Number(r.details?.cost_usd) || 0),
@@ -272,9 +281,11 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
   );
   const costStr = totalCost > 0 ? chalk.dim(`  AI cost: $${totalCost.toFixed(6)}`) : '';
 
+  const skippedStr = skipped.length ? chalk.dim(`  ${skipped.length} not applicable`) : '';
+  const avgStr = measured.length ? chalk.dim(`avg score: ${Math.round(avgScore * 100)}%`) : chalk.dim('nothing measured');
   console.log(
     `  ${chalk.greenBright(`${passed} passed`)}  ${failed > 0 ? chalk.redBright(`${failed} failed`) : ''}  ` +
-      chalk.dim(`avg score: ${Math.round(avgScore * 100)}%`) + costStr,
+      avgStr + skippedStr + costStr,
   );
   console.log('');
 }

@@ -128,7 +128,10 @@ function exportGolden(db: Database.Database, items: Trace[]): string {
         ...(s.step_type === 'tool_call' ? { input: s.input } : {}),
         ...(s.model != null ? { model: s.model } : {}),
       })),
-      eval_criteria: evals.map((e) => ({
+      // A skipped evaluator is stored with score 1.0 so it can't fail a gate,
+      // but it measured nothing — baking that into a baseline asserts a result
+      // no evaluator ever produced.
+      eval_criteria: evals.filter((e) => (e.details as { skipped?: unknown } | null)?.skipped !== true).map((e) => ({
         evaluator_name: e.evaluator_name,
         score: e.score,
         passed: e.passed,

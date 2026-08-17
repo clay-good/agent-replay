@@ -109,6 +109,14 @@ trace schema is unchanged.
 
 ### Fixed
 
+- An AI evaluator that was skipped as not applicable no longer counts as a
+  measured 100% pass. Such a preset is stored with a score of 1.0 so it cannot
+  fail a gate, but it makes no measurements — yet the `eval` tally and average,
+  the dashboard's score-trend chart, and an exported golden baseline all
+  treated it as a real result. `eval` now reports it separately ("N not
+  applicable"), and the trend and baseline leave it out. The stored row stays,
+  since it explains why nothing ran.
+
 - Numbers the tool reports now match what it measured. `stats` summed only the
   trace-level `total_tokens`, which is set solely when a producer sends one —
   while `ingest`, `record`, the OTel mapper, and the importers all populate

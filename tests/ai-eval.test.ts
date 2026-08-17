@@ -596,3 +596,38 @@ describe('runAiEval (stubbed LLM)', () => {
     expect(result.details.parse_error).toBe(true);
   });
 });
+
+
+// ── a skipped evaluator measured nothing and must not count as a pass ───────
+
+describe('a skipped AI preset is not counted as a measured result', () => {
+  const opts = { provider: 'anthropic' as const, api_key: 'k', model: 'claude-haiku-4-5-20251001' };
+
+  it('is excluded from the golden baseline and the dashboard score trend', async () => {
+    // Regression: `applicable: false` stores score 1.0 / passed so the preset
+    // can't fail a gate — but it made zero measurements, and every numeric
+    // consumer treated it as a real 100%: the eval tally and average, the
+    // dashboard's score-trend chart, and the golden baseline's eval_criteria.
+    const { exportTraces } = await import('../src/services/export-service.js');
+    const { recentEvalScores } = await import('../src/ui/dashboard-data.js');
+
+    const db = createTestDb();
+    const clean = ingestTrace(db, makeTrace({
+      agent_name: 'skip-bot', status: 'completed', error: undefined, output: { result: 'ok' },
+      steps: [{ step_number: 1, step_type: 'output', name: 'done', output: { result: 'ok' } }],
+    }));
+    vi.stubGlobal('fetch', vi.fn());
+
+    const result = await runAiEval(db, clean.id, 'ai-root-cause', opts);
+    expect(result.details.skipped).toBe(true);
+
+    // The eval row still exists (it explains why nothing ran)...
+    expect(getTrace(db, clean.id)!.evals).toHaveLength(1);
+    // ...but it is not a data point, and not a baseline assertion.
+    expect(recentEvalScores(db)).toHaveLength(0);
+    const golden = JSON.parse(exportTraces(db, { agent_name: 'skip-bot' }, 'golden'));
+    expect(golden[0].eval_criteria).toEqual([]);
+
+    vi.unstubAllGlobals();
+  });
+});
