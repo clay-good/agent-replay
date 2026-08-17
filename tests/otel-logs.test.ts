@@ -250,3 +250,50 @@ describe('mapOtlpLogs — failure mapping', () => {
     expect(traces[0].steps![0].error).toBeUndefined();
   });
 });
+
+// ── the logs path must not lose or fabricate data ───────────────────────────
+
+describe('mapOtlpLogs — data fidelity', () => {
+  const MS = 1_000_000;
+
+  it('keeps a batch that carries only token counts', () => {
+    // Regression: a flush window with only model-call events has no steps and
+    // no prompt — but it does have tokens, and the whole group was dropped, so
+    // a session's token total depended on where the exporter cut its batches.
+    const traces = mapOtlpLogs(otlpLogs([
+      logRecord('gemini_cli.api_response', { 'session.id': 'sess-tok', input_token_count: 100, output_token_count: 20 }, 2 * MS),
+    ]));
+    expect(traces).toHaveLength(1);
+    expect(traces[0].total_tokens).toBe(120);
+  });
+
+  it('does not fuse session-less records from unrelated sources', () => {
+    // Regression: every record without session.id joined one '__nosession__'
+    // bucket, so unrelated services in one batch became a single trace with
+    // summed tokens. The span path already refuses the same fusion.
+    const traces = mapOtlpLogs(otlpLogs([
+      logRecord('gemini_cli.tool_call', { function_name: 'a' }, 1 * MS),
+      logRecord('gemini_cli.tool_call', { function_name: 'b' }, 2 * MS),
+    ]));
+    expect(traces).toHaveLength(2);
+    for (const t of traces) expect(t.steps).toHaveLength(1);
+  });
+
+  it('stamps steps with their event time and gives the trace a duration', () => {
+    // Regression: no log-derived step set started_at, so the writer stamped
+    // every one with the ingest wall-clock — a timeline where all steps happen
+    // at once. The trace had no ended_at either, so `list` showed "-" forever.
+    const traces = mapOtlpLogs(otlpLogs([
+      logRecord('gemini_cli.user_prompt', { 'session.id': 'sess-t', prompt: 'go' }, 1 * MS),
+      logRecord('gemini_cli.tool_call', { 'session.id': 'sess-t', function_name: 'first' }, 2 * MS),
+      logRecord('gemini_cli.tool_call', { 'session.id': 'sess-t', function_name: 'second' }, 5 * MS),
+    ]));
+    const [t] = traces;
+    expect(t.started_at).toBe('1970-01-01T00:00:00.001Z');
+    expect(t.ended_at).toBe('1970-01-01T00:00:00.005Z');
+    expect(t.steps!.map((s) => s.started_at)).toEqual([
+      '1970-01-01T00:00:00.002Z',
+      '1970-01-01T00:00:00.005Z',
+    ]);
+  });
+});

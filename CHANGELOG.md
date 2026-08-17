@@ -98,6 +98,17 @@ trace schema is unchanged.
 
 ### Fixed
 
+- The OTel *logs* path no longer loses or fabricates data. A flush window
+  carrying only model-call events has no steps and no prompt but does have
+  token counts, and the whole group was discarded — so a session's token total
+  depended on where the exporter happened to cut its batches. Records with no
+  `session.id` were all grouped under one placeholder, fusing unrelated
+  services in a batch into a single trace (the span path already refuses the
+  same fusion). And no log-derived step recorded the event's own time, so every
+  step was stamped with the moment the batch arrived — a timeline where
+  everything happens at once — while the trace never got an end time, and so
+  showed no duration at all.
+
 - `import` no longer fabricates token totals from string counts. A transcript
   whose `usage` carried `"100"` rather than `100` concatenated instead of
   adding — `0 + "100" + 20` becomes `"010020"`, stored as 10,020 tokens instead

@@ -51,12 +51,18 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
   const logs = flattenLogs(otlp).filter((l) => l.eventName.startsWith('gemini_cli.') || l.eventName.startsWith('claude_code.'));
 
   const bySession = new Map<string, FlatLog[]>();
-  for (const l of logs) {
-    const sid = str(l.attrs['session.id']) ?? '__nosession__';
+  logs.forEach((l, i) => {
+    // A record with no session.id gets its own group rather than joining one
+    // shared '__nosession__' bucket. Grouping on a placeholder fused every
+    // session-less record in the batch — across unrelated resourceLogs, so
+    // across unrelated services — into a single trace with summed tokens and
+    // one arbitrary agent name. The span path refuses the same fusion for the
+    // same reason: the correlation key is absent, so correlate nothing.
+    const sid = str(l.attrs['session.id']) ?? `!nosession:${i}`;
     const list = bySession.get(sid) ?? [];
     list.push(l);
     bySession.set(sid, list);
-  }
+  });
 
   const traces: IngestTraceInput[] = [];
   for (const [sid, group] of bySession) {
@@ -73,9 +79,17 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
     const steps: IngestStepInput[] = [];
     let stepNumber = 1;
     let startedAt: string | undefined;
+    let endedAtNanos = 0;
 
     for (const l of group) {
       if (!startedAt && l.time) startedAt = new Date(l.time / 1e6).toISOString();
+      // The record's own event time. No log-derived step set `started_at`, and
+      // the writer falls back to the ingest wall-clock, so every step of an
+      // imported session carried the same fabricated timestamp — the moment the
+      // batch happened to arrive. Timelines showed every step as simultaneous,
+      // and the trace never gained a duration at all.
+      const at = l.time ? new Date(l.time / 1e6).toISOString() : undefined;
+      if (l.time) endedAtNanos = Math.max(endedAtNanos, l.time);
       const a = l.attrs;
       const evt = l.eventName;
 
@@ -92,6 +106,7 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
           step_number: toolStep,
           step_type: 'tool_call',
           name,
+          started_at: at,
           input: parseArgs(a.function_args),
           output: a.success != null ? { success: a.success } : null,
           duration_ms: numOrNull(a.duration_ms),
@@ -104,6 +119,7 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
             step_number: stepNumber++,
             step_type: 'decision',
             name: `tool_decision:${name}`,
+            started_at: at,
             caused_by_step: toolStep,
             decision: geminiDecision(decision),
           });
@@ -116,6 +132,7 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
           step_number: stepNumber++,
           step_type: 'tool_call',
           name: str(a.tool_name) ?? str(a.name) ?? 'tool',
+          started_at: at,
           output: a.success != null ? { success: a.success } : null,
           duration_ms: numOrNull(a.duration_ms),
           error: toolError(a),
@@ -132,6 +149,7 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
             step_number: stepNumber++,
             step_type: 'decision',
             name: `tool_decision:${name}`,
+            started_at: at,
             decision: { chosen: decision, decided_by: decision === 'allow' || decision === 'deny' ? 'user' : 'policy' },
           });
         }
@@ -147,6 +165,7 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
           step_number: stepNumber++,
           step_type: 'llm_call',
           name: str(a['gen_ai.request.model']) ?? str(a.model) ?? 'api_error',
+          started_at: at,
           error:
             str(a.error) ??
             str(a.error_message) ??
@@ -166,7 +185,11 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
       }
     }
 
-    if (steps.length === 0 && !input) continue;
+    // A flush window carrying only model-call events (very common between tool
+    // calls) has no steps and no prompt, but it DOES have tokens — and dropping
+    // the whole group discarded them, so a session's token total depended on
+    // where the exporter happened to cut its batches.
+    if (steps.length === 0 && !input && !totalTokens) continue;
 
     traces.push({
       agent_name: isGemini ? 'gemini' : 'claude-code',
@@ -179,6 +202,9 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
       session_id: sid === '__nosession__' ? null : sid,
       input: input ?? {},
       started_at: startedAt,
+      // The session spans its first event to its last. Without this the trace
+      // had no ended_at and no total_duration_ms, so `list` showed "-" forever.
+      ended_at: endedAtNanos ? new Date(endedAtNanos / 1e6).toISOString() : null,
       total_tokens: totalTokens || null,
       metadata: { source_format: isGemini ? 'gemini-cli-logs' : 'claude-code-logs' },
       steps,
