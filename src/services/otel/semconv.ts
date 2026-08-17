@@ -182,11 +182,22 @@ function isoFromNanos(nanos: number): string | undefined {
 export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[] {
   const spans = flattenSpans(otlp);
   const byTrace = new Map<string, FlatSpan[]>();
-  for (const s of spans) {
-    const list = byTrace.get(s.traceId) ?? [];
+  spans.forEach((s, i) => {
+    // A span with no trace id still becomes a synthetic trace rather than being
+    // rejected (a deliberate choice — see the orphan-span test), but it must not
+    // be GROUPED with other id-less spans: flattenSpans normalizes a missing
+    // traceId to '', and grouping on that value fused every orphan in the batch
+    // — across unrelated `resourceSpans` entries — into one trace, attributed to
+    // whichever service sorted earliest and with all their tokens summed. A
+    // collector fanning in two services was enough. The trace id is the only
+    // correlation key there is, so with none present, correlate nothing: give
+    // each orphan its own group. The stored `otel_trace_id` stays '', which
+    // findMergeTarget already refuses to merge across batches.
+    const key = s.traceId || ` orphan:${i}`;
+    const list = byTrace.get(key) ?? [];
     list.push(s);
-    byTrace.set(s.traceId, list);
-  }
+    byTrace.set(key, list);
+  });
 
   const traces: IngestTraceInput[] = [];
   for (const [, group] of byTrace) {

@@ -259,6 +259,35 @@ describe('OTLP receiver', () => {
     expect(listTraces(db, {}).total).toBe(1);
   });
 
+  it('does not fuse orphan spans from different services into one trace', () => {
+    // Regression: flattenSpans normalizes a missing traceId to '', and grouping
+    // on that value put EVERY id-less span in the batch — across unrelated
+    // resourceSpans entries — into a single trace, attributed to whichever
+    // service sorted earliest, with both services' tokens summed. A collector
+    // fanning two services in was enough to fabricate that trace. Orphans are
+    // still mapped (not rejected), just never correlated with each other.
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    const orphan = (service: string, spanId: string) => ({
+      resource: { attributes: [attr('service.name', service)] },
+      scopeSpans: [{ spans: [{
+        spanId, name: 'chat', startTimeUnixNano: String(MS), endTimeUnixNano: String(2 * MS),
+        attributes: [attr('gen_ai.usage.input_tokens', 10)],
+      }] }],
+    });
+    const res = handleTracesExport(
+      db,
+      JSON.stringify({ resourceSpans: [orphan('billing-svc', 'o1'), orphan('search-svc', 'o2')] }),
+      stats,
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.payload).toEqual({}); // still full success — orphans are not rejected
+    const names = listTraces(db, {}).items.map((t) => t.agent_name).sort();
+    expect(names).toEqual(['billing-svc', 'search-svc']);
+    // Neither trace absorbed the other's tokens.
+    for (const t of listTraces(db, {}).items) expect(t.total_tokens).toBe(10);
+  });
+
   it('assembles spans of one OTel trace arriving across batches into a single trace', () => {
     const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
     // Batch 1: root + first child for OTel trace "t7".
