@@ -401,10 +401,12 @@ between them, and nothing else.
   Gemini import attaches a decision record to every tool call, and a retry storm
   is all errors — because the prioritized fill was itself in-order. The step that
   ended the run is now claimed before anything else competes for the budget.
-  Rendering is lazy again rather than rendering every step up front, which
-  recovers the early exit for traces of small steps (20,000 tiny steps: 420 ms →
-  1 ms). With payloads at the 200-character render limit the scan still visits
-  every step, at roughly the cost of the version before the rewrite.
+  Rendering is lazy again rather than rendering every step up front, so a step
+  the budget cannot hold is no longer rendered before being discarded (20,000
+  tiny steps summarize in ~24 ms). The loop still visits every step: it stops
+  early only when the budget is exactly consumed, because there is no sound
+  lower bound on a line's length to stop on — a fixed floor is what used to drop
+  steps that fit and report them as omitted.
 
 - `diff --fields ""` and `check --fields ""` bypassed the guard that rejects a
   list naming no fields — `diff` silently suppressed every field comparison and
