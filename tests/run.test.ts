@@ -3,6 +3,7 @@ import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
 import { getTrace } from '../src/services/trace-service.js';
 import { runWrapped } from '../src/services/harness-service.js';
+import { resolveDataDir } from '../src/utils/paths.js';
 
 let db: Database.Database;
 
@@ -278,6 +279,27 @@ fs.appendFileSync(f, JSON.stringify({ v: 1, type: 'trace_end', trace_id: t, stat
     expect(trace.total_duration_ms).not.toBeNull();
     expect(trace.total_duration_ms!).toBeGreaterThanOrEqual(0);
   }, 15000);
+});
+
+describe('AGENT_REPLAY_DIR handshake', () => {
+  it('is honored by a nested agent-replay command, with --dir still winning', async () => {
+    // `run` sets AGENT_REPLAY_DIR for its child and the README documents it as
+    // how the wrapper hands the child its store — but nothing read it back, so a
+    // child that is itself an agent-replay invocation wrote to ./.agent-replay
+    // instead of the store the wrapper had just opened a trace in.
+    const prev = process.env.AGENT_REPLAY_DIR;
+    try {
+      process.env.AGENT_REPLAY_DIR = '/handed/down';
+      expect(resolveDataDir()).toBe('/handed/down');
+      expect(resolveDataDir(undefined)).toBe('/handed/down');
+      expect(resolveDataDir('/explicit')).toBe('/explicit'); // --dir always wins
+      delete process.env.AGENT_REPLAY_DIR;
+      expect(resolveDataDir()).toBe('.agent-replay');
+    } finally {
+      if (prev === undefined) delete process.env.AGENT_REPLAY_DIR;
+      else process.env.AGENT_REPLAY_DIR = prev;
+    }
+  });
 });
 
 describe('runWrapped reports the status it stored', () => {

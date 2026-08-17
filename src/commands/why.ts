@@ -5,6 +5,7 @@ import { causalWalk } from '../services/decision-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { stepIcon, stepLabel, heading, label } from '../ui/theme.js';
 import type { StepType } from '../models/enums.js';
+import { resolveDataDir } from '../utils/paths.js';
 
 export interface WhyOptions {
   step?: string;
@@ -24,7 +25,7 @@ const LINK_LABELS: Record<CausalHop['link'], string> = {
  * from step N and explain how the agent got there.
  */
 export function runWhy(traceId: string, opts: WhyOptions = {}): void {
-  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   // Parse with Number, not parseInt: `--step 1e2` must mean 100 (or be a usage

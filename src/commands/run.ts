@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import { ensureDatabase } from '../db/index.js';
 import { runWrapped } from '../services/harness-service.js';
 import { shortId } from '../utils/id.js';
+import { resolveDataDir } from '../utils/paths.js';
 
 export interface RunOptions {
   agentName?: string;
@@ -23,7 +24,7 @@ export async function runRun(parts: string[] = [], opts: RunOptions = {}): Promi
   }
 
   const [command, ...args] = parts;
-  const dbDir = resolve(opts.dir ?? '.agent-replay');
+  const dbDir = resolve(resolveDataDir(opts.dir));
   const db = ensureDatabase(resolve(dbDir, 'traces.db'));
   const tags = (opts.tags ?? '').split(',').map((s) => s.trim()).filter(Boolean);
 
@@ -47,7 +48,10 @@ export async function runRun(parts: string[] = [], opts: RunOptions = {}): Promi
       ? chalk.green(disagrees ? `completed (child exited ${result.exitCode})` : 'completed')
       : chalk.redBright(`${result.status} (exit ${result.exitCode})`);
   console.error(
-    chalk.dim(`\n  agent-replay: trace ${shortId(result.traceId)} ${status}, ${result.eventsApplied} event(s) recorded.`),
+    chalk.dim(`\n  agent-replay: trace ${shortId(result.traceId)} ${status}, ${result.eventsApplied} event(s) recorded.`) +
+      (result.eventsDropped > 0
+        ? chalk.yellow(` ${result.eventsDropped} event(s) could not be stored — see the messages above.`)
+        : ''),
   );
 
   // Propagate the child's exit status.

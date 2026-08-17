@@ -157,7 +157,21 @@ nothing else.
   panel with the critical finding printed inside it. The declared value is kept
   as `declared_risk_level` when the two disagree.
 
+### Changed
+
+- Every command honors `AGENT_REPLAY_DIR` as its data directory when `--dir`
+  isn't given. `run` sets that variable for its child and the README documents
+  it as how the wrapper hands the child its store, but nothing read it back — so
+  a nested invocation (`run -- sh -c '... | agent-replay record'`) wrote to a
+  fresh `./.agent-replay` instead of the store the wrapper had just opened a
+  trace in. An explicit `--dir` still wins.
+
 ### Fixed
+
+- `run`'s summary says when events could not be stored. A child recording
+  several sub-traces through one channel collides on the per-trace step
+  numbering and loses everything after the first, but the count lived only in
+  stderr lines while the summary still read "N event(s) recorded".
 
 - `agent-replay run` keeps its headline guarantee when the store hiccups.
   Finalization was unguarded, so a write that failed (another process holding

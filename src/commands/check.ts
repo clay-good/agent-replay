@@ -9,6 +9,7 @@ import type { TraceWithDetails } from '../models/types.js';
 import { heading } from '../ui/theme.js';
 import { parseSinceToIso } from '../utils/time.js';
 import { errorMessage } from '../utils/json.js';
+import { resolveDataDir } from '../utils/paths.js';
 
 export interface CheckOptions {
   golden?: string;
@@ -88,7 +89,7 @@ export function runCheck(opts: CheckOptions = {}): void {
     return;
   }
 
-  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   // Gather candidate traces.

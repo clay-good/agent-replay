@@ -10,6 +10,7 @@ import { truncate } from '../utils/json.js';
 import { renderTimeline, renderTree } from '../ui/timeline.js';
 import { evalTable } from '../ui/table.js';
 import { heading, separator } from '../ui/theme.js';
+import { resolveDataDir } from '../utils/paths.js';
 
 export interface ShowOptions {
   json?: boolean;
@@ -27,7 +28,7 @@ export interface ShowOptions {
  * with header panel, step timeline, evaluations, and optional snapshots.
  */
 export function runShow(traceId: string, opts: ShowOptions = {}): void {
-  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   const trace = getTrace(db, traceId);

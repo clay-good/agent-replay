@@ -9,6 +9,7 @@ import { makeTranslator } from '../services/stream-translators.js';
 import { updateTrace } from '../services/trace-service.js';
 import { summaryPanel } from '../ui/boxen-panels.js';
 import { errorMessage } from '../utils/json.js';
+import { resolveDataDir } from '../utils/paths.js';
 
 export interface RecordOptions {
   format?: string;
@@ -33,7 +34,7 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
     return;
   }
 
-  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   const extraTags = (opts.tags ?? '')

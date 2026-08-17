@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import chalk from 'chalk';
 import { ensureDatabase } from '../db/index.js';
 import { DashboardView } from '../ui/dashboard-view.js';
+import { resolveDataDir } from '../utils/paths.js';
 
 export interface DashboardOptions {
   refresh?: string;
@@ -29,7 +30,7 @@ export function runDashboard(opts: DashboardOptions = {}): void {
     refreshSeconds = r;
   }
 
-  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   const dashboard = new DashboardView(db, {

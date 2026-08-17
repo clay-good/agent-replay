@@ -7,6 +7,7 @@ import { traceTable } from '../ui/table.js';
 import { heading } from '../ui/theme.js';
 import { parseSinceToIso } from '../utils/time.js';
 import { errorMessage } from '../utils/json.js';
+import { resolveDataDir } from '../utils/paths.js';
 
 export interface ListOptions {
   status?: string;
@@ -24,7 +25,7 @@ export interface ListOptions {
  * `agent-replay list` — query traces with filters and display a formatted table.
  */
 export function runList(opts: ListOptions = {}): void {
-  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   const filter: ListTracesFilter = {};

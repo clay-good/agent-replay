@@ -8,6 +8,7 @@ import { renderDiff } from '../ui/diff-renderer.js';
 import { summaryPanel, aiDiffPanel } from '../ui/boxen-panels.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage } from '../utils/json.js';
+import { resolveDataDir } from '../utils/paths.js';
 
 export interface DiffOptions {
   compact?: boolean;
@@ -26,7 +27,7 @@ export async function runDiff(
   traceIdB: string,
   opts: DiffOptions = {},
 ): Promise<void> {
-  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   // Resolve both traces (supports prefix-matching)

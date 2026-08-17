@@ -336,7 +336,7 @@ Wrap any agent command to record it end-to-end and propagate its exit status —
 agent-replay run --agent-name my-bot -- node agent.js
 ```
 
-The wrapper pre-creates a trace and hands the child a recording channel via environment variables (`AGENT_REPLAY_DIR`, `AGENT_REPLAY_TRACE_ID`, `AGENT_REPLAY_EVENTS`). An instrumented child (using the [`TraceRecorder` SDK](#programmatic-api) or writing JSONL events to `$AGENT_REPLAY_EVENTS`) records a full step-by-step trace; an uninstrumented child still gets a trace with timing and exit metadata. The child's stdio passes through untouched, and the trace is finalized from its exit — `0` → completed, non-zero → failed with the code recorded. `agent-replay run` exits with the child's own status, so it drops cleanly into scripts and CI.
+The wrapper pre-creates a trace and hands the child a recording channel via environment variables (`AGENT_REPLAY_DIR`, `AGENT_REPLAY_TRACE_ID`, `AGENT_REPLAY_EVENTS`). Every `agent-replay` command honors `AGENT_REPLAY_DIR` as its data directory when `--dir` isn't given, so a nested invocation (`run -- sh -c '... | agent-replay record'`) writes to the wrapper's store rather than a fresh one in the working directory. An instrumented child (using the [`TraceRecorder` SDK](#programmatic-api) or writing JSONL events to `$AGENT_REPLAY_EVENTS`) records a full step-by-step trace; an uninstrumented child still gets a trace with timing and exit metadata. The child's stdio passes through untouched, and the trace is finalized from its exit — `0` → completed, non-zero → failed with the code recorded. `agent-replay run` exits with the child's own status, so it drops cleanly into scripts and CI.
 
 ### Regression check (CI)
 

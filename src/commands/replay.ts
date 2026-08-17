@@ -10,6 +10,7 @@ import { stepIcon, stepLabel, heading, separator, colors } from '../ui/theme.js'
 
 import { errorMessage, truncate, hasRenderableContent } from '../utils/json.js';
 import { formatDuration } from '../utils/time.js';
+import { resolveDataDir } from '../utils/paths.js';
 
 export interface ReplayOptions {
   speed?: string;
@@ -27,7 +28,7 @@ export async function runReplay(
   traceId: string,
   opts: ReplayOptions = {},
 ): Promise<void> {
-  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   const trace = getTrace(db, traceId);

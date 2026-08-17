@@ -9,6 +9,7 @@ import { ensureDatabase } from '../db/index.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { parseSinceToIso } from '../utils/time.js';
 import { errorMessage } from '../utils/json.js';
+import { resolveDataDir } from '../utils/paths.js';
 
 export interface ExportOptions {
   format?: string;
@@ -32,7 +33,7 @@ export interface ExportOptions {
  * ignoring the filters.
  */
 export function runExport(traceId: string | undefined, opts: ExportOptions = {}): void {
-  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   const filter: ListTracesFilter = {};

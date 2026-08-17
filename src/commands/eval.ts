@@ -18,6 +18,7 @@ import { heading, formatScorePct } from '../ui/theme.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage } from '../utils/json.js';
 import type { EvalResult } from '../models/types.js';
+import { resolveDataDir } from '../utils/paths.js';
 
 export interface EvalOptions {
   rubric?: string;
@@ -34,7 +35,7 @@ export interface EvalOptions {
  * using built-in presets, custom rubric files, or AI-powered analysis.
  */
 export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): Promise<void> {
-  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   // Resolve trace

@@ -9,6 +9,7 @@ import { traceTable } from '../ui/table.js';
 import { heading, separator, colors } from '../ui/theme.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage } from '../utils/json.js';
+import { resolveDataDir } from '../utils/paths.js';
 
 export interface DemoOptions {
   interactive?: boolean;
@@ -23,7 +24,7 @@ export interface DemoOptions {
  * This command handles init, reset, seeding, and the walkthrough flow.
  */
 export async function runDemo(opts: DemoOptions = {}): Promise<void> {
-  const baseDir = resolve(opts.dir ?? '.agent-replay');
+  const baseDir = resolve(resolveDataDir(opts.dir));
   const dbPath = resolve(baseDir, 'traces.db');
 
   // Reset if requested — safety check: only delete .agent-replay directories

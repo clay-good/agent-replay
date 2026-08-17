@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { resolveDataDir } from '../utils/paths.js';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -46,7 +47,7 @@ const ENV_KEYS: Record<string, string> = {
 // ── Config I/O ───────────────────────────────────────────────────────────
 
 export function configPath(dir?: string): string {
-  return join(resolve(dir ?? '.agent-replay'), 'config.json');
+  return join(resolve(resolveDataDir(dir)), 'config.json');
 }
 
 export function loadConfig(dir?: string): AgentReplayConfig | null {

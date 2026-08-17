@@ -9,6 +9,7 @@ import { ensureDatabase } from '../db/index.js';
 import { summaryPanel } from '../ui/boxen-panels.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage } from '../utils/json.js';
+import { resolveDataDir } from '../utils/paths.js';
 
 export interface IngestOptions {
   format?: 'json' | 'jsonl';
@@ -23,7 +24,7 @@ export interface IngestOptions {
  */
 export function runIngest(filePath: string, opts: IngestOptions = {}): void {
   const absPath = resolve(filePath);
-  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   const spinner = startSpinner(`Reading ${absPath}...`);

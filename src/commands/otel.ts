@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import { ensureDatabase } from '../db/index.js';
 import { startOtelReceiver, type OtelStats } from '../services/otel/receiver.js';
 import { heading } from '../ui/theme.js';
+import { resolveDataDir } from '../utils/paths.js';
 
 export interface OtelServeOptions {
   port?: string;
@@ -32,7 +33,7 @@ export async function runOtelServe(opts: OtelServeOptions = {}): Promise<void> {
     // port) or "1e2" (100 vs 1) — the exporter would then hit the wrong port.
     port = p;
   }
-  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };

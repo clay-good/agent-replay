@@ -35,6 +35,8 @@ export interface RunWrappedResult {
   traceId: string;
   exitCode: number;
   eventsApplied: number;
+  /** Events the store refused (e.g. a step number already used by this trace). */
+  eventsDropped: number;
 }
 
 export async function runWrapped(db: Database.Database, opts: RunWrappedOptions): Promise<RunWrappedResult> {
@@ -61,6 +63,7 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
   writeFileSync(eventsPath, '');
 
   let applied = 0;
+  let dropped = 0;
   // Read the events file incrementally from a byte offset so a long run
   // (real sessions emit thousands of events) doesn't re-read the whole growing
   // file on every 200ms poll. Only complete, newline-terminated lines are
@@ -101,6 +104,11 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
         childDeclaredStatus = true;
       }
     } catch (err) {
+      // Count it. A child that records several sub-traces through one channel
+      // collides on UNIQUE(trace_id, step_number) and loses every step after
+      // the first sub-trace; with the count only in a stderr line, the summary
+      // still read "N event(s) recorded" and nothing said data was missing.
+      dropped++;
       process.stderr.write(`agent-replay run: skipped ${event.type}: ${(err as Error).message}\n`);
     }
   };
@@ -405,5 +413,5 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
     }
   }
 
-  return { traceId: trace.id, status: finalStatus, exitCode, eventsApplied: applied };
+  return { traceId: trace.id, status: finalStatus, exitCode, eventsApplied: applied, eventsDropped: dropped };
 }

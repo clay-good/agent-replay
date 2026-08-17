@@ -6,6 +6,7 @@ import { getTrace, getStepsAfter, getMostRecentRunningTrace } from '../services/
 import { ensureDatabase } from '../db/index.js';
 import { stepIcon, stepLabel, heading, statusBadge } from '../ui/theme.js';
 import { formatDuration } from '../utils/time.js';
+import { resolveDataDir } from '../utils/paths.js';
 
 export interface WatchOptions {
   interval?: string;
@@ -20,7 +21,7 @@ const DEFAULT_POLL_MS = 500;
  * With no trace ID, follows the most recently started running trace.
  */
 export function runWatch(traceId: string | undefined, opts: WatchOptions = {}): void {
-  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   // Reject a malformed --interval up front — before resolving the trace — rather

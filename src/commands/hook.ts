@@ -4,6 +4,7 @@ import { ensureDatabase } from '../db/index.js';
 import { applyHookPayload, formatEnforcementResponse, resolveHookRouting } from '../services/hook-adapter.js';
 import type { HookDialect } from '../services/hook-adapter.js';
 import { errorMessage } from '../utils/json.js';
+import { resolveDataDir } from '../utils/paths.js';
 
 export interface HookOptions {
   noInput?: boolean;
@@ -126,7 +127,7 @@ export async function runHook(eventArg: string | undefined, opts: HookOptions = 
   }
 
   try {
-    const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+    const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
     // In enforce mode a missing store is a failure to evaluate, not an empty
     // policy set. The path is resolved from the process's cwd and
     // `ensureDatabase` CREATES what it doesn't find, so a hook that fired from

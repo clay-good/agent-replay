@@ -5,6 +5,7 @@ import { importClaudeTranscript } from '../services/importers/claude-transcript.
 import { importCodexRollout } from '../services/importers/codex-rollout.js';
 import { summaryPanel } from '../ui/boxen-panels.js';
 import { errorMessage } from '../utils/json.js';
+import { resolveDataDir } from '../utils/paths.js';
 
 export interface ImportOptions {
   format?: string;
@@ -28,7 +29,7 @@ export function runImport(filePath: string, opts: ImportOptions = {}): void {
   }
 
   const absPath = resolve(filePath);
-  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   const tags = (opts.tags ?? '').split(',').map((s) => s.trim()).filter(Boolean);

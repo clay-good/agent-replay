@@ -6,6 +6,7 @@ import { summaryPanel } from '../ui/boxen-panels.js';
 import { heading, label, formatCostUsd } from '../ui/theme.js';
 import { formatDuration, parseSinceToIso } from '../utils/time.js';
 import { errorMessage } from '../utils/json.js';
+import { resolveDataDir } from '../utils/paths.js';
 
 export interface StatsOptions {
   json?: boolean;
@@ -19,7 +20,7 @@ export interface StatsOptions {
  * consumable as `--json` in CI, where the full-screen dashboard can't run).
  */
 export function runStats(opts: StatsOptions = {}): void {
-  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   // A malformed --since is a usage error, not a silent store-wide fallback

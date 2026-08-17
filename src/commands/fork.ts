@@ -6,6 +6,7 @@ import { ensureDatabase } from '../db/index.js';
 import { summaryPanel } from '../ui/boxen-panels.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage, safeJsonParse } from '../utils/json.js';
+import { resolveDataDir } from '../utils/paths.js';
 
 export interface ForkOptions {
   fromStep: string;
@@ -20,7 +21,7 @@ export interface ForkOptions {
  * with optional input/context modifications.
  */
 export function runFork(traceId: string, opts: ForkOptions): void {
-  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   // Resolve trace

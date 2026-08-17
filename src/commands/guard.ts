@@ -22,6 +22,7 @@ import { isValidStepType } from '../utils/validators.js';
 import { openSync, readSync, closeSync } from 'node:fs';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage, safeParseInt } from '../utils/json.js';
+import { resolveDataDir } from '../utils/paths.js';
 
 // ── guard list ───────────────────────────────────────────────────────────
 
@@ -30,7 +31,7 @@ export interface GuardListOptions {
 }
 
 export function runGuardList(opts: GuardListOptions = {}): void {
-  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   const policies = listPolicies(db);
@@ -65,7 +66,7 @@ export interface GuardAddOptions {
 }
 
 export function runGuardAdd(opts: GuardAddOptions): void {
-  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   // Parse pattern JSON
@@ -143,7 +144,7 @@ export interface GuardRemoveOptions {
 }
 
 export function runGuardRemove(policyId: string, opts: GuardRemoveOptions = {}): void {
-  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   try {
@@ -168,7 +169,7 @@ export interface GuardToggleOptions {
  * used to mean deleting it (and retyping it, with a new id, to bring it back).
  */
 export function runGuardToggle(policyId: string, enabled: boolean, opts: GuardToggleOptions = {}): void {
-  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   try {
@@ -189,7 +190,7 @@ export interface GuardTestOptions {
 }
 
 export function runGuardTest(traceId: string, opts: GuardTestOptions = {}): void {
-  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   // Resolve trace
@@ -351,7 +352,7 @@ export async function runGuardCheck(opts: GuardCheckOptions = {}): Promise<void>
   // the DB was locked. `hook --enforce` already fails closed here, and this
   // command's own require_review path fails closed without a TTY, so allowing
   // on "cannot evaluate" contradicted the module's stated posture.
-  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   let verdict: ReturnType<typeof verdictForMatches>;
   try {
     const db = ensureDatabase(dbPath);

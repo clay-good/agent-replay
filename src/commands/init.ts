@@ -3,20 +3,21 @@ import { join, resolve } from 'node:path';
 import chalk from 'chalk';
 import { ensureDatabase } from '../db/index.js';
 import { welcomePanel } from '../ui/boxen-panels.js';
+import { resolveDataDir } from '../utils/paths.js';
 
 export interface InitOptions {
   force?: boolean;
   dir?: string;
 }
 
-const DEFAULT_DIR = '.agent-replay';
+
 
 /**
  * `agent-replay init` — create project directory, initialize SQLite database,
  * write a default config.json, and show a welcome panel.
  */
 export function runInit(opts: InitOptions = {}): void {
-  const baseDir = resolve(opts.dir ?? DEFAULT_DIR);
+  const baseDir = resolve(resolveDataDir(opts.dir));
   const dbPath = join(baseDir, 'traces.db');
   const configPath = join(baseDir, 'config.json');
 

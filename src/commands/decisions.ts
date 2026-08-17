@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import { listDecisions } from '../services/decision-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { heading, label } from '../ui/theme.js';
+import { resolveDataDir } from '../utils/paths.js';
 
 export interface DecisionsOptions {
   json?: boolean;
@@ -14,7 +15,7 @@ export interface DecisionsOptions {
  * with its options, chosen option, confidence, and rationale.
  */
 export function runDecisions(traceId: string, opts: DecisionsOptions = {}): void {
-  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   const result = listDecisions(db, traceId);
