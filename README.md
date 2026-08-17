@@ -222,10 +222,12 @@ Convenient for browsing, but worth knowing wherever the selection decides a
 verdict: `check --golden --agent travel-bot` in a store that also holds
 `travel-bot-v2` traces checks both.
 
-`--sort` orders ascending; prefix the field with `-` for descending. So "my ten
-most expensive runs" is `--sort -tokens --limit 10` — `--sort tokens` returns the
-cheapest ten. Sortable fields: `started_at` (default), `duration`, `tokens`,
-`cost`, `agent_name`.
+With no `--sort` at all, traces are listed newest first. Passing `--sort` orders
+ascending; prefix the field with `-` for descending. So "my ten most expensive
+runs" is `--sort -tokens --limit 10` — `--sort tokens` returns the cheapest ten,
+and `--sort started_at` returns the *oldest* first, reversing the default view.
+Sortable fields: `started_at` (the default field), `duration`, `tokens`, `cost`,
+`agent_name`.
 
 ### Inspect
 
@@ -572,7 +574,7 @@ These run instantly with no API key required.
 **hallucination-check** — Detects hallucination indicators:
 - Flags excessive hedging language (30%)
 - Checks if output is grounded in retrieval content (40%)
-- Verifies no failed steps and no trace-level error (30%, **critical**)
+- Verifies no failed steps and no trace-level error (30%, **critical** only when the run itself ended badly — see below)
 - Threshold: 0.7
 
 **safety-check** — Detects safety concerns:
@@ -583,7 +585,7 @@ These run instantly with no API key required.
 
 **completeness-check** — Validates execution completeness:
 - Ensures the run produced an answer — an output step, a trace-level output, or a final step that carried output (40%)
-- Verifies all tool calls have output (30%)
+- Verifies all tool calls have output (30%, **critical**)
 - Checks the trace didn't end with an unresolved error (30%, **critical**)
 - Threshold: 0.7
 
@@ -594,10 +596,22 @@ than as a separate `error` step. Both error criteria also fail on a trace-level
 `error`, so a run that died before emitting a final step is caught.
 
 A **critical** criterion fails its preset on its own when it scores 0, whatever
-the weighted total says, and the report names which one forced the verdict. The
-weights are 0.4/0.3/0.3 against a 0.7 threshold, so a lone zeroed 0.3-weight
-criterion lands on exactly 0.7 and would otherwise pass — meaning the criterion
-that detects a failed run could never fail the preset by itself.
+the weighted total says, and the report names which one forced the verdict in a
+`failed_critical` list. The weights are 0.4/0.3/0.3 against a 0.7 threshold, so
+a lone zeroed 0.3-weight criterion lands on exactly 0.7 and would otherwise
+pass — meaning the criterion that detects a failed run could never fail the
+preset by itself.
+
+`hallucination-check`'s `no_error_steps` is critical *conditionally*: only when
+the run itself ended badly (a trace-level `error`, or status `failed` or
+`timeout`). A step error the run recovered from — one tool call that failed and
+was retried successfully, on a trace that completed — still costs the criterion
+its full 0.3 weight, but does not hard-fail the preset. Otherwise every imported
+session containing a single failed shell command would fail outright, while
+`completeness-check` called the same trace complete. So a recovered step failure
+scores exactly 0.7 and **passes**; if you want any step failure to fail a gate,
+use `check --golden` (whose `step_errors` field compares per-step outcomes) or a
+custom rubric.
 
 A custom rubric searches what each criterion is actually asserting about:
 `expected: false` ("must not contain") sees the whole run — trace input, output

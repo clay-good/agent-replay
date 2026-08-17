@@ -1028,12 +1028,26 @@ export function getTrace(
   // so a copied partial like `trc_ab_c` would otherwise treat `_` as a wildcard
   // and resolve to an unrelated trace; a literal `%` would match everything.
   // Mirrors the agent_name/session_id branches in listTraces.
+  //
+  // Try the exact id on its own FIRST. The combined query below is correct but
+  // cannot use the PRIMARY KEY index: `id = ? OR id LIKE ?` is a disjunction, so
+  // SQLite falls back to `SCAN agent_traces` plus a temp B-tree for the ORDER BY.
+  // That is ~3.5 ms per lookup on a 10k-trace store against ~0.005 ms for a
+  // keyed hit, and it grows with the store — `exportTraces` calls this once per
+  // trace with an ALREADY-CANONICAL id and no limit, which made a whole-store
+  // export quadratic (1k traces 0.4 s, 2k 1.2 s, 4k 5.5 s). Same class of defect
+  // as the `list` full scan that schema v4's expression index exists to fix, on
+  // the path that builds golden datasets and backups. The exact match is also
+  // what the ORDER BY below would have chosen, so this changes no result — a
+  // prefix that is itself a full id resolves to that id either way.
   const escaped = traceId.replace(/[\\%_]/g, '\\$&');
-  const traceRow = db
+  const traceRow = (db
+    .prepare('SELECT * FROM agent_traces WHERE id = ?')
+    .get(traceId) ?? db
     .prepare(
-      "SELECT * FROM agent_traces WHERE id = ? OR id LIKE ? ESCAPE '\\' ORDER BY (id = ?) DESC, id ASC LIMIT 1",
+      "SELECT * FROM agent_traces WHERE id LIKE ? ESCAPE '\\' ORDER BY id ASC LIMIT 1",
     )
-    .get(traceId, `${escaped}%`, traceId) as Record<string, unknown> | undefined;
+    .get(`${escaped}%`)) as Record<string, unknown> | undefined;
 
   if (!traceRow) return null;
 

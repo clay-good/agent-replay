@@ -171,6 +171,17 @@ between them, and nothing else.
 
 ### Fixed
 
+- Exporting a whole store was quadratic. `getTrace` resolves an id prefix with
+  `id = ? OR id LIKE ?`, and that disjunction cannot use the primary key index,
+  so every lookup was a full scan of `agent_traces` plus a temp B-tree for the
+  ordering. `export` calls it once per trace — with an already-canonical id, so
+  the prefix machinery was pure waste — and applies no limit, so the cost grew
+  with the square of the store: a 3,000-trace export took 10.4 s, and larger
+  stores far worse. It now tries the exact id first and only falls back to the
+  prefix query, which resolves identically. The same export now takes 1.1 s and
+  scales linearly. This is the same class of defect the schema v4 expression
+  index exists to fix, on the path that builds golden datasets and backups.
+
 - A failed tool call in a Gemini stream (`record --format gemini-stream`) was
   recorded as a clean one. The gemini translator's `tool_result` branch had no
   error path at all, while every sibling capture path (`hook`, the Claude

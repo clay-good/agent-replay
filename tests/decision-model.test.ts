@@ -455,3 +455,51 @@ describe('listTraces session filter', () => {
     expect(listTraces(db, { session_id: 'other' }).total).toBe(1);
   });
 });
+
+describe('getTrace resolves a canonical id from the primary key index', () => {
+  it('keeps a whole-store export linear instead of quadratic', () => {
+    // `getTrace` matched with `id = ? OR id LIKE ?`. That disjunction cannot use
+    // the PRIMARY KEY index, so every lookup was `SCAN agent_traces` plus a temp
+    // B-tree for the ORDER BY. `exportTraces` calls getTrace once per trace,
+    // with an ALREADY-CANONICAL id and no limit, so the cost was O(N^2): this
+    // 3000-trace export measured 10.4 s before the fix and 1.1 s after, and the
+    // gap widens with store size. Same class as the `list` full scan that schema
+    // v4's expression index exists to fix, on the path that builds golden
+    // datasets and backups. The bound below has ~4x headroom over the fixed
+    // timing and still fails the quadratic version by 2x.
+    runMigrations(db);
+    const ins = db.prepare(
+      `INSERT INTO agent_traces (id, agent_name, trigger, status, input, started_at, tags, metadata, created_at)
+       VALUES (?, 'bulk', 'manual', 'completed', '{}', '2026-01-01T00:00:00.000Z', '[]', '{}', '2026-01-01T00:00:00.000Z')`,
+    );
+    db.transaction(() => {
+      for (let i = 0; i < 3000; i++) ins.run(`trc_${String(i).padStart(9, '0')}`);
+    })();
+
+    const started = performance.now();
+    const out = JSON.parse(exportTraces(db, {}, 'json')) as unknown[];
+    const elapsed = performance.now() - started;
+    expect(out).toHaveLength(3000);
+    expect(elapsed).toBeLessThan(5000);
+  }, 60_000);
+
+  it('still prefers an exact id over a longer one it prefixes', () => {
+    // The ordering the old single query used (`(id = ?) DESC`) existed so a
+    // short id that another id merely starts with cannot be shadowed. Splitting
+    // the query must preserve that.
+    runMigrations(db);
+    const mk = (id: string) =>
+      db.prepare(
+        `INSERT INTO agent_traces (id, agent_name, trigger, status, input, started_at, tags, metadata, created_at)
+         VALUES (?, 'a', 'manual', 'completed', '{}', '2026-01-01T00:00:00.000Z', '[]', '{}', '2026-01-01T00:00:00.000Z')`,
+      ).run(id);
+    mk('trc_abc');
+    mk('trc_abcdef');
+    expect(getTrace(db, 'trc_abc')!.id).toBe('trc_abc');
+    // A prefix matching only the longer id still resolves to it.
+    expect(getTrace(db, 'trc_abcd')!.id).toBe('trc_abcdef');
+    // A prefix matching both resolves deterministically to the shortest (id ASC).
+    expect(getTrace(db, 'trc_ab')!.id).toBe('trc_abc');
+    expect(getTrace(db, 'trc_zzz')).toBeNull();
+  });
+});
