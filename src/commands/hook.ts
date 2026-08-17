@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { existsSync } from 'node:fs';
 import { ensureDatabase } from '../db/index.js';
 import { applyHookPayload, formatEnforcementResponse, resolveHookRouting } from '../services/hook-adapter.js';
 import type { HookDialect } from '../services/hook-adapter.js';
@@ -80,7 +81,18 @@ export async function runHook(eventArg: string | undefined, opts: HookOptions = 
 
   let raw = '';
   try {
-    for await (const chunk of process.stdin) raw += chunk;
+    // Concatenate the BYTES, then decode once. `raw += chunk` decodes each chunk
+    // on its own, and a pipe hands us exactly 64 KiB at a time — so any
+    // multi-byte character straddling a boundary (emoji, CJK, accented text, a
+    // smart quote) became U+FFFD. The JSON stayed valid, since the damage is
+    // inside a string, so nothing reported it: a content-based deny simply did
+    // not match the corrupted text and the tool call was allowed, and the same
+    // mangled text was stored as the audit record of the run.
+    const chunks: Buffer[] = [];
+    for await (const chunk of process.stdin) {
+      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : (chunk as Buffer));
+    }
+    raw = Buffer.concat(chunks).toString('utf8');
   } catch (err) {
     console.error(`agent-replay hook: failed to read stdin: ${errorMessage(err)}`);
     if (failClosedWithoutPayload(`stdin read failed: ${errorMessage(err)}`)) return;
@@ -115,6 +127,16 @@ export async function runHook(eventArg: string | undefined, opts: HookOptions = 
 
   try {
     const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+    // In enforce mode a missing store is a failure to evaluate, not an empty
+    // policy set. The path is resolved from the process's cwd and
+    // `ensureDatabase` CREATES what it doesn't find, so a hook that fired from
+    // any directory other than the project root got a brand-new store with zero
+    // policies and cheerfully allowed everything — the one condition on this
+    // path that failed OPEN. Throw into the fail-closed handler below, which
+    // blocks the call and says why. Capture mode still creates the store.
+    if (opts.enforce && !existsSync(dbPath)) {
+      throw new Error(`no trace store at ${dbPath} — run "agent-replay init" there, or point the hook at one with --dir`);
+    }
     const db = ensureDatabase(dbPath);
     const result = applyHookPayload(db, payload, { noInput: opts.noInput, enforce: opts.enforce, eventArg });
     // Progress goes to stderr only (stdout is reserved for hook decisions).

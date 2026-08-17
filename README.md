@@ -178,7 +178,7 @@ For Claude Code, `tool_use`/`tool_result` blocks become paired `tool_call` steps
 
 #### Enforcement (block dangerous tool calls live)
 
-Add `--enforce` to the hook to evaluate each proposed tool call against your [guardrail policies](#guardrails) before it runs, and block denied calls in the harness's own dialect — no extra wiring beyond the same hook registration on the pre-tool event:
+Add `--enforce` to the hook to evaluate each proposed tool call against your [guardrail policies](#guardrails) before it runs, and block denied calls in the harness's own dialect. Register it with the event name — `agent-replay hook PreToolUse --enforce` (or `BeforeTool` for Gemini CLI) — so that if stdin arrives empty or unreadable, the command still knows a tool call was being gated and blocks rather than allowing an unchecked call. It also needs to find your store: the path resolves from the hook process's working directory, so pass `--dir` unless that is the project root. Enforcing against a store that does not exist blocks, with the reason, instead of quietly running with no policies.
 
 - **Claude Code / Codex CLI**: emits `{"hookSpecificOutput": {"permissionDecision": "deny" | "ask", ...}}` — `deny` policies block, `require_review` policies defer to the harness's own approval prompt (`"ask"`).
 - **Gemini CLI**: emits `{"decision": "deny", "reason": ...}` (its hooks are allow/deny only, so `require_review` denies with a "review required" reason).
@@ -420,6 +420,13 @@ never fires under `hook --enforce`, no matter how it looks in `guard list`. It
 still matches in post-hoc evaluation (`guard test`, and `guard check` on a
 recorded step), so it is a useful auditing pattern, not a blocking one; `guard
 add` warns when you write one as a blocking policy.
+
+**The most restrictive match wins.** When several policies match one step, the
+verdict is the strictest of them — `deny` over `require_review` over `warn` over
+`allow` — and `--priority` only breaks ties *among equally restrictive* matches,
+deciding which policy is cited. So a broad `deny` plus a narrow, higher-priority
+`allow` does **not** carve out an exception: the call is still denied. Express an
+exception by narrowing the `deny` pattern itself.
 
 `input_contains` and `output_contains` match against both the raw text and the
 JSON form of the step's input/output, so a pattern containing quotes,

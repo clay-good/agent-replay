@@ -257,7 +257,14 @@ export interface GuardCheckOptions {
 export async function runGuardCheck(opts: GuardCheckOptions = {}): Promise<void> {
   let raw = '';
   try {
-    for await (const chunk of process.stdin) raw += chunk;
+    // Decode once over the whole body, not per chunk — see the same read in
+    // `hook`: a 64 KiB pipe boundary through a multi-byte character silently
+    // corrupted the text a content-based policy matches against.
+    const chunks: Buffer[] = [];
+    for await (const chunk of process.stdin) {
+      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : (chunk as Buffer));
+    }
+    raw = Buffer.concat(chunks).toString('utf8');
   } catch (err) {
     console.error(chalk.red(`  Failed to read stdin: ${errorMessage(err)}`));
     process.exitCode = 1;

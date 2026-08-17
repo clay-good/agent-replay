@@ -105,3 +105,23 @@ describe('safeRegex catastrophic-backtracking rejection', () => {
     expect(safeRegex('^(a|aa)+$')).toBeNull();
   });
 });
+
+describe('safeRegex — Unicode property escapes', () => {
+  it('compiles a pattern that only works in Unicode mode', () => {
+    // Without the `u` flag `\p{Lu}` degrades to a literal `p`, so a guardrail
+    // written with a Unicode property escape validated cleanly, listed as an
+    // active deny, and then matched nothing at all.
+    const re = safeRegex('^\\p{Script=Han}+$');
+    expect(re).not.toBeNull();
+    expect(re!.test('秘密鍵')).toBe(true);
+    expect(re!.test('secret')).toBe(false);
+  });
+
+  it('still accepts a pattern that is only legal without `u`', () => {
+    // `\-` outside a class is an invalid escape in Unicode mode; falling back
+    // keeps every pattern that used to compile.
+    const re = safeRegex('a\\-b');
+    expect(re).not.toBeNull();
+    expect(re!.test('a-b')).toBe(true);
+  });
+});

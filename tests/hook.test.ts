@@ -4,6 +4,11 @@ import { runMigrations } from '../src/db/migrations.js';
 import { getTrace, listTraces } from '../src/services/trace-service.js';
 import { applyHookPayload, detectDialect } from '../src/services/hook-adapter.js';
 import { forkTrace } from '../src/services/fork-service.js';
+import { addPolicy } from '../src/services/guard-service.js';
+import { ensureDatabase, resetConnection } from '../src/db/index.js';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 let db: Database.Database;
 
@@ -280,6 +285,13 @@ describe('runHook with no payload', () => {
   let errSpy: ReturnType<typeof vi.spyOn>;
   const realStdin = process.stdin;
 
+  function setStdinBuffers(chunks: Buffer[]) {
+    Object.defineProperty(process, 'stdin', {
+      value: { async *[Symbol.asyncIterator]() { for (const c of chunks) yield c; } },
+      configurable: true,
+    });
+  }
+
   function setStdin(chunks: string[]) {
     Object.defineProperty(process, 'stdin', {
       value: { async *[Symbol.asyncIterator]() { for (const c of chunks) yield c; } },
@@ -324,6 +336,67 @@ describe('runHook with no payload', () => {
     // Capture must never write to stdout — stdout is read as a hook decision.
     expect(stdout.join('')).toBe('');
     expect(process.exitCode).toBe(0);
+  });
+
+  it('decodes a payload split mid-character across stdin chunks', async () => {
+    // A pipe delivers 64 KiB chunks, and `raw += chunk` decoded each chunk on
+    // its own — so a multi-byte character straddling a boundary became U+FFFD.
+    // The JSON stayed valid (the damage sits inside a string), so nothing
+    // reported it: a content-based deny stopped matching the corrupted text and
+    // the tool call was allowed, with the same mangled text stored as the audit
+    // record. Split a payload right through a 3-byte character to reproduce it.
+    const dir = mkdtempSync(join(tmpdir(), 'ar-hook-utf8-'));
+    try {
+      const hdb = ensureDatabase(resolve(dir, 'traces.db'));
+      addPolicy(hdb, { name: 'no-cjk', action: 'deny', match_pattern: { input_contains: '秘密鍵' } });
+      resetConnection(); // runHook opens its own connection to the same file
+
+      const payload = Buffer.from(
+        JSON.stringify({
+          hook_event_name: 'PreToolUse',
+          session_id: 's-utf8',
+          tool_name: 'Bash',
+          tool_input: { command: 'echo 秘密鍵' },
+        }),
+        'utf8',
+      );
+      const cut = payload.indexOf(Buffer.from('秘', 'utf8')) + 1; // mid-character
+      setStdinBuffers([payload.subarray(0, cut), payload.subarray(cut)]);
+
+      const { runHook } = await import('../src/commands/hook.js');
+      await runHook('PreToolUse', { enforce: true, dir });
+
+      const decision = JSON.parse(stdout.join('')) as {
+        hookSpecificOutput: { permissionDecision: string; permissionDecisionReason: string };
+      };
+      expect(decision.hookSpecificOutput.permissionDecision).toBe('deny');
+      // The policy matched the real text, not a fail-closed error block.
+      expect(decision.hookSpecificOutput.permissionDecisionReason).toContain('秘密鍵');
+    } finally {
+      resetConnection();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks under --enforce when the store the hook points at does not exist', async () => {
+    // The store path resolves from the process's cwd and ensureDatabase CREATES
+    // what it doesn't find, so a hook firing from any directory but the project
+    // root got a brand-new store with zero policies and allowed everything —
+    // the one condition on this path that failed OPEN.
+    const missing = join(tmpdir(), 'ar-hook-no-store-does-not-exist');
+    rmSync(missing, { recursive: true, force: true });
+    setStdin([JSON.stringify({ hook_event_name: 'PreToolUse', session_id: 's', tool_name: 'Bash', tool_input: {} })]);
+
+    const { runHook } = await import('../src/commands/hook.js');
+    await runHook('PreToolUse', { enforce: true, dir: missing });
+
+    const decision = JSON.parse(stdout.join('')) as {
+      hookSpecificOutput: { permissionDecision: string; permissionDecisionReason: string };
+    };
+    expect(decision.hookSpecificOutput.permissionDecision).toBe('deny');
+    expect(decision.hookSpecificOutput.permissionDecisionReason).toMatch(/no trace store/);
+    // And it did not leave a decoy store behind for the next invocation to trust.
+    expect(existsSync(missing)).toBe(false);
   });
 
   it('allows a non-gating event under --enforce when stdin is empty', async () => {

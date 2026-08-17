@@ -169,6 +169,17 @@ export function safeRegex(pattern: string, flags = 'i'): RegExp | null {
     }
   }
 
+  // Prefer Unicode mode, falling back to the plain form. Without `u`, `\p{Lu}`
+  // and friends degrade silently to a literal `p` — so a `name_regex` policy
+  // written with a Unicode property escape validated cleanly, listed as active,
+  // and then matched nothing at all: a kill-switch that can never fire. `u` also
+  // rejects a few patterns that are legal without it (a stray `\-`, a lone
+  // surrogate), which is why this falls back rather than switching outright.
+  try {
+    return new RegExp(pattern, flags.includes('u') ? flags : `${flags}u`);
+  } catch {
+    // fall through to the non-Unicode form
+  }
   try {
     return new RegExp(pattern, flags);
   } catch {
