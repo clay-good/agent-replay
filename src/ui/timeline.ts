@@ -21,6 +21,29 @@ export interface TimelineOptions {
  *   │      ...
  *   └─ 3  ➡ Output  "final_answer"                         50ms
  */
+/**
+ * Whether a stored `input`/`output` value has anything worth rendering.
+ *
+ * The guards here used to be a bare truthiness test on `output` and a
+ * `Object.keys(...).length > 0` test on `input`. Both fields hold arbitrary
+ * JSON — the storage layer keeps whatever the producer sent — so a step whose
+ * output was `false` or `0` (a failed check, a "not found", a boolean guard
+ * result) rendered with no Output line at all, indistinguishable from a step
+ * that produced nothing, while `show --json` showed the value. A scalar input
+ * (`42`) has no keys and vanished the same way. The two tests also disagreed
+ * with each other about `{}`.
+ *
+ * An empty object or array is still treated as nothing to show: it carries no
+ * information, and the mappers deliberately store "no content" as null rather
+ * than `{}` for exactly that reason.
+ */
+export function hasRenderableContent(value: unknown): boolean {
+  if (value == null) return false;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'object') return Object.keys(value as object).length > 0;
+  return true; // a scalar — including 0, false and '' — is real content
+}
+
 export function renderTimeline(
   steps: TraceStep[],
   options: TimelineOptions = {},
@@ -78,13 +101,13 @@ export function renderTimeline(
     }
 
     // Input
-    if (showInput && step.input && Object.keys(step.input).length > 0) {
+    if (showInput && hasRenderableContent(step.input)) {
       const inputStr = truncateJson(step.input, contentWidth);
       lines.push(`  ${chalk.dim(pipe)}      ${label('Input:')} ${chalk.dim(inputStr)}`);
     }
 
     // Output
-    if (showOutput && step.output) {
+    if (showOutput && hasRenderableContent(step.output)) {
       const outputStr = truncateJson(step.output, contentWidth);
       lines.push(`  ${chalk.dim(pipe)}      ${label('Output:')} ${chalk.dim(outputStr)}`);
     }
@@ -172,6 +195,14 @@ export function renderTree(steps: TraceStep[], options: TimelineOptions = {}): s
     lines.push(`  ${indent}${branch}${chalk.dim(`#${step.step_number}`)} ${icon} ${typeLabel}  ${name}${causal}${dur}`);
     if (step.decision) {
       lines.push(`  ${indent}   ${label('chose')} ${chalk.greenBright(step.decision.chosen)}`);
+    }
+    // The tree is the view for understanding why an agent did what it did, and
+    // it is only reached when a trace HAS causal structure — so on a failed
+    // trace, the case it exists for, it was hiding the failure message that the
+    // default timeline prints. The compact view still omits input/output and
+    // per-step detail by design; an error is not detail.
+    if (step.error) {
+      lines.push(`  ${indent}   ${label('error')} ${chalk.redBright(truncateJson(step.error, 100))}`);
     }
   };
 

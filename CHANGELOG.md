@@ -109,6 +109,16 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `show` and `replay` no longer hide a step's stored input or output when the
+  value is falsy or scalar. Both fields hold arbitrary JSON, and the guards were
+  a bare truthiness test on output and a key-count test on input — so a step
+  whose output was `false` or `0` (a failed check, a "not found", a boolean
+  guard result) rendered with no output line at all, indistinguishable from a
+  step that produced nothing, while `--json` showed the value. A scalar input
+  vanished the same way. `show --tree` also now prints a step's error: the tree
+  is only reached when a trace has causal structure, so on a failed trace — the
+  case the view exists for — it was hiding the failure message.
+
 - Schema v3 adds two indexes for lookups that were full table scans. `otel
   serve` resolves every incoming batch against
   `json_extract(metadata, '$.otel_trace_id')`, which nothing could index, so

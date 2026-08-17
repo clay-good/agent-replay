@@ -233,3 +233,41 @@ describe('formatScorePct — display never contradicts the verdict', () => {
     expect(out).toContain('FAIL');
   });
 });
+
+// ── the renderer must not hide data the store holds ────────────────────────
+
+describe('renderTimeline / renderTree fidelity', () => {
+  it('renders a falsy or scalar input/output instead of dropping it', () => {
+    // Regression: the output guard was a bare truthiness test and the input
+    // guard was `Object.keys(...).length > 0`. Both fields hold arbitrary JSON,
+    // so a step whose output was `false` or `0` — a failed check, a "not
+    // found", a boolean guard result — rendered with no Output line at all,
+    // indistinguishable from a step that produced nothing, while `show --json`
+    // showed the value. A scalar input vanished the same way, and the two
+    // guards disagreed with each other about `{}`.
+    const out = noAnsi(renderTimeline([
+      step({ step_type: 'tool_call', step_number: 1, name: 'false_out', input: { a: 1 }, output: false as never }),
+      step({ step_type: 'tool_call', step_number: 2, name: 'zero_out', input: 42 as never, output: 0 as never }),
+      step({ step_type: 'tool_call', step_number: 3, name: 'empty', input: {}, output: {} as never }),
+    ]));
+
+    expect(out).toMatch(/Output: false/);
+    expect(out).toMatch(/Output: 0/);
+    expect(out).toMatch(/Input: 42/);
+    // An empty object still carries nothing, and now both guards agree on that.
+    expect(out).not.toMatch(/Input: \{\}/);
+    expect(out).not.toMatch(/Output: \{\}/);
+  });
+
+  it('shows a step error in the tree view', () => {
+    // The tree is only reached when a trace HAS causal structure, so on a
+    // failed trace — the case it exists for — it was hiding the failure
+    // message that the default timeline prints.
+    const out = noAnsi(renderTree([
+      step({ step_type: 'tool_call', step_number: 1, name: 'fetch' }),
+      step({ step_type: 'error', step_number: 2, name: 'boom', caused_by_step_number: 1, error: 'RATE_LIMIT: upstream rejected' }),
+    ]));
+    expect(out).toMatch(/caused by #1/);
+    expect(out).toMatch(/RATE_LIMIT: upstream rejected/);
+  });
+});

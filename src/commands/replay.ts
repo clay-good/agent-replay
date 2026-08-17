@@ -7,6 +7,7 @@ import { ensureDatabase } from '../db/index.js';
 import { traceHeaderPanel } from '../ui/boxen-panels.js';
 import { stepSpinner, successSpinner, failSpinner, warnSpinner } from '../ui/spinner.js';
 import { stepIcon, stepLabel, heading, separator, colors } from '../ui/theme.js';
+import { hasRenderableContent } from '../ui/timeline.js';
 import { errorMessage, truncate } from '../utils/json.js';
 import { formatDuration } from '../utils/time.js';
 
@@ -182,7 +183,7 @@ async function replayStep(step: TraceStep, speed: number): Promise<void> {
   }
 
   // Show output summary if present
-  if (step.output && Object.keys(step.output).length > 0) {
+  if (hasRenderableContent(step.output)) {
     let outputStr: string;
     try {
       outputStr = truncate(JSON.stringify(step.output), 100);
