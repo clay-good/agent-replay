@@ -205,7 +205,18 @@ nothing else.
   `agent-replay`, and deleted their working tree.
 
 - `record` finalizes a trace it resumed by id, as documented, while leaving
-  alone the one trace an enclosing `agent-replay run` handed it. Under the README's own
+  alone the one trace a *live* enclosing `agent-replay run` handed it — a run
+  removes its channel as it finalizes, so a stale `AGENT_REPLAY_TRACE_ID`
+  inherited from a finished run no longer strands a resumed trace `running`.
+
+- The `diff` table never cuts a value between the halves of a surrogate pair
+  (an emoji in a prompt is enough): a lone surrogate rendered as U+FFFD in both
+  columns, so the mojibake looked like the difference. `diff --compact` also
+  names the `--fields` filter instead of reporting a bare "Differences: 0".
+
+- A non-string `ai.model` in a hand-edited config is ignored rather than passed
+  to a provider adapter, where it surfaced as `long.startsWith is not a
+  function` — or was sent as the model name itself. Under the README's own
   nested example (`run -- sh -c '... | agent-replay record'`) the events carry
   the wrapper's trace id, so the end-of-stream `timeout` finalization marked a
   clean run red — and permanently, since the wrapper then sees a non-running

@@ -95,7 +95,9 @@ export async function runDiff(
       'Right trace': `${traceB.agent_name} (${traceB.id.slice(0, 12)})`,
       'Left steps': diff.left_step_count,
       'Right steps': diff.right_step_count,
-      'Differences': diff.diffs.length,
+      Differences: appliedFields && appliedFields.length > 0
+        ? `${diff.diffs.length} (in ${appliedFields.join(', ')} only)`
+        : diff.diffs.length,
       'Divergence at': diff.divergence_step != null ? `Step ${diff.divergence_step}` : 'N/A',
     };
     console.log(summaryPanel('Trace Diff Summary', stats));

@@ -146,13 +146,24 @@ function windowed(text: string, other: string, max: number): string {
   // The leading "..." costs three of the budget, so the furthest useful start is
   // `length - (max - 3)`; clamping to `length - max` instead left the differing
   // tail cut off again, defeating the point of windowing.
-  const start = Math.min(Math.max(0, i - lead), Math.max(0, text.length - (max - 3)));
+  const start = safeCut(text, Math.min(Math.max(0, i - lead), Math.max(0, text.length - (max - 3))));
   if (start === 0) return truncate(text, max);
   const body = text.slice(start);
   return `...${truncate(body, max - 3)}`;
 }
 
+/**
+ * Move a cut index off the low half of a surrogate pair. Slicing between the
+ * halves of an astral character (an emoji in a prompt is enough) leaves a lone
+ * surrogate, which renders as U+FFFD — in BOTH columns, so the mojibake looked
+ * like the difference.
+ */
+function safeCut(s: string, index: number): number {
+  const code = s.charCodeAt(index);
+  return code >= 0xdc00 && code <= 0xdfff ? index + 1 : index;
+}
+
 function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
-  return s.slice(0, max - 3) + '...';
+  return s.slice(0, safeCut(s, max - 3)) + '...';
 }

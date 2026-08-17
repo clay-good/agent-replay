@@ -488,7 +488,9 @@ describe('CLI integration', () => {
       '{"v":1,"type":"step","trace_id":"tw","step_number":1,"step_type":"tool_call","name":"go"}',
       '{"v":1,"type":"trace_end","trace_id":"tw","status":"completed"}',
     ].join('\n');
-    run(['record'], stream);
+    // Assert the setup step succeeded: its failure is what the fork assertion
+    // below would otherwise report, pointing at the wrong command.
+    expect(run(['record'], stream).code).toBe(0);
     // Short poll so the first tick detects completion quickly; execFileSync would
     // throw ETIMEDOUT (not exit 0) if watch hung.
     const r = run(['watch', 'tw', '--interval', '50']);
@@ -526,7 +528,9 @@ describe('CLI integration', () => {
       '{"v":1,"type":"step","trace_id":"tfk","step_number":3,"step_type":"output","name":"c"}',
       '{"v":1,"type":"trace_end","trace_id":"tfk","status":"completed"}',
     ].join('\n');
-    run(['record'], stream);
+    // Assert the setup step succeeded: its failure is what the fork assertion
+    // below would otherwise report, pointing at the wrong command.
+    expect(run(['record'], stream).code).toBe(0);
     expect(run(['fork', 'tfk', '--from-step', '2']).code).toBe(0);
     // A new trace exists whose lineage points at the original.
     const forked = JSON.parse(run(['list', '--json']).stdout).items.find((t: { parent_trace_id: string | null }) => t.parent_trace_id);
@@ -564,7 +568,9 @@ describe('CLI integration', () => {
       '{"v":1,"type":"step","trace_id":"tgap","step_number":3,"step_type":"output","name":"c"}',
       '{"v":1,"type":"trace_end","trace_id":"tgap","status":"completed"}',
     ].join('\n');
-    run(['record'], stream);
+    // Assert the setup step succeeded: its failure is what the fork assertion
+    // below would otherwise report, pointing at the wrong command.
+    expect(run(['record'], stream).code).toBe(0);
     // No step 2 → runtime error (exit 1), even with --modify-context supplied.
     expect(run(['fork', 'tgap', '--from-step', '2', '--modify-context', '{"region":"eu"}']).code).toBe(1);
     // The real fork points still work.

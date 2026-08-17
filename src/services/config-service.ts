@@ -162,7 +162,7 @@ export function resolveProvider(config: AgentReplayConfig | null): ResolvedProvi
       return {
         provider: preferred,
         apiKey,
-        model: config?.ai?.model ?? DEFAULT_MODELS[preferred],
+        model: typeof config?.ai?.model === 'string' ? config.ai.model : DEFAULT_MODELS[preferred],
       };
     }
     // Explicit provider set but no key — return null
@@ -174,7 +174,11 @@ export function resolveProvider(config: AgentReplayConfig | null): ResolvedProvi
   // over the user's explicit `ai.model`, silently billing a different vendor and
   // returning results from a model they did not choose.
   const providers: Array<'anthropic' | 'google' | 'openai'> = ['anthropic', 'google', 'openai'];
-  const configuredModel = config?.ai?.model;
+  // Only a STRING is a model name. `loadConfig` does a bare JSON.parse with no
+  // schema check, and a non-string was passed through as "suits any provider" —
+  // moving the crash from here into the provider adapter (`long.startsWith is
+  // not a function`), or sending the number itself as the model name.
+  const configuredModel = typeof config?.ai?.model === 'string' ? config.ai.model : undefined;
   const preferredByModel = configuredModel
     ? providers.find((p) => modelOwner(configuredModel) === p)
     : undefined;
@@ -185,7 +189,7 @@ export function resolveProvider(config: AgentReplayConfig | null): ResolvedProvi
   for (const p of providers) {
     const apiKey = resolveApiKey(p, config);
     if (apiKey) {
-      const configured = config?.ai?.model;
+      const configured = configuredModel;
       return {
         provider: p,
         apiKey,

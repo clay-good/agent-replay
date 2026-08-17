@@ -215,6 +215,19 @@ describe('resolveProvider with a model from another provider', () => {
     delete process.env.ANTHROPIC_API_KEY;
   });
 
+  it('ignores a non-string ai.model instead of passing it to a provider', () => {
+    // loadConfig does a bare JSON.parse with no schema check, so a hand-edited
+    // `"model": 123` is reachable. It used to be passed through as "suits any
+    // provider", moving the crash into the provider adapter — or sending the
+    // number itself as the model name.
+    process.env.ANTHROPIC_API_KEY = 'ant-key';
+    const resolved = resolveProvider({ ai: { model: 123 } } as never);
+    expect(resolved!.provider).toBe('anthropic');
+    expect(typeof resolved!.model).toBe('string');
+    expect(resolved!.model).not.toBe(123 as never);
+    delete process.env.ANTHROPIC_API_KEY;
+  });
+
   it('still honors a model when the provider is set explicitly', () => {
     const resolved = resolveProvider({ ai: { provider: 'openai', model: 'gpt-5.4-mini' } } as never);
     expect(resolved!.model).toBe('gpt-5.4-mini');

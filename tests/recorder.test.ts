@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { Readable } from 'node:stream';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { runMigrations } from '../src/db/migrations.js';
@@ -483,12 +483,19 @@ describe('record finalization contract', () => {
     const { runRecord } = await import('../src/commands/record.js');
     const dir = mkdtempSync(join(tmpdir(), 'ar-record-fin-'));
     const prevTraceEnv = process.env.AGENT_REPLAY_TRACE_ID;
+    const prevEventsEnv = process.env.AGENT_REPLAY_EVENTS;
     try {
       const rdb = ensureDatabase(resolve(dir, 'traces.db'));
       const resumed = startTrace(rdb, { agent_name: 'resumed' });
       const wrapper = startTrace(rdb, { agent_name: 'wrapper' });
       resetConnection();
 
+      // A LIVE wrapper: `run` removes its channel dir as it finalizes, so an
+      // events file that still exists is what distinguishes an enclosing run
+      // from a stale id inherited from one that already finished.
+      const channel = join(dir, 'events.jsonl');
+      writeFileSync(channel, '');
+      process.env.AGENT_REPLAY_EVENTS = channel;
       process.env.AGENT_REPLAY_TRACE_ID = wrapper.id;
       const line = (id: string, n: number) =>
         JSON.stringify({ v: 1, type: 'step', trace_id: id, step_number: n, step_type: 'thought', name: 's' }) + '\n';
@@ -505,9 +512,25 @@ describe('record finalization contract', () => {
         (db2.prepare('SELECT status FROM agent_traces WHERE id = ?').get(id) as { status: string }).status;
       expect(statusOf(resumed.id)).toBe('timeout'); // cannot dangle silently
       expect(statusOf(wrapper.id)).toBe('running'); // the wrapper finalizes its own
+
+      // A STALE id — the wrapper has finished and taken its channel with it —
+      // must not exempt anything, or a legitimately resumed trace dangles.
+      rmSync(channel, { force: true });
+      resetConnection();
+      setStdin([JSON.stringify({ v: 1, type: 'step', trace_id: wrapper.id, step_number: 2, step_type: 'thought', name: 's2' }) + '\n']);
+      const logSpy2 = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        await runRecord({ dir });
+      } finally {
+        logSpy2.mockRestore();
+      }
+      const db3 = ensureDatabase(resolve(dir, 'traces.db'));
+      expect((db3.prepare('SELECT status FROM agent_traces WHERE id = ?').get(wrapper.id) as { status: string }).status).toBe('timeout');
     } finally {
       if (prevTraceEnv === undefined) delete process.env.AGENT_REPLAY_TRACE_ID;
       else process.env.AGENT_REPLAY_TRACE_ID = prevTraceEnv;
+      if (prevEventsEnv === undefined) delete process.env.AGENT_REPLAY_EVENTS;
+      else process.env.AGENT_REPLAY_EVENTS = prevEventsEnv;
       resetConnection();
       rmSync(dir, { recursive: true, force: true });
     }

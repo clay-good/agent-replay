@@ -228,6 +228,26 @@ describe('renderDiff verdict and value windowing', () => {
     expect(filtered).toContain('No differences in the selected field(s): model.');
   });
 
+  it('does not cut a surrogate pair when windowing', () => {
+    // `start` is a UTF-16 index, so slicing could land between the halves of an
+    // astral character (an emoji in a prompt is enough), leaving a lone
+    // surrogate that renders as U+FFFD — in BOTH columns, so the mojibake looked
+    // like the difference.
+    const lead = 'A'.repeat(20) + '😀' + 'C'.repeat(7);
+    const diff = {
+      diffs: [{
+        step_number: 1, field: 'input',
+        left_value: { p: `${lead}1${'T'.repeat(40)}` },
+        right_value: { p: `${lead}2${'T'.repeat(40)}` },
+      }],
+      divergence_step: 1,
+      left_trace_id: 'trc_left0000', right_trace_id: 'trc_right000',
+      left_step_count: 1, right_step_count: 1,
+    } as unknown as TraceDiffResult;
+    const out = noAnsi(renderDiff(diff, trace('l', 'completed'), trace('r', 'completed')));
+    expect(out).not.toContain('\uFFFD');
+  });
+
   it('shows the differing region of two values that share a long prefix', () => {
     // Truncating both sides from position 0 rendered a real difference as two
     // byte-identical cells under "1 difference(s) found" — the normal shape for

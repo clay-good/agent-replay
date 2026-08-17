@@ -10,6 +10,7 @@ import { updateTrace } from '../services/trace-service.js';
 import { summaryPanel } from '../ui/boxen-panels.js';
 import { errorMessage } from '../utils/json.js';
 import { resolveDataDir } from '../utils/paths.js';
+import { existsSync } from 'node:fs';
 
 export interface RecordOptions {
   format?: string;
@@ -128,7 +129,14 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
   // marked a clean run red and permanently wrong. Excluding only that id keeps
   // the contract for every trace this stream resumed by id, which excluding all
   // non-opened traces had broken — they dangled `running` forever.
-  const wrapperTraceId = process.env.AGENT_REPLAY_TRACE_ID;
+  // Only exempt the wrapper's trace when a wrapper is actually ALIVE. `run`
+  // removes its channel directory as it finalizes, so an events file that still
+  // exists means the enclosing wrapper has not finished — while a stale
+  // AGENT_REPLAY_TRACE_ID inherited from a run that already ended would
+  // otherwise leave a legitimately resumed trace dangling `running` forever.
+  const channel = process.env.AGENT_REPLAY_EVENTS;
+  const wrapperAlive = channel != null && channel !== '' && existsSync(channel);
+  const wrapperTraceId = wrapperAlive ? process.env.AGENT_REPLAY_TRACE_ID : undefined;
   let finalized = 0;
   if (!opts.leaveOpen) {
     for (const id of touched) {
