@@ -303,3 +303,56 @@ describe('runCheck gathers every candidate trace', () => {
     }
   }, 120_000);
 });
+
+// ── check command: an empty golden baseline is not a passing gate ────────────
+
+describe('runCheck refuses an empty golden baseline', () => {
+  it('exits 2 instead of reporting a vacuous green gate', () => {
+    // Regression: `export --format golden` writes `[]` when its filter matches
+    // nothing (a mistyped --tag is enough) and exits 0. `check --golden` then
+    // accepted that file: with no entries every candidate fell to the
+    // `unmatched` branch, which passes unless --strict, so the run printed
+    // "0 passed, 0 regressed" in green and exited 0 — forever. The CI gate was
+    // entirely vacuous and nothing told the user.
+    const dir = mkdtempSync(join(tmpdir(), 'ar-check-empty-'));
+    try {
+      const cdb = ensureDatabase(resolve(dir, 'traces.db'));
+      ingestTrace(cdb, baseline);
+
+      const emptyPath = join(dir, 'empty-golden.json');
+      writeFileSync(emptyPath, '[]\n');
+
+      const prevExit = process.exitCode;
+      process.exitCode = 0;
+      const errs: string[] = [];
+      const spy = vi.spyOn(console, 'error').mockImplementation((m?: unknown) => {
+        errs.push(String(m));
+      });
+      try {
+        runCheck({ golden: emptyPath, dir });
+      } finally {
+        spy.mockRestore();
+      }
+      expect(process.exitCode).toBe(2);
+      expect(errs.join('\n')).toMatch(/no entries/i);
+      process.exitCode = prevExit;
+
+      // A non-empty baseline still runs normally.
+      const goldenPath = join(dir, 'golden.json');
+      writeFileSync(goldenPath, exportTraces(cdb, { agent_name: 'travel-bot' }, 'golden'));
+      const prev2 = process.exitCode;
+      process.exitCode = 0;
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        runCheck({ golden: goldenPath, dir });
+      } finally {
+        logSpy.mockRestore();
+      }
+      expect(process.exitCode).toBe(0);
+      process.exitCode = prev2;
+    } finally {
+      resetConnection();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

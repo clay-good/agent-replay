@@ -106,6 +106,13 @@ export function runExport(traceId: string | undefined, opts: ExportOptions = {})
       const outPath = resolve(opts.output);
       writeFileSync(outPath, output);
       successSpinner(spinner, `Exported to ${outPath}`);
+      // An empty export stays exit 0 (documented), but a golden baseline with no
+      // entries is a CI gate that can never fail — and the usual cause is a
+      // filter typo the user would otherwise never hear about. Say so here,
+      // where it can still be fixed; `check` refuses such a file outright.
+      if (format === 'golden' && output.trim() === '[]') {
+        console.error(chalk.yellow('  ⚠ No traces matched — this golden baseline is empty and cannot detect a regression.'));
+      }
     } else {
       spinner.stop();
       process.stdout.write(output);

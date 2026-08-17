@@ -98,6 +98,14 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `check --golden` now refuses a golden file with no entries (exit `2`) instead
+  of reporting a vacuous green gate. An empty baseline matches nothing, so every
+  candidate fell to the `unmatched` branch — which passes unless `--strict` —
+  and the run printed "0 passed, 0 regressed" and exited `0` forever. The usual
+  cause is a filter typo: `export --format golden --tag known-good` writes `[]`
+  and exits `0` when the tag is actually `known_good`. That export now also
+  warns that the baseline it just wrote can never detect a regression.
+
 - `record` now exits `1` when a stream produced input but **every** event was
   rejected, instead of reporting a total capture failure as success. Piping the
   wrong `--format` (or a broken producer) into `record` dropped every line as a

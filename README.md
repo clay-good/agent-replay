@@ -325,6 +325,8 @@ Comparable fields: `step_count`, `step_types`, `step_names`, `tool_inputs`, `sta
 
 Matches are made by agent name and a hash of the input, so each run is compared to its own golden counterpart. A divergence report names the trace, the step, and the differing field.
 
+A golden file with no entries is rejected (exit `2`) rather than passing green: an empty baseline can never detect a regression, and the usual cause is an export filter that matched nothing. The export warns about this too, so a mistyped `--tag` surfaces where you can still fix it.
+
 ### Evaluate
 
 ```bash

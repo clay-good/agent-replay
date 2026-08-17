@@ -43,6 +43,23 @@ export function runCheck(opts: CheckOptions = {}): void {
     return;
   }
 
+  // A baseline with no entries cannot gate anything: every candidate falls to
+  // the `unmatched` branch, which passes unless --strict, so the run reports
+  // "0 passed, 0 regressed" in green and exits 0 — forever. `export --format
+  // golden` writes `[]` happily when its filter matches nothing (a mistyped
+  // --tag is enough), so this is a mistake a user can make silently and never
+  // hear about again. Refuse it, like an unreadable file.
+  if (golden.length === 0) {
+    console.error(
+      chalk.red(`  Golden file has no entries: ${opts.golden}`),
+    );
+    console.error(
+      chalk.dim('  An empty baseline can never detect a regression. Re-export it with a filter that matches.'),
+    );
+    process.exitCode = 2;
+    return;
+  }
+
   const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
   const db = ensureDatabase(dbPath);
 
