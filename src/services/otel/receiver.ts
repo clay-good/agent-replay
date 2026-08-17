@@ -206,10 +206,20 @@ function ingestOtlpTraces(
   } catch {
     return { status: 400, payload: { error: 'invalid OTLP body: resourceSpans/scopeSpans/spans must be arrays' } };
   }
-  // DB writes are server-side: let them propagate to a 500.
-  for (const t of traces) {
-    upsertOtelTrace(db, t, stats);
-  }
+  // DB writes are server-side: let them propagate to a 500. One transaction for
+  // the WHOLE batch, though — without it, a failure part way through a
+  // multi-trace payload left the earlier traces committed and answered 500, and
+  // a 5xx tells an OTLP exporter to retry the same batch. On redelivery
+  // findMergeTarget found those committed traces and merged the same spans
+  // again — steps duplicated and tokens doubled, permanently, because duplicate
+  // deliveries are deliberately not de-duplicated. All-or-nothing makes the
+  // retry safe instead. (better-sqlite3 nests via savepoints, so the per-trace
+  // transactions inside still work.)
+  db.transaction(() => {
+    for (const t of traces) {
+      upsertOtelTrace(db, t, stats);
+    }
+  })();
 
   // Root/agent spans define traces rather than steps, so mappedSpans can be
   // fewer than totalSpans without any rejection. Only report partial_success
@@ -269,9 +279,13 @@ function ingestOtlpLogs(
   } catch {
     return { status: 400, payload: { error: 'invalid OTLP body: resourceLogs/scopeLogs/logRecords must be arrays' } };
   }
-  for (const t of traces) {
-    upsertOtelTrace(db, t, stats);
-  }
+  // All-or-nothing, for the same reason as the traces endpoint above: a partial
+  // commit plus the exporter's retry duplicates everything it already stored.
+  db.transaction(() => {
+    for (const t of traces) {
+      upsertOtelTrace(db, t, stats);
+    }
+  })();
   // The traces endpoint reports partial_success when a batch mapped to nothing;
   // this one answered a bare 200 unconditionally. mapOtlpLogs keeps only
   // `gemini_cli.*` / `claude_code.*` events, so an emitter whose event names

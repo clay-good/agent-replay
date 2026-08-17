@@ -117,6 +117,14 @@ nothing else.
 
 ### Fixed
 
+- An OTLP batch is now stored all-or-nothing. The receiver's upsert loop had no
+  transaction around it, so a write failure part way through a multi-trace
+  payload left the earlier traces committed and answered `500` — and a `5xx`
+  tells an OTLP exporter to retry the same batch. On redelivery those committed
+  traces were found and the same spans merged into them again: steps
+  duplicated, tokens doubled, permanently, because duplicate deliveries are
+  deliberately not de-duplicated. Both `/v1/traces` and `/v1/logs`.
+
 - `run`'s summary line now reports the status the trace was actually stored
   with. It was derived from the exit code alone, so a child that declares
   `trace_end {status: completed}` and then exits non-zero — a crash during

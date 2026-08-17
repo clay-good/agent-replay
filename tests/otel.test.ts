@@ -657,3 +657,43 @@ describe('mapOtlpTraces — root span and parent ordering', () => {
     expect(child.parent_step).toBe(parent.step_number);
   });
 });
+
+
+// ── a batch is stored all-or-nothing ───────────────────────────────────────
+
+describe('an OTLP batch commits atomically', () => {
+  it('stores nothing when one trace in a multi-trace batch fails', () => {
+    // Regression: the upsert loop had no transaction around it, so a failure
+    // part way through a multi-trace payload left the earlier traces committed
+    // and answered 500 — and a 5xx tells an OTLP exporter to retry the SAME
+    // batch. On redelivery findMergeTarget found those committed traces and
+    // merged the same spans again: steps duplicated, tokens doubled, and
+    // permanently, since duplicate deliveries are deliberately not deduped.
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    const batch = JSON.stringify(otlp([
+      span({ traceId: 'ok1', spanId: 'a', name: 'chat', start: MS, end: 2 * MS, attrs: { 'gen_ai.operation.name': 'chat' } }),
+      span({ traceId: 'ok2', spanId: 'b', name: 'chat', start: MS, end: 2 * MS, attrs: { 'gen_ai.operation.name': 'chat' } }),
+    ]));
+
+    // Make the SECOND insert fail, after the first has already been written.
+    let inserts = 0;
+    const realPrepare = db.prepare.bind(db);
+    db.prepare = ((sql: string) => {
+      if (sql.includes('INSERT INTO agent_traces')) {
+        inserts++;
+        if (inserts === 2) throw new Error('simulated mid-batch write failure');
+      }
+      return realPrepare(sql);
+    }) as typeof db.prepare;
+
+    try {
+      expect(() => handleTracesExport(db, batch, stats)).toThrow(/simulated/);
+    } finally {
+      db.prepare = realPrepare;
+    }
+
+    // The first trace must NOT have survived — otherwise the exporter's retry
+    // would merge its spans a second time.
+    expect(listTraces(db, {}).total).toBe(0);
+  });
+});
