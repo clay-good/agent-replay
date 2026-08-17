@@ -25,6 +25,31 @@ between them, and nothing else.
 
 ### Fixed
 
+- `demo --reset` could delete a working tree that merely looked like a store. The
+  guard accepted any directory whose name starts with `agent-replay`, which a
+  source checkout called `agent-replay-project` does, and then removed the tree
+  recursively. `--reset` now deletes only `traces.db` and its sidecars, so the
+  blast radius is data this command created; a directory holding no store has
+  nothing to reset.
+
+- One OpenTelemetry span could blackhole a whole pipeline. The span-to-step-type
+  tables are plain object literals keyed by untrusted telemetry — the
+  `gen_ai.operation.name` attribute and the span name's leading word — so a span
+  named `constructor` or `toString` (an auto-instrumented JS class method)
+  resolved to a function, survived the fallback that only replaces null, and
+  reached the SQLite bind. The batch's transaction rolled back and the receiver
+  answered 500, which OTLP exporters retry, so the poisoned batch was resent
+  forever and every other span in it was lost with it.
+
+- A parallel tool batch's `PostToolUse` hooks silently lost results. Each hook is
+  its own process, and the "find the open tool step" read and the update that
+  closes it were separate statements, so simultaneous hooks all claimed the same
+  newest open step: the last writer won, the other outputs were discarded, and
+  those steps stayed open forever — with no warning, because the update matches
+  on `(trace_id, step_number)` and always reports a row changed. Six parallel
+  hooks lost one to three results per run before the fix. The claim and the close
+  are now one transaction.
+
 - `show --from-step/--to-step` reported the WINDOW's token subtotal on the
   trace-level `Tokens:` line. The header falls back to summing the steps when no
   producer set a trace-level total — the shape of every hook-, `record`-, OTel-

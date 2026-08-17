@@ -46,8 +46,16 @@ export async function runDemo(opts: DemoOptions = {}): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    rmSync(baseDir, { recursive: true });
-    console.log(chalk.dim('  Cleared existing data.'));
+    // Delete the store's OWN files, never the directory tree. The name check
+    // above is a naming heuristic, not proof of a store: a source checkout
+    // called `agent-replay-project` passes it, and `--dir agent-replay-project`
+    // then recursively deleted that working tree. Unlinking traces.db and its
+    // sidecars bounds the blast radius to data this command created, and a
+    // directory that holds no store has nothing to reset.
+    if (existsSync(dbPath)) {
+      for (const suffix of ['', '-wal', '-shm']) rmSync(dbPath + suffix, { force: true });
+      console.log(chalk.dim('  Cleared existing data.'));
+    }
   }
 
   // Init if needed

@@ -61,17 +61,37 @@ interface Classified {
   stepType?: string;
 }
 
+/**
+ * Look a span's operation/kind up in a step-type table, ignoring keys inherited
+ * from Object.prototype.
+ *
+ * The keys come from untrusted telemetry — the `gen_ai.operation.name` attribute
+ * and the span NAME's leading word — and these tables are plain object literals,
+ * so a span named `constructor` or `toString` (an auto-instrumented JS class
+ * method) resolved to a FUNCTION. That was typed as `string`, survived the
+ * `?? 'thought'` fallback (it is not null), and reached the SQLite bind as a
+ * function: the whole batch's transaction rolled back and the receiver answered
+ * 500 — which OTLP exporters retry, so one such span resent a poisoned batch
+ * forever and blackholed the pipeline. Mirrors the guards already in
+ * hook-adapter and eval-service.
+ */
+function lookupStepType(table: Record<string, string>, key: string): string | undefined {
+  return Object.hasOwn(table, key) ? table[key] : undefined;
+}
+
 function classify(name: string, attrs: Record<string, unknown>): Classified {
   const op = str(attrs['gen_ai.operation.name']);
   if (op) {
     if (GENAI_OP_ROOT.has(op)) return { role: 'root' };
-    if (GENAI_OP_STEP[op]) return { role: 'step', stepType: GENAI_OP_STEP[op] };
+    const opStep = lookupStepType(GENAI_OP_STEP, op);
+    if (opStep) return { role: 'step', stepType: opStep };
   }
   const kind = str(attrs['openinference.span.kind']);
   if (kind) {
     const upper = kind.toUpperCase();
     if (upper === 'AGENT' || upper === 'CHAIN') return { role: 'root' };
-    if (OPENINFERENCE_KIND[upper]) return { role: 'step', stepType: OPENINFERENCE_KIND[upper] };
+    const kindStep = lookupStepType(OPENINFERENCE_KIND, upper);
+    if (kindStep) return { role: 'step', stepType: kindStep };
   }
   // OpenLLMetry (traceloop.*): workflow/agent anchor a trace; tool → tool_call;
   // task → thought; an llm.request.type marks an inference span.
@@ -86,7 +106,8 @@ function classify(name: string, attrs: Record<string, unknown>): Classified {
   // Fall back to the span name's leading verb.
   const first = name.trim().split(/\s+/)[0];
   if (GENAI_OP_ROOT.has(first)) return { role: 'root' };
-  if (GENAI_OP_STEP[first]) return { role: 'step', stepType: GENAI_OP_STEP[first] };
+  const nameStep = lookupStepType(GENAI_OP_STEP, first);
+  if (nameStep) return { role: 'step', stepType: nameStep };
   return { role: 'step', stepType: 'thought' };
 }
 

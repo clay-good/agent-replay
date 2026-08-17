@@ -539,6 +539,33 @@ describe('OTLP receiver', () => {
 
 // ── OpenLLMetry (traceloop.*) fallback ─────────────────────────────────────
 
+describe('mapOtlpTraces — span names inherited from Object.prototype', () => {
+  // The step-type tables are plain object literals and their keys come from
+  // untrusted telemetry: `gen_ai.operation.name`, and the span NAME's leading
+  // word. A span named `constructor` or `toString` (an auto-instrumented JS class
+  // method) used to resolve to a FUNCTION typed as string — it survived the
+  // `?? 'thought'` fallback and reached the SQLite bind, rolling back the whole
+  // batch's transaction and answering 500, which OTLP exporters retry forever.
+  for (const poison of ['constructor', 'toString', 'valueOf', 'hasOwnProperty', '__proto__']) {
+    it(`classifies a span named "${poison}" as an ordinary step and stores it`, () => {
+      const [trace] = mapOtlpTraces(otlp([
+        span({ traceId: 'tp', spanId: 'p1', name: poison, start: 1 * MS, end: 2 * MS, attrs: {} }),
+      ]));
+      expect(typeof trace.steps![0].step_type).toBe('string');
+      expect(trace.steps![0].step_type).toBe('thought');
+      expect(() => ingestTrace(db, trace)).not.toThrow();
+    });
+
+    it(`ignores a gen_ai.operation.name of "${poison}"`, () => {
+      const [trace] = mapOtlpTraces(otlp([
+        span({ traceId: 'to', spanId: 'o1', name: 'work', start: 1 * MS, end: 2 * MS, attrs: { 'gen_ai.operation.name': poison } }),
+      ]));
+      expect(trace.steps![0].step_type).toBe('thought');
+      expect(() => ingestTrace(db, trace)).not.toThrow();
+    });
+  }
+});
+
 describe('mapOtlpTraces (OpenLLMetry traceloop.*)', () => {
   it('maps traceloop span kinds and llm.request.type', () => {
     const payload = otlp([

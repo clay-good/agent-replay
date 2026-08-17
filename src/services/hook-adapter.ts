@@ -411,22 +411,36 @@ export function applyHookPayload(
     case 'post_tool':
     case 'post_tool_fail': {
       const toolName = str(payload.tool_name);
-      const open = findOpenToolStep(db, traceId, toolName);
-      if (!open) return { action, dialect, traceId, note: 'no matching open tool step' };
-      const ended = isoNow();
-      // Preserve a genuine 0 ms duration (an instant/cached tool call closing in
-      // the same millisecond) — `|| undefined` would drop it to null, unlike the
-      // recorder which passes 0 through. Still coalesce an unparseable started_at
-      // (NaN) to undefined so a bogus duration is never stored.
-      const delta = Date.parse(ended) - Date.parse(open.started_at);
-      const duration = Number.isFinite(delta) ? Math.max(0, delta) : undefined;
-      const result = (payload.tool_output ?? payload.tool_response) as Record<string, unknown> | undefined;
-      updateStep(db, traceId, open.step_number, {
-        output: result ?? null,
-        ended_at: ended,
-        duration_ms: duration,
-        error: action === 'post_tool_fail' ? (errorText(payload.error) ?? 'tool failed') : undefined,
-      });
+      // Claim the step and close it in ONE IMMEDIATE transaction. Every hook is
+      // its own process, so a harness that dispatches a batch of tools in
+      // parallel fires the matching PostToolUse hooks near-simultaneously; with
+      // the find and the update as separate autocommit statements they all read
+      // the SAME newest open step and all wrote it. Last writer won: the other
+      // results were discarded and their steps stayed open forever — silently,
+      // because updateStep matches on (trace_id, step_number) and always reports
+      // one row changed. Serializing the claim gives each process a different
+      // open step, which is also what stops a stale open step from later
+      // absorbing another call's output (see the guard-path note above).
+      const closed = db.transaction(() => {
+        const open = findOpenToolStep(db, traceId, toolName);
+        if (!open) return undefined;
+        const ended = isoNow();
+        // Preserve a genuine 0 ms duration (an instant/cached tool call closing in
+        // the same millisecond) — `|| undefined` would drop it to null, unlike the
+        // recorder which passes 0 through. Still coalesce an unparseable started_at
+        // (NaN) to undefined so a bogus duration is never stored.
+        const delta = Date.parse(ended) - Date.parse(open.started_at);
+        const duration = Number.isFinite(delta) ? Math.max(0, delta) : undefined;
+        const result = (payload.tool_output ?? payload.tool_response) as Record<string, unknown> | undefined;
+        updateStep(db, traceId, open.step_number, {
+          output: result ?? null,
+          ended_at: ended,
+          duration_ms: duration,
+          error: action === 'post_tool_fail' ? (errorText(payload.error) ?? 'tool failed') : undefined,
+        });
+        return open.step_number;
+      }).immediate();
+      if (closed == null) return { action, dialect, traceId, note: 'no matching open tool step' };
       return { action, dialect, traceId, note: `closed tool_call "${toolName ?? '?'}"` };
     }
 

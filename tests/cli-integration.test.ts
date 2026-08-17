@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { execFileSync, execFile } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1103,6 +1103,58 @@ describe('CLI integration', () => {
     expect(code).toBe(1); // refused
     expect(existsSync(keep)).toBe(true); // and nothing was deleted
     rmSync(stranger, { recursive: true, force: true });
+  });
+
+  it('demo --reset deletes the store files, not a working tree that merely looks like one', () => {
+    // The name check is a naming heuristic, not proof of a store: a source
+    // checkout called `agent-replay-project` passes it, and --reset then rm -r'd
+    // that tree. Only traces.db and its sidecars may be removed.
+    const parent = mkdtempSync(join(tmpdir(), 'ar-reset-'));
+    const store = join(parent, 'agent-replay-project');
+    mkdirSync(join(store, 'src'), { recursive: true });
+    const source = join(store, 'src', 'main.ts');
+    writeFileSync(source, 'export const important = 1;');
+
+    execFileSync(process.execPath, [CLI, 'demo', '--reset', '--no-interactive', '--dir', store], { encoding: 'utf8', stdio: 'pipe' });
+
+    expect(existsSync(source)).toBe(true);
+    // The demo still seeded a store in there.
+    expect(existsSync(join(store, 'traces.db'))).toBe(true);
+
+    // A second --reset clears the store it now holds, and still keeps the source.
+    execFileSync(process.execPath, [CLI, 'demo', '--reset', '--no-interactive', '--dir', store], { encoding: 'utf8', stdio: 'pipe' });
+    expect(existsSync(source)).toBe(true);
+    rmSync(parent, { recursive: true, force: true });
+  });
+
+  it('closes every step when a parallel tool batch\'s PostToolUse hooks race', async () => {
+    // A harness that dispatches tools in parallel fires the matching PostToolUse
+    // hooks near-simultaneously, each as its own process. With the find and the
+    // update as separate statements they all claimed the SAME newest open step:
+    // last writer won, the other outputs were discarded, and those steps stayed
+    // open forever — silently, since updateStep always reports a row changed.
+    const session = 'sess_post_race';
+    const tools = [1, 2, 3, 4, 5, 6];
+    for (const n of tools) {
+      run(['hook', 'PreToolUse'], JSON.stringify({
+        hook_event_name: 'PreToolUse', session_id: session, tool_name: 'Read', tool_input: { n },
+      }));
+    }
+    await Promise.all(tools.map((n) => new Promise<void>((done) => {
+      execFile(process.execPath, [CLI, 'hook', 'PostToolUse', '--dir', dir], (): void => done())
+        .stdin!.end(JSON.stringify({
+          hook_event_name: 'PostToolUse', session_id: session, tool_name: 'Read', tool_output: { r: n },
+        }));
+    })));
+
+    const traceId = (JSON.parse(run(['list', '--json', '--session', session]).stdout).items as { id: string }[])[0].id;
+    const steps = (JSON.parse(run(['show', traceId, '--json']).stdout).steps as {
+      ended_at: string | null; output: { r: number } | null;
+    }[]).filter((s) => s.output !== undefined);
+
+    // Every step closed, and every distinct output survived.
+    expect(steps.filter((s) => s.ended_at == null)).toHaveLength(0);
+    expect(new Set(steps.map((s) => s.output?.r)).size).toBe(tools.length);
   });
 
   it('opens exactly one trace when a session\'s first hook events fire concurrently', async () => {
