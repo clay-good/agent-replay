@@ -26,7 +26,7 @@ The system SHALL, when `--ai` is passed and an API key is configured, produce an
 
 ### Requirement: Trace forking
 
-The system SHALL fork a trace at a step via `agent-replay fork <id> --from-step N`, copying steps 1..N (including their snapshots) into a new trace linked by `parent_trace_id` and `forked_from_step`. The fork starts in status `running` with trigger `manual`, ready for continuation. `--modify-input` replaces the trace input; `--modify-context` replaces the snapshot environment at the fork-point step only (earlier steps keep their original snapshots); `--tag` tags the fork.
+The system SHALL fork a trace at a step via `agent-replay fork <id> --from-step N`, copying steps 1..N (including their snapshots) into a new trace linked by `parent_trace_id` and `forked_from_step`. The fork starts in status `running` with trigger `manual`, ready for continuation. `--modify-input` replaces the trace input; `--modify-context` replaces the snapshot **context window** at the fork-point step only (earlier steps keep their original snapshots), creating a snapshot there if the step had none; `--tag` tags the fork.
 
 #### Scenario: Fork with modified input
 
