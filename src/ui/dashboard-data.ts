@@ -132,10 +132,19 @@ export interface DashboardTraceRow {
   started_at: string;
 }
 
-/** Most recent traces, newest first, for the trace table. */
+/**
+ * Most recent traces, newest first, for the trace table. Ordered by the parsed
+ * instant (with the byte order as a fallback for an unparseable timestamp), the
+ * same way `list` sorts — ordering the raw TEXT column ranked timestamps by
+ * spelling, so a trace written as `2026-08-16 23:00:00` sorted below an older
+ * `…T09:00:00Z` one and was the first thing the LIMIT dropped.
+ */
 export function recentTraces(db: Database.Database, limit = 30): DashboardTraceRow[] {
   return db
-    .prepare('SELECT id, agent_name, status, started_at FROM agent_traces ORDER BY started_at DESC LIMIT ?')
+    .prepare(
+      `SELECT id, agent_name, status, started_at FROM agent_traces
+        ORDER BY julianday(started_at) DESC, started_at DESC LIMIT ?`,
+    )
     .all(limit) as DashboardTraceRow[];
 }
 

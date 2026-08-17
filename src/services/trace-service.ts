@@ -1127,6 +1127,16 @@ export function listTraces(
   // `ingest`, `record`, the OTel mapper and the importers all populate per-step
   // `tokens_used`. Sorting on the raw column ranked a 50,000-token trace BELOW
   // a 7-token one — "show me my most expensive runs" returned the cheapest.
+  // `started_at` is TEXT, and nothing constrains the format a producer writes:
+  // SQLite's own `2026-08-16 23:00:00` and a numeric offset `…T22:00:00+02:00`
+  // both occur (the same reason SINCE_PREDICATE parses with julianday rather
+  // than comparing bytes). Ordering the raw column compares BYTES, so those
+  // traces ranked by spelling instead of instant — `list` could put the newest
+  // trace last while `stats --since` counted it as the most recent. Sort by the
+  // parsed instant, keeping the byte order as a secondary key for a timestamp
+  // julianday cannot parse at all (NULL), so no row is ever dropped or
+  // arbitrarily placed among its unparseable peers.
+  const STARTED_EXPRS = ['julianday(started_at)', 'started_at'];
   const sortMap: Record<string, string> = {
     started_at: 'started_at',
     duration: DURATION_EXPR,
@@ -1143,6 +1153,9 @@ export function listTraces(
     throw new Error(`Invalid sort field: '${sortKey}'. Valid: ${Object.keys(sortMap).join(', ')}`);
   }
   const sortDir = filter.sort_order === 'asc' ? 'ASC' : 'DESC';
+  const orderBy = `${(sortKey === 'started_at' ? STARTED_EXPRS : [sortCol])
+    .map((e) => `${e} ${sortDir}`)
+    .join(', ')}, id ASC`;
 
   const limit = filter.limit ?? 25;
   const offset = filter.offset ?? 0;
@@ -1158,7 +1171,7 @@ export function listTraces(
       `SELECT *,
         (SELECT COUNT(*) FROM agent_trace_steps s WHERE s.trace_id = agent_traces.id) AS step_count,
         ${TOKENS_EXPR} AS effective_tokens
-       FROM agent_traces ${whereClause} ORDER BY ${sortCol} ${sortDir}, id ASC LIMIT ? OFFSET ?`,
+       FROM agent_traces ${whereClause} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
     )
     .all([...params, limit, offset]) as Record<string, unknown>[];
 

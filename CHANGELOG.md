@@ -117,6 +117,14 @@ nothing else.
 
 ### Fixed
 
+- `list` and the dashboard's recent-traces table now order by the *instant* a
+  trace started, not by the bytes of its timestamp. `started_at` is TEXT and
+  nothing constrains the format a producer writes (SQLite's own
+  `2026-08-16 23:00:00`, or a `+02:00` offset), so the newest trace could be
+  shown last — and be the first row a `--limit` dropped — while
+  `stats --since` counted it as the most recent. `--since` already compared
+  instants; the ordering was left behind.
+
 - The AI evaluators are now shown the run's duration and token count. Both were
   read from the trace-level columns, which only a producer-reported total ever
   fills — so for every hook-, `record`-, OTel- or importer-captured trace the

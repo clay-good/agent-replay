@@ -856,6 +856,20 @@ describe('listTraces --since compares instants, not bytes', () => {
     const names = listTraces(db, { since: '2026-08-16T13:00:00.000Z' }).items.map((t) => t.agent_name);
     expect(names).toEqual(['unparseable']);
   });
+
+  it('orders by instant too, not just filters by it', () => {
+    // The window was parsed but the ORDER BY still compared bytes, so `list`
+    // ranked these by spelling: the newest trace was shown last, and it is the
+    // first row a `--limit` (or the dashboard's LIMIT 30) drops.
+    ingestTrace(db, at('newest', '2026-08-16 23:00:00')); // 23:00Z, sorts LAST byte-wise
+    ingestTrace(db, at('oldest', '2026-08-16T09:00:00Z'));
+    ingestTrace(db, at('middle', '2026-08-16T22:00:00+02:00')); // = 20:00Z
+
+    expect(listTraces(db, {}).items.map((t) => t.agent_name)).toEqual(['newest', 'middle', 'oldest']);
+    expect(listTraces(db, { sort_order: 'asc' }).items.map((t) => t.agent_name)).toEqual(['oldest', 'middle', 'newest']);
+    // A --limit keeps the genuinely newest rows.
+    expect(listTraces(db, { limit: 1 }).items.map((t) => t.agent_name)).toEqual(['newest']);
+  });
 });
 
 
