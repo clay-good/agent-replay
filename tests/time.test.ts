@@ -32,6 +32,18 @@ describe('parseSinceToIso', () => {
   it('throws on garbage instead of returning it verbatim (would corrupt the query)', () => {
     expect(() => parseSinceToIso('notaduration')).toThrow(/Invalid duration/);
   });
+
+  it('rejects a date-shaped bound that is not a real date', () => {
+    // Regression: the ISO branch tested only the `\d{4}-\d{2}` prefix, so
+    // `2026-99` was passed through as a literal SQL bound no timestamp could
+    // satisfy. Every query returned "No traces found" at exit 0 —
+    // indistinguishable from an empty store — and a `check --since` gate
+    // silently examined nothing.
+    expect(() => parseSinceToIso('2026-99')).toThrow(/Invalid date/);
+    expect(() => parseSinceToIso('2026-08-99T00:00:00Z')).toThrow(/Invalid date/);
+    // Real dates still pass through untouched.
+    expect(parseSinceToIso('2026-08-16')).toBe('2026-08-16');
+  });
 });
 
 describe('formatDuration', () => {

@@ -17,6 +17,7 @@ import type {
   ListTracesFilter,
 } from '../models/types.js';
 import { DECIDED_BY, TRACE_STATUSES, TRIGGER_TYPES } from '../models/enums.js';
+import { SINCE_PREDICATE, sinceParams } from '../utils/time.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -1031,9 +1032,10 @@ export function listTraces(
     params.push(filter.session_id, `${escaped}%`);
   }
   if (filter.since) {
-    // since is an ISO string or relative duration — callers should resolve to ISO
-    conditions.push('started_at >= ?');
-    params.push(filter.since);
+    // since is an ISO string or relative duration — callers should resolve to ISO.
+    // Compared as an instant, not as bytes: see SINCE_PREDICATE.
+    conditions.push(SINCE_PREDICATE);
+    params.push(...sinceParams(filter.since));
   }
 
   const whereClause =

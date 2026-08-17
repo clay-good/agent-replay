@@ -1,4 +1,33 @@
 /**
+ * SQL predicate for a `--since` lower bound on `started_at`, shared by every
+ * command that windows by time (`list`, `stats`, `export`, `check`).
+ *
+ * `started_at` is TEXT, so a plain `started_at >= ?` compares BYTES, not
+ * instants. Nothing constrains the format a producer writes — `ingest`,
+ * `record` and both importers pass a timestamp through verbatim — so real
+ * stores mix forms, and the byte order is not the time order:
+ *
+ *   - `2026-08-16T14:00:00+02:00` is 12:00Z, an hour BEFORE a 13:00Z cutoff,
+ *     but sorts above it and was wrongly included.
+ *   - `2026-08-16 13:30:00` (SQLite's own `datetime()` form) sorts below every
+ *     `T`-separated timestamp, so it was excluded from EVERY window.
+ *
+ * A CI gate reading `check --since 1d` therefore skipped traces it should have
+ * checked. `julianday()` parses offsets, `Z`, and the space form correctly. It
+ * returns NULL for a timestamp it cannot parse at all; those rows fall back to
+ * the old byte comparison so this can never drop a row it used to return.
+ *
+ * Takes the bound TWICE — see `sinceParams`.
+ */
+export const SINCE_PREDICATE =
+  '(julianday(started_at) >= julianday(?) OR (julianday(started_at) IS NULL AND started_at >= ?))';
+
+/** Bind values for {@link SINCE_PREDICATE}, which references the bound twice. */
+export function sinceParams(since: string): [string, string] {
+  return [since, since];
+}
+
+/**
  * Format a duration in milliseconds to a human-readable string.
  * Examples: "120ms", "3.2s", "1m 5s", "2h 30m"
  */
@@ -82,8 +111,17 @@ export function parseDurationString(str: string): number {
  * Returns the original string if it looks like an ISO date already.
  */
 export function parseSinceToIso(since: string): string {
-  // An ISO date is used as-is.
-  if (/^\d{4}-\d{2}/.test(since)) return since;
+  // An ISO date is used as-is — but only if it is actually a date. The prefix
+  // test alone accepted `2026-99`, which then became a literal SQL bound no
+  // timestamp could satisfy: every query returned "No traces found" at exit 0,
+  // indistinguishable from an empty store, and a `check --since` gate quietly
+  // examined nothing at all.
+  if (/^\d{4}-\d{2}/.test(since)) {
+    if (Number.isNaN(Date.parse(since))) {
+      throw new Error(`Invalid date: "${since}". Use an ISO timestamp (2026-08-16, 2026-08-16T13:00:00Z) or a duration (30m, 2h, 7d).`);
+    }
+    return since;
+  }
   // Otherwise it must be a duration (1h, 7d, 30m, …). parseDurationString throws
   // on anything unparseable — surface that rather than passing garbage to the DB,
   // which would silently produce wrong results.

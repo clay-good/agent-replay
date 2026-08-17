@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { TRACE_STATUSES } from '../models/enums.js';
+import { SINCE_PREDICATE, sinceParams } from '../utils/time.js';
 
 /**
  * Pure data queries behind the dashboard TUI. Kept separate from the blessed
@@ -29,12 +30,14 @@ export interface StatsFilter {
 
 export function dashboardStats(db: Database.Database, opts: StatsFilter = {}): DashboardStats {
   const since = opts.since;
-  const p = since ? [since] : [];
+  const p = since ? sinceParams(since) : [];
   // Trace-level: a leading WHERE or an appended AND, depending on whether the
   // query already has a WHERE. Steps/evals: window by the parent trace's start.
-  const traceWhere = since ? 'WHERE started_at >= ?' : '';
-  const traceAnd = since ? 'AND started_at >= ?' : '';
-  const childWhere = since ? 'WHERE trace_id IN (SELECT id FROM agent_traces WHERE started_at >= ?)' : '';
+  const traceWhere = since ? `WHERE ${SINCE_PREDICATE}` : '';
+  const traceAnd = since ? `AND ${SINCE_PREDICATE}` : '';
+  const childWhere = since
+    ? `WHERE trace_id IN (SELECT id FROM agent_traces WHERE ${SINCE_PREDICATE})`
+    : '';
   const count = (sql: string, params: unknown[] = []) => (db.prepare(sql).get(...params) as { cnt: number }).cnt;
   const scalar = (sql: string, params: unknown[] = []) => (db.prepare(sql).get(...params) as { v: number | null }).v;
   return {
@@ -66,12 +69,12 @@ export function dashboardStats(db: Database.Database, opts: StatsFilter = {}): D
 /** One entry per trace status (in TRACE_STATUSES order), for the bar chart. */
 export function statusCounts(db: Database.Database, opts: StatsFilter = {}): { titles: string[]; data: number[] } {
   const since = opts.since;
-  const stmt = db.prepare(`SELECT COUNT(*) as cnt FROM agent_traces WHERE status = ?${since ? ' AND started_at >= ?' : ''}`);
+  const stmt = db.prepare(`SELECT COUNT(*) as cnt FROM agent_traces WHERE status = ?${since ? ` AND ${SINCE_PREDICATE}` : ''}`);
   const titles: string[] = [];
   const data: number[] = [];
   for (const status of TRACE_STATUSES) {
     titles.push(status);
-    const params = since ? [status, since] : [status];
+    const params = since ? [status, ...sinceParams(since)] : [status];
     data.push((stmt.get(...params) as { cnt: number } | undefined)?.cnt ?? 0);
   }
   return { titles, data };
@@ -96,11 +99,11 @@ export function agentStats(db: Database.Database, opts: StatsFilter = {}): Agent
               COUNT(*) as count,
               SUM(CASE WHEN status IN ('failed', 'timeout') THEN 1 ELSE 0 END) as failed
        FROM agent_traces
-       ${since ? 'WHERE started_at >= ?' : ''}
+       ${since ? `WHERE ${SINCE_PREDICATE}` : ''}
        GROUP BY agent_name
        ORDER BY count DESC, agent_name ASC`,
     )
-    .all(...(since ? [since] : [])) as AgentStatRow[];
+    .all(...(since ? sinceParams(since) : [])) as AgentStatRow[];
 }
 
 export interface DashboardTraceRow {

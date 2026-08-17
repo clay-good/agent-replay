@@ -98,6 +98,23 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `--since` now compares instants instead of bytes, across `list`, `stats`,
+  `export`, and `check`. `started_at` is a TEXT column and nothing constrains
+  the format a producer writes — `ingest`, `record`, and both importers pass a
+  timestamp through verbatim — so the byte order was not the time order. A
+  timestamp with a UTC offset landed in the wrong window (`14:00+02:00` is
+  `12:00Z`, an hour *before* a `13:00Z` cutoff, yet it was the row returned),
+  and a space-separated timestamp — SQLite's own `datetime()` form — sorted
+  below every `T`-separated one and was excluded from *every* window. A
+  `check --since 1d` CI gate therefore skipped traces it should have checked.
+  A timestamp that cannot be parsed at all still falls back to the old
+  comparison, so nothing that used to be returned disappears.
+
+- `--since` also rejects a date-shaped value that isn't a real date. `2026-99`
+  passed the format check and became a bound no timestamp could satisfy, so
+  every query reported "No traces found" and exited `0` — indistinguishable
+  from an empty store, and a silently empty CI gate.
+
 - An OTel trace assembled from several export batches now numbers its steps by
   start time rather than arrival, so a parent span that flushes late no longer
   produces a *forward* parent reference. Batches arrive in completion order and

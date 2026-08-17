@@ -814,3 +814,46 @@ describe('eval', () => {
     expect(result.passed).toBe(true);
   });
 });
+
+describe('listTraces --since compares instants, not bytes', () => {
+  // Regression: `started_at` is TEXT and the filter used a plain `>=`, so the
+  // comparison was byte-wise. Nothing constrains the format a producer writes
+  // (ingest, record and both importers pass a timestamp through verbatim), and
+  // the byte order is not the time order — so a `check --since 1d` CI gate
+  // skipped traces it should have checked while examining ones it shouldn't.
+  const at = (name: string, started_at: string): IngestTraceInput => ({
+    agent_name: name,
+    status: 'completed',
+    started_at,
+    steps: [],
+  });
+
+  it('places an offset timestamp by its real instant', () => {
+    // 14:00+02:00 IS 12:00Z — an hour *before* the cutoff — yet it sorted above
+    // it byte-wise and was the one trace the old filter returned.
+    ingestTrace(db, at('offset-before', '2026-08-16T14:00:00+02:00'));
+    ingestTrace(db, at('utc-before', '2026-08-16T12:30:00.000Z'));
+    ingestTrace(db, at('offset-after', '2026-08-16T16:00:00+02:00')); // = 14:00Z
+
+    const names = listTraces(db, { since: '2026-08-16T13:00:00.000Z' })
+      .items.map((t) => t.agent_name)
+      .sort();
+    expect(names).toEqual(['offset-after']);
+  });
+
+  it('includes a space-separated timestamp, which sorted below every window', () => {
+    // SQLite's own datetime() form. `' '` sorts below `'T'`, so this was
+    // excluded from EVERY --since window regardless of when it happened.
+    ingestTrace(db, at('spacey', '2026-08-16 13:30:00'));
+    const names = listTraces(db, { since: '2026-08-16T13:00:00.000Z' }).items.map((t) => t.agent_name);
+    expect(names).toEqual(['spacey']);
+  });
+
+  it('still returns a row whose timestamp cannot be parsed at all', () => {
+    // julianday() gives NULL for these; they fall back to the old byte compare
+    // so the fix can never drop a row the previous behaviour returned.
+    ingestTrace(db, at('unparseable', 'sometime-on-tuesday'));
+    const names = listTraces(db, { since: '2026-08-16T13:00:00.000Z' }).items.map((t) => t.agent_name);
+    expect(names).toEqual(['unparseable']);
+  });
+});
