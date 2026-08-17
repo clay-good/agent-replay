@@ -26,7 +26,7 @@ The system SHALL ingest traces from JSON files (single trace or array) and JSONL
 
 ### Requirement: Canonical trace data model
 
-The system SHALL store traces with agent identity, trigger, status (`running`, `completed`, `failed`, `timeout`), input/output payloads, timing, token and cost totals, error, tags, metadata, fork lineage (`parent_trace_id`, `forked_from_step`), and an optional `session_id` correlation key. Only `agent_name` is required at ingest; when `status` is omitted it defaults to `completed` if `ended_at` is present and `running` otherwise. Trace IDs are generated as `trc_<nanoid>`.
+The system SHALL store traces with agent identity, trigger, status (`running`, `completed`, `failed`, `timeout`), input/output payloads, timing, token and cost totals, error, tags, metadata, fork lineage (`parent_trace_id`, `forked_from_step`), and an optional `session_id` correlation key. Only `agent_name` is required at ingest; when `status` is omitted it defaults to `completed` if `ended_at` is present and `running` otherwise. Trace IDs are generated as `trc_<nanoid>`. A capture producer MAY supply its own id, but it SHALL be an identifier: a non-empty string with no control characters. This is enforced at the WRITE, so no route can store one — an id is rendered by nearly every read command and copied into `parent_trace_id` by `fork`, so one carrying an escape sequence would address the terminal of whoever later inspects the trace, and an empty one would produce a trace no later event can reach.
 
 #### Scenario: Minimal trace accepted
 
@@ -63,7 +63,7 @@ The system SHALL accept an optional snapshot per step capturing `context_window`
 
 ### Requirement: Event-stream recording
 
-The system SHALL accept a versioned JSONL event stream on stdin via `agent-replay record`, with native event types `trace_start`, `step_start`, `step_end`, `step`, `decision`, `snapshot`, and `trace_end`, writing traces incrementally so they are queryable while still `running`. Unknown event TYPES SHALL be skipped with a warning rather than aborting the stream; unknown FIELDS SHALL be ignored silently, so a newer producer's extra keys cost nothing. A usage or timing field that is not a non-negative finite number SHALL be dropped with a warning while the rest of the event is kept, since `ingest` refuses such a value and the trace would otherwise be unrestorable from its own export.
+The system SHALL accept a versioned JSONL event stream on stdin via `agent-replay record`, with native event types `trace_start`, `step_start`, `step_end`, `step`, `decision`, `snapshot`, and `trace_end`, writing traces incrementally so they are queryable while still `running`. Unknown event TYPES SHALL be skipped with a warning rather than aborting the stream; unknown FIELDS SHALL be ignored silently, so a newer producer's extra keys cost nothing. A usage or timing field that is not a non-negative finite number SHALL be dropped with a warning while the rest of the event is kept, since `ingest` refuses such a value and the trace would otherwise be unrestorable from its own export. For the same reason, a decision's `options` SHALL be held to exactly the rule `ingest` applies — each option an object with a non-empty string `option` and, if present, a finite `score` — from one shared check rather than a second copy that could drift.
 
 #### Scenario: Incremental capture
 
