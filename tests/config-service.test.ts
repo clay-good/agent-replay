@@ -173,3 +173,39 @@ describe('config-service', () => {
     });
   });
 });
+
+describe('resolveProvider with a model from another provider', () => {
+  beforeEach(() => {
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.GOOGLE_API_KEY;
+    process.env.OPENAI_API_KEY = 'openai-key';
+  });
+  afterEach(() => {
+    delete process.env.OPENAI_API_KEY;
+  });
+
+  it('does not send a configured Claude model to an auto-detected OpenAI key', () => {
+    // `ai.model` was applied to WHATEVER provider auto-detection found, so a
+    // config naming a Claude model on a machine holding only an OpenAI key sent
+    // the Claude name to OpenAI: every eval failed with an opaque server error,
+    // and the --max-cost gate priced the run off Anthropic's rate sheet (about
+    // 4x) while doing it.
+    const config = { ai: { model: 'claude-haiku-4-5-20251001' } } as never;
+    const resolved = resolveProvider(config);
+    expect(resolved).not.toBeNull();
+    expect(resolved!.provider).toBe('openai');
+    expect(resolved!.model).not.toBe('claude-haiku-4-5-20251001');
+  });
+
+  it('keeps a model that suits the resolved provider, and any unrecognized name', () => {
+    expect(resolveProvider({ ai: { model: 'gpt-5.4-mini' } } as never)!.model).toBe('gpt-5.4-mini');
+    // A model the cost table doesn't know is usually the user being right about
+    // their own provider — pass it through.
+    expect(resolveProvider({ ai: { model: 'my-finetune-v3' } } as never)!.model).toBe('my-finetune-v3');
+  });
+
+  it('still honors a model when the provider is set explicitly', () => {
+    const resolved = resolveProvider({ ai: { provider: 'openai', model: 'gpt-5.4-mini' } } as never);
+    expect(resolved!.model).toBe('gpt-5.4-mini');
+  });
+});

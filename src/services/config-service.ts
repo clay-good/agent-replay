@@ -125,6 +125,22 @@ export function resolveApiKey(
  * Auto-detect the best available provider.
  * Priority: anthropic → google → openai
  */
+/**
+ * Whether a model name belongs to a provider, by its family prefix. Used to
+ * decide whether a configured `ai.model` applies to an auto-detected provider:
+ * `ai.model` was applied to WHATEVER provider was found, so a config naming a
+ * Claude model on a machine holding only an OpenAI key sent the Claude name to
+ * OpenAI — every eval failed with an opaque server error, and the `--max-cost`
+ * gate priced the run off Anthropic's rate sheet (4x the real cost) while doing
+ * it. An unrecognized model name still applies, since a user naming a model the
+ * table doesn't know is usually right about their own provider.
+ */
+function modelSuitsProvider(model: string, provider: 'anthropic' | 'google' | 'openai'): boolean {
+  const m = model.toLowerCase();
+  const owner = m.startsWith('claude') ? 'anthropic' : m.startsWith('gemini') ? 'google' : /^(gpt|o\d)/.test(m) ? 'openai' : null;
+  return owner === null || owner === provider;
+}
+
 export function resolveProvider(config: AgentReplayConfig | null): ResolvedProvider | null {
   const preferred = config?.ai?.provider ?? 'auto';
 
@@ -146,10 +162,11 @@ export function resolveProvider(config: AgentReplayConfig | null): ResolvedProvi
   for (const p of providers) {
     const apiKey = resolveApiKey(p, config);
     if (apiKey) {
+      const configured = config?.ai?.model;
       return {
         provider: p,
         apiKey,
-        model: config?.ai?.model ?? DEFAULT_MODELS[p],
+        model: configured && modelSuitsProvider(configured, p) ? configured : DEFAULT_MODELS[p],
       };
     }
   }

@@ -179,10 +179,14 @@ function summarizeDetails(details: Record<string, unknown>): string {
   // AI eval: parse error
   if (details.parse_error) return 'LLM response parse error';
 
-  // Deterministic eval: criteria
+  // Deterministic eval: criteria. Use the threshold the evaluation actually
+  // recorded, not a hardcoded 0.7 — a criterion scoring below a stricter
+  // threshold (or a rubric's own) was folded into "All criteria passed" while
+  // having cost the eval part of its weight.
   const criteria = details.criteria as Array<{ name: string; score: number }> | undefined;
   if (criteria && Array.isArray(criteria)) {
-    const failed = criteria.filter((c) => c.score < 0.7);
+    const threshold = typeof details.threshold === 'number' ? details.threshold : 0.7;
+    const failed = criteria.filter((c) => c.score < threshold);
     if (failed.length === 0) return 'All criteria passed';
     return failed.map((c) => c.name).join(', ');
   }

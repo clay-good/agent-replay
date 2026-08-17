@@ -152,6 +152,14 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
       provider: resolved.provider,
       api_key: resolved.apiKey,
       model: resolved.model,
+      // `config set ai.max_tokens` was validated, stored, and then read by
+      // nothing: the eval path always sent a hard 1024, which takes precedence
+      // in callLlm. 1024 output tokens is tight for a security audit or
+      // optimization reply with several findings, and a truncated reply fails
+      // JSON extraction and is stored as score 0 / passed false — a hard CI
+      // failure on a good trace, billed in full, with no supported way to
+      // raise the ceiling.
+      max_tokens: config?.ai?.max_tokens,
     };
 
     const presetsToRun = isAiPreset ? [opts.preset!] : AI_PRESET_NAMES;
@@ -219,9 +227,13 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
 
   // If no options specified, run all deterministic presets
   if (!opts.rubric && !opts.preset && !opts.all && !opts.ai) {
-    console.log(chalk.yellow('  No evaluator specified. Running all built-in presets.'));
-    console.log(chalk.dim('  Tip: Use --ai for AI-powered analysis'));
-    console.log('');
+    // stdout is the --json document; these notes belong on stderr there, or the
+    // default `eval <id> --json | jq` — the most common invocation — parses
+    // three lines of prose before reaching the array.
+    const note = opts.json ? console.error : console.log;
+    note(chalk.yellow('  No evaluator specified. Running all built-in presets.'));
+    note(chalk.dim('  Tip: Use --ai for AI-powered analysis'));
+    if (!opts.json) console.log('');
     for (const preset of PRESET_NAMES) {
       const spinner = startSpinner(`Running ${preset}...`);
       try {
@@ -239,7 +251,13 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
     }
   }
 
-  if (results.length === 0) return;
+  if (results.length === 0) {
+    // Still answer in the requested shape: every evaluator throwing (a provider
+    // outage, say) printed NOTHING on stdout while exiting 1, so a --json
+    // consumer got an empty document rather than a readable "nothing ran".
+    if (opts.json) console.log(JSON.stringify([], null, 2));
+    return;
+  }
 
   // A failing evaluation (a rubric that misses its threshold, or a built-in
   // preset that fails) is a non-zero exit, so `eval` works as a CI gate — the

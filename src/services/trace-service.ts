@@ -963,7 +963,12 @@ export function getTrace(
 
   const evalRows = db
     .prepare(
-      'SELECT * FROM agent_trace_evals WHERE trace_id = ? ORDER BY evaluated_at DESC',
+      // rowid breaks the tie: evaluated_at has millisecond resolution and one
+      // `--all` run writes several evals inside the same millisecond, where the
+      // implicit rowid order is ASCENDING — the reverse of the newest-first this
+      // asks for, so re-running an evaluator could show the stale verdict above
+      // the fresh one.
+      'SELECT * FROM agent_trace_evals WHERE trace_id = ? ORDER BY evaluated_at DESC, rowid DESC',
     )
     .all(resolvedId) as Record<string, unknown>[];
 

@@ -135,7 +135,51 @@ nothing else.
   faithfully reproduces the break pass green. Both are silent otherwise and both
   survive into CI as a wrong verdict.
 
+### Security
+
+- The untrusted-trace fence around AI-evaluated content is no longer escapable.
+  Trace content is wrapped in `<<<BEGIN/>>>END UNTRUSTED TRACE CONTENT` markers
+  and the judge is told to treat everything between them as data — but not every
+  summarized field is JSON-escaped (a trace error, a step name, a decision
+  rationale, tags are raw), so content carrying a newline plus the literal
+  terminator closed the fence early and continued in the position reserved for
+  operator instructions. Verified end to end: a trace whose error string carried
+  such a payload made `eval --preset ai-security-audit` report a clean 100% pass
+  — defeating the defense inside the one evaluator meant to catch it. Any run
+  whose error text an attacker can influence (tool stderr echoed into the trace
+  error, an HTTP error body) was a carrier. The markers are now neutralized in
+  the content before fencing, so a forged terminator survives as quoted
+  evidence rather than as syntax.
+
+- `ai-security-audit` scores the worst of the judge's declared `risk_level` and
+  the findings it listed. A reply of `{"risk_level":"none","safe":false,
+  "findings":[{"severity":"critical"}]}` stored 1.0 / PASS and rendered a green
+  panel with the critical finding printed inside it. The declared value is kept
+  as `declared_risk_level` when the two disagree.
+
 ### Fixed
+
+- `eval --json` is parseable on every path. The default invocation
+  (`eval <id> --json`, no evaluator flag) printed two lines of prose on stdout
+  before the array, and a run where every evaluator threw printed nothing at
+  all — so the same flag produced valid JSON, JSON-after-prose, or an empty
+  document depending on which path ran.
+
+- `config set ai.model` no longer applies a model to a provider it doesn't
+  belong to. It was used for whatever provider auto-detection found, so a config
+  naming a Claude model on a machine holding only an `OPENAI_API_KEY` sent the
+  Claude model name to OpenAI — every eval failed with an opaque server error,
+  and `--max-cost` priced the run off Anthropic's rate sheet while doing it.
+
+- `config set ai.max_tokens` is finally read. It was validated, stored, and then
+  ignored: the eval path always sent a hard 1024, and a truncated judge reply
+  fails JSON extraction and is stored as score 0 / failed — a CI failure on a
+  good trace, billed in full, with no supported way to raise the ceiling.
+
+- `show` lists a trace's evaluations newest-first even when several were written
+  in the same millisecond (an `--all` run), and the eval Details column reports
+  criteria against the threshold the evaluation recorded rather than a
+  hardcoded 0.7.
 
 - `list`, the dashboard and every candidate fetch keep their index. Ordering by
   the parsed instant (`julianday(started_at)`) is required for correctness, but
