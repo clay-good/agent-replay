@@ -181,7 +181,11 @@ export function runCheck(opts: CheckOptions = {}): void {
           continue;
         }
         const full = getTrace(db, item.id);
+        // Count a candidate that vanished between the list and the fetch (a
+        // concurrent delete or prune) as excluded too, so it cannot fall to the
+        // "nothing matched — widen --agent/--since" advice, which would be wrong.
         if (full) candidates.push(full);
+        else excluded++;
       }
     } catch (err) {
       fail(2, `Could not read candidate traces: ${errorMessage(err)}`);
@@ -205,7 +209,7 @@ export function runCheck(opts: CheckOptions = {}): void {
         ? `No comparable runs — ${excluded} matching trace(s) were excluded as forks or still running.`
         : 'No traces matched — nothing to check against the baseline.',
       excluded > 0
-        ? 'A fork is a never-executed copy and a running trace is mid-flight, so neither can show a regression. Wait for the run to finish, name a trace with --trace, or pass --allow-empty.'
+        ? 'A fork is a never-executed copy and a running trace is mid-flight, so neither can show a regression — and `--trace` compares whatever it names, so pointing it at one of these turns the gate red on a run that never executed. Wait for the run to finish, check the store the runs actually record into with --dir, or pass --allow-empty if this window is expected to have no comparable runs.'
         : 'A check with no candidates cannot detect a regression. Widen --agent/--since, confirm --dir points at the store the run recorded into, or pass --allow-empty if a run with no traces is expected (a quiet nightly window, a matrix job where this agent did not run).',
     );
     return;

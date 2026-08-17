@@ -439,6 +439,9 @@ describe('the trace header escapes every producer field, not just some', () => {
       // that fixed the other three and left these was still injectable.
       started_at: '2026-08-17T00:00:00Z\u001b]0;TITLE\u0007',
       ended_at: '2026-08-17T00:00:01Z\u001b[5m',
+      // `record`'s native protocol lets the PRODUCER choose the trace id, so it
+      // is no more trustworthy than the fields beside it.
+      id: 'trc_\u001b]0;PWNED_ID\u0007x',
     });
     expect(panel).not.toContain('\u001b[5m');
     expect(panel).not.toContain('\u001b[31m');

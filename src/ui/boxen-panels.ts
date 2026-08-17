@@ -9,16 +9,19 @@ import { effectiveTokens } from '../utils/totals.js';
 /**
  * Trace metadata header panel (shown at top of `show` command).
  *
- * Every producer-authored field here is escaped. `agent_version`, `tags`,
- * `session_id`, `started_at` and `ended_at` were not — the timestamps are held
- * to the same "must be a string" check as the rest, so they carry an escape
- * sequence just as easily; a first pass fixed the other three and left them,
- * while the comment claimed the panel was covered. `validateTraceInput` only
- * checks that these are strings,
- * so an ESC/OSC sequence survives `ingest` untouched and reached the terminal of
- * whoever ran `show` or `replay` — setting the window title, leaving a colour or
- * blink attribute set past the command, or (a lone CR) overwriting the line it
- * sits on. It also broke the width math boxen uses, visibly misaligning the box.
+ * Every value rendered here is escaped unless it is one this tool generates or
+ * the schema constrains: `trigger` and `status` are coerced to their enums, and
+ * the numerics cannot carry an escape sequence. Everything else is producer
+ * output — `validateTraceInput` only checks that `agent_version`, `tags`,
+ * `session_id`, `started_at` and `ended_at` are STRINGS, and `record`'s native
+ * protocol lets the producer choose the trace `id` — so an ESC/OSC sequence
+ * survives `ingest` untouched and reached the terminal of whoever ran `show` or
+ * `replay`: setting the window title, leaving a colour or blink attribute set
+ * past the command, or (a lone CR) overwriting the line it sits on. It also
+ * broke the width math boxen uses, visibly misaligning the box.
+ *
+ * This list was wrong three times, each time by fixing the fields that had just
+ * been reported and not enumerating the rest. Enumerate before editing it again.
  */
 export function traceHeaderPanel(trace: Trace): string {
   const lines: string[] = [];
@@ -26,7 +29,10 @@ export function traceHeaderPanel(trace: Trace): string {
   lines.push(
     `${label('Agent:')}     ${chalk.whiteBright.bold(safeText(trace.agent_name))}${trace.agent_version ? chalk.dim(` v${safeText(trace.agent_version)}`) : ''}`,
   );
-  lines.push(`${label('Trace ID:')}  ${chalk.dim(trace.id)}`);
+  // The id too: `record`'s native protocol lets the PRODUCER choose it
+  // (`trace_start.trace_id` is only checked for being a non-empty string), so it
+  // is no more trustworthy than the fields beside it.
+  lines.push(`${label('Trace ID:')}  ${chalk.dim(safeText(trace.id))}`);
   lines.push(`${label('Status:')}    ${statusBadge(trace.status as TraceStatus)}`);
   lines.push(`${label('Trigger:')}   ${chalk.white(trace.trigger)}`);
 

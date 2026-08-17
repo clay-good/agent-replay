@@ -2156,6 +2156,28 @@ between them, and nothing else.
 
 ### Security
 
+- A Gemini stream's unreadable exit code fabricated a run failure. `Number()` of
+  an unparseable value is `NaN`, which is `!== 0`, so a non-numeric code — a
+  Node-style `code: "ENOENT"`, or an object — marked the whole run failed and
+  reported the reason as the literal "exited with code NaN". A code that cannot
+  be read is not evidence the run failed. The Codex path was already guarded this
+  way; the two had drifted apart again.
+
+- `show` and `replay` echoed the trace **id** raw. `record`'s native protocol
+  lets the producer choose it, so it is no more trustworthy than the fields
+  beside it.
+
+- `check`'s new refusal advised naming a trace with `--trace` — but `--trace`
+  compares whatever it names, so following that advice pointed the gate at the
+  very fork or in-flight run the refusal had just excluded, turning it red on a
+  run that never executed.
+
+- A capture stream's `error: NaN` produced a failing step whose reported reason
+  was the word "null" (`JSON.stringify(NaN)`), and a numeric `is_error: 1` — what
+  an exporter that coerces booleans to ints sends — was not read as a failure at
+  all. The flag is now read generously, since missing a failure signal is the
+  fail-open direction, while a non-finite number is never an error code.
+
 - The summary panel shared by `import`, `record`, `ingest`, `fork`, `diff` and
   `stats` echoed its values raw. The keys are literals at every call site, but
   the values are not — `import` puts the transcript file's own `session_id`

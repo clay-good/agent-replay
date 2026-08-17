@@ -259,8 +259,17 @@ export class GeminiStreamTranslator extends BaseTranslator {
       // The terminal event — a clean end. Exit-code convention: 0 ok; nonzero
       // is a failure.
       this.sawTerminal = true;
-      const code = Number(obj.exit_code ?? obj.code ?? 0);
-      if (code !== 0) {
+      // Guarded the same way `codexItemError` is, and for the same reason: an
+      // unparseable value made `Number()` NaN, which is `!== 0`, so a
+      // non-numeric exit code (`"abc"`, a Node-style `code: "ENOENT"` reaching
+      // the `?? obj.code` fallback, an object) FABRICATED a trace-level failure
+      // and reported its reason as the literal "exited with code NaN". A code we
+      // cannot read is not evidence the run failed.
+      const raw = obj.exit_code ?? obj.code ?? 0;
+      const code = typeof raw === 'number' ? raw
+        : typeof raw === 'string' && raw.trim() !== '' ? Number(raw)
+        : NaN;
+      if (Number.isFinite(code) && code !== 0) {
         this.failed = true;
         this.errorText = this.errorText ?? `exited with code ${code}`;
       }
@@ -307,6 +316,10 @@ function errText(v: unknown): string | undefined {
   if (v === false || v === 0) return undefined;
   if (v == null) return undefined;
   if (Array.isArray(v)) return v.length > 0 ? JSON.stringify(v) : undefined;
+  // A non-finite number is not an error code. `JSON.stringify(NaN)` is the
+  // string "null", so an `error: NaN` field produced a failing step whose
+  // reported reason was the word "null".
+  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : undefined;
   if (typeof v === 'object') {
     const json = JSON.stringify(v);
     return json && json !== '{}' ? json : undefined;
@@ -342,12 +355,22 @@ function codexItemError(item: Record<string, unknown>): string | undefined {
     return undefined;
   }
   if (explicit != null) return explicit;
-  if (failedByExit) return `exited with code ${String(rawExit)}`;
+  // The PARSED value, so a padded `" 2 "` does not reach the message untrimmed.
+  if (failedByExit) return `exited with code ${exit}`;
   return 'tool failed';
 }
 
-/** `true`, or the `"true"` an exporter that stringifies its values sends. */
+/**
+ * `true`, or one of the forms an exporter that coerces its values sends: the
+ * string `"true"`, or a numeric 1 (`str(bool)` and `int(bool)` are both common).
+ * Read generously on purpose: MISSING a failure signal here is the fail-open
+ * direction — a failed tool call stored as clean, which reports green through
+ * `check --golden` and the eval error criteria — while a field literally named
+ * `is_error` holding 1 has no other plausible meaning.
+ */
 function isTrueish(v: unknown): boolean {
-  if (v === true) return true;
-  return typeof v === 'string' && v.trim().toLowerCase() === 'true';
+  if (v === true || v === 1) return true;
+  if (typeof v !== 'string') return false;
+  const t = v.trim().toLowerCase();
+  return t === 'true' || t === '1';
 }

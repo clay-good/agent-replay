@@ -128,6 +128,34 @@ describe('CodexExecTranslator', () => {
     for (const e of errs) expect(String(e)).not.toContain('undefined');
   });
 
+  it('reads the coerced forms of a failure flag, and ignores non-values', () => {
+    // Read generously: MISSING a failure signal is the fail-open direction (a
+    // failed call stored clean reports green through check --golden and the eval
+    // error criteria), and a field named `is_error` holding 1 has no other
+    // plausible meaning. Meanwhile `JSON.stringify(NaN)` is the string "null",
+    // so an `error: NaN` field used to produce a failing step whose reason read
+    // as the word "null".
+    const cases: Array<[Record<string, unknown>, string | null]> = [
+      [{ is_error: 1 }, 'tool failed'],
+      [{ is_error: '1' }, 'tool failed'],
+      [{ is_error: 0 }, null],
+      [{ is_error: 'false' }, null],
+      [{ error: Number.NaN }, null],
+      [{ error: 0 }, null],
+      [{ error: 42 }, '42'],
+    ];
+    for (const [extra, expected] of cases) {
+      const t = makeTranslator('codex-exec')!;
+      const id = run(t, [
+        { type: 'thread.started', thread_id: `th_${JSON.stringify(extra)}` },
+        { type: 'item.completed', item: { item_type: 'command_execution', command: 'c', ...extra } },
+        { type: 'turn.completed', usage: {} },
+      ]);
+      const step = getTrace(db, id)!.steps.find((s) => s.step_type === 'tool_call')!;
+      expect(step.error, JSON.stringify(extra)).toBe(expected);
+    }
+  });
+
   it('treats an empty container error field as success, like "" and false', () => {
     // Same fabricated-failure class as `error: ""`, via a different empty value:
     // `{}` is a plausible "no error" encoding for a structured error field.
@@ -271,6 +299,33 @@ describe('GeminiStreamTranslator', () => {
     ], false);
     const tool = getTrace(db, id)!.steps.find((s) => s.step_type === 'tool_call')!;
     expect(tool.error).toBeNull();
+  });
+
+  it('does not fabricate a run failure from an unreadable exit code', () => {
+    // `Number()` of an unparseable value is NaN, which is `!== 0`, so a
+    // non-numeric exit code — a Node-style `code: "ENOENT"` reaching the
+    // `?? obj.code` fallback, or an object — marked the whole run failed and
+    // reported its reason as the literal "exited with code NaN". A code we
+    // cannot read is not evidence the run failed. (codexItemError already
+    // guarded this; the gemini branch had drifted apart from it again.)
+    for (const result of [{ exit_code: 'abc' }, { code: 'ENOENT' }, { exit_code: {} }, { exit_code: true }]) {
+      const t = makeTranslator('gemini-stream')!;
+      const id = run(t, [
+        { type: 'init', session_id: `g_${JSON.stringify(result)}` },
+        { type: 'message', content: 'done' },
+        { type: 'result', ...result },
+      ], false);
+      const trace = getTrace(db, id)!;
+      expect(trace.status, JSON.stringify(result)).toBe('completed');
+      expect(trace.error).toBeNull();
+    }
+    // A readable non-zero code, including a stringified one, still fails.
+    const t = makeTranslator('gemini-stream')!;
+    const id = run(t, [
+      { type: 'init', session_id: 'g_code3' },
+      { type: 'result', exit_code: '3' },
+    ], false);
+    expect(getTrace(db, id)!.error).toBe('exited with code 3');
   });
 
   it('respects a non-zero result exit code as failure', () => {
