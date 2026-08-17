@@ -6,13 +6,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-A broad hardening pass across the whole CLI. Highlights: consistent exit codes
-and strict argument parsing for scripting and CI; correctness of the
-comparison, evaluation, and golden-regression paths (`diff`, `eval`,
-`check --golden`); guardrail enforcement that now fails closed (`hook
---enforce`); more faithful live capture and import (`record`, `run`, `import`,
-`fork`); and a more robust, memory-bounded OpenTelemetry receiver. The recorded
-trace schema is unchanged.
+A broad hardening pass across the whole CLI, with one theme above the rest:
+**a command should never report success, or a number, that it did not
+actually measure.** Highlights: consistent exit codes and strict argument
+parsing for scripting and CI; gates that fail when they cannot do their job
+rather than passing green (`check --golden`, `eval`, `record`, `guard check`);
+correctness of the comparison, evaluation, and golden-regression paths
+(`diff`, `eval`, `check --golden`); guardrail enforcement that fails closed
+(`hook --enforce`); readers that show what is actually stored (`show`,
+`replay`, `list`, `stats`); more faithful live capture and import (`record`,
+`run`, `import`, `fork`); and a more robust OpenTelemetry receiver that keeps
+the content, timing, and identity its dialects carry.
+
+The recorded trace *data* model is unchanged — same tables and columns, so
+existing stores and exports keep working. Schema v3 adds two indexes and
+nothing else.
 
 ### Added
 
