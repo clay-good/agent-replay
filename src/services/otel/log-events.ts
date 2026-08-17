@@ -204,8 +204,8 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
 
       if (evt.endsWith('.api_response') || evt.endsWith('.api_request')) {
         totalTokens +=
-          num(a.input_token_count ?? a['gen_ai.usage.input_tokens'] ?? a.input_tokens) +
-          num(a.output_token_count ?? a['gen_ai.usage.output_tokens'] ?? a.output_tokens);
+          usage(num(a.input_token_count ?? a['gen_ai.usage.input_tokens'] ?? a.input_tokens)) +
+          usage(num(a.output_token_count ?? a['gen_ai.usage.output_tokens'] ?? a.output_tokens));
         // The same record carries the spend when the emitter reports it. It was
         // read by nothing, so `stats` printed "Total cost: -" and
         // `list --sort cost` was inert for every OTel-captured trace, with the
@@ -296,14 +296,31 @@ function num(v: unknown): number {
   }
   return 0;
 }
+/**
+ * A usage counter, floored at zero — the clamp `semconv.usage()` applies on the
+ * span path, which this path was missing. An `intValue` is a signed int64, so a
+ * negative count is wire-legal; stored verbatim it dragged `stats` sums negative
+ * and broke the export → `ingest` round trip, since `ingest` requires a
+ * non-negative total. Same clamp the importers and stream translators apply.
+ */
+function usage(n: number): number {
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * A duration, or null. Also floored at zero: a negative `duration_ms` is
+ * rejected by `ingest` for the same reason, so storing one breaks the round trip
+ * of a trace this tool itself wrote. A genuine 0 (an instant or cached tool call)
+ * still survives — only an absent, non-numeric or negative value becomes null.
+ */
 function numOrNull(v: unknown): number | null {
   // Preserve a genuine 0 (an instant/cached tool call really does take 0 ms) —
   // `num(v) || null` collapsed it to null, the same class as the hook 0 ms
   // duration fix. Only an absent or non-numeric value becomes null.
-  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'number') return Number.isFinite(v) && v >= 0 ? v : null;
   if (typeof v === 'string') {
     const n = Number(v);
-    return Number.isFinite(n) ? n : null;
+    return Number.isFinite(n) && n >= 0 ? n : null;
   }
   return null;
 }

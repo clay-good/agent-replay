@@ -182,6 +182,32 @@ between them, and nothing else.
   scales linearly. This is the same class of defect the schema v4 expression
   index exists to fix, on the path that builds golden datasets and backups.
 
+- A root span arriving in a later OTLP batch was dropped entirely. The first
+  root span becomes the trace, so it is deliberately not among the batch's
+  steps — right for the batch that opens the trace, wrong for every later one.
+  A span exporter flushes inner spans first, so a trace with more than one root
+  (GenAI emits `create_agent` before `invoke_agent`; multi-agent runs nest
+  `invoke_agent`) naturally splits with a root in a later batch, which then
+  promoted itself to an identity the trace already had. Merging inserts only
+  steps, so that span produced no row at all — while the accepted-span count
+  still counted it. Whether a span survives no longer depends on where the
+  exporter cut its batches. A rootless synthetic trace still adopts a late root
+  as its identity rather than duplicating it as a step.
+
+- The OTLP **logs** path stored counters that `ingest` rejects. `intValue` is a
+  signed int64, so a negative token count or `duration_ms` is wire-legal; the
+  span path floors both, and this path — the one documented for Claude Code and
+  Gemini CLI — did not. A negative count dragged `stats` sums negative and broke
+  export → `ingest` of a trace this tool had just written. A genuine zero
+  duration still survives.
+
+- Merging a later OTLP batch could write a negative `total_duration_ms`. The
+  trace start and end come from independent sets (earliest start, latest end),
+  so nothing orders them; a trace whose first batch carried no renderable
+  timestamps takes the ingest wall clock as its start, and a later batch
+  contributing only an end in the past inverted the window. The mapper already
+  guards its own window this way; the merge now does too.
+
 - A failed tool call in a Gemini stream (`record --format gemini-stream`) was
   recorded as a clean one. The gemini translator's `tool_result` branch had no
   error path at all, while every sibling capture path (`hook`, the Claude

@@ -377,6 +377,36 @@ describe('OTLP receiver', () => {
     expect(getTrace(db, fork.forked_trace_id)!.steps.map((s) => s.name)).not.toContain('search');
   });
 
+  it('keeps a second root span when it arrives in a later batch', () => {
+    // A span exporter flushes inner spans first, so a multi-root trace (GenAI
+    // emits create_agent before invoke_agent; multi-agent runs nest
+    // invoke_agent) naturally splits with a root in a LATER batch. Each batch
+    // independently promoted its own first root to trace identity and
+    // contributed no step for it — and merging inserts only `steps`, so that
+    // span produced NO ROW AT ALL: silently dropped, while the accepted-span
+    // count still counted it. Whether a span survives must not depend on where
+    // the exporter cut its batches.
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    handleTracesExport(db, JSON.stringify(otlp([
+      span({ traceId: 't9', spanId: '2', parentSpanId: '1', name: 'invoke_agent', start: 2 * MS, end: 8 * MS, attrs: { 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'writer' } }),
+      span({ traceId: 't9', spanId: '3', parentSpanId: '2', name: 'execute_tool', start: 3 * MS, end: 4 * MS, attrs: { 'gen_ai.operation.name': 'execute_tool', 'gen_ai.tool.name': 'search' } }),
+    ])), stats);
+
+    handleTracesExport(db, JSON.stringify(otlp([
+      span({ traceId: 't9', spanId: '1', name: 'invoke_agent', start: 1 * MS, end: 9 * MS, attrs: { 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'researcher' } }),
+    ])), stats);
+
+    expect(listTraces(db, {}).total).toBe(1);
+    const trace = getTrace(db, listTraces(db, {}).items[0].id)!;
+    const names = trace.steps.map((s) => s.name);
+    expect(names).toContain('search');
+    // The late root survives as a step rather than vanishing.
+    expect(trace.steps.some((s) => s.metadata.otel_span_id === '1')).toBe(true);
+    // All three spans are stored, and the count reports what was stored.
+    expect(trace.steps).toHaveLength(2); // spans 3 and 1; span 2 is the trace
+    expect(stats.acceptedSpans).toBe(3);
+  });
+
   it('upgrades a rootless synthetic trace in place when the root batch arrives last', () => {
     const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
     // Batch 1: two children flush before the root ends → a synthetic trace.

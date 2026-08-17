@@ -677,9 +677,17 @@ export function mergeBatchIntoTrace(
       .reduce(earliest);
     const endCandidates = [existing.ended_at, input.ended_at].filter((v): v is string => !!v);
     const endedAt = endCandidates.length ? endCandidates.reduce(latest) : null;
-    const duration = endedAt
-      ? Math.round(Date.parse(endedAt) - Date.parse(startedAt))
-      : existing.total_duration_ms;
+    // Same skew guard the mapper applies to its own window (semconv.ts): the
+    // start and the end come from independent sets — the earliest of the starts
+    // and the latest of the ends — so nothing makes the end follow the start.
+    // A trace whose first batch carried no renderable timestamps takes the
+    // ingest wall-clock as its started_at; a later batch contributing only an
+    // end in the past then wrote a large NEGATIVE total_duration_ms, which the
+    // UI renders as a negative duration and `ingest` rejects outright, breaking
+    // the round trip of a trace this tool wrote. Keep what we had instead.
+    const merged = endedAt ? Math.round(Date.parse(endedAt) - Date.parse(startedAt)) : null;
+    const duration =
+      merged != null && Number.isFinite(merged) && merged >= 0 ? merged : existing.total_duration_ms;
     const totalTokens = (existing.total_tokens ?? 0) + (input.total_tokens ?? 0);
     // Cost sums across batches exactly like tokens. It was absent from the UPDATE
     // below, so only the FIRST batch's cost survived — and a session whose first

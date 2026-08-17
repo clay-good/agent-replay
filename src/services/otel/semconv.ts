@@ -235,7 +235,102 @@ export function isoFromNanos(nanos: number): string | undefined {
 }
 
 /** Map an OTLP/JSON traces payload into one IngestTraceInput per OTel trace ID. */
-export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[] {
+/**
+ * Map one span to a step. Extracted so the identity root can be rendered as a
+ * step too when a batch merges into a trace that already has its identity —
+ * otherwise that span is dropped entirely (see `otel_identity_root_step`).
+ */
+function spanToStep(
+  s: FlatSpan,
+  i: number,
+  stepNumberOf: Map<string, number>,
+): IngestStepInput {
+  // A nested root (invoke_agent/workflow that isn't the identity root) has
+  // no step type of its own — anchor it as a thought so children can nest.
+  const stepType = classify(s.name, s.attrs).stepType ?? 'thought';
+  const tokens = inputTokens(s.attrs) + outputTokens(s.attrs);
+  // Step numbers follow start-time order, but parentage is resolved by span
+  // id regardless of order — so a child that STARTS BEFORE its parent
+  // (clock skew, or an async wrapper) resolved to a forward reference, and
+  // a span naming itself as parent resolved to itself. `validateTraceInput`
+  // rejects both, so `otel serve` was persisting rows that `ingest` refuses
+  // — an export → ingest round-trip of an OTel trace failed. Keep only a
+  // strictly-earlier parent; `otel_parent_span_id` stays in metadata either
+  // way, which is what the cross-batch re-link uses.
+  const resolvedParent = s.parentSpanId ? stepNumberOf.get(s.parentSpanId) : undefined;
+  const parent = resolvedParent != null && resolvedParent < i + 1 ? resolvedParent : undefined;
+  // A span whose end precedes its own start (clock skew across hosts, or a
+  // hand-rolled exporter) produced a NEGATIVE duration, which
+  // `validateTraceInput` rejects — so `otel serve` persisted rows `ingest`
+  // refuses, the same round-trip break already fixed for parentage above,
+  // and the UI rendered a negative millisecond count. Drop the contradictory
+  // value rather than clamping it to 0: 0 would assert the call was instant,
+  // where null truthfully says the timing is unknown — exactly what the
+  // no-timing branch does, and what `effectiveDurationMs` already does with
+  // a backwards started_at/ended_at pair.
+  // Both stamps must be ones `isoFromNanos` can render, exactly like the
+  // trace-level window below. Guarding only the FORMATTING left a step with
+  // `ended_at: null` beside a duration of ~56,000 years, computed from the
+  // very stamp the formatter had just rejected — and the value is finite and
+  // non-negative, so validation stores it.
+  const stepEnd = s.end != null && isoFromNanos(s.end) != null ? s.end : null;
+  const stepStart = s.start != null && isoFromNanos(s.start) != null ? s.start : null;
+  const duration = stepEnd != null && stepStart != null && stepEnd >= stepStart
+    ? Math.round((stepEnd - stepStart) / 1e6)
+    : null;
+  // Same guard as the trace root below: messageContent never returns null (it
+  // omits the `messages` key when the span has no output messages), so a
+  // message-less step — the common case for tool/thought spans — must be
+  // mapped to null explicitly. Otherwise it persists a spurious `{}` that
+  // reads as truthy downstream ("OUTPUT: {}" in summaries, golden stores `{}`
+  // not null). Input keeps `{}` as its empty value, exactly like the root.
+  const outputContent = messageContent(s.attrs, 'output');
+  const output = 'messages' in outputContent ? outputContent : null;
+
+  return {
+    step_number: i + 1,
+    step_type: stepType,
+    // `tool.name` is OpenInference's spelling, alongside GenAI's
+    // `gen_ai.tool.name` and OpenLLMetry's `traceloop.entity.name`; without
+    // it an OpenInference tool span fell back to the raw span name.
+    name:
+      str(s.attrs['gen_ai.tool.name']) ??
+      str(s.attrs['tool.name']) ??
+      str(s.attrs['traceloop.entity.name']) ??
+      s.name,
+    input: messageContent(s.attrs, 'input'),
+    output,
+    started_at: isoFromNanos(s.start),
+    // `?? null` because isoFromNanos returns undefined for a stamp it cannot
+    // render; the column's "no end" value is null, not an absent key.
+    ended_at: (s.end ? isoFromNanos(s.end) : null) ?? null,
+    duration_ms: duration,
+    tokens_used: tokens || null,
+    model: str(s.attrs['gen_ai.request.model']) ?? str(s.attrs['gen_ai.response.model']) ?? str(s.attrs['llm.model_name']) ?? null,
+    error: s.errorMessage,
+    parent_step: parent ?? null,
+    metadata: stepMetadata(s.attrs, s.spanId, s.parentSpanId),
+  };
+}
+
+/**
+ * A mapped batch, plus the identity root rendered as a step.
+ *
+ * The first root span becomes the TRACE (its name, agent, timing and messages
+ * are the trace's own), so it is deliberately not among `steps`. That is right
+ * for the batch that opens the trace, and wrong for every later one: a span
+ * exporter flushes inner spans first, so a second batch carrying another root
+ * (GenAI emits `create_agent` before `invoke_agent`; multi-agent runs nest
+ * `invoke_agent`) promoted that root to an identity the trace already had, and
+ * merging inserts only `steps` — so the span produced no row at all, and the
+ * accepted-span count reported more than was stored. Whether a span survives
+ * must not depend on where the exporter cut its batches. The field is transport
+ * only: `ingestTrace` ignores it (a new trace keeps the root as identity, with
+ * no duplicate step) and the merge path appends it.
+ */
+export type MappedOtelTrace = IngestTraceInput & { otel_identity_root_step?: IngestStepInput };
+
+export function mapOtlpTraces(otlp: Record<string, unknown>): MappedOtelTrace[] {
   const spans = flattenSpans(otlp);
   const byTrace = new Map<string, FlatSpan[]>();
   spans.forEach((s, i) => {
@@ -255,7 +350,7 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
     byTrace.set(key, list);
   });
 
-  const traces: IngestTraceInput[] = [];
+  const traces: MappedOtelTrace[] = [];
   for (const [, group] of byTrace) {
     // Order by start time, but sort a span missing startTimeUnixNano (flattened
     // to 0 by num()) to the END, not the front — otherwise it steals step_number
@@ -287,73 +382,8 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
     const anyError = group.some((s) => s.errorMessage);
 
     const steps: IngestStepInput[] = stepSpans.map((s, i) => {
-      // A nested root (invoke_agent/workflow that isn't the identity root) has
-      // no step type of its own — anchor it as a thought so children can nest.
-      const stepType = classify(s.name, s.attrs).stepType ?? 'thought';
-      const tokens = inputTokens(s.attrs) + outputTokens(s.attrs);
-      totalTokens += tokens;
-      // Step numbers follow start-time order, but parentage is resolved by span
-      // id regardless of order — so a child that STARTS BEFORE its parent
-      // (clock skew, or an async wrapper) resolved to a forward reference, and
-      // a span naming itself as parent resolved to itself. `validateTraceInput`
-      // rejects both, so `otel serve` was persisting rows that `ingest` refuses
-      // — an export → ingest round-trip of an OTel trace failed. Keep only a
-      // strictly-earlier parent; `otel_parent_span_id` stays in metadata either
-      // way, which is what the cross-batch re-link uses.
-      const resolvedParent = s.parentSpanId ? stepNumberOf.get(s.parentSpanId) : undefined;
-      const parent = resolvedParent != null && resolvedParent < i + 1 ? resolvedParent : undefined;
-      // A span whose end precedes its own start (clock skew across hosts, or a
-      // hand-rolled exporter) produced a NEGATIVE duration, which
-      // `validateTraceInput` rejects — so `otel serve` persisted rows `ingest`
-      // refuses, the same round-trip break already fixed for parentage above,
-      // and the UI rendered a negative millisecond count. Drop the contradictory
-      // value rather than clamping it to 0: 0 would assert the call was instant,
-      // where null truthfully says the timing is unknown — exactly what the
-      // no-timing branch does, and what `effectiveDurationMs` already does with
-      // a backwards started_at/ended_at pair.
-      // Both stamps must be ones `isoFromNanos` can render, exactly like the
-      // trace-level window below. Guarding only the FORMATTING left a step with
-      // `ended_at: null` beside a duration of ~56,000 years, computed from the
-      // very stamp the formatter had just rejected — and the value is finite and
-      // non-negative, so validation stores it.
-      const stepEnd = s.end != null && isoFromNanos(s.end) != null ? s.end : null;
-      const stepStart = s.start != null && isoFromNanos(s.start) != null ? s.start : null;
-      const duration = stepEnd != null && stepStart != null && stepEnd >= stepStart
-        ? Math.round((stepEnd - stepStart) / 1e6)
-        : null;
-      // Same guard as the trace root below: messageContent never returns null (it
-      // omits the `messages` key when the span has no output messages), so a
-      // message-less step — the common case for tool/thought spans — must be
-      // mapped to null explicitly. Otherwise it persists a spurious `{}` that
-      // reads as truthy downstream ("OUTPUT: {}" in summaries, golden stores `{}`
-      // not null). Input keeps `{}` as its empty value, exactly like the root.
-      const outputContent = messageContent(s.attrs, 'output');
-      const output = 'messages' in outputContent ? outputContent : null;
-
-      return {
-        step_number: i + 1,
-        step_type: stepType,
-        // `tool.name` is OpenInference's spelling, alongside GenAI's
-        // `gen_ai.tool.name` and OpenLLMetry's `traceloop.entity.name`; without
-        // it an OpenInference tool span fell back to the raw span name.
-        name:
-          str(s.attrs['gen_ai.tool.name']) ??
-          str(s.attrs['tool.name']) ??
-          str(s.attrs['traceloop.entity.name']) ??
-          s.name,
-        input: messageContent(s.attrs, 'input'),
-        output,
-        started_at: isoFromNanos(s.start),
-        // `?? null` because isoFromNanos returns undefined for a stamp it cannot
-        // render; the column's "no end" value is null, not an absent key.
-        ended_at: (s.end ? isoFromNanos(s.end) : null) ?? null,
-        duration_ms: duration,
-        tokens_used: tokens || null,
-        model: str(s.attrs['gen_ai.request.model']) ?? str(s.attrs['gen_ai.response.model']) ?? str(s.attrs['llm.model_name']) ?? null,
-        error: s.errorMessage,
-        parent_step: parent ?? null,
-        metadata: stepMetadata(s.attrs, s.spanId, s.parentSpanId),
-      };
+      totalTokens += inputTokens(s.attrs) + outputTokens(s.attrs);
+      return spanToStep(s, i, stepNumberOf);
     });
 
     // The trace spans from the earliest span start (group is sorted by start)
@@ -384,6 +414,9 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
     const rootOutput = rootOutputContent && 'messages' in rootOutputContent ? rootOutputContent : null;
 
     traces.push({
+      // Numbered after the real steps; the merge renumbers by start time anyway,
+      // and a new trace never reads this field.
+      otel_identity_root_step: root ? spanToStep(root, stepSpans.length, stepNumberOf) : undefined,
       agent_name: agentName,
       trigger: 'api',
       status: anyError ? 'failed' : 'completed',

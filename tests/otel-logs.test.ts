@@ -6,6 +6,9 @@ import { mapOtlpLogs } from '../src/services/otel/log-events.js';
 import { ingestTrace } from '../src/services/trace-service.js';
 import { handleLogsExport, type OtelStats } from '../src/services/otel/receiver.js';
 import { effectiveDurationMs } from '../src/utils/time.js';
+import { mapOtlpTraces } from '../src/services/otel/semconv.js';
+import { mergeBatchIntoTrace } from '../src/services/trace-service.js';
+import { validateTraceInput } from '../src/utils/validators.js';
 
 let db: Database.Database;
 
@@ -498,3 +501,70 @@ describe('a later batch fills in what the trace still lacks', () => {
     expect((t.metadata as { follow_up_prompts?: string[] }).follow_up_prompts).toEqual(['second question']);
   });
 });
+
+describe('the log path clamps counters that ingest would reject', () => {
+  it('floors a negative token count instead of storing it', () => {
+    // `intValue` is a signed int64, so a negative count is wire-legal. The span
+    // path floors it (semconv `usage()`, whose comment names this exact
+    // consequence); the log path — the one the README documents for Claude Code
+    // and Gemini CLI — did not, so `stats` sums went negative and export →
+    // ingest of the trace this tool just wrote failed validation.
+    const [t] = mapOtlpLogs(otlpLogs([
+      logRecord('claude_code.api_request', { 'session.id': 'n1', input_tokens: -4000, output_tokens: 10 }, 1_000_000),
+    ]));
+    const trace = getTrace(db, ingestTrace(db, t).id)!;
+    expect(trace.total_tokens).toBe(10);
+
+    expect(validateTraceInput({ ...t, total_tokens: trace.total_tokens }).valid).toBe(true);
+  });
+
+  it('drops a negative duration rather than storing one', () => {
+    const [t] = mapOtlpLogs(otlpLogs([
+      logRecord('claude_code.tool_result', { 'session.id': 'n2', tool_name: 'Bash', duration_ms: -250, success: true }, 1_000_000),
+    ]));
+    const trace = getTrace(db, ingestTrace(db, t).id)!;
+    const step = trace.steps.find((x) => x.step_type === 'tool_call')!;
+    expect(step.duration_ms).toBeNull();
+  });
+
+  it('still preserves a genuine zero duration', () => {
+    const [t] = mapOtlpLogs(otlpLogs([
+      logRecord('claude_code.tool_result', { 'session.id': 'n3', tool_name: 'Bash', duration_ms: 0, success: true }, 1_000_000),
+    ]));
+    const trace = getTrace(db, ingestTrace(db, t).id)!;
+    expect(trace.steps.find((x) => x.step_type === 'tool_call')!.duration_ms).toBe(0);
+  });
+});
+
+describe('merging a later batch cannot invert the trace window', () => {
+  it('keeps the existing duration when the merged end precedes the start', () => {
+    // started_at and ended_at come from independent sets (earliest start, latest
+    // end), so nothing orders them. A first batch with no renderable timestamps
+    // takes the ingest wall clock as its start; a later batch contributing only
+    // an end in the past then wrote a large negative total_duration_ms — which
+    // the UI renders as a negative duration and `ingest` rejects.
+    const first = mapOtlpTraces({
+      resourceSpans: [{ scopeSpans: [{ spans: [{ traceId: 'tX', spanId: 'aa', name: 'chat', attributes: [] }] }] }],
+    });
+    const id = ingestTrace(db, first[0]).id;
+    expect(getTrace(db, id)!.total_duration_ms).toBeNull();
+
+    const second = mapOtlpTraces({
+      resourceSpans: [{ scopeSpans: [{ spans: [
+        { traceId: 'tX', spanId: 'bb', name: 'chat', endTimeUnixNano: '1610000000000000000', attributes: [] },
+      ] }] }],
+    });
+    mergeBatchIntoTrace(db, id, second[0]);
+
+    const merged = getTrace(db, id)!;
+    expect(merged.total_duration_ms).toBeNull();
+    expect(validateTraceInput({
+      agent_name: merged.agent_name,
+      status: merged.status,
+      input: merged.input ?? {},
+      total_duration_ms: merged.total_duration_ms ?? undefined,
+      steps: [],
+    }).valid).toBe(true);
+  });
+});
+

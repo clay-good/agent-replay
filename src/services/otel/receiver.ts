@@ -3,7 +3,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import { gunzipSync } from 'node:zlib';
 import { ingestTrace, mergeBatchIntoTrace } from '../trace-service.js';
 import type { IngestTraceInput } from '../../models/types.js';
-import { mapOtlpTraces } from './semconv.js';
+import { mapOtlpTraces, type MappedOtelTrace } from './semconv.js';
 import { mapOtlpLogs } from './log-events.js';
 import { decodeTracesData, decodeLogsData } from './protobuf.js';
 
@@ -203,7 +203,7 @@ function findMergeTarget(db: Database.Database, input: IngestTraceInput): string
  * rolled-back batch cannot leave the shutdown summary reporting spans that were
  * never stored (and counting them again when the exporter retries).
  */
-function storeOtelBatch(db: Database.Database, traces: IngestTraceInput[], stats: OtelStats): void {
+function storeOtelBatch(db: Database.Database, traces: MappedOtelTrace[], stats: OtelStats): void {
   const accepted: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
   db.transaction(() => {
     for (const t of traces) upsertOtelTrace(db, t, accepted);
@@ -213,15 +213,33 @@ function storeOtelBatch(db: Database.Database, traces: IngestTraceInput[], stats
 }
 
 /** Merge a mapped batch into its existing trace, or open a new one. */
-function upsertOtelTrace(db: Database.Database, input: IngestTraceInput, stats: OtelStats): void {
+function upsertOtelTrace(db: Database.Database, input: MappedOtelTrace, stats: OtelStats): void {
   const target = findMergeTarget(db, input);
   if (target) {
-    mergeBatchIntoTrace(db, target, input);
-  } else {
-    ingestTrace(db, input);
-    stats.acceptedTraces++;
+    // If the target already has a real identity root, this batch's own root has
+    // no identity left to define — and merging inserts only `steps`, so the span
+    // used to produce no row at all. Keep it as a step: whether a span survives
+    // must not depend on where the exporter cut its batches. Its tokens and
+    // timing were already folded in at the trace level, so nothing is
+    // double-counted.
+    //
+    // A SYNTHETIC target is the exception: it was opened by a rootless batch and
+    // the merge adopts this root as its identity, so adding it as a step too
+    // would duplicate it.
+    const targetSynthetic = (db
+      .prepare(`SELECT json_extract(metadata, '$.synthetic_trace') AS s FROM agent_traces WHERE id = ?`)
+      .get(target) as { s: unknown } | undefined)?.s;
+    const rootStep = targetSynthetic ? undefined : input.otel_identity_root_step;
+    const steps = rootStep ? [...(input.steps ?? []), rootStep] : input.steps;
+    mergeBatchIntoTrace(db, target, { ...input, steps: steps ?? [] });
+    stats.acceptedSpans += steps?.length ?? 0;
+    return;
   }
-  stats.acceptedSpans += input.steps?.length ?? 0;
+  ingestTrace(db, input);
+  stats.acceptedTraces++;
+  // The identity root is the trace itself here, not a step — but it WAS a span
+  // the client sent, so it counts as accepted.
+  stats.acceptedSpans += (input.steps?.length ?? 0) + (input.otel_identity_root_step ? 1 : 0);
 }
 
 function ingestOtlpTraces(
@@ -234,7 +252,7 @@ function ingestOtlpTraces(
   // not guard against) throws here and must answer 400, not fall through to the
   // outer 500 — a 5xx tells OTLP exporters to retry the same bad batch forever.
   let totalSpans: number;
-  let traces: IngestTraceInput[];
+  let traces: MappedOtelTrace[];
   try {
     totalSpans = countSpans(otlp);
     traces = mapOtlpTraces(otlp);
