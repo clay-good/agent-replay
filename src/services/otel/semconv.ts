@@ -25,7 +25,11 @@ export function decodeAnyValue(v: unknown): unknown {
 }
 
 export function attrsToMap(attributes: unknown[] | undefined): Record<string, unknown> {
-  const m: Record<string, unknown> = {};
+  // Null-prototype: today's guard covered the step-type LOOKUP tables but not the
+  // map being BUILT, so an attribute literally named `__proto__` reassigned this
+  // object's prototype and its entries became inherited reads for every later
+  // `attrs[...]` — enough to reclassify a span as a trace root and drop its step.
+  const m: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
   for (const a of attributes ?? []) {
     const kv = a as { key?: string; value?: unknown };
     if (typeof kv.key === 'string') m[kv.key] = decodeAnyValue(kv.value);
@@ -113,11 +117,21 @@ function classify(name: string, attrs: Record<string, unknown>): Classified {
 
 // ── Token accounting with drift aliases ─────────────────────────────────────
 
+/**
+ * A usage counter, floored at zero. protobuf `int64` is signed, so a negative
+ * count is wire-legal — and it was stored verbatim, which drags `stats` sums
+ * negative and breaks the export → `ingest` round trip (`ingest` requires a
+ * non-negative total). Same clamp the importers and stream translators apply.
+ */
+function usage(n: number): number {
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 function inputTokens(a: Record<string, unknown>): number {
-  return num(a['gen_ai.usage.input_tokens'] ?? a['gen_ai.usage.prompt_tokens'] ?? a['llm.token_count.prompt']);
+  return usage(num(a['gen_ai.usage.input_tokens'] ?? a['gen_ai.usage.prompt_tokens'] ?? a['llm.token_count.prompt']));
 }
 function outputTokens(a: Record<string, unknown>): number {
-  return num(a['gen_ai.usage.output_tokens'] ?? a['gen_ai.usage.completion_tokens'] ?? a['llm.token_count.completion']);
+  return usage(num(a['gen_ai.usage.output_tokens'] ?? a['gen_ai.usage.completion_tokens'] ?? a['llm.token_count.completion']));
 }
 
 // ── Span flattening ─────────────────────────────────────────────────────────

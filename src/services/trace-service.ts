@@ -70,6 +70,12 @@ function jsonStr(val: unknown): string {
   return JSON.stringify(val);
 }
 
+/** Whether an input object carries a non-empty `prompt`. */
+function hasPromptValue(input: unknown): boolean {
+  const prompt = (input as { prompt?: unknown } | undefined)?.prompt;
+  return typeof prompt === 'string' && prompt.trim().length > 0;
+}
+
 /** Stored `follow_up_prompts` as a list of strings — anything else reads as none. */
 function asPromptList(val: unknown): string[] {
   return Array.isArray(val) ? val.filter((p): p is string => typeof p === 'string' && p !== '') : [];
@@ -699,6 +705,24 @@ export function mergeBatchIntoTrace(
       delete mergedMeta.synthetic_trace;
     } else if (existing.output == null && input.output != null) {
       traceOutput = input.output;
+    }
+    // Adopt what the existing trace still LACKS, whatever flagged it. Keying
+    // everything on `wasSynthetic` meant a later batch's content was dropped
+    // whenever the trace already had a root — the normal BatchSpanProcessor
+    // order, since a sub-agent span ends (and flushes) before its parent. A
+    // second `invoke_agent` root then contributed no step and no trace field:
+    // its prompt, name and attributes vanished, and the trace was attributed to
+    // the sub-agent. The same gap dropped a log session's prompt outright when
+    // the batch that opened the trace carried none (a receiver started
+    // mid-session, a resumed session, an out-of-order flush).
+    if (!hasPromptValue(traceInput) && hasPromptValue(input.input)) {
+      traceInput = input.input as Record<string, unknown>;
+    }
+    // Metadata the root carries (provider, model, span id, unmapped gen_ai.*)
+    // was likewise discarded: `mergedMeta` copied the EXISTING trace's only.
+    // Existing keys win, so an upgrade can't rewrite what is already recorded.
+    for (const [key, value] of Object.entries(input.metadata ?? {})) {
+      if (key !== 'synthetic_trace' && !(key in mergedMeta)) mergedMeta[key] = value;
     }
 
     // Carry the incoming batch's later user turns across the merge. A session's

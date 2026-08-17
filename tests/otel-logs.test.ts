@@ -465,3 +465,36 @@ describe('log-event mapper robustness', () => {
     expect((trace.metadata as { follow_up_prompts?: string[] }).follow_up_prompts).toEqual(['second question']);
   });
 });
+
+describe('a later batch fills in what the trace still lacks', () => {
+  // The trace's content was adopted only when the existing trace was flagged
+  // synthetic, so a session opened by a batch WITHOUT a prompt — a receiver
+  // started mid-session, a resumed session, an out-of-order flush — discarded
+  // every later prompt from both `input` and metadata.
+  it('adopts a prompt that arrives after the trace was opened', () => {
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    handleLogsExport(db, JSON.stringify(otlpLogs([
+      logRecord('claude_code.api_request', { 'session.id': 'late', input_tokens: 10, output_tokens: 5 }, 1_000_000),
+    ])), stats);
+    handleLogsExport(db, JSON.stringify(otlpLogs([
+      logRecord('claude_code.user_prompt', { 'session.id': 'late', prompt: 'the real user question' }, 2_000_000),
+    ])), stats);
+
+    const t = getTrace(db, listTraces(db, { session_id: 'late' }).items[0].id)!;
+    expect((t.input as { prompt?: string }).prompt).toBe('the real user question');
+  });
+
+  it('does not overwrite a prompt the trace already has', () => {
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    handleLogsExport(db, JSON.stringify(otlpLogs([
+      logRecord('claude_code.user_prompt', { 'session.id': 'first', prompt: 'first question' }, 1_000_000),
+    ])), stats);
+    handleLogsExport(db, JSON.stringify(otlpLogs([
+      logRecord('claude_code.user_prompt', { 'session.id': 'first', prompt: 'second question' }, 2_000_000),
+    ])), stats);
+
+    const t = getTrace(db, listTraces(db, { session_id: 'first' }).items[0].id)!;
+    expect((t.input as { prompt?: string }).prompt).toBe('first question');
+    expect((t.metadata as { follow_up_prompts?: string[] }).follow_up_prompts).toEqual(['second question']);
+  });
+});

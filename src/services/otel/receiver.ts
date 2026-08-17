@@ -383,7 +383,12 @@ export function startOtelReceiver(db: Database.Database, port: number, stats: Ot
   }
 
   return new Promise((resolvePromise) => {
-    server.listen(port, () => {
+    // Loopback only. Node defaults to :: / 0.0.0.0, so a receiver this module
+  // calls "local" — and whose banner prints http://localhost — accepted
+  // unauthenticated writes from any host on the network: anyone could inject
+  // traces into the user's store, or spend the 32 MB body budget. An exporter on
+  // another machine is a deliberate setup that needs a deliberate proxy.
+  server.listen(port, '127.0.0.1', () => {
       const addr = server.address();
       const boundPort = typeof addr === 'object' && addr ? addr.port : port;
       resolvePromise({

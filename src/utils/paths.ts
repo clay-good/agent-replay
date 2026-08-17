@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 /**
  * The data directory a command should use: an explicit `--dir`, else the
  * `AGENT_REPLAY_DIR` handed down by `agent-replay run`, else the default.
@@ -18,4 +21,19 @@ export function resolveDataDir(dir?: string): string {
   if (dir != null && dir !== '') return dir;
   const fromEnv = process.env.AGENT_REPLAY_DIR;
   return fromEnv != null && fromEnv !== '' ? fromEnv : '.agent-replay';
+}
+
+/**
+ * Whether a trace store already exists at `dir`.
+ *
+ * Enforcement must never CREATE one. `ensureDatabase` makes what it does not
+ * find, so a gate pointed at the wrong directory silently got a brand-new store
+ * with zero policies and allowed everything — and once created, every later
+ * check passed the existence test while the policy set was still empty. So the
+ * rule is not "did `init` make this" (a store created implicitly by `ingest` or
+ * `record` is perfectly legitimate) but "does the gate have to conjure one" —
+ * which is always a misconfiguration, and is what `agent-replay init` is for.
+ */
+export function storeExists(dir: string): boolean {
+  return existsSync(resolve(dir, 'traces.db'));
 }

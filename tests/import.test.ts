@@ -470,3 +470,51 @@ describe('records that contribute nothing are not counted as imported', () => {
     expect((report.trace?.input as { prompt?: string })?.prompt).toBe('the real question');
   });
 });
+
+describe('an empty first prompt never eats the real one', () => {
+  // The fix was applied to the string-content branch only; ARRAY content is the
+  // shape real Claude Code user records use, so the bug stayed fully reachable.
+  for (const [label, first] of [
+    ['an empty text block', [{ type: 'text', text: '' }]],
+    ['a whitespace-only text block', [{ type: 'text', text: '   \n' }]],
+    ['an empty string', ''],
+    ['a whitespace-only string', '   \n'],
+  ] as const) {
+    it(`keeps the real question when the first record is ${label}`, () => {
+      const file = join(dir, `first-${label.replace(/\W+/g, '-')}.jsonl`);
+      writeFileSync(file, [
+        JSON.stringify({ type: 'user', message: { content: first } }),
+        JSON.stringify({ type: 'user', message: { content: 'THE REAL QUESTION' } }),
+      ].join('\n'));
+
+      const report = importClaudeTranscript(db, file);
+      expect((report.trace?.input as { prompt?: string })?.prompt).toBe('THE REAL QUESTION');
+      // And the empty record is a skipped record, on both content shapes.
+      expect(report.skipped).toBe(1);
+      expect(report.imported + report.skipped).toBe(2);
+    });
+  }
+});
+
+describe('the subagent path tallies like the main loop it mirrors', () => {
+  it('counts an orphan tool_result in a subagent file as skipped', () => {
+    // Subagent transcripts live at <session>/subagents/agent-*.jsonl, beside the
+    // main file — the same layout the nesting test uses.
+    const main = fixture([
+      { type: 'user', sessionId: 'sess-orphan', message: { role: 'user', content: 'go' } },
+      { type: 'assistant', sessionId: 'sess-orphan', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'A1', name: 'Task', input: { agent: 'Explore' } }] } },
+    ]);
+    const subDir = join(dir, 'transcript', 'subagents');
+    mkdirSync(subDir, { recursive: true });
+    writeFileSync(
+      join(subDir, 'agent-orphan.jsonl'),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'ORPHAN', content: 'lost output' }] } }),
+    );
+
+    const report = importClaudeTranscript(db, main);
+    // The orphan result is retained nowhere, so it is a skipped record — the
+    // main loop already counted it that way and this path claimed to mirror it.
+    expect(report.skipped).toBe(1);
+    expect(report.imported + report.skipped).toBe(3);
+  });
+});

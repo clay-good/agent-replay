@@ -15,14 +15,14 @@ import {
 import type { StepPolicyResult } from '../services/guard-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { policyTable } from '../ui/table.js';
-import { heading, separator, guardActionBadge, stepIcon, colors } from '../ui/theme.js';
+import { heading, separator, guardActionBadge, stepIcon, colors, safeText } from '../ui/theme.js';
 import type { StepType } from '../models/enums.js';
 import type { TraceStep } from '../models/types.js';
 import { isValidStepType } from '../utils/validators.js';
 import { openSync, readSync, closeSync } from 'node:fs';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage, safeParseInt } from '../utils/json.js';
-import { resolveDataDir } from '../utils/paths.js';
+import { resolveDataDir, storeExists } from '../utils/paths.js';
 
 // ── guard list ───────────────────────────────────────────────────────────
 
@@ -103,6 +103,18 @@ export function runGuardAdd(opts: GuardAddOptions): void {
     return;
   }
 
+  // Validate like every other numeric option (list --limit, otel --port,
+  // watch --interval, …): `safeParseInt` is a PARSER, so `--priority high`
+  // silently stored 0 and `--priority 1e3` stored 1. Priority orders policy
+  // evaluation and breaks ties, so a rule the author meant to rank first ranked
+  // last and `guard check` cited the wrong policy.
+  const priority = opts.priority == null ? 0 : Number(opts.priority);
+  if (!Number.isInteger(priority)) {
+    console.error(chalk.red(`  Invalid --priority: ${opts.priority} (must be an integer).`));
+    process.exitCode = 2;
+    return;
+  }
+
   const spinner = startSpinner(`Adding policy "${opts.name}"...`);
 
   try {
@@ -110,7 +122,7 @@ export function runGuardAdd(opts: GuardAddOptions): void {
       name: opts.name,
       description: opts.description,
       action: opts.action,
-      priority: safeParseInt(opts.priority, 0),
+      priority,
       match_pattern: matchPattern,
     });
 
@@ -232,7 +244,7 @@ export function runGuardTest(traceId: string, opts: GuardTestOptions = {}): void
     const icon = stepIcon(result.step.step_type as StepType);
     console.log(
       `  ${icon} ${chalk.white.bold(`Step ${result.step.step_number}`)} — ` +
-        chalk.dim(`"${result.step.name}"`) +
+        chalk.dim(`"${safeText(result.step.name)}"`) +
         chalk.dim(` (${result.step.step_type})`),
     );
 
@@ -363,6 +375,15 @@ export async function runGuardCheck(opts: GuardCheckOptions = {}): Promise<void>
   // command's own require_review path fails closed without a TTY, so allowing
   // on "cannot evaluate" contradicted the module's stated posture.
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
+  // Same fail-open as `hook --enforce`, in the command the README documents as
+  // the out-of-band gate: `ensureDatabase` CREATES what it does not find, so a
+  // check run from anywhere but the project root built an empty store, answered
+  // `allow` at exit 0, and left that store behind so every later check allowed
+  // too. Creating a policy store is what `agent-replay init` is for.
+  if (!storeExists(resolveDataDir(opts.dir))) {
+    denied(`no trace store at ${dbPath} — run "agent-replay init" there, or point the check at one with --dir`);
+    return;
+  }
   let verdict: ReturnType<typeof verdictForMatches>;
   try {
     const db = ensureDatabase(dbPath);

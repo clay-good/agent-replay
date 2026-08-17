@@ -5,7 +5,7 @@ Even with live capture, agent-replay only observes. Guardrail policies exist but
 ## Requirements
 ### Requirement: Wrapped agent execution
 
-The system SHALL run an agent process under supervision via `agent-replay run [options] -- <command>`, pre-creating a trace and exposing the recording channel to the child through environment variables (`AGENT_REPLAY_DIR`, `AGENT_REPLAY_TRACE_ID`, `AGENT_REPLAY_EVENTS`), consuming JSONL events the child emits on that channel, and finalizing the trace from the child's exit: exit 0 → `completed`, non-zero → `failed` with the exit code recorded.
+The system SHALL run an agent process under supervision via `agent-replay run [options] -- <command>`, pre-creating a trace and exposing the recording channel to the child through environment variables (`AGENT_REPLAY_DIR`, `AGENT_REPLAY_TRACE_ID`, `AGENT_REPLAY_EVENTS`), consuming JSONL events the child emits on that channel, and finalizing the trace from the child's exit: exit 0 → `completed`, non-zero → `failed` with the exit code recorded. A child that declares its own TERMINAL status in a `trace_end` event owns the outcome and that status is kept whatever the exit code; a status the store cannot record does not count as a declaration, so the exit code still decides. A child killed by a signal exits `128 + signal` with the signal named in the trace error.
 
 #### Scenario: Instrumented agent run
 

@@ -78,11 +78,11 @@ export function evalTable(evals: EvalResult[]): string {
   for (const e of evals) {
     const details = summarizeDetails(e.details);
     table.push([
-      chalk.white(e.evaluator_name),
+      chalk.white(safeText(e.evaluator_name)),
       chalk.dim(e.evaluator_type),
       scoreBadge(e.score),
       passBadge(e.passed),
-      chalk.dim(details),
+      chalk.dim(safeText(details)),
     ]);
   }
 

@@ -24,7 +24,7 @@ The system SHALL evaluate traces against user-supplied YAML/JSON rubric files (`
 
 ### Requirement: AI-powered evaluation
 
-The system SHALL provide AI presets (`ai-root-cause`, `ai-quality-review`, `ai-security-audit`, `ai-optimization`) using the configured provider's default cheap-tier model (currently `claude-haiku-4-5-20251001`, `gemini-2.0-flash`, `gpt-4o-mini` per provider), honoring a `--max-cost` budget in USD and failing gracefully when no key is configured.
+The system SHALL provide AI presets (`ai-root-cause`, `ai-quality-review`, `ai-security-audit`, `ai-optimization`) using the configured provider's default cheap-tier model (currently `claude-haiku-4-5-20251001`, `gemini-2.5-flash-lite`, `gpt-5.4-nano` per provider), honoring a `--max-cost` budget in USD and failing gracefully when no key is configured.
 
 #### Scenario: Cost budget exceeded
 

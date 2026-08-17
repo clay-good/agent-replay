@@ -6,7 +6,7 @@ Browse and understand recorded traces: filtered listing, detailed step-by-step v
 ## Requirements
 ### Requirement: Trace listing
 
-The system SHALL list traces via `agent-replay list` with filters (`--status` exact match, `--agent` substring match, `--tag` exact match against the tags array, `--since <duration>`), sorting (`--sort started_at|duration|tokens|cost`), a result limit (default 25), and `--json` output for piping.
+The system SHALL list traces via `agent-replay list` with filters (`--status` exact match, `--agent` substring match, `--tag` exact match against the tags array, `--since <duration>`), sorting (`--sort started_at|duration|tokens|cost|agent_name`, each accepting a `-` prefix for descending order), a result limit (default 25), and `--json` output for piping.
 
 #### Scenario: Filter failed traces
 

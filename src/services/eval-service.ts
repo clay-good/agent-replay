@@ -13,10 +13,12 @@ export interface EvalCriterion {
   name: string;
   description: string;
   weight: number;
-  check: (trace: EvalContext) => { score: number; details: string };
+  check: (trace: EvalContext) => { score: number; details: string; critical?: boolean };
   /**
-   * A criterion that fails the preset on its own when it scores 0, whatever the
-   * weighted total says.
+   * A criterion whose zero score fails the preset on its own, whatever the
+   * weighted total says. A check may also decide this per RESULT by returning
+   * `critical: true` — see `no_error_steps`, which must not hard-fail a run that
+   * hit an error and recovered from it.
    *
    * The weights are 0.4 / 0.3 / 0.3 against a 0.7 threshold, so a lone zeroed
    * 0.3-weight criterion lands on EXACTLY 0.7 and passes — which made the one
@@ -37,6 +39,8 @@ export interface EvalContext {
   output: Record<string, unknown> | null;
   steps: TraceStep[];
   error: string | null;
+  /** The trace's recorded status — a run can end `failed` with no error text. */
+  status?: string;
 }
 
 export interface EvalPreset {
@@ -75,7 +79,11 @@ function isAnswer(value: unknown): boolean {
   if (typeof value === 'string') return value.trim().length > 0;
   if (Array.isArray(value)) return value.length > 0;
   if (typeof value === 'object') return Object.keys(value as object).length > 0;
-  return false;
+  // A number or boolean IS an answer: a count that legitimately answers 0, or a
+  // predicate step answering false, produced a result. `hasRenderableContent`
+  // was wrong to treat '' as content and RIGHT about 0 and false; throwing both
+  // out would trade the false PASS for a false FAIL on a correct run.
+  return typeof value === 'number' || typeof value === 'boolean';
 }
 
 // ── Built-in presets ──────────────────────────────────────────────────────
@@ -135,17 +143,38 @@ const HALLUCINATION_CHECK: EvalPreset = {
       name: 'no_error_steps',
       description: 'Trace should not contain failed steps, or end with a trace-level error',
       weight: 0.3,
-      critical: true,
       check: (ctx) => {
         // A trace-level error counts, exactly as it does for completeness-check's
         // `no_unresolved_errors`: it is what sets `status: failed`, and it is the
         // only marker a run that died before emitting a final step leaves behind.
         // Looking at steps alone scored a run that ended in a fatal error a
         // perfect 1.0, while its sibling preset saw the same trace as failed.
-        if (ctx.error != null) {
-          return { score: 0.0, details: `Trace ended with an error: ${ctx.error}` };
-        }
+        //
+        // Only THAT case is critical. A step error the run recovered from — one
+        // timed-out tool call, retried successfully, on a trace that completed —
+        // still costs this criterion's weight but must not hard-fail the preset;
+        // every imported Claude Code session containing a single failed shell
+        // command would otherwise fail it outright.
+        // The run itself ended badly — by its recorded status or by a
+        // trace-level error, which is the only marker a run that died before
+        // emitting a final step leaves behind. That is the case that must not be
+        // able to pass.
+        const endedBadly = ctx.error != null || ctx.status === 'failed' || ctx.status === 'timeout';
         const errorSteps = ctx.steps.filter(isErrorStep);
+        if (endedBadly) {
+          return {
+            score: 0.0,
+            critical: true,
+            details: ctx.error != null
+              ? `Trace ended with an error: ${ctx.error}`
+              : `Trace ended ${ctx.status}${errorSteps.length ? ` with ${errorSteps.length} error step(s)` : ''}`,
+          };
+        }
+        // A step error the run RECOVERED from — one timed-out tool call, retried
+        // successfully, on a trace that completed — still costs this criterion's
+        // weight but must not hard-fail the preset: every imported Claude Code
+        // session containing a single failed shell command would otherwise fail
+        // outright, while completeness-check called the same trace 100% complete.
         return {
           score: errorSteps.length === 0 ? 1.0 : 0.0,
           details: errorSteps.length ? `${errorSteps.length} error step(s) found` : 'No error steps',
@@ -261,6 +290,13 @@ const COMPLETENESS_CHECK: EvalPreset = {
       name: 'all_tool_calls_completed',
       description: 'All tool call steps should have output (not null)',
       weight: 0.3,
+      // Same boundary as the error criteria: weight 0.3 against a 0.7 threshold
+      // with 0.7 of other weight, so a score of 0 — an agent that STARTED every
+      // tool call and completed none — landed on exactly 0.7 and passed, with
+      // "0/2 tool calls have output" printed beside the green verdict. Only the
+      // exact-zero case sits on the boundary; the ratio is continuous, so partial
+      // completion still scores and passes on its own merits.
+      critical: true,
       check: (ctx) => {
         const toolCalls = ctx.steps.filter((s) => s.step_type === 'tool_call');
         if (toolCalls.length === 0) return { score: 1.0, details: 'No tool calls to check' };
@@ -333,10 +369,11 @@ export function runEval(
     output: trace.output,
     steps: trace.steps,
     error: trace.error,
+    status: trace.status,
   };
 
   // Evaluate each criterion
-  const criteriaResults: Array<{ name: string; score: number; weight: number; details: string }> = [];
+  const criteriaResults: Array<{ name: string; score: number; weight: number; details: string; critical?: boolean }> = [];
   let weightedSum = 0;
   let totalWeight = 0;
 
@@ -347,6 +384,7 @@ export function runEval(
       score: result.score,
       weight: criterion.weight,
       details: result.details,
+      ...(result.critical ? { critical: true } : {}),
     });
     weightedSum += result.score * criterion.weight;
     totalWeight += criterion.weight;
@@ -362,11 +400,9 @@ export function runEval(
   // EvalCriterion.critical. Without this the criterion that detects a failed run
   // landed on exactly the threshold and passed, so it could never fail the preset
   // by itself.
-  const failedCritical = preset.criteria
-    .filter((c) => c.critical)
-    .map((c) => criteriaResults.find((r) => r.name === c.name))
-    .filter((r) => r != null && r.score === 0)
-    .map((r) => r!.name);
+  const failedCritical = criteriaResults
+    .filter((r) => r.score === 0 && (r.critical || preset.criteria.find((c) => c.name === r.name)?.critical))
+    .map((r) => r.name);
   const passed = score >= preset.threshold && failedCritical.length === 0;
 
   return createEval(db, traceId, {
@@ -767,6 +803,7 @@ export async function runAiEval(
       input: trace.input,
       output: trace.output,
       steps: trace.steps,
+      status: trace.status,
       error: trace.error,
     };
     if (!preset.applicable(ctx)) {

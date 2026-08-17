@@ -391,3 +391,63 @@ describe('rubric corpus depends on what the criterion asserts', () => {
     expect(res.passed).toBe(false);
   });
 });
+
+describe('an answer of zero is still an answer', () => {
+  // hasRenderableContent was wrong to treat '' as content and RIGHT about 0 and
+  // false. Throwing both out traded the false PASS for a false FAIL: a count
+  // query that legitimately answers 0, or a predicate step answering false, was
+  // reported as "produced no answer" and exited 1 on a correct run.
+  for (const [label, answer] of [['0', 0], ['false', false]] as const) {
+    it(`counts a final tool result of ${label} as an answer`, () => {
+      const res = evalTrace(base({
+        status: 'completed',
+        output: null,
+        steps: [{ step_number: 1, step_type: 'tool_call', name: 'count', input: { q: 'n' }, output: answer as never }],
+      }), 'completeness-check');
+      expect(res.passed).toBe(true);
+    });
+  }
+});
+
+describe('a recovered error is not a failed run', () => {
+  // Marking the criterion critical outright hard-failed ANY trace containing an
+  // error step — including a completed run that retried a timed-out tool call
+  // successfully. Every imported session with one failed shell command would
+  // have failed outright, while completeness-check called the same trace 100%
+  // complete. Criticality now keys on how the RUN ended.
+  it('passes a completed run that retried a failed tool call', () => {
+    const res = evalTrace(base({
+      status: 'completed',
+      steps: [
+        { step_number: 1, step_type: 'tool_call', name: 'search', input: { q: 'x' }, error: 'timed out' },
+        { step_number: 2, step_type: 'tool_call', name: 'search', input: { q: 'x' }, output: { hits: 3 } },
+        { step_number: 3, step_type: 'output', name: 'respond', output: { text: 'a clean, grounded answer' } },
+      ],
+    }), 'hallucination-check');
+    expect(res.passed).toBe(true);
+  });
+
+  for (const status of ['failed', 'timeout'] as const) {
+    it(`still fails a run that ended ${status}, even with no error text`, () => {
+      const res = evalTrace(base({
+        status,
+        steps: [{ step_number: 1, step_type: 'output', name: 'respond', output: { text: 'a clean, grounded answer' } }],
+      }), 'hallucination-check');
+      expect(res.passed).toBe(false);
+    });
+  }
+
+  // An agent that STARTED every tool call and completed none scored exactly 0.7
+  // against a 0.7 threshold and passed, with "0/2 tool calls have output"
+  // printed beside the green verdict.
+  it('fails a run in which no tool call completed', () => {
+    const res = evalTrace(base({
+      status: 'completed',
+      steps: [
+        { step_number: 1, step_type: 'tool_call', name: 'a', input: {}, output: null },
+        { step_number: 2, step_type: 'tool_call', name: 'b', input: {}, output: null },
+      ],
+    }), 'completeness-check');
+    expect(res.passed).toBe(false);
+  });
+});

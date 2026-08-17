@@ -40,12 +40,12 @@ The system SHALL store traces with agent identity, trigger, status (`running`, `
 
 ### Requirement: Step model
 
-The system SHALL store ordered steps per trace with a `step_type` from: `thought`, `tool_call`, `llm_call`, `retrieval`, `output`, `decision`, `error`, `guard_check`; each step carries name, input/output, timing, tokens, model, error, and metadata, plus optional structural fields: `parent_step` (hierarchy) and `caused_by_step` (causality), both step-number references to strictly earlier steps in the same trace. Steps of type `decision` MAY carry a structured decision record. Step numbers SHALL be positive integers, unique within a trace — uniqueness is enforced by the database constraint `UNIQUE(trace_id, step_number)`, not by pre-validation.
+The system SHALL store ordered steps per trace with a `step_type` from: `thought`, `tool_call`, `llm_call`, `retrieval`, `output`, `decision`, `error`, `guard_check`; each step carries name, input/output, timing, tokens, model, error, and metadata, plus optional structural fields: `parent_step` (hierarchy) and `caused_by_step` (causality), both step-number references to strictly earlier steps in the same trace. A step of ANY type MAY carry a structured decision record: the live recorder attaches one to whatever step made the choice, and every reader honors that. Step numbers SHALL be positive integers, unique within a trace — enforced both by pre-validation, so `ingest --dry-run` cannot pass a file the real run would reject, and by the database constraint `UNIQUE(trace_id, step_number)`.
 
 #### Scenario: Duplicate step number rejected
 
 - **WHEN** an ingested trace contains two steps with the same `step_number`
-- **THEN** the insert transaction fails on the uniqueness constraint, nothing from that trace is stored, and the error is reported
+- **THEN** validation rejects it naming the duplicated step number, nothing from that trace is stored, and the error is reported
 
 #### Scenario: Flat v1 trace remains valid
 
@@ -63,7 +63,7 @@ The system SHALL accept an optional snapshot per step capturing `context_window`
 
 ### Requirement: Event-stream recording
 
-The system SHALL accept a versioned JSONL event stream on stdin via `agent-replay record`, with native event types `trace_start`, `step_start`, `step_end`, `step`, `decision`, `snapshot`, and `trace_end`, writing traces incrementally so they are queryable while still `running`. Unknown event types or fields SHALL be skipped with a warning rather than aborting the stream.
+The system SHALL accept a versioned JSONL event stream on stdin via `agent-replay record`, with native event types `trace_start`, `step_start`, `step_end`, `step`, `decision`, `snapshot`, and `trace_end`, writing traces incrementally so they are queryable while still `running`. Unknown event TYPES SHALL be skipped with a warning rather than aborting the stream; unknown FIELDS SHALL be ignored silently, so a newer producer's extra keys cost nothing. A usage or timing field that is not a non-negative finite number SHALL be dropped with a warning while the rest of the event is kept, since `ingest` refuses such a value and the trace would otherwise be unrestorable from its own export.
 
 #### Scenario: Incremental capture
 

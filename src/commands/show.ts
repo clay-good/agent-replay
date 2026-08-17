@@ -9,7 +9,7 @@ import { traceHeaderPanel } from '../ui/boxen-panels.js';
 import { truncate } from '../utils/json.js';
 import { renderTimeline, renderTree } from '../ui/timeline.js';
 import { evalTable } from '../ui/table.js';
-import { heading, separator } from '../ui/theme.js';
+import { heading, separator, safeText } from '../ui/theme.js';
 import { resolveDataDir } from '../utils/paths.js';
 
 export interface ShowOptions {
@@ -161,7 +161,7 @@ function renderSnapshots(
 
     console.log(
       chalk.dim(`  Step ${step.step_number}`) +
-        chalk.white(` "${step.name}"`) +
+        chalk.white(` "${safeText(step.name)}"`) +
         chalk.dim(` — token_count: ${snapshot.token_count}`),
     );
 
@@ -169,7 +169,7 @@ function renderSnapshots(
       const ctx = typeof snapshot.context_window === 'string'
         ? snapshot.context_window
         : JSON.stringify(snapshot.context_window, null, 2);
-      console.log(chalk.dim('    context_window: ') + chalk.dim(truncate(ctx, 200)));
+      console.log(chalk.dim('    context_window: ') + chalk.dim(safeText(truncate(ctx, 200))));
     }
 
     if (snapshot.environment && Object.keys(snapshot.environment).length > 0) {

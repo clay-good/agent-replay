@@ -4,7 +4,7 @@ import { ensureDatabase } from '../db/index.js';
 import { applyHookPayload, formatEnforcementResponse, resolveHookRouting } from '../services/hook-adapter.js';
 import type { HookDialect } from '../services/hook-adapter.js';
 import { errorMessage } from '../utils/json.js';
-import { resolveDataDir } from '../utils/paths.js';
+import { resolveDataDir, storeExists } from '../utils/paths.js';
 
 export interface HookOptions {
   noInput?: boolean;
@@ -129,17 +129,31 @@ export async function runHook(eventArg: string | undefined, opts: HookOptions = 
   try {
     const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
     // In enforce mode a missing store is a failure to evaluate, not an empty
-    // policy set. The path is resolved from the process's cwd and
-    // `ensureDatabase` CREATES what it doesn't find, so a hook that fired from
-    // any directory other than the project root got a brand-new store with zero
-    // policies and cheerfully allowed everything — the one condition on this
-    // path that failed OPEN. Throw into the fail-closed handler below, which
-    // blocks the call and says why. Capture mode still creates the store — and
-    // so does every non-gating event under --enforce, so a user who registers
-    // one `--enforce` command line across all hook events can still bootstrap a
-    // store; only the tool call that would have gone unchecked is blocked.
-    if (opts.enforce && resolveHookRouting(payload, eventArg).action === 'pre_tool' && !existsSync(dbPath)) {
-      throw new Error(`no trace store at ${dbPath} — run "agent-replay init" there, or point the hook at one with --dir`);
+    // policy set. The path resolves from the process's cwd and `ensureDatabase`
+    // CREATES what it doesn't find, so a hook firing from any directory other
+    // than the project root got a brand-new store with zero policies and
+    // cheerfully allowed everything — the one condition on this path that failed
+    // OPEN.
+    //
+    // NO event under --enforce may bootstrap the store. Checking only on the
+    // tool call was a one-shot that any earlier event disarmed: with one
+    // `--enforce` command line registered across every hook event — the
+    // configuration that check was written to support — `SessionStart` fires
+    // first, creates an empty store, and from then on the file exists, so every
+    // later tool call was allowed unchecked and silently.
+    //
+    // A missing store still only BLOCKS the events that gate; anything else is a
+    // loud no-op, so a misconfigured directory cannot stop a session from
+    // starting — it just records nothing until someone runs `agent-replay init`.
+    if (opts.enforce && !storeExists(resolveDataDir(opts.dir))) {
+      const gating = resolveHookRouting(payload, eventArg).action === 'pre_tool';
+      if (gating) {
+        throw new Error(`no trace store at ${dbPath} — run "agent-replay init" there, or point the hook at one with --dir`);
+      }
+      console.error(
+        `agent-replay hook: no trace store at ${dbPath} — not creating one under --enforce; run "agent-replay init" there (event ignored)`,
+      );
+      return;
     }
     const db = ensureDatabase(dbPath);
     const result = applyHookPayload(db, payload, { noInput: opts.noInput, enforce: opts.enforce, eventArg });

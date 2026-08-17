@@ -108,6 +108,16 @@ export function validateTraceInput(input: unknown): ValidationResult {
   if (data.agent_version != null && typeof data.agent_version !== 'string') {
     errors.push({ field: 'agent_version', message: 'agent_version must be a string' });
   }
+  // Same class, and the most damaging instance: the writer binds
+  // `textOrNull(started_at) ?? now`, so a non-string timestamp was silently
+  // replaced by the INGEST WALL CLOCK — at exit 0, with `--dry-run` reporting the
+  // file valid. Every `--since` window, every `ORDER BY julianday(started_at)`
+  // and every duration then answered about a time the run never had.
+  for (const field of ['started_at', 'ended_at'] as const) {
+    if (data[field] != null && typeof data[field] !== 'string') {
+      errors.push({ field, message: `${field} must be an ISO-8601 string` });
+    }
+  }
   if (data.session_id != null && typeof data.session_id !== 'string') {
     errors.push({ field: 'session_id', message: 'session_id must be a string' });
   }
@@ -195,6 +205,11 @@ export function validateStepInput(input: unknown, index?: number): ValidationRes
   // exit 0.
   if (data.model != null && typeof data.model !== 'string') {
     errors.push({ field: `${prefix}model`, message: 'model must be a string' });
+  }
+  for (const field of ['started_at', 'ended_at'] as const) {
+    if (data[field] != null && typeof data[field] !== 'string') {
+      errors.push({ field: `${prefix}${field}`, message: `${field} must be an ISO-8601 string` });
+    }
   }
 
   // Optional numeric fields — must be finite non-negative

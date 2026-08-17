@@ -818,3 +818,42 @@ describe('mapOtlpTraces — a step stamp the formatter cannot render', () => {
     expect(() => ingestTrace(db, trace)).not.toThrow();
   });
 });
+
+describe('mapOtlpTraces — hostile attribute keys and counters', () => {
+  // The prototype guard covered the step-type LOOKUP tables but not the map being
+  // BUILT: an attribute named `__proto__` reassigned the map's prototype, so its
+  // entries became inherited reads — enough to reclassify a span as a trace root
+  // and drop its step entirely.
+  it('does not let a `__proto__` attribute reclassify a span', () => {
+    // The span must NOT carry its own `gen_ai.operation.name`: an own property
+    // would shadow the poisoned prototype, which is exactly why the attack needs
+    // a span that classifies by NAME while the prototype supplies the operation.
+    const payload = otlp([
+      span({ traceId: 'tp2', spanId: 'p1', name: 'chat', start: 1 * MS, end: 2 * MS, attrs: {} }),
+    ]);
+    // Inject a kvlist-shaped __proto__ attribute alongside the real ones.
+    const spans = (payload.resourceSpans[0].scopeSpans[0].spans as Array<Record<string, unknown>>);
+    (spans[0].attributes as unknown[]).push({
+      key: '__proto__',
+      value: { kvlistValue: { values: [{ key: 'gen_ai.operation.name', value: { stringValue: 'invoke_agent' } }] } },
+    });
+
+    const [trace] = mapOtlpTraces(payload);
+    expect(trace.steps).toHaveLength(1);
+    expect(trace.steps![0].step_type).toBe('llm_call');
+  });
+
+  // protobuf int64 is signed, so a negative usage count is wire-legal — and it
+  // was stored verbatim, dragging `stats` sums negative and breaking the
+  // export → ingest round trip.
+  it('clamps a negative usage counter instead of storing it', () => {
+    const [trace] = mapOtlpTraces(otlp([
+      span({
+        traceId: 'tn', spanId: 'n1', name: 'chat', start: 1 * MS, end: 2 * MS,
+        attrs: { 'gen_ai.operation.name': 'chat', 'gen_ai.usage.input_tokens': -500, 'gen_ai.usage.output_tokens': -9 },
+      }),
+    ]));
+    expect(trace.total_tokens).toBeNull();
+    expect(() => ingestTrace(db, trace)).not.toThrow();
+  });
+});

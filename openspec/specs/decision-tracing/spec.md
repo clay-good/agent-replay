@@ -28,7 +28,7 @@ The system SHALL support an optional `caused_by_step` (step number) on every ste
 
 ### Requirement: Decision records
 
-The system SHALL store, for steps of type `decision`, an optional structured decision record: the options considered (each with optional rationale and score), the chosen option, an overall rationale, a confidence value between 0 and 1, and a `decided_by` attribution (`agent`, `user`, or `policy`) so that model choices, human approvals, and policy-engine verdicts are distinguishable — matching how real harnesses attribute decisions (e.g., Gemini CLI records tool-call decisions as `accept`/`reject`/`modify`/`auto_accept`; Claude Code permission decisions are `allow`/`deny`/`ask`). Decision records on non-decision steps SHALL be rejected.
+The system SHALL store, for a step of ANY type, an optional structured decision record: the options considered (each with optional rationale and score), the chosen option, an overall rationale, a confidence value between 0 and 1, and a `decided_by` attribution (`agent`, `user`, or `policy`) so that model choices, human approvals, and policy-engine verdicts are distinguishable — matching how real harnesses attribute decisions (e.g., Gemini CLI records tool-call decisions as `accept`/`reject`/`modify`/`auto_accept`; Claude Code permission decisions are `allow`/`deny`/`ask`). A decision record SHALL be accepted on a step of any type — the live recorder attaches one to whatever step made the choice, and `decisions`, `why` and `diff` all read it wherever it hangs.
 
 #### Scenario: Decision with alternatives
 

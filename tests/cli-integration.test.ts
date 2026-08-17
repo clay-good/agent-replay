@@ -1203,6 +1203,48 @@ describe('CLI integration', () => {
     expect(out).toMatch(/\\x0d/);
   });
 
+  it('never lets a gate BOOTSTRAP the store it is supposed to consult', () => {
+    // `ensureDatabase` creates what it does not find, so a gate pointed at the
+    // wrong directory built an empty store, allowed everything, and left that
+    // store behind so every later check allowed too. Checking only on the tool
+    // call was a one-shot any earlier event disarmed: with one `--enforce`
+    // command line registered across all hook events — the configuration that
+    // check was written to support — SessionStart fires first and bootstraps it.
+    const missing = join(dir, 'no-store-here');
+    // Spawned directly: the run() helper appends its own --dir, which would
+    // point these at the seeded store instead of the missing one.
+    const spawn = (args: string[], payload: unknown) => {
+      try {
+        const stdout = execFileSync(process.execPath, [CLI, ...args], {
+          encoding: 'utf8', input: JSON.stringify(payload), stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        return { stdout, code: 0 };
+      } catch (e) {
+        const err = e as { stdout?: string; status?: number | null };
+        return { stdout: err.stdout ?? '', code: err.status ?? 1 };
+      }
+    };
+
+    // A non-gating event neither creates the store nor blocks the session.
+    const session = spawn(['hook', 'SessionStart', '--enforce', '--dir', missing],
+      { hook_event_name: 'SessionStart', session_id: 's1', cwd: '/p' });
+    expect(session.code).toBe(0);
+    expect(existsSync(join(missing, 'traces.db'))).toBe(false);
+
+    // The tool call that would have gone unchecked is blocked.
+    const gated = spawn(['hook', 'PreToolUse', '--enforce', '--dir', missing],
+      { hook_event_name: 'PreToolUse', session_id: 's1', tool_name: 'Bash', tool_input: { command: 'rm -rf /' } });
+    expect(JSON.parse(gated.stdout).hookSpecificOutput.permissionDecision).toBe('deny');
+    expect(existsSync(join(missing, 'traces.db'))).toBe(false);
+
+    // Same fail-open in the command the README documents as the standalone gate.
+    const check = spawn(['guard', 'check', '--dir', missing],
+      { step_type: 'tool_call', name: 'rm_rf', input: { cmd: 'rm -rf /' } });
+    expect(check.code).toBe(2);
+    expect(JSON.parse(check.stdout).action).toBe('deny');
+    expect(existsSync(join(missing, 'traces.db'))).toBe(false);
+  });
+
   it('demo --reset deletes the store files, not a working tree that merely looks like one', () => {
     // The name check is a naming heuristic, not proof of a store: a source
     // checkout called `agent-replay-project` passes it, and --reset then rm -r'd

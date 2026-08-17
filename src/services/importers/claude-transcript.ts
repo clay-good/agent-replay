@@ -16,9 +16,15 @@ import type { IngestTraceInput, IngestStepInput, Trace } from '../../models/type
  * tool_use↔tool_result paired by `tool_use_id`; `usage` token counts aggregated.
  */
 
-/** Whether a captured input already holds a non-empty prompt. */
+/**
+ * Whether a captured input already holds a real prompt.
+ *
+ * Trimmed, because a whitespace-only first record swallowed the next, real one
+ * exactly as an empty one did — and because the sibling "is this real content?"
+ * predicate in eval-service (`isAnswer`) trims, so the two must not disagree.
+ */
 function hasPrompt(input: Record<string, unknown> | undefined): boolean {
-  return typeof input?.prompt === 'string' && input.prompt.length > 0;
+  return typeof input?.prompt === 'string' && input.prompt.trim().length > 0;
 }
 
 const SOURCE_FORMAT = 'claude-transcript';
@@ -197,7 +203,7 @@ export function importClaudeTranscript(
       // discarded and the trace kept no question at all.
       if (type === 'user' && !hasPrompt(input)) {
         input = { prompt: content };
-        contributed = content.length > 0;
+        contributed = content.trim().length > 0;
       } else if (type === 'assistant') {
         lastAssistantText = content;
         steps.push({ step_number: stepNumber++, step_type: 'output', name: 'assistant_message', output: { text: content } });
@@ -207,9 +213,15 @@ export function importClaudeTranscript(
       for (const block of content as Block[]) {
         switch (block?.type) {
           case 'text': {
-            if (type === 'user' && !input) {
+            // Same rule as the string branch above: `{prompt: ''}` is truthy, so
+            // `!input` treated an empty or whitespace-only first record as
+            // "input captured" and discarded the next, REAL prompt. This is the
+            // shape real Claude Code user records actually use, so fixing only
+            // the string branch left the bug fully reachable — and left the two
+            // branches disagreeing about the tally for the identical situation.
+            if (type === 'user' && !hasPrompt(input)) {
               input = { prompt: block.text ?? '' };
-              contributed = true;
+              contributed = (block.text ?? '').trim().length > 0;
             } else if (type === 'assistant' && block.text) {
               lastAssistantText = block.text;
               steps.push({ step_number: stepNumber++, step_type: 'output', name: 'assistant_message', output: { text: block.text } });
@@ -377,6 +389,7 @@ function buildSubagentSteps(
 ): { steps: IngestStepInput[]; tokens: number; imported: number; skipped: number } {
   const toolResults = new Map<string, unknown>();
   const toolErrors = new Set<string>();
+  const subagentToolUseIds = new Set<string>();
   for (const rec of records) {
     const content = (rec.message as { content?: unknown } | undefined)?.content;
     if (Array.isArray(content)) {
@@ -385,6 +398,7 @@ function buildSubagentSteps(
           toolResults.set(block.tool_use_id, block.content);
           if (block.is_error === true) toolErrors.add(block.tool_use_id);
         }
+        if (block?.type === 'tool_use' && block.id) subagentToolUseIds.add(block.id);
       }
     }
   }
@@ -438,7 +452,11 @@ function buildSubagentSteps(
               metadata: { tool_use_id: block.id },
             });
           } else if (block?.type === 'tool_result') {
-            contributedResult = true;
+            // Paired only — mirroring the main loop, as the comment above claims.
+            // A result whose id matches no tool_use in this subagent file is
+            // stored nowhere, so counting it as imported reports content the
+            // store does not have.
+            if (block.tool_use_id && subagentToolUseIds.has(block.tool_use_id)) contributedResult = true;
           }
         }
       }

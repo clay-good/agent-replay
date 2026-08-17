@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import { ensureDatabase } from '../db/index.js';
 import { dashboardStats, statusCounts, agentStats } from '../ui/dashboard-data.js';
 import { summaryPanel } from '../ui/boxen-panels.js';
-import { heading, label, formatCostUsd } from '../ui/theme.js';
+import { heading, label, formatCostUsd, safeText } from '../ui/theme.js';
 import { formatDuration, parseSinceToIso } from '../utils/time.js';
 import { errorMessage } from '../utils/json.js';
 import { resolveDataDir } from '../utils/paths.js';
@@ -87,7 +87,7 @@ export function runStats(opts: StatsOptions = {}): void {
       // timeout and no failures printed "1 failed" three lines below a status
       // breakdown showing `timeout 1` and no failed row.
       const failed = a.failed_or_timeout > 0 ? chalk.red(` (${a.failed_or_timeout} failed or timed out)`) : '';
-      console.log(`    ${label(a.agent_name)} ${chalk.white(String(a.count))}${failed}`);
+      console.log(`    ${label(safeText(a.agent_name))} ${chalk.white(String(a.count))}${failed}`);
     }
   }
 

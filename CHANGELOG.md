@@ -171,6 +171,68 @@ between them, and nothing else.
 
 ### Fixed
 
+- A run wrapped by `agent-replay run` could be recorded as clean when it failed,
+  or left open forever. `trace_end.status` is a free string, and any non-empty one
+  counted as "the child owns the outcome" — but `updateTrace` coerces anything
+  unrecognized to `completed`, so a child ending with `status: "error"` was
+  laundered into a clean-looking trace AND suppressed the exit-code finalization,
+  leaving no error text on a run that exited non-zero. A golden baseline recorded
+  that way then matched it. `status: "running"` was worse: it survives coercion,
+  so the trace stayed open forever and a bare `watch` live-tailed a dead process.
+  Only a terminal status the store can record now counts.
+
+- A trace's `started_at`/`ended_at` were coerced by the writer and validated by
+  nobody, so a non-string timestamp was silently replaced by the INGEST WALL CLOCK
+  at exit 0 — with `--dry-run` reporting the file valid. Every `--since` window and
+  every ordering then answered about a time the run never had.
+
+- `completeness-check` could not fail a run in which no tool call completed:
+  `all_tool_calls_completed` has the same 0.3-weight-against-0.7-threshold shape as
+  the error criteria, so a score of 0 landed on exactly the threshold and passed,
+  with "0/2 tool calls have output" printed beside the green verdict.
+
+- `hallucination-check` hard-failed any trace containing an error step, including
+  a completed run that retried a timed-out tool call successfully — so an imported
+  session with one failed shell command failed outright while
+  `completeness-check` called the same trace 100% complete. Criticality now keys
+  on how the RUN ended (its status or a trace-level error), not on any step error.
+
+- An answer of `0` or `false` was not counted as an answer, so a count query that
+  legitimately returns zero, or a predicate step returning false, failed
+  `completeness-check` at exit 1 on a correct run.
+
+- An empty or whitespace-only first user record still discarded the next, REAL
+  prompt for ARRAY-content records — the shape real Claude Code transcripts use.
+  The earlier fix reached only the string-content branch, and the two then
+  disagreed on the tally for the identical situation. The subagent path likewise
+  never got the orphan-`tool_result` pairing check its own comment claims to
+  mirror.
+
+- An OpenTelemetry root span that arrived in a later batch was silently dropped —
+  its name, prompt, timing and attributes discarded and the trace attributed to a
+  sub-agent — because content was adopted only when the existing trace was flagged
+  synthetic. That is the normal `BatchSpanProcessor` order, since a sub-agent span
+  ends before its parent. The same gap dropped a log session's prompt outright
+  when the batch that opened the trace carried none (a receiver started
+  mid-session, a resumed session, an out-of-order flush), and discarded the root's
+  own metadata (provider, model, span id).
+
+- A negative usage counter from OTLP was stored verbatim. protobuf `int64` is
+  signed, so it is wire-legal; it dragged `stats` sums negative and broke the
+  export → `ingest` round trip, which requires a non-negative total.
+
+- `guard add --priority` parsed instead of validating, so `--priority high`
+  silently stored 0 and `--priority 1e3` stored 1 — and priority is what orders
+  policy evaluation and breaks ties, so a rule meant to rank first ranked last and
+  `guard check` cited the wrong policy.
+
+- Six more render sites echoed producer- or model-supplied text raw, including the
+  `check` gate's own divergence report (where the values are exactly the
+  attacker-influenced fields), the per-agent rows of `stats`, `show --snapshots`,
+  `guard test`, the eval table beside the panel that was already escaped, and the
+  dashboard, where the bytes also corrupt blessed's width math for the whole
+  layout.
+
 - `ingest --dry-run` passed files the real run could never load. A step's
   `error` was the one TEXT column bound without coercion, so a structured error
   (`{"code": …, "message": …}` — a shape real producers send) validated clean and
@@ -1965,6 +2027,28 @@ between them, and nothing else.
   error instead of a raw `SqliteError` stack trace.
 
 ### Security
+
+- The guardrail gate could be silenced by pointing it at the wrong directory.
+  `ensureDatabase` creates what it does not find, so `guard check` run from
+  anywhere but the project root built an empty store, answered `allow` at exit 0,
+  and left that store behind so every later check allowed too. `hook --enforce`
+  had the same hole through a different door: its missing-store check ran only on
+  the tool call, so with one `--enforce` command line registered across every hook
+  event — the configuration the check existed to support — `SessionStart` fired
+  first, bootstrapped an empty store, and from then on every tool call was allowed
+  unchecked and silently. No event under `--enforce` may create the store now; a
+  gating event with no store is a deny, and a non-gating one is a loud no-op.
+
+- The OpenTelemetry receiver listened on every interface while calling itself
+  local and printing `http://localhost`. Any host on the network could POST
+  unauthenticated traces into the store, or spend its 32 MB body budget. It now
+  binds loopback only.
+
+- An OTLP attribute literally named `__proto__` reassigned the prototype of the
+  map its attributes are read from, so its entries became inherited reads for
+  every later lookup — enough to reclassify a span as a trace root and drop its
+  step. The map is now prototype-less. (Today's earlier fix covered the step-type
+  lookup TABLES; this is the map being built.)
 
 - `hook --enforce --no-input` no longer fails open on content-based guardrails.
   `--no-input` redacted the tool-call arguments before policy evaluation, not

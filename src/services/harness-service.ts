@@ -100,7 +100,18 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
       // still be recorded as failed. Setting the flag only after a successful
       // apply also means a trace_end that failed to persist can't wrongly
       // suppress that finalization.
-      if (event.type === 'trace_end' && typeof event.status === 'string' && event.status) {
+      // Only a TERMINAL status the store can actually record counts as the child
+      // owning the outcome. `TraceEndEvent.status` is a free string, and
+      // `updateTrace` coerces anything unrecognized to `completed` — so a child
+      // ending with `status: "error"` was laundered into a clean-looking trace
+      // AND suppressed the exit-code finalization, leaving no error text on a run
+      // that exited non-zero: a golden baseline recorded `completed` then matched
+      // it. `status: "running"` was worse — it survives coercion, so the trace
+      // stayed open forever and bare `watch` live-tailed a dead process.
+      if (
+        event.type === 'trace_end' &&
+        (event.status === 'completed' || event.status === 'failed' || event.status === 'timeout')
+      ) {
         childDeclaredStatus = true;
       }
     } catch (err) {
