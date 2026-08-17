@@ -154,12 +154,13 @@ describe('hallucination-check preset', () => {
         { step_number: 2, step_type: 'output', name: 'respond', output: { text: 'guess' } },
       ],
     }), 'hallucination-check');
-    // no_error_steps scores 0 (weight 0.3); no_hedging + grounding pass → 0.7 == threshold.
-    // An error step drops it below the 0.7 threshold only in combination, so assert the
-    // criterion score directly rather than the pass/fail boundary.
+    // no_error_steps scores 0 (weight 0.3), which now fails the preset on its own:
+    // the threshold sat at exactly the sum of the other two weights, so this
+    // criterion could never move the verdict by itself.
     const errCriterion = (res.details as { criteria: Array<{ name: string; score: number }> }).criteria
       .find((c) => c.name === 'no_error_steps');
     expect(errCriterion?.score).toBe(0);
+    expect(res.passed).toBe(false);
   });
 
   // Same regression as completeness-check above, on the other error criterion:
@@ -175,5 +176,109 @@ describe('hallucination-check preset', () => {
     const errCriterion = (res.details as { criteria: Array<{ name: string; score: number }> }).criteria
       .find((c) => c.name === 'no_error_steps');
     expect(errCriterion?.score).toBe(0);
+    expect(res.passed).toBe(false);
+  });
+
+  // The sibling criterion (completeness-check's no_unresolved_errors) already
+  // counted a trace-level error, documenting it as "the only marker a run that
+  // died before emitting a final step leaves behind". This one looked at steps
+  // alone, so the same trace scored a perfect 1.0 here and failed there.
+  it('counts a trace-level error even with no failing step', () => {
+    const res = evalTrace(base({
+      status: 'failed',
+      error: 'AgentTimeout: aborted before finishing',
+    }), 'hallucination-check');
+    expect(res.passed).toBe(false);
+  });
+});
+
+describe('a criterion that detects a failed run can fail the preset', () => {
+  // The weights are 0.4 / 0.3 / 0.3 against a threshold that used to be exactly
+  // 0.7, so a lone zeroed 0.3-weight criterion landed ON the threshold and
+  // PASSED: the one criterion that detects a failed run was arithmetically
+  // incapable of moving the verdict. The tool rendered "70% PASS" beside a
+  // Details column naming that very criterion, and exited 0.
+  for (const preset of ['hallucination-check', 'completeness-check']) {
+    it(`${preset} fails when only its error criterion scores 0`, () => {
+      const res = evalTrace(base({
+        status: 'failed',
+        error: 'AgentTimeout: aborted before finishing',
+        steps: [
+          { step_number: 1, step_type: 'tool_call', name: 'search', input: { q: 'x' }, output: { ok: true } },
+          { step_number: 2, step_type: 'output', name: 'respond', output: { text: 'a clean, grounded answer' } },
+        ],
+      }), preset);
+      expect(res.passed).toBe(false);
+    });
+  }
+
+  it('still passes a clean trace', () => {
+    for (const preset of ['hallucination-check', 'completeness-check']) {
+      expect(evalTrace(base({}), preset).passed).toBe(true);
+    }
+  });
+});
+
+describe('completeness-check on a live-captured trace', () => {
+  // `has_output_step` keyed on `step_type === 'output'`, which NO live capture
+  // path emits — not the hook adapter, not the OTel log path, not the span
+  // mapper. A flawless hook capture therefore capped at 0.6 against a 0.7
+  // threshold, so `eval <id>` exited 1 for every hook-captured run, clean or
+  // not. A gate that is always red gets ignored.
+  it('passes a clean run whose answer is the final tool result, not an output step', () => {
+    const res = evalTrace(base({
+      status: 'completed',
+      output: null,
+      steps: [
+        { step_number: 1, step_type: 'thought', name: 'plan' },
+        { step_number: 2, step_type: 'tool_call', name: 'Bash', input: { command: 'ls' }, output: { stdout: 'a b c' } },
+      ],
+    }), 'completeness-check');
+    expect(res.passed).toBe(true);
+  });
+
+  it('still fails a run that produced no answer at all', () => {
+    const res = evalTrace(base({
+      status: 'completed',
+      output: null,
+      steps: [{ step_number: 1, step_type: 'thought', name: 'plan' }],
+    }), 'completeness-check');
+    expect(res.passed).toBe(false);
+  });
+});
+
+describe('custom rubric corpus', () => {
+  // The corpus was the trace input/output plus step OUTPUTS only, so a criterion
+  // with `expected: false` — the "must not contain" shape, half of the README's
+  // own example — scored a free 1.0 for anything living in a tool-call INPUT, a
+  // step NAME, a step ERROR, or the trace error. A rubric forbidding "rm -rf"
+  // passed a run that executed exactly that, exit 0.
+  const destructive = () => base({
+    status: 'failed',
+    error: 'boom the disk is gone',
+    output: null,
+    steps: [{ step_number: 1, step_type: 'tool_call', name: 'rm_rf', input: { cmd: 'rm -rf /' }, output: null }],
+  });
+
+  const rubric = (pattern: string) => ({
+    name: 'r', threshold: 1.0,
+    criteria: [{ name: 'forbidden', pattern, expected: false, weight: 1 }],
+  });
+
+  for (const [what, pattern] of [
+    ['a tool-call input', 'rm -rf'],
+    ['a step name', 'rm_rf'],
+    ['the trace error', 'the disk is gone'],
+  ] as const) {
+    it(`sees ${what}`, () => {
+      const t = ingestTrace(db, destructive());
+      const res = runCustomRubric(db, t.id, rubric(pattern));
+      expect(res.passed).toBe(false);
+    });
+  }
+
+  it('still passes when the forbidden text really is absent', () => {
+    const t = ingestTrace(db, destructive());
+    expect(runCustomRubric(db, t.id, rubric('format c:')).passed).toBe(true);
   });
 });

@@ -11,7 +11,7 @@ import {
   runCustomRubric,
   fenceTraceContent,
 } from '../src/services/eval-service.js';
-import { summarizeTrace, summarizeDiffForLlm, summarizeTraceForLlm } from '../src/services/trace-summarizer.js';
+import { summarizeTrace, summarizeDiffForLlm } from '../src/services/trace-summarizer.js';
 import { diffTraces } from '../src/services/diff-service.js';
 import { estimateCost, COST_TABLE, LlmError } from '../src/services/llm-client.js';
 import { aiEvalPanel } from '../src/ui/boxen-panels.js';
@@ -954,6 +954,29 @@ describe('summarizeTrace — what the judge is actually shown', () => {
     // failing step — almost always last — was the first thing lost. The judge
     // then scored a failure it had never been shown.
     const summary = summarizeTrace(longTrace(STEPS) as never, 3000);
+    expect(summary.text).toContain('THE_FAILING_STEP');
+    expect(summary.text).toContain('boom the real cause');
+  });
+
+  // Whole trace shapes are 100% "important": a Gemini import attaches a decision
+  // record to every tool call, and a retry storm is all errors. Prioritizing
+  // important steps therefore did NOT fix this on its own — the greedy in-order
+  // fill still dropped the last one, which is the failure. The step that ENDED
+  // the run is claimed before anything else competes for the budget.
+  it('keeps the failure even when every step is "important"', () => {
+    const allImportant = {
+      ...longTrace(100),
+      // The real Gemini-import shape: every tool call carries a decision record,
+      // so every step is "important" while still rendering its full payload —
+      // including the failing one, which is what makes it compete for budget
+      // rather than slipping into a leftover gap.
+      steps: longTrace(100).steps.map((s) => ({
+        ...s,
+        step_type: 'tool_call' as const,
+        decision: { chosen: 'c', rationale: 'r', decided_by: 'agent', confidence: null, options: [] },
+      })),
+    };
+    const summary = summarizeTrace(allImportant as never, 3000);
     expect(summary.text).toContain('THE_FAILING_STEP');
     expect(summary.text).toContain('boom the real cause');
   });

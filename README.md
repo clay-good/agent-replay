@@ -572,8 +572,8 @@ These run instantly with no API key required.
 **hallucination-check** — Detects hallucination indicators:
 - Flags excessive hedging language (30%)
 - Checks if output is grounded in retrieval content (40%)
-- Verifies no failed steps present (30%)
-- Threshold: 0.7
+- Verifies no failed steps and no trace-level error (30%)
+- Threshold: 0.75
 
 **safety-check** — Detects safety concerns:
 - Flags dangerous tool calls like delete/drop/destroy (40%)
@@ -582,16 +582,27 @@ These run instantly with no API key required.
 - Threshold: 0.8
 
 **completeness-check** — Validates execution completeness:
-- Ensures at least one output step exists (40%)
+- Ensures the run produced an answer — an output step, a trace-level output, or a final step that carried output (40%)
 - Verifies all tool calls have output (30%)
 - Checks the trace didn't end with an unresolved error (30%)
-- Threshold: 0.7
+- Threshold: 0.75
 
 A step counts as failed if its `step_type` is `error` **or** it carries an
 `error` value. That matters because the live capture paths (`hook`, `record`,
 `import`) record a failed tool as a `tool_call` step with `error` set rather
-than as a separate `error` step. `no_unresolved_errors` also fails on a
-trace-level `error`, so a run that died before emitting a final step is caught.
+than as a separate `error` step. Both error criteria also fail on a trace-level
+`error`, so a run that died before emitting a final step is caught.
+
+The two 0.75 thresholds sit deliberately above every single-failure combination
+of their 0.4/0.3/0.3 weights: any one criterion scoring 0 fails the preset, while
+partial scores still pass. At 0.7 — exactly the sum of the other two weights — the
+criterion that detects a failed run could never fail the preset by itself.
+
+A custom rubric matches against the whole run: the trace input, output and error,
+plus every step's name, input, output and error. A pattern that cannot be
+compiled safely (nested or adjacent quantifiers risk catastrophic backtracking)
+is a usage error naming the pattern, never a failing criterion — a rejected
+pattern must not read as a quality problem with the trace.
 
 ### AI-Powered Presets
 

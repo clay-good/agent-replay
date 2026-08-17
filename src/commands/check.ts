@@ -95,7 +95,16 @@ export function runCheck(opts: CheckOptions = {}): void {
   // matched...", exit 2 — never naming the bad field) or as exit 1 from a
   // store-open failure. `watch` already validates --interval before resolving a
   // trace; usage errors belong before the work.
-  const fields = opts.fields ? opts.fields.split(',').map((s) => s.trim()).filter(Boolean) : undefined;
+  const fields = opts.fields != null
+    ? opts.fields.split(',').map((s) => s.trim()).filter(Boolean)
+    : undefined;
+  // A list that names nothing silently reverted to the DEFAULT field set, so a
+  // script meaning to narrow the comparison got the full one instead — the same
+  // hole `diff --fields` had.
+  if (fields != null && fields.length === 0) {
+    fail(2, `--fields listed no field names: ${JSON.stringify(opts.fields)}`, `Known fields: ${KNOWN_FIELDS.join(', ')}`);
+    return;
+  }
   const unknownFields = (fields ?? []).filter((f) => !(KNOWN_FIELDS as readonly string[]).includes(f));
   if (unknownFields.length > 0) {
     fail(

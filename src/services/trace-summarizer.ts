@@ -156,42 +156,45 @@ function windowedJson(value: unknown, other: unknown, max: number): string {
 function summarizeSteps(steps: TraceStep[], charBudget: number): string[] {
   const outputLimit = charBudget > 2000 ? 200 : 100;
 
-  // Render every step first, then decide what fits. The previous version walked
-  // the steps in order and broke when the budget ran out, so on a long trace the
-  // LAST steps were the first thing lost — and the failing step is almost always
-  // last. An AI evaluator was then handed a summary of a FAILED trace with no
-  // failing step in it (the trace-level `error` is null on the normal
-  // hook-capture shape, where the failure detail lives on the step) and scored a
-  // failure it had never been shown. Prioritization existed but only ran under a
-  // TIGHT budget, so the default 3000-token budget took the positional path.
-  const rendered = steps.map((step) => ({
-    step,
-    line: renderStepSummary(step, outputLimit),
-    important: isImportantStep(step),
-  }));
+  // Decide WHAT to keep before rendering, and render only what is kept.
+  //
+  // Two failure modes shaped this. Walking the steps in order and stopping when
+  // the budget ran out lost the LAST steps — and the failing step is almost
+  // always last, so an AI evaluator judged a failure it had never been shown
+  // (the trace-level `error` is null on the normal hook-capture shape, where the
+  // detail lives on the step). Prioritizing "important" steps did not fix it on
+  // its own either: whole trace shapes are 100% important — a Gemini import
+  // attaches a decision record to every tool call, and a retry storm is all
+  // errors — so the greedy in-order fill dropped the last important step just
+  // the same. The step that ENDED the run is therefore claimed first, before
+  // anything else competes for the budget.
+  let lastFailureIndex = -1;
+  steps.forEach((step, i) => {
+    if (step.error != null || step.step_type === 'error') lastFailureIndex = i;
+  });
+  const priority = (i: number): number => {
+    if (i === lastFailureIndex) return 0;
+    if (isImportantStep(steps[i])) return 1;
+    return 2;
+  };
 
-  const cost = (line: string) => line.length + 1;
-  const total = rendered.reduce((n, r) => n + cost(r.line), 0);
+  const order = steps.map((_, i) => i).sort((a, b) => priority(a) - priority(b) || a - b);
 
   const keep = new Set<number>();
-  if (total <= charBudget) {
-    rendered.forEach((_, i) => keep.add(i));
-  } else {
-    // Important steps first — the error, the output, the decision — then fill
-    // what's left with the rest. Both passes run in step order, and the lines are
-    // emitted in step order below either way.
-    let used = 0;
-    for (const pass of [true, false]) {
-      rendered.forEach((r, i) => {
-        if (keep.has(i) || r.important !== pass) return;
-        if (used + cost(r.line) > charBudget) return;
-        keep.add(i);
-        used += cost(r.line);
-      });
-    }
+  const rendered = new Map<number, string>();
+  let used = 0;
+  const MIN_LINE = 40; // no useful step line is shorter; below this, stop looking
+  for (const i of order) {
+    if (charBudget - used < MIN_LINE) break;
+    const line = renderStepSummary(steps[i], outputLimit);
+    if (used + line.length + 1 > charBudget) continue;
+    rendered.set(i, line);
+    keep.add(i);
+    used += line.length + 1;
   }
 
-  const lines = rendered.filter((_, i) => keep.has(i)).map((r) => r.line);
+  // Emitted in step order whatever order they were claimed in.
+  const lines = [...keep].sort((a, b) => a - b).map((i) => rendered.get(i)!);
   const omitted = steps.length - lines.length;
   // Say so WHENEVER anything was dropped. The marker used to be emitted only on
   // the budget-break path, so the prioritizing branch could silently discard 40

@@ -51,7 +51,10 @@ export async function runDiff(
 
   // Optionally filter by fields
   let appliedFields: string[] | undefined;
-  if (opts.fields) {
+  // `opts.fields != null`, not truthiness: `--fields ""` is the very case the
+  // guard below names (a script interpolating an empty variable), and the empty
+  // string skipped the whole block.
+  if (opts.fields != null) {
     const allowedFields = opts.fields.split(',').map((f) => f.trim()).filter(Boolean);
     // A list that filters down to NOTHING (`--fields ,` or a script
     // interpolating an empty variable) passed the unknown-name guard vacuously

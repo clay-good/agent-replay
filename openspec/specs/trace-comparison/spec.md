@@ -8,7 +8,7 @@ Understand behavioral change between runs: side-by-side diffing of two traces an
 
 ### Requirement: Trace diff
 
-The system SHALL compare two traces via `agent-replay diff <a> <b>`, pairing steps by position and comparing exactly the fields `step_type`, `name`, `input`, and `output` (input/output compared as their stored JSON text, so key order matters); unpaired trailing steps are reported as `missing_left`/`missing_right`. The first step with any difference is the divergence step. Output modes: `--compact`, `--fields`, `--json`.
+The system SHALL compare two traces via `agent-replay diff <a> <b>`, pairing steps by `step_number` (a merge-join, so gaps and differing numbering never misalign the comparison) and comparing the fields `step_type`, `name`, `input`, `output`, `model`, `error`, and `decision`, plus the trace-level `trace_input`, `status`, `trace_error`, and `trace_output`. Input and output are compared as NORMALIZED JSON, so key order and whitespace never register as a difference. A step present on only one side is reported as `missing_left`/`missing_right`. `--fields` narrows the comparison to a named subset; a list naming no field at all is a usage error. The first step with any difference is the divergence step. Output modes: `--compact`, `--fields`, `--json`.
 
 #### Scenario: Diverging traces
 

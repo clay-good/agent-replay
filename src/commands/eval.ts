@@ -16,7 +16,7 @@ import { evalTable } from '../ui/table.js';
 import { aiEvalPanel } from '../ui/boxen-panels.js';
 import { heading, formatScorePct } from '../ui/theme.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
-import { errorMessage } from '../utils/json.js';
+import { errorMessage, safeRegex } from '../utils/json.js';
 import type { EvalResult } from '../models/types.js';
 import { resolveDataDir } from '../utils/paths.js';
 
@@ -72,8 +72,8 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
       // A malformed or unreadable rubric must fail the command, not exit 0 —
       // otherwise a broken CI gate silently reads as "passed". Treat a bad
       // rubric file as a usage error (exit 2), like a malformed --max-cost.
-      failSpinner(spinner, `Rubric error: ${errorMessage(err)}`);
-      process.exitCode = 2;
+      failSpinner(spinner, '');
+      refuse(2, `Rubric error: ${errorMessage(err)}`);
       return;
     }
     successSpinner(spinner, `Loaded rubric: ${rubric.name}`);
@@ -141,8 +141,7 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
     if (opts.maxCost != null) {
       const c = Number(opts.maxCost);
       if (!Number.isFinite(c) || c < 0) {
-        console.error(chalk.red(`  Invalid --max-cost: ${opts.maxCost} (must be a non-negative number in USD).`));
-        process.exitCode = 2;
+        refuse(2, `Invalid --max-cost: ${opts.maxCost} (must be a non-negative number in USD).`);
         return;
       }
       // Consume the value we just validated. Re-parsing with safeParseFloat below
@@ -389,6 +388,18 @@ async function parseRubric(raw: string, path: string): Promise<{
         throw new Error(`criteria[${i}] "weight", if set, must be a non-negative number`);
       }
       c.weight = w;
+    }
+    // Compile it here, where a bad pattern is still a USAGE error. The scorer
+    // pushes an uncompilable pattern as score 0 carrying its full weight, and the
+    // human table prints only the criterion NAME — indistinguishable from a
+    // genuine non-match. So a rubric whose pattern the (deliberately
+    // conservative) ReDoS filter rejects reported a quality FAILURE of the trace,
+    // exit 1, on a correct run.
+    if (!safeRegex(String(c.pattern), 'i')) {
+      throw new Error(
+        `criteria[${i}] "pattern" could not be compiled safely: ${JSON.stringify(c.pattern)}. ` +
+          'Patterns are rejected when they risk catastrophic backtracking (nested or adjacent quantifiers).',
+      );
     }
   }
 

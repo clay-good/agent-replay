@@ -124,6 +124,17 @@ between them, and nothing else.
 
 ### Changed
 
+- `hallucination-check` and `completeness-check` now require **0.75** rather than
+  0.7. Their criteria weigh 0.4 / 0.3 / 0.3, so a single criterion scoring 0 lands
+  on exactly 0.7 — which passed. The one criterion in each preset that detects a
+  failed run (weight 0.3) was therefore arithmetically incapable of failing the
+  preset by itself: a trace the tool renders as `✘ FAILED` reported "70% PASS"
+  beside a Details column naming that very criterion, and exited 0. The new
+  threshold sits above every single-failure combination, so any criterion that
+  scores 0 fails the preset while partial scores still pass. **A run that was
+  passing on a zeroed criterion will now fail** — which is the point, but it is a
+  visible change to an existing gate.
+
 - **Exit codes are now consistent across the CLI**, so scripts and CI can gate
   on `$?`: every failure exits non-zero — `1` for a runtime failure (not found,
   malformed input, a `check --golden` regression, an `eval` over its threshold)
@@ -155,6 +166,57 @@ between them, and nothing else.
   trace in. An explicit `--dir` still wins.
 
 ### Fixed
+
+- `completeness-check` was unsatisfiable for every live-captured trace. Its
+  heaviest criterion keyed on `step_type === 'output'`, which no capture path
+  emits — not the hook adapter, not the OTel log path, not the span mapper — so a
+  flawless hook capture capped at 0.6 against a 0.7 threshold and `eval <id>`
+  exited 1 for every hook-captured run, clean or not. A gate that is always red
+  gets ignored. A trace-level output, or the final step that carried one, now
+  counts as the answer. Same defect class the error criteria were already fixed
+  for: a criterion keyed on something the capture path never produces.
+
+- `hallucination-check`'s error criterion ignored a trace-level error, so a run
+  that died before emitting a final step scored a perfect 1.0 — while
+  `completeness-check` saw the same trace as failed and documented why ("the only
+  marker a run that died before emitting a final step leaves behind"). The two
+  now agree.
+
+- A custom rubric searched a narrower corpus than the built-in it mirrors: the
+  trace input/output plus step OUTPUTS only. A criterion with `expected: false` —
+  the "must not contain" shape, half of the README's own example — therefore
+  scored a free 1.0 for anything living in a tool-call input, a step name, a step
+  error, or the trace error. A rubric forbidding `rm -rf` passed a run that
+  executed exactly that, exit 0. Step names, inputs, errors and the trace error
+  are now searched too.
+
+- A rubric pattern the ReDoS filter rejects was scored 0 with its full weight
+  rather than refused, and the table prints only the criterion name — so a valid,
+  non-catastrophic pattern that the deliberately conservative filter declines
+  reported a quality FAILURE of the trace, exit 1, on a correct run. Patterns are
+  now compiled at parse time, where a bad one is a usage error naming the pattern.
+
+- `eval --rubric` and `eval --max-cost` refusals printed nothing on stdout under
+  `--json`, the two paths that bypassed the helper added to guarantee a
+  JSON-shaped refusal, so `eval --json | jq -r .ok` got a parse error.
+
+- The shared diff windowing I extracted last commit lost its surrogate safety: a
+  cut could split an emoji into a lone surrogate, which renders as U+FFFD in BOTH
+  columns — the mojibake becomes the apparent difference — and the index moved
+  the wrong way, shrinking the window so the differing tail fell out of view and
+  both columns printed identical text again. Restored, and it now covers the
+  model-facing summary as well as the terminal view.
+
+- The AI summary still dropped the failing step when EVERY step was important — a
+  Gemini import attaches a decision record to every tool call, and a retry storm
+  is all errors — because the prioritized fill was itself in-order. The step that
+  ended the run is now claimed before anything else competes for the budget.
+  Rendering is also lazy again, restoring the early exit the rewrite had lost
+  (a 20,000-step trace went from 3 ms to 420 ms).
+
+- `diff --fields ""` and `check --fields ""` bypassed the guard that rejects a
+  list naming no fields — `diff` silently suppressed every field comparison and
+  `check` silently reverted to the default set.
 
 - `diff` never compared the DECISION record, the one field this tool exists to
   explain. Two runs that took opposite actions at the same step — one choosing

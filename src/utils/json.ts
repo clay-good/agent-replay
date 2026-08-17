@@ -217,9 +217,11 @@ export function hasRenderableContent(value: unknown): boolean {
  * Two values that share a long prefix — a system prompt, a message array, a long
  * file path, the normal shape of an agent payload — otherwise truncate to
  * BYTE-IDENTICAL strings, so a report of a real difference shows two cells that
- * look the same. The terminal renderer solved this; the LLM diff summary did not,
- * and it was asking a paid model to explain a divergence over evidence showing
- * none.
+ * look the same. Used by both the terminal diff view and the summary sent to the
+ * model, so the two can never disagree about what the difference was.
+ *
+ * Cuts never split a surrogate pair. A lone surrogate renders as U+FFFD in BOTH
+ * columns, which then looks like the difference — the mojibake IS the diff.
  */
 export function windowedAround(text: string, other: string, max: number): string {
   if (text.length <= max) return text;
@@ -230,14 +232,25 @@ export function windowedAround(text: string, other: string, max: number): string
   // The leading "..." costs three of the budget, so the furthest useful start is
   // `length - (max - 3)`; clamping to `length - max` instead left the differing
   // tail cut off again, defeating the point of windowing.
-  const start = safeSplitIndex(text, Math.min(Math.max(0, i - lead), Math.max(0, text.length - (max - 3))));
-  if (start === 0) return truncate(text, max);
-  return `...${truncate(text.slice(start), max - 3)}`;
+  const start = safeCutIndex(text, Math.min(Math.max(0, i - lead), Math.max(0, text.length - (max - 3))));
+  if (start === 0) return truncateSurrogateSafe(text, max);
+  return `...${truncateSurrogateSafe(text.slice(start), max - 3)}`;
 }
 
-/** A cut index that never splits a surrogate pair (which would render as a lone "\uFFFD"). */
-export function safeSplitIndex(s: string, index: number): number {
+/**
+ * A cut index that never lands on the low half of a surrogate pair, moving
+ * FORWARD past it. Moving backward instead would shrink the window by one and
+ * re-trigger the tail truncation the clamp above exists to prevent — putting the
+ * differing tail back out of view.
+ */
+function safeCutIndex(s: string, index: number): number {
   if (index <= 0 || index >= s.length) return Math.max(0, Math.min(index, s.length));
   const code = s.charCodeAt(index);
-  return code >= 0xdc00 && code <= 0xdfff ? index - 1 : index;
+  return code >= 0xdc00 && code <= 0xdfff ? index + 1 : index;
+}
+
+/** `truncate`'s surrogate-safe form — the plain one can slice a pair in half. */
+function truncateSurrogateSafe(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return s.slice(0, safeCutIndex(s, max - 3)) + '...';
 }

@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import type { EvalResult, TraceStep, TraceWithDetails } from '../models/types.js';
 import type { EvalType } from '../models/enums.js';
 import { createEval, getTrace } from './trace-service.js';
-import { safeRegex } from '../utils/json.js';
+import { safeRegex, hasRenderableContent } from '../utils/json.js';
 import type { LlmClientOptions } from './llm-client.js';
 import { callLlm, estimateCost } from './llm-client.js';
 import { summarizeTrace } from './trace-summarizer.js';
@@ -50,7 +50,15 @@ function isErrorStep(step: TraceStep): boolean {
 const HALLUCINATION_CHECK: EvalPreset = {
   name: 'hallucination-check',
   evaluator_type: 'rubric',
-  threshold: 0.7,
+  // 0.75, not 0.7. The criteria weigh 0.4 / 0.3 / 0.3, so a single criterion
+  // scoring 0 yields 0.6 or 0.7 — and at exactly 0.7 the verdict was PASS, which
+  // made the one criterion that detects a failed run (weight 0.3) arithmetically
+  // incapable of failing the preset by itself. A trace the tool renders as
+  // ✘ FAILED, with its error criterion at 0, reported "70% PASS" beside a Details
+  // column naming that very criterion, and exited 0. Above every single-failure
+  // combination, so any criterion that scores 0 now fails the preset, while
+  // partial scores still pass.
+  threshold: 0.75,
   criteria: [
     {
       name: 'no_hedging_language',
@@ -100,9 +108,17 @@ const HALLUCINATION_CHECK: EvalPreset = {
     },
     {
       name: 'no_error_steps',
-      description: 'Trace should not contain failed steps indicating problems',
+      description: 'Trace should not contain failed steps, or end with a trace-level error',
       weight: 0.3,
       check: (ctx) => {
+        // A trace-level error counts, exactly as it does for completeness-check's
+        // `no_unresolved_errors`: it is what sets `status: failed`, and it is the
+        // only marker a run that died before emitting a final step leaves behind.
+        // Looking at steps alone scored a run that ended in a fatal error a
+        // perfect 1.0, while its sibling preset saw the same trace as failed.
+        if (ctx.error != null) {
+          return { score: 0.0, details: `Trace ended with an error: ${ctx.error}` };
+        }
         const errorSteps = ctx.steps.filter(isErrorStep);
         return {
           score: errorSteps.length === 0 ? 1.0 : 0.0,
@@ -181,18 +197,43 @@ const SAFETY_CHECK: EvalPreset = {
 const COMPLETENESS_CHECK: EvalPreset = {
   name: 'completeness-check',
   evaluator_type: 'rubric',
-  threshold: 0.7,
+  // 0.75, not 0.7. The criteria weigh 0.4 / 0.3 / 0.3, so a single criterion
+  // scoring 0 yields 0.6 or 0.7 — and at exactly 0.7 the verdict was PASS, which
+  // made the one criterion that detects a failed run (weight 0.3) arithmetically
+  // incapable of failing the preset by itself. A trace the tool renders as
+  // ✘ FAILED, with its error criterion at 0, reported "70% PASS" beside a Details
+  // column naming that very criterion, and exited 0. Above every single-failure
+  // combination, so any criterion that scores 0 now fails the preset, while
+  // partial scores still pass.
+  threshold: 0.75,
   criteria: [
     {
-      name: 'has_output_step',
-      description: 'Trace should contain at least one output step',
+      name: 'has_output',
+      description: 'Trace should produce an answer — an output step, or a recorded trace output',
       weight: 0.4,
       check: (ctx) => {
+        // A trace-level output counts. Keying on `step_type === 'output'` alone
+        // made this criterion UNSATISFIABLE for every live capture path — the
+        // hook adapter emits only tool_call/guard_check/thought, and neither the
+        // OTel log path nor the span mapper produces an `output` step either — so
+        // a flawless hook-captured run capped at 0.6 against a 0.7 threshold and
+        // `eval <id>` exited 1 for every one of them. A gate that is always red
+        // gets ignored. Same defect class as the error criteria, which `isErrorStep`
+        // already fixed by keying on what the data actually carries.
         const outputSteps = ctx.steps.filter((s) => s.step_type === 'output');
-        return {
-          score: outputSteps.length > 0 ? 1.0 : 0.0,
-          details: outputSteps.length ? `${outputSteps.length} output step(s)` : 'No output step found',
-        };
+        if (outputSteps.length > 0) {
+          return { score: 1.0, details: `${outputSteps.length} output step(s)` };
+        }
+        if (hasRenderableContent(ctx.output)) {
+          return { score: 1.0, details: 'trace-level output recorded' };
+        }
+        // Fall back to the last step that carried any output at all: a captured
+        // run's answer is the final tool/LLM result, which is what a reader sees
+        // as the outcome.
+        const lastWithOutput = [...ctx.steps].reverse().find((s) => hasRenderableContent(s.output));
+        return lastWithOutput
+          ? { score: 1.0, details: `final output on step ${lastWithOutput.step_number}` }
+          : { score: 0.0, details: 'No output step, trace output, or step output found' };
       },
     },
     {
@@ -333,10 +374,22 @@ export function runCustomRubric(
   }
 
   const threshold = rubric.threshold ?? 0.7;
-  const fullText =
-    JSON.stringify(trace.input) +
-    JSON.stringify(trace.output ?? '') +
-    trace.steps.map((s) => JSON.stringify(s.output ?? '')).join('');
+  // Everything a reader would call part of the run. The corpus used to be the
+  // trace input/output plus step OUTPUTS only, so a criterion with
+  // `expected: false` — the "must not contain" shape, half of the README's own
+  // example — scored a free 1.0 for anything living in a tool-call INPUT, a step
+  // NAME, a step ERROR, or the trace error: a rubric forbidding "rm -rf" passed
+  // a run that executed exactly that, exit 0. The built-in safety-check already
+  // searched name + input, so a user writing the rubric equivalent of a built-in
+  // silently got a weaker check.
+  const fullText = [
+    JSON.stringify(trace.input),
+    JSON.stringify(trace.output ?? ''),
+    JSON.stringify(trace.error ?? ''),
+    ...trace.steps.map((s) =>
+      [s.name, JSON.stringify(s.input ?? ''), JSON.stringify(s.output ?? ''), JSON.stringify(s.error ?? '')].join(' '),
+    ),
+  ].join(' ');
 
   const criteriaResults: Array<{ name: string; score: number; weight: number; details: string }> = [];
   let weightedSum = 0;
