@@ -449,3 +449,16 @@ describe('step reference validation on the live path', () => {
     expect(getTrace(db, 'trc_ok')!.steps[1].parent_step_number).toBe(1);
   });
 });
+
+describe('preview escapes control characters', () => {
+  it('renders an ESC sequence from a bad line as text, not as terminal control', () => {
+    // The rejected line is untrusted producer output echoed straight into the
+    // supervisor's terminal and CI log, so a child could inject cursor moves,
+    // color resets or OSC commands into the log of the tool watching it.
+    const bad = '{"v":1,"type":"step","name":"x\u001b[31m\u0000"}garbage';
+    const res = parseEventLine(bad);
+    expect(res.event).toBeNull();
+    expect(res.warning).not.toContain('\u001b');
+    expect(res.warning).toContain('\\x1b');
+  });
+});

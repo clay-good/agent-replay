@@ -159,6 +159,37 @@ nothing else.
 
 ### Fixed
 
+- `agent-replay run` keeps its headline guarantee when the store hiccups.
+  Finalization was unguarded, so a write that failed (another process holding
+  the lock past `busy_timeout` — likelier now that the receiver, hook and fork
+  take it up front) replaced the child's own exit code with `1`, left the trace
+  `running` with no `ended_at` forever, and leaked the channel directory. It is
+  now best-effort: the failure is reported, the child's status is still what
+  `run` exits with, and the temp directory always goes. A failure to open the
+  trace at all — before the child is spawned — now says the command was never
+  started, rather than a bare "database is locked".
+
+- `run` detects an events-channel rewrite that keeps or grows the file's size.
+  The append-only guard only compared sizes, so a producer that reopened the
+  channel truncating (`createWriteStream`'s default `w` flags, or
+  `writeFileSync`) and wrote at least as much as had been consumed slipped
+  through and reading resumed at a stale offset — events dropped, exit 0, no
+  diagnostic, exactly what the guard exists to prevent.
+
+- `run` records a duration for an instrumented child. A child that sends its own
+  `trace_end` owns the status but rarely sends totals, and the wrapper skipped
+  its update entirely, so an instrumented run had a null `total_duration_ms`
+  while an uninstrumented run of the same command reported one.
+
+- A rejected event line is escaped before being echoed. It is untrusted producer
+  output printed straight to the supervising terminal and CI log, so a child
+  emitting ESC sequences could move the cursor or recolor the log of the tool
+  watching it.
+
+- `record` no longer calls a legal comment-only native stream a total failure:
+  `//` lines are part of the protocol, but were counted as unmatched input, so
+  such a stream reported "none of the N line(s) matched" and exited 1.
+
 - `eval --json` is parseable on every path. The default invocation
   (`eval <id> --json`, no evaluator flag) printed two lines of prose on stdout
   before the array, and a run where every evaluator threw printed nothing at

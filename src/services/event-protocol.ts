@@ -229,5 +229,11 @@ export function validateEvent(obj: unknown): ParseResult {
 }
 
 function preview(s: string): string {
-  return s.length > 60 ? `${s.slice(0, 57)}...` : s;
+  // Escape C0 controls (and DEL) before echoing. This string is by definition
+  // untrusted producer output — the line we just failed to parse — and it is
+  // written straight to the supervisor's terminal and CI log. A child emitting
+  // ESC sequences could move the cursor, recolor, or issue OSC commands in the
+  // log of the tool watching it.
+  const safe = s.replace(/[\u0000-\u001f\u007f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
+  return safe.length > 60 ? `${safe.slice(0, 57)}...` : safe;
 }

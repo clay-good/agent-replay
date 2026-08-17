@@ -77,7 +77,11 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
   const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
 
   for await (const line of rl) {
-    if (line.trim()) inputLines++;
+    // A `//` comment line is explicitly part of the native protocol (see
+    // parseEventLine), so counting it as input made a legal comment-only stream
+    // report "none of the N line(s) matched the format" and exit 1.
+    const trimmed = line.trim();
+    if (trimmed && !trimmed.startsWith('//')) inputLines++;
     if (translator) {
       // Native harness stream: parse the line, then translate to our events.
       const trimmed = line.trim();

@@ -39,12 +39,22 @@ export interface RunWrappedResult {
 
 export async function runWrapped(db: Database.Database, opts: RunWrappedOptions): Promise<RunWrappedResult> {
   const startMs = Date.now();
-  const trace = startTrace(db, {
-    agent_name: opts.agentName ?? opts.command,
-    trigger: 'manual',
-    tags: opts.tags,
-    input: { command: opts.command, args: opts.args },
-  });
+  let trace;
+  try {
+    trace = startTrace(db, {
+      agent_name: opts.agentName ?? opts.command,
+      trigger: 'manual',
+      tags: opts.tags,
+      input: { command: opts.command, args: opts.args },
+    });
+  } catch (err) {
+    // This runs BEFORE the child is spawned, so the command never ran at all.
+    // A bare "database is locked" left the user unable to tell that from a
+    // child that ran and failed — say which it was.
+    throw new Error(
+      `could not open a trace for this run, so the command was NOT started: ${(err as Error).message}`,
+    );
+  }
 
   const channelDir = mkdtempSync(join(tmpdir(), 'ar-run-'));
   const eventsPath = join(channelDir, 'events.jsonl');
@@ -61,7 +71,7 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
   // Decode bytes with a StringDecoder so a multi-byte UTF-8 character split
   // across two reads (a poll boundary landing mid-character, or the child
   // flushing a partial write) recombines instead of each half becoming U+FFFD.
-  const decoder = new StringDecoder('utf8');
+  let decoder = new StringDecoder('utf8');
 
   const applyLine = (line: string): void => {
     const { event, warning } = parseEventLine(line);
@@ -104,6 +114,43 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
   // dir and orphaned the child.
   const MAX_READ_CHUNK = 8 * 1024 * 1024;
 
+  // The channel's opening bytes, so a rewrite that keeps or grows the size is
+  // still detected (see drainOnce).
+  const HEAD_BYTES = 256;
+  let channelHead: Buffer | null = null;
+  const readHead = (path: string): Buffer | null => {
+    let fd: number | undefined;
+    try {
+      fd = openSync(path, 'r');
+      const buf = Buffer.alloc(HEAD_BYTES);
+      const n = readSync(fd, buf, 0, HEAD_BYTES, 0);
+      return buf.subarray(0, n);
+    } catch {
+      return null;
+    } finally {
+      if (fd !== undefined) {
+        try {
+          closeSync(fd);
+        } catch {
+          // best-effort
+        }
+      }
+    }
+  };
+
+  /**
+   * Whether the channel's opening bytes CHANGED, over the prefix we have already
+   * seen. Comparing the fixed-size head wholesale would flag ordinary growth as
+   * a rewrite (a file shorter than HEAD_BYTES gains bytes with every append, and
+   * a legitimate line split across two writes lands exactly there), which would
+   * reset the read offset and drop the event it was in the middle of.
+   */
+  const headChanged = (head: Buffer | null): boolean => {
+    if (head === null || channelHead === null) return false;
+    const n = Math.min(head.length, channelHead.length);
+    return !head.subarray(0, n).equals(channelHead.subarray(0, n));
+  };
+
   const drainOnce = (final: boolean): void => {
     let size: number;
     try {
@@ -111,16 +158,34 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
     } catch {
       return;
     }
-    if (size < bytesRead) {
+    // A shrink is only ONE way to rewrite the channel. A producer that reopens it
+    // truncating (`createWriteStream(path)` with its default 'w' flags, or
+    // writeFileSync — an ordinary mistake) and writes at least as many bytes as
+    // were already consumed passed the size check untouched, and reading resumed
+    // at a stale offset: events silently dropped, exit 0, no diagnostic — the
+    // exact outcome the guard below promises to prevent. An in-place truncate
+    // keeps the inode, so compare the file's opening bytes, which a rewrite
+    // changes.
+    const head = readHead(eventsPath);
+    const replaced = headChanged(head);
+    if (head !== null && (channelHead === null || head.length >= channelHead.length || replaced)) {
+      channelHead = head;
+    }
+
+    if (size < bytesRead || replaced) {
       // The channel is contracted to be append-only. A producer that rewrote or
       // truncated it would otherwise never be read again — every later event
       // silently dropped, exit 0, no diagnostic. Resume from the new end and say
       // so, rather than re-applying events already recorded.
       process.stderr.write(
-        `agent-replay run: events channel was rewritten (${bytesRead} → ${size} bytes); earlier events may be lost\n`,
+        `agent-replay run: events channel was rewritten (${bytesRead} → ${size} bytes); earlier events may be lost. The channel is append-only — open it with 'a', not 'w'.\n`,
       );
       bytesRead = size;
       partial = '';
+      // Reset the decoder too: its buffered partial multi-byte sequence belongs
+      // to the file that was just replaced, and would corrupt the first
+      // character read from the new one.
+      decoder = new StringDecoder('utf8');
     }
     if (size > bytesRead) {
       const fd = openSync(eventsPath, 'r');
@@ -259,46 +324,86 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
   });
 
   // Apply anything written right before exit, then finalize.
-  drain(true);
+  //
+  // All of finalization is best-effort. The polling path was hardened against a
+  // throw for this reason, but the finalization path was not — and a throw here
+  // reaches the CLI's top-level handler, which exits 1. So a store-level hiccup
+  // (another writer holding the write lock past busy_timeout — likelier now that
+  // the receiver, hook and fork take it up front for a whole batch) DESTROYED
+  // the wrapper's headline guarantee: the child's own exit code was replaced by
+  // 1, the trace stayed `running` with no ended_at forever, and the channel dir
+  // leaked. Report what failed, still return the child's status.
+  const finalize = (): string => {
+    drain(true);
 
-  const durationMs = Date.now() - startMs;
-  const current = db.prepare('SELECT status, metadata FROM agent_traces WHERE id = ?').get(trace.id) as
-    | { status: string; metadata: string }
-    | undefined;
+    const durationMs = Date.now() - startMs;
+    const current = db.prepare('SELECT status, metadata FROM agent_traces WHERE id = ?').get(trace.id) as
+      | { status: string; metadata: string }
+      | undefined;
 
-  // Honor an EXPLICIT terminal status from the child; otherwise derive from the
-  // exit code. The trace is still `running` if the child emitted no trace_end,
-  // and a statusless trace_end defaults to `completed` — so a non-zero exit
-  // without an explicit child status must override that default to `failed`,
-  // per the spec (exit 0 → completed, non-zero → failed with the code recorded).
-  if (current && !childDeclaredStatus && (current.status === 'running' || exitCode !== 0)) {
-    updateTrace(db, trace.id, {
-      status: exitCode === 0 ? 'completed' : 'failed',
-      ended_at: new Date(startMs + durationMs).toISOString(),
-      total_duration_ms: durationMs,
-      error: exitCode === 0
-        ? undefined
-        : killedSignal
-          ? `child killed by signal ${killedSignal} (exit ${exitCode})`
-          : `child exited with code ${exitCode}`,
-    });
-  }
+    // Honor an EXPLICIT terminal status from the child; otherwise derive from the
+    // exit code. The trace is still `running` if the child emitted no trace_end,
+    // and a statusless trace_end defaults to `completed` — so a non-zero exit
+    // without an explicit child status must override that default to `failed`,
+    // per the spec (exit 0 → completed, non-zero → failed with the code recorded).
+    if (current && !childDeclaredStatus && (current.status === 'running' || exitCode !== 0)) {
+      updateTrace(db, trace.id, {
+        status: exitCode === 0 ? 'completed' : 'failed',
+        ended_at: new Date(startMs + durationMs).toISOString(),
+        total_duration_ms: durationMs,
+        error: exitCode === 0
+          ? undefined
+          : killedSignal
+            ? `child killed by signal ${killedSignal} (exit ${exitCode})`
+            : `child exited with code ${exitCode}`,
+      });
+    }
 
-  // Merge exit metadata regardless of who finalized the trace.
-  let metadata: Record<string, unknown> = {};
+    // A child that sent its own trace_end owns the status — but it rarely sends
+    // totals, and the wrapper is the only party that knows the wall-clock span
+    // of the process. Filling a total_duration_ms the child left null keeps an
+    // instrumented run inside duration stats, where it used to drop out while
+    // an UNinstrumented run of the same command reported a duration.
+    if (current && childDeclaredStatus) {
+      const row = db.prepare('SELECT total_duration_ms FROM agent_traces WHERE id = ?').get(trace.id) as
+        | { total_duration_ms: number | null }
+        | undefined;
+      if (row && row.total_duration_ms == null) {
+        updateTrace(db, trace.id, { total_duration_ms: durationMs });
+      }
+    }
+
+    // Merge exit metadata regardless of who finalized the trace.
+    let metadata: Record<string, unknown> = {};
+    try {
+      metadata = JSON.parse(current?.metadata ?? '{}');
+    } catch {
+      metadata = {};
+    }
+    metadata.exit_code = exitCode;
+    db.prepare('UPDATE agent_traces SET metadata = ? WHERE id = ?').run(JSON.stringify(metadata), trace.id);
+
+    return (db.prepare('SELECT status FROM agent_traces WHERE id = ?').get(trace.id) as
+      | { status: string }
+      | undefined)?.status ?? 'unknown';
+  };
+
+  let finalStatus: string;
   try {
-    metadata = JSON.parse(current?.metadata ?? '{}');
-  } catch {
-    metadata = {};
+    finalStatus = finalize();
+  } catch (err) {
+    console.error(`agent-replay run: could not finalize trace ${trace.id}: ${(err as Error).message}`);
+    console.error(`agent-replay run: the child ran and exited ${exitCode}; that status is still reported.`);
+    finalStatus = 'unknown';
+  } finally {
+    // The channel dir is the wrapper's own temp state; it must go even when the
+    // store write failed, or every such run leaks a directory.
+    try {
+      rmSync(channelDir, { recursive: true, force: true });
+    } catch {
+      // Nothing useful to do — the OS reclaims it at the latest on reboot.
+    }
   }
-  metadata.exit_code = exitCode;
-  db.prepare('UPDATE agent_traces SET metadata = ? WHERE id = ?').run(JSON.stringify(metadata), trace.id);
-
-  rmSync(channelDir, { recursive: true, force: true });
-
-  const finalStatus = (db.prepare('SELECT status FROM agent_traces WHERE id = ?').get(trace.id) as
-    | { status: string }
-    | undefined)?.status ?? 'unknown';
 
   return { traceId: trace.id, status: finalStatus, exitCode, eventsApplied: applied };
 }

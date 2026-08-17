@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
 import { getTrace } from '../src/services/trace-service.js';
@@ -226,6 +226,59 @@ fs.appendFileSync(f, ev(3));
   }, 15000);
 });
 
+
+describe('runWrapped detects a same-size channel rewrite', () => {
+  it('warns instead of silently reading from a stale offset', async () => {
+    // The append-only guard only compared SIZE, so a producer that reopened the
+    // channel truncating (createWriteStream's default 'w' flags, or
+    // writeFileSync — an ordinary mistake) and wrote at least as many bytes as
+    // were already consumed slipped through: events dropped, exit 0, no
+    // diagnostic — the very outcome the guard promises to prevent. The rewrite
+    // here is byte-for-byte the same LENGTH as what was already read.
+    const SCRIPT = `
+const fs = require('fs');
+const f = process.env.AGENT_REPLAY_EVENTS;
+const t = process.env.AGENT_REPLAY_TRACE_ID;
+const ev = (n) => JSON.stringify({ v: 1, type: 'step', trace_id: t, step_number: n, step_type: 'thought', name: 's' + n }) + '\\n';
+fs.appendFileSync(f, ev(1));
+setTimeout(() => { fs.writeFileSync(f, ev(2)); setTimeout(() => process.exit(0), 400); }, 400);
+`;
+    const warnings: string[] = [];
+    const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation(((chunk: string | Uint8Array) => {
+      warnings.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+    let res;
+    try {
+      res = await runWrapped(db, { command: process.execPath, args: ['-e', SCRIPT], agentName: 'same-size-rewriter' });
+    } finally {
+      errSpy.mockRestore();
+    }
+    expect(res.exitCode).toBe(0);
+    expect(warnings.join('')).toMatch(/events channel was rewritten/);
+  }, 15000);
+});
+
+describe('runWrapped fills a duration the child left null', () => {
+  it('records the wall-clock span when the child declares its own status', async () => {
+    // A child that sends its own trace_end owns the status but rarely sends
+    // totals, and the wrapper skipped its update entirely — so an INSTRUMENTED
+    // run had total_duration_ms null while an uninstrumented run of the same
+    // command reported one, dropping it out of duration stats.
+    const SCRIPT = `
+const fs = require('fs');
+const f = process.env.AGENT_REPLAY_EVENTS;
+const t = process.env.AGENT_REPLAY_TRACE_ID;
+fs.appendFileSync(f, JSON.stringify({ v: 1, type: 'step', trace_id: t, step_number: 1, step_type: 'output', name: 'done' }) + '\\n');
+fs.appendFileSync(f, JSON.stringify({ v: 1, type: 'trace_end', trace_id: t, status: 'completed' }) + '\\n');
+`;
+    const res = await runWrapped(db, { command: process.execPath, args: ['-e', SCRIPT], agentName: 'self-finalizer' });
+    const trace = getTrace(db, res.traceId)!;
+    expect(trace.status).toBe('completed'); // the child's declaration still wins
+    expect(trace.total_duration_ms).not.toBeNull();
+    expect(trace.total_duration_ms!).toBeGreaterThanOrEqual(0);
+  }, 15000);
+});
 
 describe('runWrapped reports the status it stored', () => {
   it('returns the child-declared status alongside a disagreeing exit code', async () => {
