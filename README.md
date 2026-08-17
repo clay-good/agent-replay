@@ -763,6 +763,8 @@ agent-replay config test-ai
 
 All AI presets use the cheapest available model. A typical evaluation costs less than $0.01.
 
+Every provider call has a **60-second deadline** and retries a transient failure **twice** with a doubling backoff (0.5s, then 1s), honoring a `Retry-After` header when the provider sends one. So a routine rate limit or a 503 no longer fails a whole `eval --ai` run, and a provider that accepts the connection and then stalls can no longer hang an unattended CI job — it fails with `Request timed out after 60000ms`. A bad key, a malformed request (4xx) and an unparseable reply are *not* retried; they cannot succeed on a second attempt. Failed attempts consume no tokens, so retries don't change what `--max-cost` prices.
+
 ## Programmatic API
 
 You can also use `agent-replay` as a library:

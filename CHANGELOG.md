@@ -25,6 +25,19 @@ between them, and nothing else.
 
 ### Added
 
+- AI provider calls now have a deadline and a bounded retry budget. `fetch` has
+  no default timeout, so a provider that accepted the connection and then
+  stalled hung `eval --ai`, `diff --ai` or `config test-ai` forever — an
+  unattended CI job with no output and no way to fail. And a single 429 or 503,
+  routine on a shared key, failed a whole evaluation run. Each attempt now has a
+  60-second deadline that covers the response body as well as the connect (a
+  provider can send headers promptly and stall mid-stream), and a transient
+  failure — 429, 5xx, network error, timeout — is retried twice with a doubling
+  backoff, honoring `Retry-After` when the provider sends one. Failures that
+  cannot succeed on a second attempt (bad key, 4xx, unparseable reply) are not
+  retried. Retried attempts return no usage, so `--max-cost` accounting is
+  unchanged; `latency_ms` covers every attempt and the waits between them.
+
 - Schema v3 adds two indexes for lookups that were full table scans. `otel
   serve` resolves every incoming batch against
   `json_extract(metadata, '$.otel_trace_id')`, which nothing could index, so

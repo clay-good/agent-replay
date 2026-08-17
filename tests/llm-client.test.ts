@@ -9,9 +9,16 @@ import { callLlm } from '../src/services/llm-client.js';
  * classification without touching the network.
  */
 
-function res(status: number, body: unknown): Response {
-  return { status, json: async () => body } as unknown as Response;
+function res(status: number, body: unknown, headers: Record<string, string> = {}): Response {
+  return {
+    status,
+    json: async () => body,
+    headers: { get: (name: string) => headers[name.toLowerCase()] ?? null },
+  } as unknown as Response;
 }
+
+/** No retry waits, no real deadline — keeps the failure-path tests instant. */
+const fast = { max_retries: 0, retry_base_delay_ms: 1 } as const;
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -105,7 +112,7 @@ describe('callLlm — provider request/response parsing', () => {
 });
 
 describe('callLlm — error classification', () => {
-  const call = () => callLlm({ provider: 'anthropic', api_key: 'k' }, { prompt: 'p' });
+  const call = () => callLlm({ provider: 'anthropic', api_key: 'k', ...fast }, { prompt: 'p' });
 
   it('maps 401/403 to auth, 429 to rate_limit, and 5xx to server', async () => {
     for (const [status, type] of [[401, 'auth'], [403, 'auth'], [429, 'rate_limit'], [500, 'server']] as const) {
@@ -120,7 +127,111 @@ describe('callLlm — error classification', () => {
   });
 
   it('maps an unparseable 200 body to a parse error', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 200, json: async () => { throw new Error('bad json'); } } as unknown as Response));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      status: 200,
+      headers: { get: () => null },
+      json: async () => { throw new Error('bad json'); },
+    } as unknown as Response));
     await expect(call()).rejects.toMatchObject({ type: 'parse' });
+  });
+});
+
+/**
+ * These three commands (`eval --ai`, `diff --ai`, `config test-ai`) are meant to
+ * run unattended in CI, where `fetch`'s absent default timeout used to hang a job
+ * forever and a single routine 429 used to fail the whole run.
+ */
+describe('callLlm — timeout and retry', () => {
+  const ok = { content: [{ text: 'ok' }], usage: { input_tokens: 1, output_tokens: 1 } };
+
+  it('aborts a stalled request and reports a timeout, not a hang', async () => {
+    // A provider that accepts the connection and never answers: the abort signal
+    // is the only thing that ends this call.
+    const fetchMock = vi.fn().mockImplementation((_url, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      callLlm({ provider: 'anthropic', api_key: 'k', timeout_ms: 20, max_retries: 0 }, { prompt: 'p' }),
+    ).rejects.toMatchObject({ type: 'network', message: 'Request timed out after 20ms' });
+  });
+
+  it('times out a response whose BODY stalls after the headers arrive', async () => {
+    // Headers land immediately, the body never does — the deadline must still
+    // cover the body read, and the abort must not be mistaken for bad JSON.
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((_url, init: RequestInit) => Promise.resolve({
+      status: 200,
+      headers: { get: () => null },
+      json: () => new Promise((_r, reject) => {
+        init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+      }),
+    } as unknown as Response)));
+
+    await expect(
+      callLlm({ provider: 'anthropic', api_key: 'k', timeout_ms: 20, max_retries: 0 }, { prompt: 'p' }),
+    ).rejects.toMatchObject({ type: 'network', message: 'Request timed out after 20ms' });
+  });
+
+  it('retries a 429 and returns the eventual success', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(res(429, { error: { message: 'slow down' } }))
+      .mockResolvedValueOnce(res(200, ok));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const out = await callLlm(
+      { provider: 'anthropic', api_key: 'k', retry_base_delay_ms: 1 },
+      { prompt: 'p' },
+    );
+    expect(out.text).toBe('ok');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries a 5xx and a network error, and gives up after max_retries', async () => {
+    for (const failure of [
+      { mock: vi.fn().mockResolvedValue(res(503, {})), type: 'server' },
+      { mock: vi.fn().mockRejectedValue(new Error('ECONNRESET')), type: 'network' },
+    ]) {
+      vi.stubGlobal('fetch', failure.mock);
+      await expect(
+        callLlm({ provider: 'anthropic', api_key: 'k', max_retries: 2, retry_base_delay_ms: 1 }, { prompt: 'p' }),
+      ).rejects.toMatchObject({ type: failure.type });
+      expect(failure.mock).toHaveBeenCalledTimes(3); // 1 attempt + 2 retries
+    }
+  });
+
+  it('does NOT retry auth, a 4xx or a parse failure', async () => {
+    for (const status of [401, 400]) {
+      const fetchMock = vi.fn().mockResolvedValue(res(status, { error: { message: 'nope' } }));
+      vi.stubGlobal('fetch', fetchMock);
+      await expect(
+        callLlm({ provider: 'anthropic', api_key: 'k', retry_base_delay_ms: 1 }, { prompt: 'p' }),
+      ).rejects.toBeInstanceOf(Error);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('waits the delay the provider asked for via Retry-After', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(res(429, {}, { 'retry-after': '0.05' }))
+      .mockResolvedValueOnce(res(200, ok));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const start = Date.now();
+    // Base delay is 1ms, so anything close to 50ms can only come from the header.
+    await callLlm({ provider: 'anthropic', api_key: 'k', retry_base_delay_ms: 1 }, { prompt: 'p' });
+    expect(Date.now() - start).toBeGreaterThanOrEqual(40);
+  });
+
+  it('ignores a non-numeric Retry-After rather than guessing', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(res(429, {}, { 'retry-after': 'Wed, 21 Oct 2026 07:28:00 GMT' }))
+      .mockResolvedValueOnce(res(200, ok));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const out = await callLlm({ provider: 'anthropic', api_key: 'k', retry_base_delay_ms: 1 }, { prompt: 'p' });
+    expect(out.text).toBe('ok');
   });
 });

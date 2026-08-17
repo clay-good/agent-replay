@@ -5,6 +5,12 @@ export interface LlmClientOptions {
   api_key: string;
   model?: string;
   max_tokens?: number;
+  /** Per-attempt deadline. Defaults to DEFAULT_TIMEOUT_MS. */
+  timeout_ms?: number;
+  /** Retries after the first attempt for transient failures. Defaults to DEFAULT_MAX_RETRIES. */
+  max_retries?: number;
+  /** First backoff delay; doubles per retry. Defaults to DEFAULT_RETRY_BASE_DELAY_MS. */
+  retry_base_delay_ms?: number;
 }
 
 export interface LlmRequest {
@@ -24,6 +30,9 @@ export interface LlmResponse {
 }
 
 export class LlmError extends Error {
+  /** Delay the provider asked for via `Retry-After`, when it sent one. */
+  retryAfterMs?: number;
+
   constructor(
     message: string,
     public type: 'network' | 'auth' | 'rate_limit' | 'server' | 'parse',
@@ -50,6 +59,42 @@ const DEFAULT_MODELS: Record<string, string> = {
   openai: 'gpt-5.4-nano',
 };
 
+// ── Retry / timeout policy ──────────────────────────────────────────────
+
+/**
+ * A provider call gets a deadline and a bounded retry budget because `eval --ai`,
+ * `diff --ai` and `config test-ai` are meant to run unattended in CI. `fetch`
+ * has NO default timeout, so a provider that accepts the connection and then
+ * stalls used to hang the command forever — a hung CI job with no output. And a
+ * single 429 or 503 (routine on a shared key) used to fail the whole run, which
+ * for `eval --ai` means a red gate that says nothing about the trace.
+ */
+export const DEFAULT_TIMEOUT_MS = 60_000;
+export const DEFAULT_MAX_RETRIES = 2;
+export const DEFAULT_RETRY_BASE_DELAY_MS = 500;
+/** Ceiling on a single backoff wait, including one the provider asked for. */
+const MAX_RETRY_DELAY_MS = 30_000;
+
+/**
+ * Only transient failures are retried. A 429, a 5xx and a network error/timeout
+ * can succeed on a second attempt; an auth failure (bad key), a 4xx (malformed
+ * request) and a parse failure cannot, and retrying them just triples the wait
+ * before the same error surfaces.
+ */
+function isRetryable(err: unknown): boolean {
+  if (!(err instanceof LlmError)) return false;
+  if (err.type === 'network' || err.type === 'rate_limit') return true;
+  return err.type === 'server' && err.statusCode != null && err.statusCode >= 500;
+}
+
+function backoffMs(err: unknown, attempt: number, baseDelayMs: number): number {
+  const asked = err instanceof LlmError ? err.retryAfterMs : undefined;
+  const delay = asked ?? baseDelayMs * 2 ** (attempt - 1);
+  return Math.min(delay, MAX_RETRY_DELAY_MS);
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 // ── Main entry ──────────────────────────────────────────────────────────
 
 export async function callLlm(
@@ -58,16 +103,45 @@ export async function callLlm(
 ): Promise<LlmResponse> {
   const model = opts.model ?? DEFAULT_MODELS[opts.provider];
   const maxTokens = request.max_tokens ?? opts.max_tokens ?? 1024;
+  const timeoutMs = positive(opts.timeout_ms) ?? DEFAULT_TIMEOUT_MS;
+  const baseDelayMs = positive(opts.retry_base_delay_ms) ?? DEFAULT_RETRY_BASE_DELAY_MS;
+  const retries = Number.isFinite(opts.max_retries as number)
+    ? Math.max(0, Math.trunc(opts.max_retries as number))
+    : DEFAULT_MAX_RETRIES;
 
+  // `start` is taken once, so latency_ms covers every attempt and the waits
+  // between them — the wall-clock cost the caller actually paid.
   const start = Date.now();
 
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await callProvider(opts, model, maxTokens, request, start, timeoutMs);
+    } catch (err) {
+      if (attempt > retries || !isRetryable(err)) throw err;
+      await sleep(backoffMs(err, attempt, baseDelayMs));
+    }
+  }
+}
+
+function positive(value: number | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function callProvider(
+  opts: LlmClientOptions,
+  model: string,
+  maxTokens: number,
+  request: LlmRequest,
+  start: number,
+  timeoutMs: number,
+): Promise<LlmResponse> {
   switch (opts.provider) {
     case 'anthropic':
-      return callAnthropic(opts.api_key, model, maxTokens, request, start);
+      return callAnthropic(opts.api_key, model, maxTokens, request, start, timeoutMs);
     case 'google':
-      return callGoogle(opts.api_key, model, maxTokens, request, start);
+      return callGoogle(opts.api_key, model, maxTokens, request, start, timeoutMs);
     case 'openai':
-      return callOpenai(opts.api_key, model, maxTokens, request, start);
+      return callOpenai(opts.api_key, model, maxTokens, request, start, timeoutMs);
     default:
       throw new LlmError(`Unsupported provider: ${opts.provider}`, 'parse', opts.provider);
   }
@@ -130,6 +204,7 @@ async function callAnthropic(
   maxTokens: number,
   request: LlmRequest,
   start: number,
+  timeoutMs: number,
 ): Promise<LlmResponse> {
   const body: Record<string, unknown> = {
     model,
@@ -140,7 +215,7 @@ async function callAnthropic(
     body.system = request.system;
   }
 
-  const res = await safeFetch('https://api.anthropic.com/v1/messages', {
+  const data = await requestJson('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -148,9 +223,7 @@ async function callAnthropic(
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify(body),
-  }, 'anthropic');
-
-  const data = await safeJson(res, 'anthropic');
+  }, 'anthropic', timeoutMs);
 
   const text = (data.content as Array<{ text: string }>)?.[0]?.text ?? '';
   const usage = data.usage as { input_tokens: number; output_tokens: number } | undefined;
@@ -176,6 +249,7 @@ async function callGoogle(
   maxTokens: number,
   request: LlmRequest,
   start: number,
+  timeoutMs: number,
 ): Promise<LlmResponse> {
   // Gemini basic API: system prompt prepended to user content
   const userContent = request.system
@@ -189,16 +263,14 @@ async function callGoogle(
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
-  const res = await safeFetch(url, {
+  const data = await requestJson(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'x-goog-api-key': apiKey,
     },
     body: JSON.stringify(body),
-  }, 'google');
-
-  const data = await safeJson(res, 'google');
+  }, 'google', timeoutMs);
 
   const candidates = data.candidates as Array<{ content: { parts: Array<{ text: string }> } }> | undefined;
   const text = candidates?.[0]?.content?.parts?.[0]?.text ?? '';
@@ -225,6 +297,7 @@ async function callOpenai(
   maxTokens: number,
   request: LlmRequest,
   start: number,
+  timeoutMs: number,
 ): Promise<LlmResponse> {
   const messages: Array<{ role: string; content: string }> = [];
   if (request.system) {
@@ -241,16 +314,14 @@ async function callOpenai(
   // forward-compatible choice for every model this adapter targets.
   const body = { model, max_completion_tokens: maxTokens, messages };
 
-  const res = await safeFetch('https://api.openai.com/v1/chat/completions', {
+  const data = await requestJson('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(body),
-  }, 'openai');
-
-  const data = await safeJson(res, 'openai');
+  }, 'openai', timeoutMs);
 
   const choices = data.choices as Array<{ message: { content: string } }> | undefined;
   const text = choices?.[0]?.message?.content ?? '';
@@ -271,42 +342,83 @@ async function callOpenai(
 
 // ── Shared helpers ──────────────────────────────────────────────────────
 
-async function safeFetch(
+/**
+ * Send one request and parse its JSON under a single deadline.
+ *
+ * The timer stays armed across the BODY read, not just the connect: a provider
+ * can send headers promptly and then stall mid-stream, and aborting only the
+ * connect phase would leave that case hanging forever. Because the abort makes
+ * `res.json()` reject, the aborted flag is what separates a real timeout from a
+ * genuinely malformed body — otherwise a timeout would be reported as a parse
+ * error and (correctly, for a parse error) never retried.
+ */
+async function requestJson(
   url: string,
   init: RequestInit,
   provider: string,
-): Promise<Response> {
+  timeoutMs: number,
+): Promise<Record<string, unknown>> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, init);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new LlmError(`Network error: ${msg}`, 'network', provider, undefined, { cause: err });
+    let res: Response;
+    try {
+      res = await fetch(url, { ...init, signal: controller.signal });
+    } catch (err) {
+      throw networkError(err, provider, timeoutMs, controller.signal.aborted);
+    }
+
+    // Check for HTTP errors before parsing — error responses may not be valid JSON
+    if (res.status < 200 || res.status >= 300) {
+      let data: Record<string, unknown> = {};
+      try {
+        data = (await res.json()) as Record<string, unknown>;
+      } catch {
+        // Non-JSON error response — pass empty data so handleHttpError uses status code
+      }
+      handleHttpError(res.status, data, provider, retryAfterMs(res));
+    }
+
+    try {
+      return (await res.json()) as Record<string, unknown>;
+    } catch (err) {
+      if (controller.signal.aborted) throw networkError(err, provider, timeoutMs, true);
+      throw new LlmError('Failed to parse response JSON', 'parse', provider, res.status);
+    }
+  } finally {
+    clearTimeout(timer);
   }
 }
 
-async function safeJson(res: Response, provider: string): Promise<Record<string, unknown>> {
-  // Check for HTTP errors before parsing — error responses may not be valid JSON
-  if (res.status < 200 || res.status >= 300) {
-    let data: Record<string, unknown> = {};
-    try {
-      data = (await res.json()) as Record<string, unknown>;
-    } catch {
-      // Non-JSON error response — pass empty data so handleHttpError uses status code
-    }
-    handleHttpError(res.status, data, provider);
-  }
+function networkError(
+  err: unknown,
+  provider: string,
+  timeoutMs: number,
+  timedOut: boolean,
+): LlmError {
+  const msg = timedOut
+    ? `Request timed out after ${timeoutMs}ms`
+    : `Network error: ${err instanceof Error ? err.message : String(err)}`;
+  return new LlmError(msg, 'network', provider, undefined, { cause: err });
+}
 
-  try {
-    return (await res.json()) as Record<string, unknown>;
-  } catch {
-    throw new LlmError('Failed to parse response JSON', 'parse', provider, res.status);
-  }
+/**
+ * `Retry-After` in delay-seconds form. The HTTP-date form is allowed by the spec
+ * but no supported provider sends it, and guessing wrong is worse than falling
+ * back to our own backoff, so anything non-numeric is ignored.
+ */
+function retryAfterMs(res: Response): number | undefined {
+  const raw = res.headers?.get('retry-after');
+  if (raw == null) return undefined;
+  const seconds = Number(raw.trim());
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : undefined;
 }
 
 function handleHttpError(
   status: number,
   data: Record<string, unknown>,
   provider: string,
+  retryAfter?: number,
 ): void {
   if (status >= 200 && status < 300) return;
 
@@ -319,8 +431,9 @@ function handleHttpError(
   if (status === 401 || status === 403) {
     throw new LlmError(`Authentication failed: ${msg}`, 'auth', provider, status);
   }
-  if (status === 429) {
-    throw new LlmError(`Rate limited: ${msg}`, 'rate_limit', provider, status);
-  }
-  throw new LlmError(`Server error: ${msg}`, 'server', provider, status);
+  const err = status === 429
+    ? new LlmError(`Rate limited: ${msg}`, 'rate_limit', provider, status)
+    : new LlmError(`Server error: ${msg}`, 'server', provider, status);
+  err.retryAfterMs = retryAfter;
+  throw err;
 }
