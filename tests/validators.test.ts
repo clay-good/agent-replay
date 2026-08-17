@@ -281,3 +281,49 @@ describe('validateStepInput', () => {
     expect(result.valid).toBe(false);
   });
 });
+
+describe('holes the writer assumed were covered here', () => {
+  // trace-service coerces a non-scalar to null so one bad field can never cost a
+  // LIVE capture the whole run, stating that "the ingest path validates these
+  // upstream". It did not: the value was silently dropped at exit 0.
+  it('rejects a non-string agent_version instead of dropping it', () => {
+    const r = validateTraceInput({ agent_name: 'a', agent_version: { maj: 1 }, steps: [] });
+    expect(r.valid).toBe(false);
+    expect(r.errors.map((e) => e.field)).toContain('agent_version');
+  });
+
+  it('rejects a non-string step model instead of dropping it', () => {
+    const r = validateTraceInput({
+      agent_name: 'a',
+      steps: [{ step_number: 1, step_type: 'llm_call', name: 'call', model: { id: 'x' } }],
+    });
+    expect(r.valid).toBe(false);
+    expect(r.errors.map((e) => e.field)).toContain('steps[0].model');
+  });
+
+  // The schema has UNIQUE(trace_id, step_number), so a duplicate validated clean
+  // and then failed at INSERT — `--dry-run`, documented as "validate without
+  // inserting", answered exit 0 for a file the real run could never load.
+  it('rejects a duplicate step_number', () => {
+    const r = validateTraceInput({
+      agent_name: 'a',
+      steps: [
+        { step_number: 1, step_type: 'output', name: 'a' },
+        { step_number: 1, step_type: 'output', name: 'b' },
+      ],
+    });
+    expect(r.valid).toBe(false);
+    expect(r.errors[0].message).toMatch(/appears more than once/);
+  });
+
+  it('still allows gaps in step numbering', () => {
+    const r = validateTraceInput({
+      agent_name: 'a',
+      steps: [
+        { step_number: 1, step_type: 'output', name: 'a' },
+        { step_number: 3, step_type: 'output', name: 'b' },
+      ],
+    });
+    expect(r.valid).toBe(true);
+  });
+});

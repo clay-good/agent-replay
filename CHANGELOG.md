@@ -171,6 +171,32 @@ between them, and nothing else.
 
 ### Fixed
 
+- `ingest --dry-run` passed files the real run could never load. A step's
+  `error` was the one TEXT column bound without coercion, so a structured error
+  (`{"code": …, "message": …}` — a shape real producers send) validated clean and
+  then made the insert refuse the bind, rolling back the whole trace with a
+  message naming neither the field nor the step; it is now flattened like every
+  sibling error column. A duplicate `step_number` also validated clean and then
+  hit the schema's UNIQUE constraint. And an object-valued `agent_version` or
+  step `model` was silently coerced to null at exit 0 — the writer does that
+  deliberately so one bad field can never cost a LIVE capture the whole run, on
+  the stated assumption that ingest validates it first, which it did not.
+
+- One unparseable line made `ingest` discard the whole JSONL file: three valid
+  traces beside one truncated line ingested nothing. That contradicted the policy
+  the validation stage right below it states — load the valid subset, and exit 1
+  because something was dropped. Bad lines are now reported by line number and
+  the valid records load.
+
+- An orphan `tool_result` was counted as an imported record although it is stored
+  nowhere. It has no `tool_use` to attach to — routine when a transcript is
+  head-truncated, after `/compact`, or when the `tool_use` line itself was
+  unparseable — so the summary reported content the store does not have.
+
+- An EMPTY first user record made the importer discard the next, real prompt:
+  `{prompt: ''}` is truthy, so the "input already captured" check read it as
+  captured and the trace ended up with no question at all.
+
 - `completeness-check` was unsatisfiable for every live-captured trace. Its
   heaviest criterion keyed on `step_type === 'output'`, which the hook adapter,
   the OTel log path and the span mapper never emit (the Gemini stream translator

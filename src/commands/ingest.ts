@@ -53,16 +53,24 @@ export function runIngest(filePath: string, opts: IngestOptions = {}): void {
 
   // Parse traces
   let traces: unknown[];
+  const parseWarnings: string[] = [];
   try {
-    traces = parseTraces(raw, format);
+    traces = parseTraces(raw, format, parseWarnings);
   } catch (err) {
     failSpinner(spinner, `Parse error: ${errorMessage(err)}`);
     process.exitCode = 1;
     return;
   }
 
+  // A line that could not be parsed is a dropped record, so it fails the command
+  // exactly like a record that failed validation — but the valid ones still load.
+  for (const w of parseWarnings) {
+    console.error(chalk.red(`  ${w}`));
+    process.exitCode = 1;
+  }
+
   if (traces.length === 0) {
-    failSpinner(spinner, 'No traces found in file.');
+    failSpinner(spinner, parseWarnings.length > 0 ? 'No traces could be parsed from file.' : 'No traces found in file.');
     process.exitCode = 1;
     return;
   }
@@ -178,7 +186,7 @@ function detectFormat(raw: string): 'json' | 'jsonl' {
   }
 }
 
-function parseTraces(raw: string, format: 'json' | 'jsonl'): unknown[] {
+function parseTraces(raw: string, format: 'json' | 'jsonl', parseWarnings: string[]): unknown[] {
   if (format === 'json') {
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [parsed];
@@ -187,17 +195,29 @@ function parseTraces(raw: string, format: 'json' | 'jsonl'): unknown[] {
   // JSONL: one JSON object per line. Track the true file line number *before*
   // dropping blank/comment lines, so a parse error names the line the user sees
   // in their editor rather than a post-filter index.
-  return raw
-    .split('\n')
-    .map((line, idx) => ({ text: line.trim(), lineNo: idx + 1 }))
-    .filter((e) => e.text.length > 0 && !e.text.startsWith('//'))
-    .map((e) => {
-      try {
-        return JSON.parse(e.text);
-      } catch {
-        throw new Error(`Invalid JSON on line ${e.lineNo}`);
-      }
-    });
+  // Parse per line and keep going. Throwing on the first bad line discarded the
+  // WHOLE file — three valid traces beside one truncated line ingested nothing —
+  // which contradicts the policy the validation stage right below states: ingest
+  // the valid subset, and exit 1 because something was dropped. The bad lines are
+  // reported the same way invalid records are.
+  const parsed: Record<string, unknown>[] = [];
+  const badLines: number[] = [];
+  for (const [idx, line] of raw.split('\n').entries()) {
+    const text = line.trim();
+    if (text.length === 0 || text.startsWith('//')) continue;
+    try {
+      parsed.push(JSON.parse(text));
+    } catch {
+      badLines.push(idx + 1);
+    }
+  }
+  if (badLines.length > 0) {
+    parseWarnings.push(
+      `Invalid JSON on line${badLines.length > 1 ? 's' : ''} ${badLines.slice(0, 10).join(', ')}` +
+        (badLines.length > 10 ? ` and ${badLines.length - 10} more` : ''),
+    );
+  }
+  return parsed;
 }
 
 function validateTrace(t: Record<string, unknown>, index: number): string[] {

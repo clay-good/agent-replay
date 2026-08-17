@@ -16,6 +16,11 @@ import type { IngestTraceInput, IngestStepInput, Trace } from '../../models/type
  * tool_use↔tool_result paired by `tool_use_id`; `usage` token counts aggregated.
  */
 
+/** Whether a captured input already holds a non-empty prompt. */
+function hasPrompt(input: Record<string, unknown> | undefined): boolean {
+  return typeof input?.prompt === 'string' && input.prompt.length > 0;
+}
+
 const SOURCE_FORMAT = 'claude-transcript';
 const SOURCE_VERSION = '2025-07';
 
@@ -132,6 +137,12 @@ export function importClaudeTranscript(
   // which downstream error-aware consumers read as success.
   const toolResults = new Map<string, unknown>();
   const toolErrors = new Set<string>();
+  // Which tool_use ids exist at all. A result whose id pairs with nothing is
+  // stored NOWHERE — routine when a transcript is head-truncated (after
+  // `/compact`, a partially copied file, or when the tool_use line itself was
+  // unparseable) — so counting it as imported reports content the store does not
+  // have. `imported + skipped = records` held; what it counted was wrong.
+  const toolUseIds = new Set<string>();
   for (const rec of records) {
     const content = (rec.message as { content?: unknown } | undefined)?.content;
     if (Array.isArray(content)) {
@@ -140,6 +151,7 @@ export function importClaudeTranscript(
           toolResults.set(block.tool_use_id, block.content);
           if (block.is_error === true) toolErrors.add(block.tool_use_id);
         }
+        if (block?.type === 'tool_use' && block.id) toolUseIds.add(block.id);
       }
     }
   }
@@ -180,9 +192,12 @@ export function importClaudeTranscript(
       // imported. A follow-up user turn (input already set) captures nothing —
       // there is no user/input step type — so it must fall through to skipped,
       // matching the codex-rollout importer and the content-less-record test.
-      if (type === 'user' && !input) {
+      // `!input` alone treated an EMPTY first user record as "input captured",
+      // because `{prompt: ''}` is truthy — so the next, real prompt was
+      // discarded and the trace kept no question at all.
+      if (type === 'user' && !hasPrompt(input)) {
         input = { prompt: content };
-        contributed = true;
+        contributed = content.length > 0;
       } else if (type === 'assistant') {
         lastAssistantText = content;
         steps.push({ step_number: stepNumber++, step_type: 'output', name: 'assistant_message', output: { text: content } });
@@ -229,8 +244,10 @@ export function importClaudeTranscript(
             break;
           }
           case 'tool_result':
-            // already indexed in the first pass
-            contributed = true;
+            // Indexed in the first pass — but it only contributes if its id
+            // pairs with a tool_use that this import actually kept. An orphan
+            // result is retained nowhere, so it is a skipped record.
+            if (block.tool_use_id && toolUseIds.has(block.tool_use_id)) contributed = true;
             break;
           default:
             break;

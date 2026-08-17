@@ -424,3 +424,49 @@ describe('importer robustness', () => {
     }
   });
 });
+
+describe('records that contribute nothing are not counted as imported', () => {
+  // A tool_result whose id pairs with nothing is stored NOWHERE — routine when a
+  // transcript is head-truncated (after /compact, a partially copied file, or
+  // when the tool_use line itself was unparseable). Counting it as imported
+  // reported content the store does not have.
+  it('counts an orphan tool_result as skipped', () => {
+    const file = join(dir, 'orphan.jsonl');
+    writeFileSync(file, [
+      JSON.stringify({ type: 'user', message: { content: 'go' } }),
+      JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'ORPHAN', content: 'lost output' }] } }),
+    ].join('\n'));
+
+    const report = importClaudeTranscript(db, file);
+    expect(report.imported).toBe(1);
+    expect(report.skipped).toBe(1);
+    expect(report.imported + report.skipped).toBe(2);
+  });
+
+  it('still counts a paired tool_result as imported', () => {
+    const file = join(dir, 'paired.jsonl');
+    writeFileSync(file, [
+      JSON.stringify({ type: 'user', message: { content: 'go' } }),
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'T1', name: 'Bash', input: { cmd: 'ls' } }] } }),
+      JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'T1', content: 'a b c' }] } }),
+    ].join('\n'));
+
+    const report = importClaudeTranscript(db, file);
+    expect(report.skipped).toBe(0);
+    expect(report.imported).toBe(3);
+  });
+
+  // `{prompt: ''}` is truthy, so an EMPTY first user record read as "input
+  // captured" and the next, real prompt was discarded — the trace kept no
+  // question at all.
+  it('does not let an empty first prompt block the real one', () => {
+    const file = join(dir, 'emptyfirst.jsonl');
+    writeFileSync(file, [
+      JSON.stringify({ type: 'user', message: { content: '' } }),
+      JSON.stringify({ type: 'user', message: { content: 'the real question' } }),
+    ].join('\n'));
+
+    const report = importClaudeTranscript(db, file);
+    expect((report.trace?.input as { prompt?: string })?.prompt).toBe('the real question');
+  });
+});
