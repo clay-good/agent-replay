@@ -97,7 +97,7 @@ For the native protocol, each event is one JSON object on its own line carrying 
 | `snapshot` | Freeze context/environment/tool state at a step |
 | `trace_end` | Finalize the trace (`status`, `output`, token/cost totals) |
 
-Unknown event types and fields are skipped with a warning, never a crash — a newer producer stays compatible. A trace left open when the stream ends is finalized as `timeout` unless `--leave-open` — including one this stream resumed by id, so a trace can't dangle silently. The single exception is the trace a *live* enclosing `agent-replay run` handed down (via `AGENT_REPLAY_TRACE_ID`): that one belongs to the wrapper, which finalizes it from the child's exit.
+Unknown event types and fields are skipped with a warning, never a crash — a newer producer stays compatible. A usage or timing field that is not a non-negative finite number (`tokens_used`, `duration_ms`, `total_tokens`, `total_duration_ms`) is dropped with a warning and the rest of the event is kept, since `ingest` rejects such a value and the trace would otherwise be unrestorable from its own export. A trace left open when the stream ends is finalized as `timeout` unless `--leave-open` — including one this stream resumed by id, so a trace can't dangle silently. The single exception is the trace a *live* enclosing `agent-replay run` handed down (via `AGENT_REPLAY_TRACE_ID`): that one belongs to the wrapper, which finalizes it from the child's exit.
 
 #### OpenTelemetry ingest
 
@@ -262,7 +262,9 @@ agent-replay watch
 agent-replay watch <trace-id> --interval 200
 ```
 
-With no id it picks the most recent `running` trace, so it's the natural companion to a hook-instrumented session in another terminal. It exits when the trace is finalized.
+With no id it picks the most recent `running` trace — by start *instant*, not by the spelling of the timestamp — so it's the natural companion to a hook-instrumented session in another terminal. It exits when the trace is finalized.
+
+A producer that opens a step and closes it later (the two-phase `step_start`/`step_end` protocol) gets two lines per step: the announcement when the step starts, and a closing line carrying what only the end knows — duration, tokens, and any error. A producer that writes a complete step in one event gets a single line. Text that came from the agent (step names, errors, models, decision rationales) is escaped before it reaches your terminal, so a control sequence in a tool's stderr cannot retarget the terminal you are watching from.
 
 ### Explain decisions
 
@@ -364,7 +366,7 @@ agent-replay check --golden golden.json --strict --json
 agent-replay check --golden golden.json --fields model
 ```
 
-Comparable fields: `step_count`, `step_types`, `step_names`, `tool_inputs`, `status` (the default set), plus opt-in `model`. An unrecognized `--fields` value is rejected rather than silently comparing nothing.
+Comparable fields: `step_count`, `step_types`, `step_names`, `tool_inputs`, `status` (the default set), plus opt-in `model`. An unrecognized `--fields` value is rejected rather than silently comparing nothing — as a usage error (exit `2`) named for the bad field, checked before the store is opened, so a typo can't surface as "no traces matched" instead.
 
 Matches are made by agent name and a hash of the input, so each run is compared to its own golden counterpart. A divergence report names the trace, the step, and the differing field. The summary also reports baseline entries **no candidate exercised** — a scenario whose run crashed or never happened at all, which otherwise leaves a gate green with nothing to say about it. Those count as failures under `--strict`, alongside unmatched runs.
 
