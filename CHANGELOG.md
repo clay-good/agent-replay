@@ -117,6 +117,26 @@ nothing else.
 
 ### Fixed
 
+- The AI evaluators are no longer shown a trace with its falsy results removed.
+  The summary they reason from used a bare truthiness test, so a run whose
+  answer was `false` or `0` — a failed check, a "not found", a boolean verdict —
+  was presented as a run that produced nothing, and the judge scored a trace it
+  had not been shown. The same guard now used by `show` covers the summarizer
+  and the diff summary.
+
+- `replay`'s footer no longer contradicts the header it just printed. Step
+  durations and tokens were summed with `?? 0`, making "unmeasured"
+  indistinguishable from "instant" — so a trace whose steps carry no timing
+  reported "0ms" directly below a panel showing its real duration. With nothing
+  measured, it now says nothing.
+
+- `guard`'s `name_contains` now fails closed like every other match key. An
+  unusable value (an object, which stringifies to something no step name can
+  contain) made a `deny` policy validate, list as active, and silently never
+  fire — a kill switch that could not fire. `guard add` rejects a non-string,
+  but `addPolicy` and direct inserts bypass that, which is exactly why the
+  sibling keys already failed closed.
+
 - `ingest` now accepts a decision record on a step of any type, so a trace
   captured live can be re-ingested from its own export. **This reverses a
   previously-enforced rule.** Nothing else in the system maintained it: the

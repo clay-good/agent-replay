@@ -2,6 +2,7 @@ import chalk from 'chalk';
 import type { TraceStep } from '../models/types.js';
 import type { StepType } from '../models/enums.js';
 import { stepIcon, stepLabel, colors, label, separator } from './theme.js';
+import { hasRenderableContent } from '../utils/json.js';
 
 export interface TimelineOptions {
   showInput?: boolean;
@@ -21,29 +22,6 @@ export interface TimelineOptions {
  *   │      ...
  *   └─ 3  ➡ Output  "final_answer"                         50ms
  */
-/**
- * Whether a stored `input`/`output` value has anything worth rendering.
- *
- * The guards here used to be a bare truthiness test on `output` and a
- * `Object.keys(...).length > 0` test on `input`. Both fields hold arbitrary
- * JSON — the storage layer keeps whatever the producer sent — so a step whose
- * output was `false` or `0` (a failed check, a "not found", a boolean guard
- * result) rendered with no Output line at all, indistinguishable from a step
- * that produced nothing, while `show --json` showed the value. A scalar input
- * (`42`) has no keys and vanished the same way. The two tests also disagreed
- * with each other about `{}`.
- *
- * An empty object or array is still treated as nothing to show: it carries no
- * information, and the mappers deliberately store "no content" as null rather
- * than `{}` for exactly that reason.
- */
-export function hasRenderableContent(value: unknown): boolean {
-  if (value == null) return false;
-  if (Array.isArray(value)) return value.length > 0;
-  if (typeof value === 'object') return Object.keys(value as object).length > 0;
-  return true; // a scalar — including 0, false and '' — is real content
-}
-
 export function renderTimeline(
   steps: TraceStep[],
   options: TimelineOptions = {},

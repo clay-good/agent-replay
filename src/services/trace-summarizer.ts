@@ -1,6 +1,6 @@
 import type { TraceWithDetails, TraceStep, TraceDiffResult } from '../models/types.js';
 import { formatDuration } from '../utils/time.js';
-import { truncate, truncateJson } from '../utils/json.js';
+import { truncate, truncateJson, hasRenderableContent } from '../utils/json.js';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -30,8 +30,11 @@ export function summarizeTrace(
   const inputStr = truncObj(trace.input, 300);
   lines.push(`INPUT: ${inputStr}`);
 
-  // Output summary
-  if (trace.output) {
+  // Output summary. `hasRenderableContent`, not truthiness: the summary is what
+  // an AI evaluator reasons from, and a run whose answer was `false` or `0` — a
+  // failed check, a "not found", a boolean verdict — was presented as a run that
+  // produced NOTHING. The judge then scored a trace it had not been shown.
+  if (hasRenderableContent(trace.output)) {
     const outputStr = truncObj(trace.output, 300);
     lines.push(`OUTPUT: ${outputStr}`);
   }
@@ -84,8 +87,8 @@ export function summarizeDiffForLlm(
   lines.push(`INPUT B: ${truncObj(right.input, 200)}`);
 
   // Output comparison
-  if (left.output) lines.push(`OUTPUT A: ${truncObj(left.output, 200)}`);
-  if (right.output) lines.push(`OUTPUT B: ${truncObj(right.output, 200)}`);
+  if (hasRenderableContent(left.output)) lines.push(`OUTPUT A: ${truncObj(left.output, 200)}`);
+  if (hasRenderableContent(right.output)) lines.push(`OUTPUT B: ${truncObj(right.output, 200)}`);
 
   // Divergence
   if (diff.divergence_step != null) {
@@ -156,14 +159,14 @@ function summarizeSteps(steps: TraceStep[], charBudget: number): string[] {
 
     if (step.error) line += ' ERROR';
 
-    // Output summary
-    if (step.output) {
+    // Output summary — same guard, same reason as the trace output above.
+    if (hasRenderableContent(step.output)) {
       const outStr = truncObj(step.output, outputLimit);
       line += `\n   -> ${outStr}`;
     }
 
     // Input for tool_call steps (often contains critical info like file paths)
-    if (step.step_type === 'tool_call' && step.input && Object.keys(step.input).length > 0) {
+    if (step.step_type === 'tool_call' && hasRenderableContent(step.input)) {
       const inStr = truncObj(step.input, outputLimit);
       line += `\n   input: ${inStr}`;
     }
@@ -195,7 +198,12 @@ function summarizeSteps(steps: TraceStep[], charBudget: number): string[] {
   return lines;
 }
 
-function truncObj(obj: Record<string, unknown>, maxLen: number): string {
+/**
+ * `unknown`, not `Record<string, unknown>`: these fields hold arbitrary JSON —
+ * a scalar input, a `false` output — and the callers no longer narrow with a
+ * truthiness test that was itself the bug (it hid exactly those values).
+ */
+function truncObj(obj: unknown, maxLen: number): string {
   try {
     const str = JSON.stringify(obj);
     if (str.length <= maxLen) return str;

@@ -373,6 +373,31 @@ describe('a policy with no usable match criteria', () => {
   });
 });
 
+describe('name_contains fails closed like every other match key', () => {
+  it('treats an unusable name_contains as a match for a blocking policy', () => {
+    // Regression: name_contains was the one key that didn't fail closed. An
+    // object value stringifies to "[object Object]", which can never occur in a
+    // step name, so a deny policy written that way validated, listed as an
+    // active deny, and silently never fired. `guard add` rejects a non-string,
+    // but addPolicy (seed data, any SDK caller) and a direct insert bypass it.
+    addPolicy(db, { name: 'bad-deny', action: 'deny', match_pattern: { name_contains: { oops: 1 } as never } });
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'delete_user' })));
+    expect(v.action).toBe('deny');
+    expect(v.reason).toMatch(/unusable/);
+  });
+
+  it('leaves a non-blocking policy inert', () => {
+    addPolicy(db, { name: 'bad-warn', action: 'warn', match_pattern: { name_contains: { oops: 1 } as never } });
+    expect(verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'x' }))).action).toBe('allow');
+  });
+
+  it('still matches a normal string needle', () => {
+    addPolicy(db, { name: 'ok-deny', action: 'deny', match_pattern: { name_contains: 'delete' } });
+    expect(verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'delete_user' }))).action).toBe('deny');
+    expect(verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'read_user' }))).action).toBe('allow');
+  });
+});
+
 // ── guard check: an unusable store must block, not allow ────────────────────
 
 describe('runGuardCheck fails closed when policies cannot be evaluated', () => {

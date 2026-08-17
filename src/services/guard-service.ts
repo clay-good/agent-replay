@@ -357,11 +357,21 @@ function matchesPolicy(step: TraceStep, policy: GuardrailPolicy): string | null 
 
   // Match by step name (contains)
   if (pattern.name_contains != null) {
-    const nameStr = String(pattern.name_contains);
-    if (!step.name.toLowerCase().includes(nameStr.toLowerCase())) {
+    // The one match key that didn't fail closed. An object value stringifies to
+    // "[object Object]", which can never occur in a step name, so a deny policy
+    // written that way validated, listed as active, and silently never fired.
+    // `guard add` rejects a non-string, but `addPolicy` (seed data, any SDK
+    // caller) and a direct insert bypass that — the same justification every
+    // sibling branch already carries.
+    const needle = containsNeedle(pattern.name_contains);
+    if (needle == null) {
+      if (!failsClosed) return null;
+      reasons.push(`name_contains '${String(pattern.name_contains)}' is unusable — failing closed`);
+    } else if (!step.name.toLowerCase().includes(needle)) {
       return null;
+    } else {
+      reasons.push(`name contains '${pattern.name_contains}'`);
     }
-    reasons.push(`name contains '${nameStr}'`);
   }
 
   // Match by step name (regex)

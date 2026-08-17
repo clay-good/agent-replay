@@ -7,8 +7,8 @@ import { ensureDatabase } from '../db/index.js';
 import { traceHeaderPanel } from '../ui/boxen-panels.js';
 import { stepSpinner, successSpinner, failSpinner, warnSpinner } from '../ui/spinner.js';
 import { stepIcon, stepLabel, heading, separator, colors } from '../ui/theme.js';
-import { hasRenderableContent } from '../ui/timeline.js';
-import { errorMessage, truncate } from '../utils/json.js';
+
+import { errorMessage, truncate, hasRenderableContent } from '../utils/json.js';
 import { formatDuration } from '../utils/time.js';
 
 export interface ReplayOptions {
@@ -120,15 +120,23 @@ export async function runReplay(
   console.log(separator());
   console.log('');
 
-  const totalMs = steps.reduce((sum, s) => sum + (s.duration_ms ?? 0), 0);
-  const totalTokens = steps.reduce((sum, s) => sum + (s.tokens_used ?? 0), 0);
+  // Sum only the steps that were actually timed. `?? 0` made "unmeasured"
+  // indistinguishable from "instant": on a trace whose steps carry no
+  // duration_ms, this printed "| 0ms" directly below the header panel THIS
+  // COMMAND had just printed showing the trace's real duration — two
+  // contradictory durations on one screen. With nothing timed, say nothing.
+  const timed = steps.filter((s) => s.duration_ms != null);
+  const totalMs = timed.length ? timed.reduce((sum, s) => sum + (s.duration_ms as number), 0) : null;
+  // Same for tokens: a measured total of 0 is a fact, absence is not.
+  const counted = steps.filter((s) => s.tokens_used != null);
+  const totalTokens = counted.length ? counted.reduce((sum, s) => sum + (s.tokens_used as number), 0) : null;
   const errorSteps = steps.filter((s) => s.error);
 
   console.log(
     colors.primary('  Replay complete: ') +
       chalk.white(`${steps.length} steps`) +
-      chalk.dim(` | ${formatDuration(totalMs)}`) +
-      chalk.dim(totalTokens > 0 ? ` | ${totalTokens.toLocaleString()} tokens` : '') +
+      chalk.dim(totalMs != null ? ` | ${formatDuration(totalMs)}` : '') +
+      chalk.dim(totalTokens != null ? ` | ${totalTokens.toLocaleString()} tokens` : '') +
       (errorSteps.length > 0 ? chalk.redBright(` | ${errorSteps.length} error(s)`) : ''),
   );
   console.log('');

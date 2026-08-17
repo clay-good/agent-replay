@@ -684,3 +684,26 @@ describe('AI eval treats trace content as data, not instructions', () => {
     expect(result.passed).toBe(false); // 0.2 < 0.5 — the injected block would have passed
   });
 });
+
+
+describe('summarizeTrace shows falsy results to the judge', () => {
+  it('includes a false or zero output instead of presenting it as nothing', async () => {
+    // Regression: the summary — what an AI evaluator reasons from — used a bare
+    // truthiness test, so a run whose answer was `false` or `0` (a failed check,
+    // a "not found", a boolean verdict) was presented as a run that produced
+    // NOTHING, and the judge scored a trace it had not been shown.
+    const db = createTestDb();
+    const trace = ingestTrace(db, makeTrace({
+      status: 'completed', error: undefined, output: false as never,
+      steps: [
+        { step_number: 1, step_type: 'tool_call', name: 'validate', input: { id: 7 }, output: false },
+        { step_number: 2, step_type: 'output', name: 'final', output: 0 },
+      ],
+    }));
+
+    const text = summarizeTrace(getTrace(db, trace.id)!).text;
+    expect(text).toContain('OUTPUT: false');
+    expect(text).toMatch(/-> false/);
+    expect(text).toMatch(/-> 0/);
+  });
+});
