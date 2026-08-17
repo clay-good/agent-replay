@@ -117,6 +117,29 @@ nothing else.
 
 ### Fixed
 
+- `--since` resolves its cutoff to a UTC instant before querying. `Date.parse`
+  accepts more formats than SQLite's `julianday`, and while an unparseable
+  stored timestamp falls back to the old comparison, an unparseable *bound* made
+  every window match nothing at exit `0`. ISO 8601 basic-format offsets are the
+  reachable case — `+0200`, exactly what `date +%FT%T%z` emits in a shell
+  script. Normalizing also settles the zone-less forms, which JavaScript reads
+  as local time and SQLite as UTC; local is what a bare timestamp means, and
+  stored timestamps are UTC. `stats --json` echoes the resolved bound.
+
+- A cross-batch OTel trace never keeps a parent reference pointing at a later
+  step, even when start-time ordering cannot resolve it. Span timestamps are
+  stored to millisecond precision, so a parent and child starting in the same
+  millisecond tie and fall back to arrival order — leaving exactly the forward
+  reference the ordering exists to remove. Any that survive are now cleared, so
+  the trace stays something `ingest` accepts. Renumbering is also bounded, so a
+  very large assembled trace can't stall the receiver's write lock.
+
+- `run` escalates to `SIGKILL` if a child ignores a forwarded signal. Handling
+  the signal replaces Node's default terminate-on-signal, so forwarding alone
+  traded a stuck trace row for a stuck *process* — a child with `trap "" TERM`
+  kept the wrapper alive indefinitely, which is worse in the CI case this
+  serves.
+
 - A golden entry no longer silently discards a trace's own metadata key when it
   collides with one of the four the gate reads (`status`, `total_duration_ms`,
   `total_tokens`, `tags`). The reserved keys still win — `check` compares
@@ -398,13 +421,15 @@ nothing else.
   and exits `0` when the tag is actually `known_good`. That export now also
   warns that the baseline it just wrote can never detect a regression.
 
-- `record` now exits `1` when a stream produced input but **every** event was
-  rejected, instead of reporting a total capture failure as success. Piping the
-  wrong `--format` (or a broken producer) into `record` dropped every line as a
-  warning, recorded nothing, and still exited `0` — so `agent | agent-replay
-  record && agent-replay check` treated an empty recording as a clean run.
-  Per-event leniency is unchanged: a stream where some events survive still
-  exits `0`, and an empty stream is still not a failure.
+- `record` now exits `1` when a stream produced input but nothing was recorded,
+  instead of reporting a total capture failure as success. Piping the wrong
+  `--format` (or a broken producer) into `record` recorded nothing and still
+  exited `0` — so `agent | agent-replay record && agent-replay check` treated an
+  empty recording as a clean run. Note the `--format` case needs the check to
+  key on input received rather than on warnings, because a stream translator
+  ignores an unrecognized line silently. Per-event leniency is unchanged: a
+  stream where some events survive still exits `0`, and an empty stream is
+  still not a failure.
 
 - `why` no longer presents time-travelling causality as fact. `ingest` validates
   that `parent_step` / `caused_by_step` reference an earlier step, but the live

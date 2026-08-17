@@ -773,6 +773,19 @@ describe('CLI integration', () => {
     // An empty stream is not a failure — there was nothing to record.
     expect(run(['record'], '').code).toBe(0);
 
+    // The case the fix was written for, and which the first attempt MISSED: with
+    // a translator format, an unrecognized line is ignored SILENTLY rather than
+    // warned about, so `warnings` stayed 0 and piping the wrong --format
+    // reported success having recorded nothing.
+    const nativeStream = [
+      '{"v":1,"type":"trace_start","trace_id":"twf","agent_name":"x"}',
+      '{"v":1,"type":"trace_end","trace_id":"twf","status":"completed"}',
+    ].join('\n');
+    expect(run(['record', '--format', 'codex-exec'], nativeStream).code).toBe(1);
+    expect(run(['record', '--format', 'gemini-stream'], nativeStream).code).toBe(1);
+    // The right format for that same stream still succeeds.
+    expect(run(['record'], nativeStream).code).toBe(0);
+
     // And a partial failure stays exit 0: per-event leniency is the contract.
     const partial = [
       '{ truncated',
@@ -1018,7 +1031,10 @@ describe('CLI integration', () => {
 
     const windowed = JSON.parse(run(['stats', '--json', '--since', '2025-01-01']).stdout);
     expect(windowed.overall.traces).toBe(1); // only the 2030 trace
-    expect(windowed.since).toBe('2025-01-01');
+    // The echoed cutoff is the NORMALIZED bound actually used, not the raw
+    // input: `--since` is resolved to a UTC instant so SQLite can always parse
+    // it (a `+0200`-style offset it cannot parse would otherwise match nothing).
+    expect(windowed.since).toBe('2025-01-01T00:00:00.000Z');
     expect(windowed.by_agent).toEqual([{ agent_name: 'new', count: 1, failed: 0 }]);
 
     expect(run(['stats', '--since', 'not-a-window']).code).toBe(2); // usage error

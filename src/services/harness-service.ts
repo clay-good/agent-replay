@@ -196,12 +196,32 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
     // temp dir, and orphaned the child still holding the terminal. Forwarding
     // lets the child exit, which runs the normal close → finalize → cleanup
     // path, and the wrapper still reports 128 + signal.
+    // Escalate if the child doesn't go. Installing these handlers REPLACES
+    // Node's default terminate-on-signal, so forwarding alone traded a stuck
+    // trace row for a stuck PROCESS: a child that ignores SIGTERM (`trap "" TERM`)
+    // left the wrapper alive indefinitely, which is worse in the CI use case
+    // this exists for. SIGKILL cannot be ignored, so a grace period guarantees
+    // the run ends — and it ends through the normal close → finalize → cleanup
+    // path, which is the point.
+    const KILL_GRACE_MS = 5_000;
+    let escalation: NodeJS.Timeout | undefined;
     const forward = (sig: NodeJS.Signals) => (): void => {
       try {
         child.kill(sig);
       } catch {
         // The child is already gone; the close handler will finalize.
       }
+      if (escalation) return; // a repeated signal doesn't restart the clock
+      escalation = setTimeout(() => {
+        process.stderr.write(`agent-replay run: child did not exit after ${sig}; sending SIGKILL\n`);
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // Already gone.
+        }
+      }, KILL_GRACE_MS);
+      // Don't hold the event loop open on the grace timer alone.
+      escalation.unref?.();
     };
     const onSigint = forward('SIGINT');
     const onSigterm = forward('SIGTERM');
@@ -212,6 +232,7 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
 
     const done = (code: number): void => {
       clearInterval(poll);
+      if (escalation) clearTimeout(escalation);
       process.off('SIGINT', onSigint);
       process.off('SIGTERM', onSigterm);
       process.off('SIGHUP', onSighup);

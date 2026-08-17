@@ -117,10 +117,20 @@ export function parseSinceToIso(since: string): string {
   // indistinguishable from an empty store, and a `check --since` gate quietly
   // examined nothing at all.
   if (/^\d{4}-\d{2}/.test(since)) {
-    if (Number.isNaN(Date.parse(since))) {
+    const parsed = Date.parse(since);
+    if (Number.isNaN(parsed)) {
       throw new Error(`Invalid date: "${since}". Use an ISO timestamp (2026-08-16, 2026-08-16T13:00:00Z) or a duration (30m, 2h, 7d).`);
     }
-    return since;
+    // NORMALIZE, don't pass through. `Date.parse` accepts strictly more formats
+    // than SQLite's `julianday`, and the comparison has a byte-compare fallback
+    // for an unparseable ROW but none for an unparseable BOUND — `julianday(?)`
+    // is then NULL, so no row can satisfy the window and every query returns
+    // nothing at exit 0. ISO 8601 basic-format offsets are the reachable case:
+    // `+0200`, which is exactly what `date +%FT%T%z` emits in a shell script.
+    // Normalizing to a UTC instant also settles the zone-less forms, which JS
+    // reads as local time and SQLite as UTC; local is what a user typing a bare
+    // timestamp means, and the stored timestamps are UTC.
+    return new Date(parsed).toISOString();
   }
   // Otherwise it must be a duration (1h, 7d, 30m, …). parseDurationString throws
   // on anything unparseable — surface that rather than passing garbage to the DB,

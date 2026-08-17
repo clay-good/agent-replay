@@ -453,6 +453,41 @@ describe('OTLP receiver', () => {
     ).toBe(true);
   });
 
+  it('never keeps a forward parent reference, even when start times tie', () => {
+    // Renumbering by start time cannot resolve every case: span timestamps are
+    // stored to MILLISECOND precision, so a parent and a child that start within
+    // the same millisecond tie and the tie-break falls to arrival order —
+    // leaving exactly the forward reference the renumbering exists to remove.
+    // (Clock skew putting a parent's start after its child's does the same.)
+    // Such a reference is what validateTraceInput rejects and what makes `why`
+    // render step 1 as "caused by #2", so it must never survive.
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    const T = 20 * MS;
+    // Child starts 0.2ms AFTER its parent — identical once truncated to ms.
+    handleTracesExport(db, JSON.stringify(otlp([
+      span({ traceId: 'ttie', spanId: 'C', parentSpanId: 'P', name: 'execute_tool', start: T + 200_000, end: T + 900_000, attrs: { 'gen_ai.operation.name': 'execute_tool' } }),
+    ])), stats);
+    handleTracesExport(db, JSON.stringify(otlp([
+      span({ traceId: 'ttie', spanId: 'P', name: 'chat', start: T, end: T + 9 * MS, attrs: { 'gen_ai.operation.name': 'chat' } }),
+    ])), stats);
+
+    const trace = getTrace(db, listTraces(db, {}).items[0].id)!;
+    for (const step of trace.steps) {
+      if (step.parent_step_number != null) expect(step.parent_step_number).toBeLessThan(step.step_number);
+      if (step.caused_by_step_number != null) expect(step.caused_by_step_number).toBeLessThan(step.step_number);
+    }
+    // And the result is something `ingest` will take back.
+    expect(
+      validateTraceInput({
+        agent_name: trace.agent_name,
+        steps: trace.steps.map((s) => ({
+          step_number: s.step_number, step_type: s.step_type, name: s.name,
+          parent_step: s.parent_step_number, caused_by_step: s.caused_by_step_number,
+        })),
+      } as never).valid,
+    ).toBe(true);
+  });
+
   it('keeps distinct OTel traces separate across batches', () => {
     const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
     handleTracesExport(db, JSON.stringify(otlp([

@@ -45,6 +45,13 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
   let applied = 0;
   let warnings = 0;
   let totalSteps = 0;
+  // Non-blank lines the producer actually sent. The failure condition is
+  // "input arrived and nothing was recorded" — keying it on `warnings` instead
+  // missed the very case it was written for: with `--format codex-exec` or
+  // `gemini-stream`, a translator IGNORES an unrecognized line silently rather
+  // than warning, so piping the wrong --format left warnings at 0 and the run
+  // reported success having recorded nothing.
+  let inputLines = 0;
 
   const apply = (event: CaptureEvent): void => {
     if (event.type === 'trace_start' && extraTags.length > 0) {
@@ -70,6 +77,7 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
   const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
 
   for await (const line of rl) {
+    if (line.trim()) inputLines++;
     if (translator) {
       // Native harness stream: parse the line, then translate to our events.
       const trimmed = line.trim();
@@ -137,12 +145,16 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
   // Per-event leniency is deliberate — one bad line must never cost the rest of
   // the stream (see the hostile-input test). But leniency about *some* events is
   // not the same as reporting a total capture failure as success: when the
-  // producer sent input and EVERY event was dropped, nothing was recorded and a
-  // CI pipeline (`agent | agent-replay record && agent-replay check`) read that
-  // as a clean run. An empty stream stays exit 0 — no input is not a failure.
-  if (applied === 0 && warnings > 0) {
+  // producer sent input and NOTHING was recorded, a CI pipeline
+  // (`agent | agent-replay record && agent-replay check`) read that as a clean
+  // run. An empty stream stays exit 0 — no input is not a failure.
+  if (applied === 0 && inputLines > 0) {
     console.error(
-      chalk.red(`  Nothing was recorded: all ${warnings} event(s) were rejected.`),
+      chalk.red(
+        warnings > 0
+          ? `  Nothing was recorded: all ${warnings} event(s) were rejected.`
+          : `  Nothing was recorded: none of the ${inputLines} line(s) matched the ${format} format.`,
+      ),
     );
     process.exitCode = 1;
   }

@@ -25,8 +25,18 @@ describe('parseSinceToIso', () => {
     expect(Math.abs(ms - expected)).toBeLessThan(5000); // ~1h ago
   });
 
-  it('passes an ISO date through unchanged', () => {
-    expect(parseSinceToIso('2026-01-01T00:00:00Z')).toBe('2026-01-01T00:00:00Z');
+  it('normalizes an ISO date to a UTC instant SQLite can parse', () => {
+    // Was "passes an ISO date through unchanged". Pass-through was the defect:
+    // Date.parse accepts strictly more formats than SQLite's julianday, and the
+    // --since comparison has a byte-compare fallback for an unparseable ROW but
+    // none for an unparseable BOUND. `julianday(?)` was then NULL, so no row
+    // could satisfy the window and every query returned nothing at exit 0.
+    expect(parseSinceToIso('2026-01-01T00:00:00Z')).toBe('2026-01-01T00:00:00.000Z');
+    // The reachable case: ISO 8601 basic-format offsets, which `date +%FT%T%z`
+    // emits. julianday() returns NULL for this; normalized, it works.
+    expect(parseSinceToIso('2026-08-16T13:30:00+0200')).toBe('2026-08-16T11:30:00.000Z');
+    // An offset with a colon means the same instant either way.
+    expect(parseSinceToIso('2026-08-16T13:30:00+02:00')).toBe('2026-08-16T11:30:00.000Z');
   });
 
   it('throws on garbage instead of returning it verbatim (would corrupt the query)', () => {
@@ -41,8 +51,8 @@ describe('parseSinceToIso', () => {
     // silently examined nothing.
     expect(() => parseSinceToIso('2026-99')).toThrow(/Invalid date/);
     expect(() => parseSinceToIso('2026-08-99T00:00:00Z')).toThrow(/Invalid date/);
-    // Real dates still pass through untouched.
-    expect(parseSinceToIso('2026-08-16')).toBe('2026-08-16');
+    // A real date normalizes to the instant SQLite reads it as.
+    expect(parseSinceToIso('2026-08-16')).toBe('2026-08-16T00:00:00.000Z');
   });
 });
 

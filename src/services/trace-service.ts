@@ -441,6 +441,18 @@ function renumberByStartTime(db: Database.Database, traceId: string): void {
   }[];
   if (steps.length < 2) return;
 
+  // Renumbering rewrites every row of the trace twice, so it is bounded. A
+  // long-running receiver assembling a very large trace would otherwise pay an
+  // O(N) rewrite per batch — seconds, while holding the write lock — and the
+  // reordering batch is the normal case here, so this is not a rare path. Above
+  // the bound the trace keeps arrival order; the forward-reference sweep below
+  // still runs, so the data stays valid either way.
+  const RENUMBER_MAX_STEPS = 2_000;
+  if (steps.length > RENUMBER_MAX_STEPS) {
+    dropForwardRefs(db, traceId, steps);
+    return;
+  }
+
   const ordered = [...steps].sort((a, b) => {
     const ta = a.started_at ? Date.parse(a.started_at) : NaN;
     const tb = b.started_at ? Date.parse(b.started_at) : NaN;
@@ -453,7 +465,10 @@ function renumberByStartTime(db: Database.Database, traceId: string): void {
 
   const renumbered = new Map<number, number>();
   ordered.forEach((s, i) => renumbered.set(s.step_number, i + 1));
-  if (ordered.every((s, i) => s.step_number === i + 1)) return; // already in order
+  if (ordered.every((s, i) => s.step_number === i + 1)) {
+    dropForwardRefs(db, traceId, steps);
+    return; // already in order
+  }
 
   const ref = (n: number | null): number | null => (n == null ? null : (renumbered.get(n) ?? null));
   const update = db.prepare(
@@ -476,6 +491,46 @@ function renumberByStartTime(db: Database.Database, traceId: string): void {
       traceId,
       s.step_number + offset,
     );
+  }
+
+  dropForwardRefs(db, traceId);
+}
+
+/**
+ * Clear any parent/caused-by reference that still points at a LATER step.
+ *
+ * Start-time ordering cannot always resolve these: span timestamps are stored
+ * to millisecond precision, so a parent and a child that start within the same
+ * millisecond tie, and the tie-break falls back to arrival order — leaving the
+ * forward reference the renumbering was meant to remove. Clock skew between
+ * hosts can put a parent's start after its child's outright. Those references
+ * are what `validateTraceInput` rejects and what makes `why` render step 1 as
+ * "caused by #2", so a trace must never keep one: the same rule the
+ * single-batch OTel path and the live record path already enforce. The span ids
+ * stay in metadata, so a later batch can still repair the link properly.
+ */
+function dropForwardRefs(
+  db: Database.Database,
+  traceId: string,
+  known?: { step_number: number; parent_step_number: number | null; caused_by_step_number: number | null }[],
+): void {
+  const rows =
+    known ??
+    (db
+      .prepare(
+        'SELECT step_number, parent_step_number, caused_by_step_number FROM agent_trace_steps WHERE trace_id = ?',
+      )
+      .all(traceId) as { step_number: number; parent_step_number: number | null; caused_by_step_number: number | null }[]);
+
+  const clear = db.prepare(
+    'UPDATE agent_trace_steps SET parent_step_number = ?, caused_by_step_number = ? WHERE trace_id = ? AND step_number = ?',
+  );
+  for (const r of rows) {
+    const parent = r.parent_step_number != null && r.parent_step_number >= r.step_number ? null : r.parent_step_number;
+    const caused = r.caused_by_step_number != null && r.caused_by_step_number >= r.step_number ? null : r.caused_by_step_number;
+    if (parent !== r.parent_step_number || caused !== r.caused_by_step_number) {
+      clear.run(parent, caused, traceId, r.step_number);
+    }
   }
 }
 
