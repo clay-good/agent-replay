@@ -999,8 +999,8 @@ describe('CLI integration', () => {
     expect(out.by_status.completed).toBe(2);
     expect(out.by_status.failed).toBe(1);
     expect(out.by_agent).toEqual([
-      { agent_name: 'bot-a', count: 2, failed: 1 },
-      { agent_name: 'bot-b', count: 1, failed: 0 },
+      { agent_name: 'bot-a', count: 2, failed_or_timeout: 1 },
+      { agent_name: 'bot-b', count: 1, failed_or_timeout: 0 },
     ]);
   });
 
@@ -1035,7 +1035,7 @@ describe('CLI integration', () => {
     // input: `--since` is resolved to a UTC instant so SQLite can always parse
     // it (a `+0200`-style offset it cannot parse would otherwise match nothing).
     expect(windowed.since).toBe('2025-01-01T00:00:00.000Z');
-    expect(windowed.by_agent).toEqual([{ agent_name: 'new', count: 1, failed: 0 }]);
+    expect(windowed.by_agent).toEqual([{ agent_name: 'new', count: 1, failed_or_timeout: 0 }]);
 
     expect(run(['stats', '--since', 'not-a-window']).code).toBe(2); // usage error
   });

@@ -468,7 +468,7 @@ agent-replay stats --since 2026-08-01
 agent-replay stats --json
 ```
 
-The `--json` shape is `{ since, overall, by_status, by_agent }`, where `by_agent` lists each agent's trace `count` and a `failed` tally (failed + timeout), most-active first. `--since` windows every count to traces started at or after the cutoff (steps and evals by their parent trace's start time); the active-policy count is current config and is never windowed. A malformed `--since` is a usage error (exit `2`).
+The `--json` shape is `{ since, overall, by_status, by_agent }`, where `by_agent` lists each agent's trace `count` and a `failed_or_timeout` tally, most-active first (named for what it counts, so it can't be read as failures alone alongside `by_status`). `--since` windows every count to traces started at or after the cutoff (steps and evals by their parent trace's start time); the active-policy count is current config and is never windowed. A malformed `--since` is a usage error (exit `2`).
 
 ### Configuration
 

@@ -2,8 +2,9 @@ import boxen from 'boxen';
 import chalk from 'chalk';
 import type { Trace } from '../models/types.js';
 import type { TraceStatus } from '../models/enums.js';
-import { statusBadge, colors, label, formatScorePct } from './theme.js';
+import { statusBadge, colors, label, formatScorePct, formatCostUsd } from './theme.js';
 import { effectiveDurationMs } from '../utils/time.js';
+import { effectiveTokens } from '../utils/totals.js';
 
 /**
  * Trace metadata header panel (shown at top of `show` command).
@@ -26,24 +27,12 @@ export function traceHeaderPanel(trace: Trace): string {
   // a producer reports a total, so `show` omitted the Tokens line entirely for a
   // trace whose tokens are recorded per step — while `replay` of the same trace
   // printed a total and `stats` counted it in the store roll-up.
-  const steps = (trace as { steps?: { tokens_used: number | null }[] }).steps;
-  const stepTokens = steps?.reduce<number | null>(
-    (sum, s) => (s.tokens_used == null ? sum : (sum ?? 0) + s.tokens_used),
-    null,
-  );
-  const tokens = trace.total_tokens ?? trace.effective_tokens ?? stepTokens ?? null;
+  const tokens = effectiveTokens(trace as Parameters<typeof effectiveTokens>[0]);
   if (tokens != null) {
     lines.push(`${label('Tokens:')}    ${chalk.white(tokens.toLocaleString())}`);
   }
   if (trace.total_cost_usd != null) {
-    // A per-trace cost is routinely a fraction of a cent, and toFixed(4)
-    // rendered anything under $0.00005 as "$0.0000" — reporting zero where real
-    // spend exists. Widen the precision only for those values, so the common
-    // case keeps its familiar 4-decimal form. (aiEvalPanel in this file already
-    // uses 6 decimals for the same reason.)
-    const cost = trace.total_cost_usd;
-    const costStr = cost > 0 && cost < 0.0001 ? cost.toFixed(8) : cost.toFixed(4);
-    lines.push(`${label('Cost:')}      ${chalk.white('$' + costStr)}`);
+    lines.push(`${label('Cost:')}      ${chalk.white(formatCostUsd(trace.total_cost_usd))}`);
   }
 
   lines.push(`${label('Started:')}   ${chalk.white(trace.started_at)}`);

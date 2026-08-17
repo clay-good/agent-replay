@@ -70,6 +70,16 @@ export function formatScorePct(score: number): string {
   return `${Number.isInteger(pct) ? pct : pct.toFixed(1)}%`;
 }
 
+/**
+ * A dollar amount, widening past four decimals only when four would round real
+ * spend to "$0.0000". Agent runs routinely cost a fraction of a cent, so a flat
+ * toFixed(4) reported zero for a store that had genuinely spent money — and
+ * `stats` said "$0.0000" for the same trace `show` displayed as "$0.00002000".
+ */
+export function formatCostUsd(cost: number): string {
+  return cost > 0 && cost < 0.0001 ? `$${cost.toFixed(8)}` : `$${cost.toFixed(4)}`;
+}
+
 export function scoreBadge(score: number): string {
   const display = formatScorePct(score);
   if (score >= 0.8) return chalk.greenBright.bold(display);

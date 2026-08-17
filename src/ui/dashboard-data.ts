@@ -95,7 +95,14 @@ export function statusCounts(db: Database.Database, opts: StatsFilter = {}): { t
 export interface AgentStatRow {
   agent_name: string;
   count: number;
-  failed: number;
+  /**
+   * Failed AND timed-out traces. Named for what it counts: as `failed` it
+   * contradicted its own document — `stats --json` reported
+   * `by_status: {failed: 0, timeout: 1}` next to `by_agent: [{failed: 1}]`, and
+   * a CI job alerting on the per-agent number fired on timeouts. The human
+   * output already says "failed or timed out".
+   */
+  failed_or_timeout: number;
 }
 
 /**
@@ -109,7 +116,7 @@ export function agentStats(db: Database.Database, opts: StatsFilter = {}): Agent
     .prepare(
       `SELECT agent_name,
               COUNT(*) as count,
-              SUM(CASE WHEN status IN ('failed', 'timeout') THEN 1 ELSE 0 END) as failed
+              SUM(CASE WHEN status IN ('failed', 'timeout') THEN 1 ELSE 0 END) as failed_or_timeout
        FROM agent_traces
        ${since ? `WHERE ${SINCE_PREDICATE}` : ''}
        GROUP BY agent_name

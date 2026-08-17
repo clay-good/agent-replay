@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { traceTable, evalTable, policyTable } from '../src/ui/table.js';
 import { traceHeaderPanel } from '../src/ui/boxen-panels.js';
-import { formatScorePct } from '../src/ui/theme.js';
+import { formatScorePct, formatCostUsd } from '../src/ui/theme.js';
 import { renderTimeline, renderTree } from '../src/ui/timeline.js';
 import { renderDiff } from '../src/ui/diff-renderer.js';
 import type { Trace, TraceStep, EvalResult, GuardrailPolicy, TraceDiffResult } from '../src/models/types.js';
@@ -200,6 +200,17 @@ describe('renderDiff', () => {
     const out = noAnsi(renderDiff(diff, trace(), trace()));
     expect(out).toContain('extra_step_xyz');
     expect(out).toContain('Right only');
+  });
+});
+
+describe('formatCostUsd — never reports real spend as zero', () => {
+  it('widens past four decimals only for sub-cent amounts', () => {
+    // `stats` printed "$0.0000" for a store where `show` displayed the same
+    // trace as "$0.00002000": a flat toFixed(4) rounds real spend to zero.
+    expect(formatCostUsd(0.00002)).toBe('$0.00002000');
+    expect(formatCostUsd(0)).toBe('$0.0000');
+    expect(formatCostUsd(0.1234)).toBe('$0.1234');
+    expect(formatCostUsd(12.5)).toBe('$12.5000');
   });
 });
 

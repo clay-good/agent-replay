@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import { ensureDatabase } from '../db/index.js';
 import { dashboardStats, statusCounts, agentStats } from '../ui/dashboard-data.js';
 import { summaryPanel } from '../ui/boxen-panels.js';
-import { heading, label } from '../ui/theme.js';
+import { heading, label, formatCostUsd } from '../ui/theme.js';
 import { formatDuration, parseSinceToIso } from '../utils/time.js';
 import { errorMessage } from '../utils/json.js';
 
@@ -61,7 +61,7 @@ export function runStats(opts: StatsOptions = {}): void {
       'Active policies': overall.policies,
       'Avg duration': overall.avgDurationMs != null ? formatDuration(Math.round(overall.avgDurationMs)) : '-',
       'Total tokens': overall.totalTokens != null ? overall.totalTokens.toLocaleString() : '-',
-      'Total cost': overall.totalCost != null ? '$' + overall.totalCost.toFixed(4) : '-',
+      'Total cost': overall.totalCost != null ? formatCostUsd(overall.totalCost) : '-',
     }),
   );
 
@@ -85,7 +85,7 @@ export function runStats(opts: StatsOptions = {}): void {
       // agentStats), but the label said only "failed" — so a store with one
       // timeout and no failures printed "1 failed" three lines below a status
       // breakdown showing `timeout 1` and no failed row.
-      const failed = a.failed > 0 ? chalk.red(` (${a.failed} failed or timed out)`) : '';
+      const failed = a.failed_or_timeout > 0 ? chalk.red(` (${a.failed_or_timeout} failed or timed out)`) : '';
       console.log(`    ${label(a.agent_name)} ${chalk.white(String(a.count))}${failed}`);
     }
   }

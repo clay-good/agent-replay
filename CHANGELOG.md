@@ -117,6 +117,23 @@ nothing else.
 
 ### Fixed
 
+- The AI evaluators are now shown the run's duration and token count. Both were
+  read from the trace-level columns, which only a producer-reported total ever
+  fills — so for every hook-, `record`-, OTel- or importer-captured trace the
+  judge was handed a run with no timing and no tokens, while `list`, `show` and
+  `stats` displayed both. The efficiency preset asks the model to weigh "cost,
+  latency and token usage"; it was scoring what it had not been shown.
+  `diff --ai` lost the same durations.
+
+- `stats` no longer prints `$0.0000` for a store with real spend under half a
+  cent — the widening `show` already applied is now shared by both.
+
+- `stats --json` renamed the per-agent `failed` tally to `failed_or_timeout`,
+  which is what it has always counted. The same document reported
+  `by_status: {failed: 0, timeout: 1}` beside `by_agent: [{failed: 1}]`, so a CI
+  job alerting on the per-agent number fired on timeouts. The human output
+  already said "failed or timed out".
+
 - `check --golden` no longer passes green when it had nothing to check. A run
   where no trace matched the filters produced "0 passed, 0 regressed" and exit
   `0` — even under `--strict`, which only counts candidates that were actually

@@ -1,6 +1,7 @@
 import type { TraceWithDetails, TraceStep, TraceDiffResult } from '../models/types.js';
-import { formatDuration } from '../utils/time.js';
+import { formatDuration, effectiveDurationMs } from '../utils/time.js';
 import { truncate, truncateJson, hasRenderableContent } from '../utils/json.js';
+import { effectiveTokens } from '../utils/totals.js';
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -39,9 +40,16 @@ export function summarizeTrace(
     lines.push(`OUTPUT: ${outputStr}`);
   }
 
-  // Step summary header
-  const totalDur = trace.total_duration_ms != null ? `, ${formatDuration(trace.total_duration_ms)}` : '';
-  const totalTok = trace.total_tokens != null ? `, ${trace.total_tokens} tokens` : '';
+  // Step summary header. Both totals fall back to what the steps carry, exactly
+  // as `list`, `show` and `stats` do: the trace-level columns are set only when
+  // a producer reports them, so for every hook-, `record`-, OTel- or
+  // importer-captured trace the judge was handed a run with no duration and no
+  // token count — while the efficiency preset's own prompt asks it to weigh
+  // "cost, latency and token usage". It scored what it had not been shown.
+  const durationMs = effectiveDurationMs(trace);
+  const tokens = effectiveTokens(trace);
+  const totalDur = durationMs != null ? `, ${formatDuration(durationMs)}` : '';
+  const totalTok = tokens != null ? `, ${tokens} tokens` : '';
   lines.push(`\nSTEPS (${trace.steps.length} total${totalDur}${totalTok}):`);
 
   // Steps — progressively truncate based on budget
@@ -79,8 +87,10 @@ export function summarizeDiffForLlm(
   // Trace headers
   const leftVer = left.agent_version ? ` v${left.agent_version}` : '';
   const rightVer = right.agent_version ? ` v${right.agent_version}` : '';
-  lines.push(`TRACE A: ${left.agent_name}${leftVer} [${left.status.toUpperCase()}] (${left.steps.length} steps${left.total_duration_ms != null ? `, ${formatDuration(left.total_duration_ms)}` : ''})`);
-  lines.push(`TRACE B: ${right.agent_name}${rightVer} [${right.status.toUpperCase()}] (${right.steps.length} steps${right.total_duration_ms != null ? `, ${formatDuration(right.total_duration_ms)}` : ''})`);
+  const leftDur = effectiveDurationMs(left);
+  const rightDur = effectiveDurationMs(right);
+  lines.push(`TRACE A: ${left.agent_name}${leftVer} [${left.status.toUpperCase()}] (${left.steps.length} steps${leftDur != null ? `, ${formatDuration(leftDur)}` : ''})`);
+  lines.push(`TRACE B: ${right.agent_name}${rightVer} [${right.status.toUpperCase()}] (${right.steps.length} steps${rightDur != null ? `, ${formatDuration(rightDur)}` : ''})`);
 
   // Input comparison
   lines.push(`\nINPUT A: ${truncObj(left.input, 200)}`);

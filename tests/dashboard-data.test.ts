@@ -142,7 +142,7 @@ describe('StatsFilter (since)', () => {
     expect(byStatus.completed).toBe(1);
     expect(byStatus.failed).toBe(0); // the failed one is old, excluded
 
-    expect(agentStats(db, { since: cutoff })).toEqual([{ agent_name: 'new-bot', count: 1, failed: 0 }]);
+    expect(agentStats(db, { since: cutoff })).toEqual([{ agent_name: 'new-bot', count: 1, failed_or_timeout: 0 }]);
   });
 
   it('counts everything with no filter (store-wide), matching the dashboard call', () => {
@@ -171,8 +171,10 @@ describe('agentStats', () => {
 
     const rows = agentStats(db);
     expect(rows).toEqual([
-      { agent_name: 'bot-a', count: 3, failed: 2 }, // failed + timeout both count
-      { agent_name: 'bot-b', count: 1, failed: 0 },
+      // The key is named for what it counts: `stats --json` used to report
+      // `by_status: {failed: 0, timeout: 1}` beside `by_agent: [{failed: 1}]`.
+      { agent_name: 'bot-a', count: 3, failed_or_timeout: 2 },
+      { agent_name: 'bot-b', count: 1, failed_or_timeout: 0 },
     ]);
   });
 

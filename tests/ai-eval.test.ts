@@ -262,6 +262,33 @@ describe('trace summarizer', () => {
     expect(summary.estimated_tokens).toBeGreaterThan(0);
   });
 
+  it('shows the judge the duration and tokens the steps carry', () => {
+    // A hook-, record-, OTel- or importer-captured trace has per-step tokens and
+    // only `ended_at` — the trace-level totals stay null. The summary read those
+    // columns directly, so the AI evaluators (the efficiency preset asks about
+    // "cost, latency and token usage") were handed a run with no duration and no
+    // token count, while `list`, `show` and `stats` all displayed both.
+    const db = createTestDb();
+    const trace = ingestTrace(db, {
+      agent_name: 'measured-bot',
+      status: 'completed',
+      started_at: '2026-08-16T00:00:00.000Z',
+      ended_at: '2026-08-16T00:00:02.000Z',
+      input: { task: 'x' },
+      steps: [
+        { step_number: 1, step_type: 'llm_call', name: 'plan', tokens_used: 120 },
+        { step_number: 2, step_type: 'output', name: 'done', tokens_used: 30 },
+      ],
+    });
+    const full = getTrace(db, trace.id)!;
+    expect(full.total_tokens).toBeNull();
+    expect(full.total_duration_ms).toBeNull();
+
+    const summary = summarizeTrace(full);
+    expect(summary.text).toContain('150 tokens');
+    expect(summary.text).toContain('2.0s');
+  });
+
   it('respects token budget', () => {
     const db = createTestDb();
     const trace = ingestTrace(db, makeTrace());
