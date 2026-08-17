@@ -293,6 +293,13 @@ function rowToSnapshot(row: Record<string, unknown>): TraceSnapshot {
 
 // ── 1. ingestTrace ────────────────────────────────────────────────────────
 
+/**
+ * C0 controls, DEL and C1 — never legitimate in an identifier, and an escape
+ * sequence in one addresses the terminal of whoever later inspects the trace.
+ */
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/;
+
 /** Insert the trace row (no steps). Shared by ingestTrace and startTrace. */
 function insertTraceRow(
   db: Database.Database,
@@ -794,6 +801,16 @@ export function startTrace(
   input: IngestTraceInput,
   opts: { id?: string } = {},
 ): Trace {
+  // The WRITE is the single door, not the protocol parser. `validateEvent`
+  // rejects a control character in a producer-supplied trace id, but the
+  // programmatic path — `TraceRecorder.startTrace`, which builds an event and
+  // calls `applyEvent` directly — never passes through it. An id reaches show,
+  // list, watch, why, decisions, fork, eval, check and the dashboard, and is
+  // copied into `parent_trace_id` by `fork`, so one that can address the
+  // terminal must not be storable by ANY route.
+  if (opts.id != null && CONTROL_CHARS.test(opts.id)) {
+    throw new Error('trace id must not contain control characters');
+  }
   const traceId = opts.id ?? generateId('trc');
   const timestamp = now();
   const status = input.status ?? (input.ended_at ? 'completed' : 'running');

@@ -609,5 +609,17 @@ describe('a producer-chosen trace id cannot carry control characters', () => {
     const ok = validateEvent({ v: 1, type: 'trace_start', trace_id: 'trc_normal-01', agent_name: 'a' });
     expect(ok.event).not.toBeNull();
   });
+
+  it('is refused on the programmatic path too, which skips the protocol parser', () => {
+    // `TraceRecorder.startTrace` builds an event and calls `applyEvent`
+    // directly, so `validateEvent` never sees it — the protocol parser is not
+    // the single door the WRITE is. Guarded at `startTrace`, which every route
+    // goes through.
+    expect(() =>
+      startTrace(db, { agent_name: 'a', status: 'running', input: {} }, { id: 'trc_\u001b]0;X\u0007' }),
+    ).toThrow(/control characters/);
+    // A normal id still opens a trace.
+    expect(startTrace(db, { agent_name: 'a', status: 'running', input: {} }, { id: 'trc_fine-01' }).id).toBe('trc_fine-01');
+  });
 });
 

@@ -2165,7 +2165,10 @@ between them, and nothing else.
   column name, kept being missed. It is now rejected where it enters, which is a
   single door: an identifier never legitimately contains an escape sequence, a
   NUL or a newline, so everything downstream is safe by construction, the way
-  the schema already constrains `trigger` and `status`. Every render site is
+  the schema already constrains `trigger` and `status`. The guard sits on the
+  WRITE (`startTrace`), not only on the protocol parser: the programmatic
+  `TraceRecorder.startTrace` builds an event and applies it directly, so the
+  parser is not a door every route passes through. Every render site is
   escaped as well, so a store that already holds such an id is safe to inspect.
 
 - A Gemini stream's unreadable exit code fabricated a run failure. `Number()` of
