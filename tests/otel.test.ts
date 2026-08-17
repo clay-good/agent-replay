@@ -368,6 +368,51 @@ describe('OTLP receiver', () => {
     expect(B.parent_step_number).toBe(A.step_number);
   });
 
+  it('numbers an assembled trace by start time so the re-link points backward', () => {
+    // Regression: batches arrive in COMPLETION order, but a parent span ends
+    // after its children — so a late-flushing parent was numbered ABOVE the
+    // child it owns, and the backward re-link wrote a FORWARD parent reference.
+    // validateTraceInput rejects those, so `otel serve` persisted rows `ingest`
+    // refuses (export → ingest hard-failed for exactly the deep traces this
+    // assembly serves), and `why` / `show --tree` rendered step 1 as "caused by
+    // #2". Numbering by start time satisfies both contracts at once: the parent
+    // really did start first.
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    // Batch 1: only the child (starts at 3ms, ends first).
+    handleTracesExport(db, JSON.stringify(otlp([
+      span({ traceId: 'tord', spanId: 'C', parentSpanId: 'P', name: 'execute_tool', start: 3 * MS, end: 4 * MS, attrs: { 'gen_ai.operation.name': 'execute_tool', 'gen_ai.tool.name': 'search' } }),
+    ])), stats);
+    // Batch 2: its parent, which STARTED EARLIER (2ms) but flushed later.
+    handleTracesExport(db, JSON.stringify(otlp([
+      span({ traceId: 'tord', spanId: 'P', name: 'chat', start: 2 * MS, end: 7 * MS, attrs: { 'gen_ai.operation.name': 'chat' } }),
+    ])), stats);
+
+    const trace = getTrace(db, listTraces(db, {}).items[0].id)!;
+    const parent = trace.steps.find((s) => s.name === 'chat')!;
+    const child = trace.steps.find((s) => s.name === 'search')!;
+
+    // The hierarchy survives...
+    expect(child.parent_step_number).toBe(parent.step_number);
+    // ...and now points strictly backward, because the earlier-starting parent
+    // is numbered first despite arriving second.
+    expect(parent.step_number).toBeLessThan(child.step_number);
+    expect(trace.steps.map((s) => s.step_number).sort((a, b) => a - b)).toEqual([1, 2]);
+
+    // The assembled trace is something `ingest` will actually accept.
+    expect(
+      validateTraceInput({
+        agent_name: trace.agent_name,
+        steps: trace.steps.map((s) => ({
+          step_number: s.step_number,
+          step_type: s.step_type,
+          name: s.name,
+          parent_step: s.parent_step_number,
+          caused_by_step: s.caused_by_step_number,
+        })),
+      } as never).valid,
+    ).toBe(true);
+  });
+
   it('keeps distinct OTel traces separate across batches', () => {
     const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
     handleTracesExport(db, JSON.stringify(otlp([

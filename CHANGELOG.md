@@ -98,6 +98,16 @@ trace schema is unchanged.
 
 ### Fixed
 
+- An OTel trace assembled from several export batches now numbers its steps by
+  start time rather than arrival, so a parent span that flushes late no longer
+  produces a *forward* parent reference. Batches arrive in completion order and
+  a parent span ends after its children, so the parent was numbered above the
+  child it owned — a reference `ingest` rejects (the export → ingest round-trip
+  hard-failed for exactly the deep traces cross-batch assembly exists to serve)
+  and one that made `why` and `show --tree` render step 1 as "caused by #2".
+  The hierarchy is preserved; it now points backward, as everything downstream
+  already assumed.
+
 - OTel spans that end before they start (clock skew between hosts, or a
   hand-rolled exporter) no longer persist a negative duration at the step or
   trace level. Those values are exactly what `validateTraceInput` rejects, so

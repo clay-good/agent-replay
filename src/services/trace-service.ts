@@ -408,6 +408,76 @@ export function ingestTrace(
  * localhost OTLP delivery is effectively exactly-once, and dedup would
  * complicate cross-batch parentage.
  */
+/**
+ * Renumber an assembled trace's steps so that step_number follows START TIME
+ * rather than arrival order, rewriting parent/caused-by references to match.
+ *
+ * Batches arrive in completion order, but a parent span ends *after* its
+ * children — so the parent flushes later and, numbered on arrival, landed ABOVE
+ * the child it owns. That made the backward re-link write a forward parent
+ * reference: `validateTraceInput` rejects those (so `otel serve` persisted rows
+ * `ingest` refuses, breaking export → ingest for exactly the deep traces this
+ * assembly exists to serve), and `why` / `show --tree` rendered step 1 as
+ * "caused by #2" — time-travelling causality presented as fact.
+ *
+ * Numbering by start time is what makes both hold at once: the parent really did
+ * start first, so once numbers reflect that, the re-link points backward on its
+ * own. Ties keep their current relative order, so a batch of same-instant steps
+ * is left alone. The renumber runs inside the merge transaction; it is a no-op
+ * when the order is already correct, which is the common case.
+ */
+function renumberByStartTime(db: Database.Database, traceId: string): void {
+  const steps = db
+    .prepare(
+      `SELECT step_number, started_at, parent_step_number, caused_by_step_number
+         FROM agent_trace_steps WHERE trace_id = ? ORDER BY step_number`,
+    )
+    .all(traceId) as {
+    step_number: number;
+    started_at: string | null;
+    parent_step_number: number | null;
+    caused_by_step_number: number | null;
+  }[];
+  if (steps.length < 2) return;
+
+  const ordered = [...steps].sort((a, b) => {
+    const ta = a.started_at ? Date.parse(a.started_at) : NaN;
+    const tb = b.started_at ? Date.parse(b.started_at) : NaN;
+    // A step with no (or unparseable) start time keeps its arrival position
+    // rather than sorting to either end — there is nothing better to say about
+    // it, and moving it would reorder steps we have no timing evidence about.
+    if (Number.isNaN(ta) || Number.isNaN(tb) || ta === tb) return a.step_number - b.step_number;
+    return ta - tb;
+  });
+
+  const renumbered = new Map<number, number>();
+  ordered.forEach((s, i) => renumbered.set(s.step_number, i + 1));
+  if (ordered.every((s, i) => s.step_number === i + 1)) return; // already in order
+
+  const ref = (n: number | null): number | null => (n == null ? null : (renumbered.get(n) ?? null));
+  const update = db.prepare(
+    `UPDATE agent_trace_steps
+        SET step_number = ?, parent_step_number = ?, caused_by_step_number = ?
+      WHERE trace_id = ? AND step_number = ?`,
+  );
+
+  // Two phases: UNIQUE(trace_id, step_number) means an in-place shuffle can
+  // collide mid-flight, so park every row above the current maximum first.
+  const offset = steps.reduce((m, s) => Math.max(m, s.step_number), 0);
+  for (const s of [...steps].reverse()) {
+    update.run(s.step_number + offset, s.parent_step_number, s.caused_by_step_number, traceId, s.step_number);
+  }
+  for (const s of steps) {
+    update.run(
+      renumbered.get(s.step_number) as number,
+      ref(s.parent_step_number),
+      ref(s.caused_by_step_number),
+      traceId,
+      s.step_number + offset,
+    );
+  }
+}
+
 export function mergeBatchIntoTrace(
   db: Database.Database,
   traceId: string,
@@ -504,6 +574,8 @@ export function mergeBatchIntoTrace(
         relink.run(parent, traceId, orphan.step_number);
       }
     }
+
+    renumberByStartTime(db, traceId);
 
     // Recompute trace-level aggregates over both the existing trace and the
     // incoming batch: widest time window, summed tokens, failure-dominant status.
