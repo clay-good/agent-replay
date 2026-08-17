@@ -14,7 +14,7 @@ import type Database from 'better-sqlite3';
  *   - Added guardrail_policies table (adapted from 002_policies.sql policy_rules)
  */
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 const SCHEMA_V1 = `
 -- ============================================================================
@@ -174,6 +174,30 @@ CREATE TABLE IF NOT EXISTS agent_trace_decisions (
 CREATE INDEX IF NOT EXISTS idx_agent_trace_decisions_step ON agent_trace_decisions(step_id);
 `;
 
+/**
+ * v2 → v3: indexes for two hot lookups that were full table scans.
+ *
+ * Purely additive — no columns, no data, no semantics — so an older binary
+ * opening a v3 store is unaffected.
+ *
+ * `otel serve` resolves every incoming batch to an existing trace with
+ * `json_extract(metadata, '$.otel_trace_id') = ?`, which no index could serve,
+ * so cross-batch assembly re-scanned the whole trace table once per batch: a
+ * receiver left running against an accumulating store got steadily slower and
+ * eventually backed up the exporter. SQLite can index that expression directly.
+ *
+ * The dashboard's recent-scores query (`ORDER BY evaluated_at DESC LIMIT 20`)
+ * had only a `trace_id` index to work with, so it sorted the entire evals table
+ * — every refresh tick, by default every 5 seconds.
+ */
+const SCHEMA_V3_OBJECTS = `
+CREATE INDEX IF NOT EXISTS idx_agent_traces_otel_trace
+    ON agent_traces(json_extract(metadata, '$.otel_trace_id'));
+
+CREATE INDEX IF NOT EXISTS idx_agent_trace_evals_evaluated_at
+    ON agent_trace_evals(evaluated_at);
+`;
+
 /** True if `table` already has a column named `column`. */
 function hasColumn(db: Database.Database, table: string, column: string): boolean {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
@@ -193,6 +217,12 @@ export function applySchemaV2(db: Database.Database): void {
   }
   db.exec(SCHEMA_V2_OBJECTS);
   db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(2);
+}
+
+/** Migrate a v2 database in place to v3 (records schema version 3). */
+export function applySchemaV3(db: Database.Database): void {
+  db.exec(SCHEMA_V3_OBJECTS);
+  db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(3);
 }
 
 /** Get the current schema version, or 0 if no schema exists. */

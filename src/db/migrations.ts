@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { SCHEMA_VERSION, getSchemaVersion, applySchemaV1, applySchemaV2 } from './schema.js';
+import { SCHEMA_VERSION, getSchemaVersion, applySchemaV1, applySchemaV2, applySchemaV3 } from './schema.js';
 
 /**
  * Run any pending migrations, upgrading the database to the latest schema.
@@ -28,6 +28,10 @@ export function runMigrations(db: Database.Database): number {
 
     // v1 → v2: decision-trace model (hierarchy, causality, sessions, decisions)
     if (current < 2) applySchemaV2(db);
+
+    // v2 → v3: indexes for the OTel merge lookup and the dashboard's recent
+    // evals — both were full table scans. Additive only.
+    if (current < 3) applySchemaV3(db);
   }).immediate();
 
   return SCHEMA_VERSION;

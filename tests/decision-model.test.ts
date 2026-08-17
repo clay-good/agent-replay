@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { applySchemaV1, applySchemaV2 } from '../src/db/schema.js';
+import { applySchemaV1, applySchemaV2, SCHEMA_VERSION } from '../src/db/schema.js';
 import { runMigrations } from '../src/db/migrations.js';
 import { getSchemaVersion } from '../src/db/schema.js';
 import { ingestTrace, getTrace, listTraces, attachDecision } from '../src/services/trace-service.js';
@@ -39,8 +39,8 @@ describe('v1 → v2 migration', () => {
     ).run();
 
     const after = runMigrations(db);
-    expect(after).toBe(2);
-    expect(getSchemaVersion(db)).toBe(2);
+    expect(after).toBe(SCHEMA_VERSION);
+    expect(getSchemaVersion(db)).toBe(SCHEMA_VERSION);
 
     // The pre-existing trace and step survive, with new columns defaulting to NULL.
     const trace = getTrace(db, 'trc_legacy');
@@ -58,14 +58,14 @@ describe('v1 → v2 migration', () => {
     expect(tbl).toBeTruthy();
   });
 
-  it('brings a fresh database straight to v2', () => {
-    expect(runMigrations(db)).toBe(2);
-    expect(getSchemaVersion(db)).toBe(2);
+  it('brings a fresh database straight to the current version', () => {
+    expect(runMigrations(db)).toBe(SCHEMA_VERSION);
+    expect(getSchemaVersion(db)).toBe(SCHEMA_VERSION);
   });
 
-  it('is idempotent when already at v2', () => {
+  it('is idempotent when already current', () => {
     runMigrations(db);
-    expect(runMigrations(db)).toBe(2);
+    expect(runMigrations(db)).toBe(SCHEMA_VERSION);
   });
 
   it('does not crash re-applying v2 when the columns already exist (upgrade race)', () => {
@@ -80,7 +80,31 @@ describe('v1 → v2 migration', () => {
     expect(getSchemaVersion(db)).toBe(1);
 
     expect(() => runMigrations(db)).not.toThrow();
+    expect(getSchemaVersion(db)).toBe(SCHEMA_VERSION);
+  });
+
+  it('adds the v3 lookup indexes, and they are actually used', () => {
+    // v3 is additive (indexes only, no columns or data), so an older binary
+    // opening a v3 store is unaffected. Both queries were full scans: the OTel
+    // merge lookup re-scanned the whole trace table once per incoming batch, so
+    // a long-running `otel serve` got steadily slower as the store grew, and
+    // the dashboard sorted the entire evals table on every 5s refresh.
+    applySchemaV1(db);
+    applySchemaV2(db);
     expect(getSchemaVersion(db)).toBe(2);
+    runMigrations(db);
+    expect(getSchemaVersion(db)).toBe(SCHEMA_VERSION);
+
+    const plan = (sql: string, ...params: unknown[]): string =>
+      (db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...(params as [])) as { detail: string }[])
+        .map((r) => r.detail)
+        .join(' | ');
+
+    expect(plan("SELECT id FROM agent_traces WHERE json_extract(metadata, '$.otel_trace_id') = ? LIMIT 1", 'x'))
+      .toContain('idx_agent_traces_otel_trace');
+    const evalPlan = plan('SELECT score, evaluated_at FROM agent_trace_evals ORDER BY evaluated_at DESC LIMIT ?', 20);
+    expect(evalPlan).toContain('idx_agent_trace_evals_evaluated_at');
+    expect(evalPlan).not.toContain('TEMP B-TREE'); // the index supplies the order
   });
 });
 

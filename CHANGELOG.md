@@ -109,6 +109,15 @@ trace schema is unchanged.
 
 ### Fixed
 
+- Schema v3 adds two indexes for lookups that were full table scans. `otel
+  serve` resolves every incoming batch against
+  `json_extract(metadata, '$.otel_trace_id')`, which nothing could index, so
+  cross-batch assembly re-scanned the whole trace table once per batch and a
+  long-running receiver grew steadily slower as the store filled. The
+  dashboard's recent-scores query likewise sorted the entire evals table on
+  every refresh tick. The migration is additive — indexes only, no columns and
+  no data — so an older binary opening a v3 store is unaffected.
+
 - `otel serve` now reports `partial_success` when a `/v1/logs` batch mapped to
   nothing, instead of a bare `200`. Only `gemini_cli.*` and `claude_code.*`
   events are recognized, so an emitter whose event names drift — a CLI version
