@@ -42,7 +42,7 @@ The system SHALL persist every evaluation as an eval record (evaluator type `rub
 
 ### Requirement: Golden regression check
 
-The system SHALL compare traces against a golden dataset via `agent-replay check --golden <file>`, matching candidate traces to golden traces by agent name and input hash, diffing on a structural field allowlist (step count, step types, step names, tool-call inputs, per-step failure, final status) rather than raw output text, and exiting non-zero with a divergence report when any matched trace regresses. `--fields` SHALL override the allowlist and `--json` SHALL emit the report as structured data.
+The system SHALL compare traces against a golden dataset via `agent-replay check --golden <file>`, matching candidate traces to golden traces by agent name and input hash, diffing on a structural field allowlist (step count, step types, step names, tool-call inputs, per-step failure, final status) rather than raw output text, and exiting non-zero with a divergence report when any matched trace regresses. `--fields` SHALL override the allowlist and `--json` SHALL emit the report as structured data. Candidates gathered in bulk SHALL exclude forked traces (a never-executed copy of a step prefix, which otherwise matches its own baseline and diverges on step count and status — reporting a regression that never happened) and traces still `running` (a partial shape is not a regression). A trace named explicitly with `--trace` SHALL still be compared, whatever its lineage or status.
 
 #### Scenario: Regression detected in CI
 

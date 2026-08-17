@@ -17,7 +17,7 @@ The system SHALL export traces via `agent-replay export` in `json`, `jsonl`, or 
 
 ### Requirement: Golden dataset format
 
-The system SHALL build golden datasets from known-good runs via `--format golden`: a JSON array of entries, each with `id`, `agent_name`, `input`, `expected_output` (the trace's recorded output), `steps_summary` (per step: `step_number`, `step_type`, `name`, `failed`, plus `input` for a tool call and `model` when recorded), `eval_criteria` (per stored eval: `evaluator_name`, `score`, `passed`), and `metadata` (trace metadata plus `status`, `total_duration_ms`, `total_tokens`, `tags`).
+The system SHALL build golden datasets from known-good runs via `--format golden`: a JSON array of entries, each with `id`, `agent_name`, `input`, `expected_output` (the trace's recorded output), `steps_summary` (per step: `step_number`, `step_type`, `name`, `failed`, plus `input` for a tool call and `model` when recorded), `eval_criteria` (per stored eval: `evaluator_name`, `score`, `passed`), and `metadata` (trace metadata plus `status`, `total_duration_ms`, `total_tokens`, `tags`). A golden dataset is built from RUNS, so forked traces SHALL be excluded from it: a fork is a never-executed copy of a step prefix, and a baseline holding one lets a real run that stopped early reproduce its shorter shape and pass. `json` and `jsonl` exports are backups and SHALL still carry forks.
 
 #### Scenario: Build a golden set
 
