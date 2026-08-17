@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import chalk from 'chalk';
 import { ensureDatabase } from '../db/index.js';
 import { getTrace, listTraces } from '../services/trace-service.js';
-import { checkGolden } from '../services/check-service.js';
+import { checkGolden, KNOWN_FIELDS } from '../services/check-service.js';
 import type { GoldenEntry } from '../services/export-service.js';
 import type { TraceWithDetails } from '../models/types.js';
 import { heading } from '../ui/theme.js';
@@ -89,6 +89,23 @@ export function runCheck(opts: CheckOptions = {}): void {
     return;
   }
 
+  // Validate --fields BEFORE touching the store. It was checked inside
+  // checkGolden, after every candidate had been fetched, so a plain typo was
+  // reported as whatever the data layer complained about first ("No traces
+  // matched...", exit 2 — never naming the bad field) or as exit 1 from a
+  // store-open failure. `watch` already validates --interval before resolving a
+  // trace; usage errors belong before the work.
+  const fields = opts.fields ? opts.fields.split(',').map((s) => s.trim()).filter(Boolean) : undefined;
+  const unknownFields = (fields ?? []).filter((f) => !(KNOWN_FIELDS as readonly string[]).includes(f));
+  if (unknownFields.length > 0) {
+    fail(
+      2,
+      `Unknown --fields value(s): ${unknownFields.join(', ')}.`,
+      `Known fields: ${KNOWN_FIELDS.join(', ')}`,
+    );
+    return;
+  }
+
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
@@ -140,7 +157,6 @@ export function runCheck(opts: CheckOptions = {}): void {
     return;
   }
 
-  const fields = opts.fields ? opts.fields.split(',').map((s) => s.trim()).filter(Boolean) : undefined;
   let report;
   try {
     report = checkGolden(golden, candidates, { fields, strict: opts.strict });

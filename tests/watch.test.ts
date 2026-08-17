@@ -13,6 +13,7 @@ import {
   getTrace,
   isPossiblyAbandoned,
   updateTrace,
+  updateStep,
 } from '../src/services/trace-service.js';
 import { forkTrace } from '../src/services/fork-service.js';
 import { runWatch, renderStepLine, unseenSteps } from '../src/commands/watch.js';
@@ -226,5 +227,78 @@ describe('renderStepLine', () => {
     expect(plain).toContain('#5');
     expect(plain).toContain('"boom"');
     expect(plain).toContain('kaboom');
+  });
+});
+
+// ── runWatch reflects step_end ────────────────────────────────────────────
+
+describe('runWatch shows a step\'s outcome, not just its start', () => {
+  it('prints a closing line when a two-phase step ends', () => {
+    // Under the documented two-phase protocol (`step_start` → `step_end`) a step
+    // is FIRST SEEN open: duration, tokens and error are all still null. Printing
+    // each step exactly once meant the live tail never showed any of them — a
+    // failing run announced "trace finished: FAILED" with no error text, while
+    // `show` on the same trace printed it.
+    const dir = mkdtempSync(join(tmpdir(), 'ar-watch-end-'));
+    const db = ensureDatabase(resolve(dir, 'traces.db'));
+    const t = startTrace(db, { agent_name: 'w', status: 'running' }, { id: 'trc_watchend' });
+    appendStep(db, t.id, { step_number: 1, step_type: 'tool_call', name: 'slow_tool' });
+
+    const logs: string[] = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((m?: unknown) => { logs.push(String(m ?? '')); });
+
+    vi.useFakeTimers();
+    try {
+      runWatch(t.id, { dir, interval: '20' });
+      // The step closes between polls, exactly as a separate producer process
+      // would close it.
+      updateStep(db, t.id, 1, {
+        ended_at: new Date().toISOString(), duration_ms: 2900, tokens_used: 999, error: 'TOOL BLEW UP',
+      });
+      vi.advanceTimersByTime(20);
+      updateTrace(db, t.id, { status: 'failed' });
+      vi.advanceTimersByTime(20);
+    } finally {
+      vi.useRealTimers();
+      logSpy.mockRestore();
+      process.removeAllListeners('SIGINT');
+      rmSync(dir, { recursive: true, force: true });
+    }
+
+    const plain = logs.map((l) => l.replace(/\x1B\[[0-9;]*m/g, '')).join('\n');
+    expect(plain).toContain('slow_tool');      // the opening line
+    expect(plain).toContain('TOOL BLEW UP');   // the outcome — withheld before the fix
+    expect(plain).toContain('2.9s');
+    expect(plain).toContain('999 tok');
+    // And it closes exactly once, however many polls follow.
+    expect(plain.match(/TOOL BLEW UP/g)).toHaveLength(1);
+  });
+
+  it('does not add a closing line for a single-phase step', () => {
+    // A producer that writes a complete step in one event already showed
+    // everything on its first line; a second line would be noise.
+    const dir = mkdtempSync(join(tmpdir(), 'ar-watch-one-'));
+    const db = ensureDatabase(resolve(dir, 'traces.db'));
+    const t = startTrace(db, { agent_name: 'w', status: 'running' }, { id: 'trc_watchone' });
+    appendStep(db, t.id, {
+      step_number: 1, step_type: 'tool_call', name: 'quick', ended_at: new Date().toISOString(),
+      duration_ms: 5, tokens_used: 3,
+    });
+
+    const logs: string[] = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((m?: unknown) => { logs.push(String(m ?? '')); });
+    vi.useFakeTimers();
+    try {
+      runWatch(t.id, { dir, interval: '20' });
+      vi.advanceTimersByTime(60);
+    } finally {
+      vi.useRealTimers();
+      logSpy.mockRestore();
+      process.removeAllListeners('SIGINT');
+      rmSync(dir, { recursive: true, force: true });
+    }
+    const plain = logs.map((l) => l.replace(/\x1B\[[0-9;]*m/g, '')).join('\n');
+    expect(plain).toContain('quick');
+    expect(plain).not.toContain('done');
   });
 });

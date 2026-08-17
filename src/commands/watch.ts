@@ -65,10 +65,25 @@ export function runWatch(traceId: string | undefined, opts: WatchOptions = {}): 
   // cursor would silently drop a step whose number is lower than one already
   // printed but which was written later. A seen-set surfaces it on the next poll.
   const seen = new Set<number>();
+  // Steps printed while still unfinished, awaiting their closing line.
+  const open = new Set<number>();
   const printNew = (): void => {
-    for (const s of unseenSteps(getStepsAfter(db, id, 0), seen)) {
+    const steps = getStepsAfter(db, id, 0);
+    for (const s of unseenSteps(steps, seen)) {
       console.log(renderStepLine(s));
       seen.add(s.step_number);
+      if (s.ended_at == null) open.add(s.step_number);
+    }
+    // Under the two-phase protocol (`step_start` then `step_end`) a step is FIRST
+    // SEEN open, when its duration, tokens and error are all still null — so
+    // printing each step exactly once meant the live tail never showed any of
+    // them. A failing run reported its failure with no error text, under a
+    // "trace finished: FAILED" badge whose cause `show` displayed but `watch`
+    // withheld. Print a closing line when a step gains its outcome.
+    for (const s of steps) {
+      if (s.ended_at != null && open.delete(s.step_number)) {
+        console.log(renderStepLine(s, 'closed'));
+      }
     }
   };
   printNew();
@@ -115,14 +130,24 @@ export function unseenSteps(steps: TraceStep[], seen: Set<number>): TraceStep[] 
   return steps.filter((s) => !seen.has(s.step_number));
 }
 
-/** One compact line per step for the live tail. */
-export function renderStepLine(step: TraceStep): string {
+/**
+ * One compact line per step for the live tail.
+ *
+ * `phase` is 'closed' for the follow-up line a two-phase producer's `step_end`
+ * earns: the step was already announced by name, so the closing line carries
+ * what the opening one could not yet know — outcome, duration, tokens, error.
+ */
+export function renderStepLine(step: TraceStep, phase: 'full' | 'closed' = 'full'): string {
   const num = chalk.dim(`#${step.step_number}`.padStart(4));
-  const icon = stepIcon(step.step_type as StepType);
-  const type = stepLabel(step.step_type as StepType);
-  const name = chalk.white.bold(`"${safeText(step.name)}"`);
   const dur = step.duration_ms != null ? chalk.dim(`  ${formatDuration(step.duration_ms)}`) : '';
   const tokens = step.tokens_used != null ? chalk.dim(`  ${step.tokens_used.toLocaleString()} tok`) : '';
   const err = step.error ? `  ${chalk.redBright('error:')} ${chalk.red(safeText(step.error))}` : '';
+  if (phase === 'closed') {
+    const outcome = step.error ? chalk.redBright('failed') : chalk.dim('done');
+    return `  ${num} ${chalk.dim('\u2514')} ${outcome}${dur}${tokens}${err}`;
+  }
+  const icon = stepIcon(step.step_type as StepType);
+  const type = stepLabel(step.step_type as StepType);
+  const name = chalk.white.bold(`"${safeText(step.name)}"`);
   return `  ${num} ${icon} ${type}  ${name}${dur}${tokens}${err}`;
 }

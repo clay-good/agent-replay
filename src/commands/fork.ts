@@ -5,7 +5,7 @@ import { forkTrace } from '../services/fork-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { summaryPanel } from '../ui/boxen-panels.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
-import { errorMessage, safeJsonParse } from '../utils/json.js';
+import { errorMessage } from '../utils/json.js';
 import { resolveDataDir } from '../utils/paths.js';
 
 export interface ForkOptions {
@@ -89,23 +89,11 @@ export function runFork(traceId: string, opts: ForkOptions): void {
   );
 
   try {
-    const result = forkTrace(db, trace.id, fromStep, modifiedInput, modifiedContext);
-
-    // Apply tag if provided
-    if (opts.tag) {
-      const existing = db
-        .prepare('SELECT tags FROM agent_traces WHERE id = ?')
-        .get(result.forked_trace_id) as { tags: string } | undefined;
-      // This runs AFTER forkTrace's transaction has committed, so a throw here
-      // would report "Fork failed" (exit 1) for a fork that actually exists —
-      // an orphan whose id was never printed, with a fresh one created on every
-      // retry. A non-array `tags` column made `tags.push` do exactly that.
-      const parsed = existing ? safeJsonParse<unknown>(existing.tags) : null;
-      const tags = Array.isArray(parsed) ? (parsed as string[]) : [];
-      tags.push(opts.tag);
-      db.prepare('UPDATE agent_traces SET tags = ? WHERE id = ?')
-        .run(JSON.stringify(tags), result.forked_trace_id);
-    }
+    // The tag goes in with the fork itself. Writing it afterwards meant any
+    // failure on that one statement reported "Fork failed" (exit 1) for a fork
+    // that had already committed — an orphan whose id was never printed, with a
+    // fresh one created on every retry.
+    const result = forkTrace(db, trace.id, fromStep, modifiedInput, modifiedContext, opts.tag);
 
     successSpinner(spinner, `Forked trace successfully.`);
 

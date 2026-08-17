@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { traceTable, evalTable, policyTable } from '../src/ui/table.js';
 import { traceHeaderPanel } from '../src/ui/boxen-panels.js';
 import { formatScorePct, formatCostUsd } from '../src/ui/theme.js';
+import { formatDuration } from '../src/utils/time.js';
 import { renderTimeline, renderTree } from '../src/ui/timeline.js';
 import { renderDiff } from '../src/ui/diff-renderer.js';
 import type { Trace, TraceStep, EvalResult, GuardrailPolicy, TraceDiffResult } from '../src/models/types.js';
@@ -49,15 +50,23 @@ describe('traceTable', () => {
     expect(noAnsi(traceTable([stale]))).toContain('abandoned');
   });
 
-  it('formats the duration column in ms, seconds, and minutes by magnitude', () => {
+  it('formats the duration column with the same formatter every other view uses', () => {
+    // One formatter across list/show/replay/watch/stats: four copies existed and
+    // disagreed above a minute, so `list` said "1.5m" where `watch` said
+    // "1m 30s" for the very same number, and a single `replay` screen printed
+    // both forms of one duration four lines apart.
     const out = noAnsi(traceTable([
       trace({ id: 'trc_a', agent_name: 'fast', total_duration_ms: 500 }),
       trace({ id: 'trc_b', agent_name: 'mid', total_duration_ms: 5000 }),
       trace({ id: 'trc_c', agent_name: 'slow', total_duration_ms: 90000 }),
+      // A negative stored value is not a duration; the shared formatter refuses
+      // it, where the column's own copy printed "-500ms".
+      trace({ id: 'trc_d', agent_name: 'bad', total_duration_ms: -500 }),
     ]));
     expect(out).toContain('500ms');
     expect(out).toContain('5.0s');
-    expect(out).toContain('1.5m');
+    expect(out).toContain(formatDuration(90000));
+    expect(out).not.toContain('-500ms');
   });
 });
 

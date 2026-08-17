@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import type { Trace } from '../models/types.js';
 import type { TraceStatus } from '../models/enums.js';
 import { statusBadge, colors, label, formatScorePct, formatCostUsd, safeText } from './theme.js';
-import { effectiveDurationMs } from '../utils/time.js';
+import { effectiveDurationMs, formatDuration } from '../utils/time.js';
 import { effectiveTokens } from '../utils/totals.js';
 
 /**
@@ -258,9 +258,3 @@ function scoreBar(value: number, max: number): string {
   return color('\u2588'.repeat(filled)) + chalk.dim('\u2591'.repeat(empty));
 }
 
-function formatDuration(ms: number): string {
-  if (!Number.isFinite(ms)) return 'N/A';
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60000).toFixed(1)}m`;
-}

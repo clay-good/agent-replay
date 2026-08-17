@@ -3,6 +3,7 @@ import type { TraceStep } from '../models/types.js';
 import type { StepType } from '../models/enums.js';
 import { stepIcon, stepLabel, colors, label, separator, safeText } from './theme.js';
 import { hasRenderableContent } from '../utils/json.js';
+import { formatDuration } from '../utils/time.js';
 
 export interface TimelineOptions {
   showInput?: boolean;
@@ -210,12 +211,6 @@ export function renderTree(steps: TraceStep[], options: TimelineOptions = {}): s
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60000).toFixed(1)}m`;
-}
 
 function truncateJson(obj: unknown, maxLen: number): string {
   let str: string;

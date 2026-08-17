@@ -4,7 +4,7 @@ import type { Trace, EvalResult, GuardrailPolicy } from '../models/types.js';
 import type { TraceStatus } from '../models/enums.js';
 import { statusBadge, scoreBadge, passBadge, guardActionBadge, colors } from './theme.js';
 import { isPossiblyAbandoned } from '../services/trace-service.js';
-import { effectiveDurationMs } from '../utils/time.js';
+import { effectiveDurationMs, formatDuration } from '../utils/time.js';
 
 // ── Generic table factory ─────────────────────────────────────────────────
 
@@ -137,10 +137,11 @@ function stepCountStr(trace: Trace): string {
 }
 
 function formatDurationShort(ms: number | null): string {
-  if (ms == null) return chalk.dim('-');
-  if (ms < 1000) return chalk.white(`${ms}ms`);
-  if (ms < 60000) return chalk.white(`${(ms / 1000).toFixed(1)}s`);
-  return chalk.white(`${(ms / 60000).toFixed(1)}m`);
+  // The shared formatter, so `list` cannot disagree with `show`, `replay`,
+  // `watch` and `stats` about the same number (2.1m vs 2m 5s) — and so a
+  // negative or non-finite stored value renders as "-" here too rather than
+  // "-500ms".
+  return ms == null ? chalk.dim('-') : chalk.white(formatDuration(ms));
 }
 
 function formatRelative(iso: string): string {

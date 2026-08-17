@@ -1105,6 +1105,35 @@ describe('CLI integration', () => {
     rmSync(stranger, { recursive: true, force: true });
   });
 
+  it('applies fork --tag as part of the fork itself', () => {
+    // The tag used to be written AFTER forkTrace committed, so a failure on that
+    // one statement reported "Fork failed" (exit 1) for a fork that existed —
+    // an orphan whose id was never printed, and a fresh one on every retry.
+    const lines = ['{"v":1,"type":"trace_start","trace_id":"tftag","agent_name":"ft"}',
+      '{"v":1,"type":"step","trace_id":"tftag","step_number":1,"step_type":"thought","name":"a"}',
+      '{"v":1,"type":"trace_end","trace_id":"tftag","status":"completed"}'];
+    run(['record'], lines.join('\n'));
+
+    const out = run(['fork', 'tftag', '--from-step', '1', '--tag', 'whatif']);
+    expect(out.code).toBe(0);
+    const forkId = JSON.parse(run(['list', '--json', '--tag', 'whatif']).stdout).items[0].id;
+    const forked = JSON.parse(run(['show', forkId, '--json']).stdout);
+    expect(forked.tags).toContain('whatif');
+    expect(forked.parent_trace_id).toBe('tftag');
+  });
+
+  it('rejects an unknown check --fields value before it touches the store', () => {
+    // The field list was validated inside checkGolden, after every candidate had
+    // been fetched, so a typo surfaced as whatever the data layer complained
+    // about first — "No traces matched...", never naming the bad field.
+    const golden = join(dir, 'g.json');
+    writeFileSync(golden, JSON.stringify([{ agent_name: 'nobody', step_count: 1, steps_summary: [] }]));
+    const r = run(['check', '--golden', golden, '--fields', 'bogus']);
+    expect(r.code).toBe(2);
+    expect(r.stderr + r.stdout).toMatch(/bogus/);
+    expect(r.stderr + r.stdout).toMatch(/Known fields/);
+  });
+
   it('demo --reset deletes the store files, not a working tree that merely looks like one', () => {
     // The name check is a naming heuristic, not proof of a store: a source
     // checkout called `agent-replay-project` passes it, and --reset then rm -r'd

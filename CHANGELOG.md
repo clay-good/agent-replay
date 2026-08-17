@@ -73,6 +73,30 @@ between them, and nothing else.
   auto-detection already did, and the README's claim is true again. A model of no
   known family — a proxy's own name — still passes through.
 
+- `watch` never showed a step's outcome. Under the two-phase protocol
+  (`step_start` then `step_end`) a step is first seen while it is still open, so
+  printing each step exactly once meant duration, tokens and error text were
+  always null at print time: a failing run announced `trace finished: FAILED`
+  with no error, while `show` on the same trace printed it. A step that ends now
+  gets a closing line carrying its outcome. Producers that write a complete step
+  in one event are unchanged — no second line.
+
+- One duration formatter across every view. Four copies had drifted apart above a
+  minute, so `list` and `show` said "2.1m" where `watch`, `replay` and `stats`
+  said "2m 5s" — and a single `replay` screen printed both forms of the same
+  number four lines apart. The copies also lacked the shared formatter's guards,
+  rendering a negative stored duration as "-500ms".
+
+- `fork --tag` wrote the tag after the fork's transaction had committed, so a
+  failure on that one statement reported `Fork failed` (exit 1) for a fork that
+  existed — an orphan whose id was never printed, with a fresh one created on
+  every retry. The tag is now part of the same transaction.
+
+- `check --fields` validated its field list only after opening the store and
+  fetching every candidate, so a typo was reported as whatever the data layer
+  complained about first ("No traces matched…") without ever naming the bad
+  field. Usage errors are now checked first, as `watch --interval` already did.
+
 - `demo --reset` could delete a working tree that merely looked like a store. The
   guard accepted any directory whose name starts with `agent-replay`, which a
   source checkout called `agent-replay-project` does, and then removed the tree

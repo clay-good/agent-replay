@@ -16,6 +16,13 @@ export function forkTrace(
   fromStep: number,
   modifiedInput?: Record<string, unknown>,
   modifiedContext?: Record<string, unknown>,
+  /**
+   * A tag to add to the copy. Applied INSIDE this transaction: `fork --tag` used
+   * to write it afterwards, so any failure on that statement reported "Fork
+   * failed" (exit 1) for a fork that had already committed — an orphan whose id
+   * was never printed, and a fresh one created on every retry.
+   */
+  tag?: string,
 ): ForkResult {
   if (!Number.isFinite(fromStep) || fromStep < 1) {
     throw new Error(`Invalid fromStep: ${fromStep} (must be >= 1)`);
@@ -69,6 +76,21 @@ export function forkTrace(
       ? JSON.stringify(modifiedInput)
       : (original.input as string);
 
+    // The copy inherits the original's tags, plus the one `--tag` asked for. A
+    // tags column that is not a JSON array (only reachable from hand-edited
+    // data) starts the copy from an empty list rather than throwing.
+    let forkedTags = original.tags as string;
+    if (tag) {
+      let parsed: unknown = null;
+      try {
+        parsed = JSON.parse((original.tags as string) ?? '[]');
+      } catch {
+        parsed = null;
+      }
+      const list = Array.isArray(parsed) ? (parsed as string[]) : [];
+      forkedTags = JSON.stringify([...list, tag]);
+    }
+
     // Keep the original's metadata and layer the fork provenance on top.
     // Replacing it wholesale dropped everything a producer had attached
     // (session/run correlation ids, cost tags, harness info) from every fork,
@@ -99,7 +121,7 @@ export function forkTrace(
       original.agent_version,
       input,
       now,
-      original.tags,
+      forkedTags,
       metadata,
       traceId,
       fromStep,
