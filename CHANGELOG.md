@@ -117,6 +117,21 @@ nothing else.
 
 ### Fixed
 
+- `agent-replay run` now finalizes its trace and cleans up on every exit path.
+  Interrupting the wrapper — Ctrl-C, or a CI job timeout killing it — left the
+  trace `running` forever with no end time, no error, and no exit code, leaked
+  its temp channel directory, and orphaned the child process still holding the
+  terminal; the interrupt is now forwarded to the child, which runs the normal
+  finalize-and-clean path and still reports 128 + signal. A read failure on the
+  events channel can no longer kill the wrapper either: the poll ran on a
+  timer, so a throw there was an uncaught exception that lost the child's exit
+  status mid-run — a 2 GiB events file was enough, since a single read that
+  large is rejected outright. Reads are now chunked and any I/O failure
+  degrades to a warning. A synchronous `spawn` failure (an empty command, as a
+  script with an unset variable produces) no longer leaves an unfinalizable
+  ghost trace. And a producer that rewrites the append-only channel instead of
+  appending is reported, rather than having every later event silently dropped.
+
 - `list` and `show` now report token usage from the steps that carry it when
   the trace-level total is absent, and `--sort tokens` orders by the same
   number. The trace column is set only when a producer reports a total, so a

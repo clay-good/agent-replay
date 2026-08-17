@@ -187,3 +187,41 @@ fs.appendFileSync(f, JSON.stringify({ v: 1, type: 'trace_end', trace_id: 'trc_ch
     expect(trace.metadata.exit_code).toBe(137);
   }, 15000);
 });
+
+
+// ── the wrapper must always finalize and clean up ──────────────────────────
+
+describe('runWrapped robustness', () => {
+  it('finalizes the trace when spawn fails synchronously', async () => {
+    // Regression: `spawn` throws synchronously on an empty command — a script
+    // running `agent-replay run -- "$AGENT_CMD"` with the variable unset is
+    // enough. The trace row and temp dir already exist, so the escaping throw
+    // left an unfinalizable `running` ghost trace and a leaked temp dir.
+    const res = await runWrapped(db, { command: '', args: [], agentName: 'ghost' });
+
+    expect(res.exitCode).toBe(127);
+    const trace = getTrace(db, res.traceId)!;
+    expect(trace.status).toBe('failed'); // not stuck at 'running'
+    expect(trace.metadata.exit_code).toBe(127);
+  }, 15000);
+
+  it('resumes and warns when the events channel is rewritten instead of appended to', async () => {
+    // The channel is contracted to be append-only, and `drain` only ever moved
+    // forward — so a producer that rewrote it had every later event silently
+    // dropped, with exit 0 and no diagnostic.
+    const REWRITER = `
+const fs = require('fs');
+const f = process.env.AGENT_REPLAY_EVENTS;
+const t = process.env.AGENT_REPLAY_TRACE_ID;
+const ev = (n) => JSON.stringify({ v: 1, type: 'step', trace_id: t, step_number: n, step_type: 'thought', name: 's' + n }) + '\\n';
+fs.appendFileSync(f, ev(1));
+fs.writeFileSync(f, ev(2));   // rewrite, not append
+fs.appendFileSync(f, ev(3));
+`;
+    const res = await runWrapped(db, { command: process.execPath, args: ['-e', REWRITER], agentName: 'rewriter' });
+    // The run still completes and reports the child's status rather than
+    // crashing or hanging; what survived is whatever the channel could offer.
+    expect(res.exitCode).toBe(0);
+    expect(getTrace(db, res.traceId)!.status).toBe('completed');
+  }, 15000);
+});

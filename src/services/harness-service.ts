@@ -91,20 +91,44 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
     }
   };
 
-  const drain = (final: boolean): void => {
+  // Read at most this much per pass. `readSync` rejects a length that overflows
+  // int32, so a child that wrote a 2 GiB events file made `Buffer.alloc(size -
+  // bytesRead)` produce a length readSync throws on — and that throw happened
+  // inside a setInterval callback, i.e. an UNCAUGHT exception: the wrapper died
+  // with a raw stack trace, exited 1 instead of the child's status (fatal in CI,
+  // the documented use case), left the trace stuck `running`, leaked the temp
+  // dir and orphaned the child.
+  const MAX_READ_CHUNK = 8 * 1024 * 1024;
+
+  const drainOnce = (final: boolean): void => {
     let size: number;
     try {
       size = statSync(eventsPath).size;
     } catch {
       return;
     }
+    if (size < bytesRead) {
+      // The channel is contracted to be append-only. A producer that rewrote or
+      // truncated it would otherwise never be read again — every later event
+      // silently dropped, exit 0, no diagnostic. Resume from the new end and say
+      // so, rather than re-applying events already recorded.
+      process.stderr.write(
+        `agent-replay run: events channel was rewritten (${bytesRead} → ${size} bytes); earlier events may be lost\n`,
+      );
+      bytesRead = size;
+      partial = '';
+    }
     if (size > bytesRead) {
       const fd = openSync(eventsPath, 'r');
       try {
-        const buf = Buffer.alloc(size - bytesRead);
-        const n = readSync(fd, buf, 0, buf.length, bytesRead);
-        bytesRead += n;
-        partial += decoder.write(buf.subarray(0, n));
+        while (size > bytesRead) {
+          const len = Math.min(size - bytesRead, MAX_READ_CHUNK);
+          const buf = Buffer.alloc(len);
+          const n = readSync(fd, buf, 0, len, bytesRead);
+          if (n <= 0) break; // nothing more readable; try again next pass
+          bytesRead += n;
+          partial += decoder.write(buf.subarray(0, n));
+        }
       } finally {
         closeSync(fd);
       }
@@ -121,22 +145,72 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
     for (const line of lines) applyLine(line);
   };
 
+  /**
+   * Never let a read failure escape. This runs on a timer, so a throw here is an
+   * uncaught exception that kills the wrapper mid-run — losing the child's exit
+   * status, the trace's finalization and the temp dir. Any I/O problem (EMFILE,
+   * EACCES, a file that outgrew a single read) must degrade to a warning; the
+   * next pass, or the final drain, picks up whatever is readable.
+   */
+  const drain = (final: boolean): void => {
+    try {
+      drainOnce(final);
+    } catch (err) {
+      process.stderr.write(`agent-replay run: could not read the events channel: ${(err as Error).message}\n`);
+    }
+  };
+
   let killedSignal: string | null = null;
   const exitCode = await new Promise<number>((resolvePromise) => {
-    const child = spawn(opts.command, opts.args, {
-      stdio: 'inherit',
-      env: {
-        ...process.env,
-        AGENT_REPLAY_DIR: opts.dbDir,
-        AGENT_REPLAY_TRACE_ID: trace.id,
-        AGENT_REPLAY_EVENTS: eventsPath,
-      },
-    });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(opts.command, opts.args, {
+        stdio: 'inherit',
+        env: {
+          ...process.env,
+          AGENT_REPLAY_DIR: opts.dbDir,
+          AGENT_REPLAY_TRACE_ID: trace.id,
+          AGENT_REPLAY_EVENTS: eventsPath,
+        },
+      });
+    } catch (err) {
+      // `spawn` can throw SYNCHRONOUSLY — an empty command (a script running
+      // `agent-replay run -- "$AGENT_CMD"` with the variable unset) is enough.
+      // The trace row and the temp dir already exist, so an escaping throw left
+      // an unfinalizable `running` ghost trace in the store and a leaked temp
+      // dir. Treat it like the async spawn failure below.
+      process.stderr.write(`agent-replay run: failed to spawn: ${(err as Error).message}\n`);
+      resolvePromise(127);
+      return;
+    }
 
     const poll = setInterval(() => drain(false), 200);
 
+    // Forward an interrupt to the child rather than dying where we stand.
+    // Without this, Ctrl-C or a CI timeout killing the wrapper left the trace
+    // `running` forever with no ended_at, no error and no exit code, leaked the
+    // temp dir, and orphaned the child still holding the terminal. Forwarding
+    // lets the child exit, which runs the normal close → finalize → cleanup
+    // path, and the wrapper still reports 128 + signal.
+    const forward = (sig: NodeJS.Signals) => (): void => {
+      try {
+        child.kill(sig);
+      } catch {
+        // The child is already gone; the close handler will finalize.
+      }
+    };
+    const onSigint = forward('SIGINT');
+    const onSigterm = forward('SIGTERM');
+    const onSighup = forward('SIGHUP');
+    process.on('SIGINT', onSigint);
+    process.on('SIGTERM', onSigterm);
+    process.on('SIGHUP', onSighup);
+
     const done = (code: number): void => {
       clearInterval(poll);
+      process.off('SIGINT', onSigint);
+      process.off('SIGTERM', onSigterm);
+      process.off('SIGHUP', onSighup);
       resolvePromise(code);
     };
 
