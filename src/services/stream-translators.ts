@@ -190,6 +190,19 @@ export class GeminiStreamTranslator extends BaseTranslator {
       // below). A raw string is stored verbatim as TEXT and then fails to
       // JSON.parse on read, so the tool output would silently come back null.
       const out = obj.output ?? obj.result;
+      // Mirror every sibling capture path (hook-adapter, claude-transcript): a
+      // failed tool call keeps step_type 'tool_call' but populates `error`, so
+      // the failure survives into the store. This branch had no error path at
+      // all, so a run whose every tool call failed was recorded as clean —
+      // `isErrorStep` saw nothing, `eval --preset ai-root-cause` was therefore
+      // "not applicable" and scored a 100% PASS, and a `check --golden`
+      // step_errors baseline had no failure to regress against.
+      //
+      // Only unambiguous, shape-generic signals are read (`is_error: true` and
+      // a non-null `error`), per this file's rule of not guessing vendor-internal
+      // field names: the whole result object is preserved in `output` either way,
+      // so a stream that signals failure some other way is no worse off than before.
+      const failed = obj.is_error === true || obj.error != null;
       return [
         {
           v: 1,
@@ -197,6 +210,7 @@ export class GeminiStreamTranslator extends BaseTranslator {
           trace_id: this.traceId!,
           step_number: num,
           output: typeof out === 'string' ? { output: out } : ((out as Record<string, unknown>) ?? null),
+          error: failed ? (errText(obj.error) ?? errText(out) ?? 'tool failed') : undefined,
         } as CaptureEvent,
       ];
     }
@@ -260,4 +274,16 @@ function toNum(v: unknown): number {
 
 function str(v: unknown): string | undefined {
   return typeof v === 'string' && v ? v : undefined;
+}
+
+/**
+ * Error text from a value a harness may report either as a string or as a
+ * structured `{message, code, stderr}` object — the same coercion
+ * `hook-adapter` applies, so a structured error is not collapsed to the
+ * generic "tool failed".
+ */
+function errText(v: unknown): string | undefined {
+  if (typeof v === 'string') return v || undefined;
+  if (v == null) return undefined;
+  return JSON.stringify(v);
 }

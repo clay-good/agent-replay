@@ -142,6 +142,49 @@ describe('GeminiStreamTranslator', () => {
     expect(tool.output).toEqual({ output: 'plain file contents' });
   });
 
+  it('records a failed gemini tool_result as a step error', () => {
+    // The gemini branch had NO error path: a run whose tool calls all failed
+    // was stored as clean, so `isErrorStep` saw nothing, ai-root-cause scored a
+    // 100% PASS on it, and a golden step_errors baseline had no failure to
+    // regress against. Every sibling capture path (hook-adapter,
+    // claude-transcript) already populated `error` here.
+    const t = makeTranslator('gemini-stream')!;
+    const id = run(t, [
+      { type: 'init', session_id: 'g_err' },
+      { type: 'tool_use', id: 't1', name: 'write_file', input: { path: 'a' } },
+      { type: 'tool_result', id: 't1', is_error: true, result: 'EACCES: permission denied' },
+      { type: 'result', exit_code: 0 },
+    ], false);
+    const tool = getTrace(db, id)!.steps.find((s) => s.step_type === 'tool_call')!;
+    expect(tool.error).toBe('EACCES: permission denied');
+    // The result content is still preserved as output, not replaced by it.
+    expect(tool.output).toEqual({ output: 'EACCES: permission denied' });
+  });
+
+  it('flattens a structured gemini tool error instead of collapsing it', () => {
+    const t = makeTranslator('gemini-stream')!;
+    const id = run(t, [
+      { type: 'init', session_id: 'g_err2' },
+      { type: 'tool_use', id: 't1', name: 'run_cmd', input: {} },
+      { type: 'tool_result', id: 't1', error: { message: 'boom', code: 'E1' } },
+      { type: 'result', exit_code: 0 },
+    ], false);
+    const tool = getTrace(db, id)!.steps.find((s) => s.step_type === 'tool_call')!;
+    expect(tool.error).toBe('{"message":"boom","code":"E1"}');
+  });
+
+  it('leaves a successful gemini tool_result with no error', () => {
+    const t = makeTranslator('gemini-stream')!;
+    const id = run(t, [
+      { type: 'init', session_id: 'g_ok' },
+      { type: 'tool_use', id: 't1', name: 'read_file', input: {} },
+      { type: 'tool_result', id: 't1', is_error: false, output: { ok: true } },
+      { type: 'result', exit_code: 0 },
+    ], false);
+    const tool = getTrace(db, id)!.steps.find((s) => s.step_type === 'tool_call')!;
+    expect(tool.error).toBeNull();
+  });
+
   it('respects a non-zero result exit code as failure', () => {
     const t = makeTranslator('gemini-stream')!;
     const id = run(t, [

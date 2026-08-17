@@ -6,7 +6,7 @@ import { getTrace, listTraces } from '../services/trace-service.js';
 import { checkGolden, KNOWN_FIELDS } from '../services/check-service.js';
 import type { GoldenEntry } from '../services/export-service.js';
 import type { TraceWithDetails } from '../models/types.js';
-import { heading } from '../ui/theme.js';
+import { heading, safeText } from '../ui/theme.js';
 import { parseSinceToIso } from '../utils/time.js';
 import { errorMessage } from '../utils/json.js';
 import { resolveDataDir } from '../utils/paths.js';
@@ -231,13 +231,13 @@ export function runCheck(opts: CheckOptions = {}): void {
 
   for (const r of report.results) {
     if (!r.matched) {
-      console.log(`  ${chalk.dim('○')} ${chalk.dim(r.trace_id.slice(0, 12))} ${r.agent_name} — ${chalk.yellow('unmatched')}${opts.strict ? chalk.red(' (strict: fail)') : ''}`);
+      console.log(`  ${chalk.dim('○')} ${chalk.dim(r.trace_id.slice(0, 12))} ${safeText(r.agent_name)} — ${chalk.yellow('unmatched')}${opts.strict ? chalk.red(' (strict: fail)') : ''}`);
       continue;
     }
     if (r.passed) {
-      console.log(`  ${chalk.green('✔')} ${chalk.dim(r.trace_id.slice(0, 12))} ${r.agent_name} — ${chalk.green('pass')}`);
+      console.log(`  ${chalk.green('✔')} ${chalk.dim(r.trace_id.slice(0, 12))} ${safeText(r.agent_name)} — ${chalk.green('pass')}`);
     } else {
-      console.log(`  ${chalk.redBright('✘')} ${chalk.dim(r.trace_id.slice(0, 12))} ${r.agent_name} — ${chalk.redBright('REGRESSED')}`);
+      console.log(`  ${chalk.redBright('✘')} ${chalk.dim(r.trace_id.slice(0, 12))} ${safeText(r.agent_name)} — ${chalk.redBright('REGRESSED')}`);
       for (const d of r.divergences) {
         const at = d.step_number != null ? chalk.dim(` @step ${d.step_number}`) : '';
         console.log(`      ${chalk.white(d.field)}${at}: golden ${chalk.green(short(d.golden))} → got ${chalk.redBright(short(d.candidate))}`);
@@ -256,7 +256,15 @@ export function runCheck(opts: CheckOptions = {}): void {
   process.exitCode = report.ok ? 0 : 1;
 }
 
+/**
+ * Divergence values are agent-authored (a step name, a tool input) and reach
+ * here from trace data OR from a golden baseline file that may have been
+ * shared or downloaded, so they are escaped like every other rendered
+ * producer string. A lone carriage return in one of them could overwrite the
+ * `REGRESSED` line above it and make this gate misreport its own verdict.
+ */
 function short(v: unknown): string {
   const s = typeof v === 'string' ? v : JSON.stringify(v);
-  return s != null && s.length > 60 ? `${s.slice(0, 57)}...` : String(s);
+  const out = s != null && s.length > 60 ? `${s.slice(0, 57)}...` : String(s);
+  return safeText(out);
 }

@@ -171,6 +171,26 @@ between them, and nothing else.
 
 ### Fixed
 
+- A failed tool call in a Gemini stream (`record --format gemini-stream`) was
+  recorded as a clean one. The gemini translator's `tool_result` branch had no
+  error path at all, while every sibling capture path (`hook`, the Claude
+  transcript importer) already kept `step_type: tool_call` and populated
+  `error`. Nothing downstream could then see the failure: `eval --preset
+  ai-root-cause` treats a trace with no failing step as not-applicable and
+  scores it a 100% PASS, and a `check --golden` `step_errors` baseline had no
+  failure to regress against — so a run whose every tool call errored reported
+  green twice over. Only unambiguous, shape-generic signals are read
+  (`is_error: true`, a non-null `error`); the result content is still preserved
+  as the step output either way.
+
+- `check` echoed producer text raw — the one human-readable renderer left
+  without `safeText`. Agent names and divergence values are agent-authored, and
+  on the golden side they arrive from a baseline file that may have been shared
+  or downloaded. A lone carriage return in one returns the cursor to column 0
+  and lets following bytes overwrite the `REGRESSED` line above it, so the
+  regression gate could be made to misreport its own verdict; an OSC sequence
+  retitles the operator's terminal.
+
 - A run wrapped by `agent-replay run` could be recorded as clean when it failed,
   or left open forever. `trace_end.status` is a free string, and any non-empty one
   counted as "the child owns the outcome" — but `updateTrace` coerces anything

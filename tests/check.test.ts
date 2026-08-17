@@ -369,6 +369,63 @@ describe('runCheck gathers every candidate trace', () => {
   }, 120_000);
 });
 
+// ── check command: rendered producer text is escaped ─────────────────────────
+
+describe('runCheck escapes producer text in its human-readable report', () => {
+  it('does not echo raw control bytes from an agent name or a divergence value', () => {
+    // `check` was the only human-readable renderer with no `safeText`. Both the
+    // agent name and the divergence values are producer output — and the golden
+    // side arrives from a baseline FILE that may have been shared or downloaded.
+    // A lone CR there returns the cursor to column 0 and lets the next bytes
+    // overwrite the `REGRESSED` line, so the gate can be made to misreport its
+    // own verdict; an OSC sequence retitles the operator's terminal.
+    const dir = mkdtempSync(join(tmpdir(), 'ar-check-esc-'));
+    try {
+      const cdb = ensureDatabase(resolve(dir, 'traces.db'));
+      const evil = 'bot\u001b]0;pwned\u0007\rALL PASSED';
+      // Baseline and candidate share the input (so they match) but differ in a
+      // step name carrying the payload — that difference is what gets rendered.
+      ingestTrace(cdb, {
+        agent_name: evil,
+        status: 'completed',
+        input: { task: 'x' },
+        steps: [{ step_number: 1, step_type: 'tool_call', name: 'good_name', input: { a: 1 } }],
+      });
+      const goldenPath = join(dir, 'golden.json');
+      writeFileSync(goldenPath, exportTraces(cdb, { agent_name: evil }, 'golden'));
+      deleteTrace(cdb, (JSON.parse(exportTraces(cdb, { agent_name: evil }, 'golden')) as GoldenEntry[])[0].id);
+      ingestTrace(cdb, {
+        agent_name: evil,
+        status: 'completed',
+        input: { task: 'x' },
+        steps: [{ step_number: 1, step_type: 'tool_call', name: evil, input: { a: 1 } }],
+      });
+
+      const out: string[] = [];
+      const prevExit = process.exitCode;
+      const spy = vi.spyOn(console, 'log').mockImplementation((m?: unknown) => {
+        out.push(String(m));
+      });
+      try {
+        runCheck({ golden: goldenPath, dir });
+      } finally {
+        spy.mockRestore();
+      }
+      const text = out.join('\n');
+      // The payload is reported (this is a real regression) but never as raw bytes.
+      expect(text).toContain('REGRESSED');
+      expect(text).not.toContain('\u001b');
+      expect(text).not.toContain('\u0007');
+      expect(text).not.toMatch(/\r(?!\n)/);
+      expect(text).toContain('\\x1b');
+      process.exitCode = prevExit;
+    } finally {
+      resetConnection();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 // ── check command: an empty golden baseline is not a passing gate ────────────
 
 describe('runCheck refuses an empty golden baseline', () => {
