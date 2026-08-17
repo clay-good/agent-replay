@@ -671,6 +671,41 @@ describe('a producer-chosen trace id cannot carry control characters', () => {
     }).event).not.toBeNull();
   });
 
+  it('accepts and rejects exactly the same option shapes as ingest does', () => {
+    // Asserts AGREEMENT rather than specific verdicts: the defect this guards is
+    // the two paths drifting, which is what happened when the live check was
+    // written by hand instead of calling ingest's rule. A shape one path accepts
+    // and the other refuses means a trace this tool wrote cannot be restored
+    // from its own export.
+    const shapes: Array<[string, unknown]> = [
+      ['valid', [{ option: 'a' }]],
+      ['score 0', [{ option: 'a', score: 0 }]],
+      ['extra properties', [{ option: 'a', score: 1, rationale: 'r', extra: 'x' }]],
+      ['empty array', []],
+      ['absent', undefined],
+      ['empty option string', [{ option: '' }]],
+      ['numeric option', [{ option: 123 }]],
+      ['null element', [null]],
+      ['nested array', [['a']]],
+      ['bare string element', ['a']],
+      ['NaN score', [{ option: 'a', score: Number.NaN }]],
+      ['string score', [{ option: 'a', score: 'high' }]],
+      ['long list', Array.from({ length: 50 }, (_, i) => ({ option: `o${i}` }))],
+    ];
+    for (const [label, options] of shapes) {
+      const decision = options === undefined ? { chosen: 'a' } : { chosen: 'a', options };
+      const liveOk = validateEvent({
+        v: 1, type: 'step', trace_id: 'trc_agree', step_number: 1,
+        step_type: 'decision', name: 'pick', decision,
+      }).event !== null;
+      const ingestOk = validateStepInput({
+        step_number: 1, step_type: 'decision', name: 'pick',
+        decision: { ...decision, decided_by: 'agent' },
+      }).valid;
+      expect(liveOk, `live vs ingest disagree on: ${label}`).toBe(ingestOk);
+    }
+  });
+
   it('is refused on the programmatic path too, which skips the protocol parser', () => {
     // `TraceRecorder.startTrace` builds an event and calls `applyEvent`
     // directly, so `validateEvent` never sees it — the protocol parser is not
