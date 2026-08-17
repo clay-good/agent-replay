@@ -118,19 +118,46 @@ export function runExport(traceId: string | undefined, opts: ExportOptions = {})
       const outPath = resolve(opts.output);
       writeFileSync(outPath, output);
       successSpinner(spinner, `Exported to ${outPath}`);
-      // An empty export stays exit 0 (documented), but a golden baseline with no
-      // entries is a CI gate that can never fail — and the usual cause is a
-      // filter typo the user would otherwise never hear about. Say so here,
-      // where it can still be fixed; `check` refuses such a file outright.
-      if (format === 'golden' && output.trim() === '[]') {
-        console.error(chalk.yellow('  ⚠ No traces matched — this golden baseline is empty and cannot detect a regression.'));
-      }
     } else {
       spinner.stop();
       process.stdout.write(output);
     }
+    if (format === 'golden') warnAboutBaseline(output);
   } catch (err) {
     failSpinner(spinner, `Export failed: ${errorMessage(err)}`);
     process.exitCode = 1;
+  }
+}
+
+/**
+ * Warn when a golden baseline can't do the job it will be used for. Both cases
+ * are silent otherwise, and both survive into CI as a green gate.
+ *
+ * A baseline is meant to be built from known-good runs, but nothing filters by
+ * status: a `running` trace bakes in a truncated prefix of a run still in
+ * flight, so the next correct, completed run "regresses" against it; a `failed`
+ * or `timeout` trace asserts the failure as the expected shape, so a candidate
+ * that faithfully reproduces the break passes green. Say so here, where
+ * re-exporting with `--tag known-good` still costs nothing.
+ */
+function warnAboutBaseline(output: string): void {
+  if (output.trim() === '[]') {
+    console.error(chalk.yellow('  ⚠ No traces matched — this golden baseline is empty and cannot detect a regression.'));
+    return;
+  }
+  let entries: { metadata?: { status?: unknown } }[];
+  try {
+    entries = JSON.parse(output);
+  } catch {
+    return; // the export we just produced; unparseable is not something to report on
+  }
+  const other = entries.filter((e) => e?.metadata?.status !== 'completed').length;
+  if (other > 0) {
+    console.error(
+      chalk.yellow(`  ⚠ ${other} of ${entries.length} baseline entr${other === 1 ? 'y is' : 'ies are'} not from a completed run.`),
+    );
+    console.error(
+      chalk.dim('    An in-flight run bakes in a partial shape (later correct runs then "regress"); a failed one makes reproducing the failure pass. Filter with --tag known-good, or --status completed.'),
+    );
   }
 }

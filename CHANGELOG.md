@@ -115,6 +115,22 @@ nothing else.
   that doesn't read hook stdout ignores, letting the denied call run. Nothing
   in a payload distinguishes such a harness, so the user says.
 
+### Added
+
+- `check --golden` reports baseline entries that no candidate exercised. The
+  verdict was candidate-driven only, so a scenario whose run crashed, recorded
+  under a different agent name, or ran a different input silently vanished from
+  the gate — it reported "1 passed" and exited `0` while the rest of the
+  baseline went unchecked. Reported in the summary and in `--json` as
+  `uncovered`; a failure only under `--strict`, which already fails unmatched
+  runs.
+
+- `export --format golden` warns when a baseline is built from runs that did not
+  complete. A `running` trace bakes in a truncated shape, so the next correct run
+  "regresses" against it; a `failed` or `timeout` one makes a candidate that
+  faithfully reproduces the break pass green. Both are silent otherwise and both
+  survive into CI as a wrong verdict.
+
 ### Fixed
 
 - `list` and the dashboard's recent-traces table now order by the *instant* a

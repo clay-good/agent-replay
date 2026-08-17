@@ -162,7 +162,10 @@ export function runCheck(opts: CheckOptions = {}): void {
   }
 
   console.log('');
-  const summary = `${report.passed} passed, ${report.failed} regressed, ${report.unmatched} unmatched`;
+  const uncovered = report.uncovered > 0
+    ? `, ${report.uncovered} baseline${report.uncovered === 1 ? '' : 's'} not exercised${opts.strict ? ' (strict: fail)' : ''}`
+    : '';
+  const summary = `${report.passed} passed, ${report.failed} regressed, ${report.unmatched} unmatched${uncovered}`;
   console.log(report.ok ? chalk.green(`  ${summary}`) : chalk.redBright(`  ${summary}`));
   console.log('');
 

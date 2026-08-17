@@ -87,6 +87,29 @@ describe('checkGolden', () => {
     expect(checkGolden(golden, [candidate(baseline)], { fields: ['tool_inputs'] }).ok).toBe(true);
   });
 
+  it('reports baselines no candidate exercised, and fails them under --strict', () => {
+    // The verdict was candidate-driven only: a scenario whose run crashed, or
+    // recorded under a different agent name, simply never appeared — the gate
+    // reported "1 passed" and exited 0 while the rest of the baseline went
+    // unchecked.
+    const golden = makeGolden();
+    ingestTrace(db, { ...baseline, agent_name: 'other-bot', input: { task: 'other' } });
+    const extra = JSON.parse(exportTraces(db, { agent_name: 'other-bot' }, 'golden')) as GoldenEntry[];
+    const both = [...golden, ...extra];
+
+    const report = checkGolden(both, [candidate(baseline)]);
+    expect(report.passed).toBe(1);
+    expect(report.uncovered).toBe(1);
+    expect(report.ok).toBe(true); // reported, but not a failure by default
+
+    // --strict, which already fails on an unmatched candidate, fails here too.
+    expect(checkGolden(both, [candidate(baseline)], { strict: true }).ok).toBe(false);
+    // Exercising every baseline leaves nothing uncovered.
+    const full = checkGolden(both, [candidate(baseline), candidate({ ...baseline, agent_name: 'other-bot', input: { task: 'other' } })], { strict: true });
+    expect(full.uncovered).toBe(0);
+    expect(full.ok).toBe(true);
+  });
+
   it('pairs distinct candidates that share an agent+input key without false regressions', () => {
     // Two runs of the same agent with the same input but different shapes — an
     // original and its fork, say. A plain golden index kept only the last, so
@@ -438,6 +461,48 @@ describe('runCheck refuses a gate with nothing to check', () => {
       expect(r.exit).toBe(2);
       expect(r.errs).toMatch(/not a golden dataset/i);
       expect(r.errs).toMatch(/steps_summary/);
+    } finally {
+      resetConnection();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('export --format golden warns about a baseline it cannot trust', () => {
+  it('names entries that did not come from a completed run', async () => {
+    // A baseline is meant to hold known-good runs, but nothing filters by
+    // status: a `running` entry bakes in a partial shape, so the next correct
+    // run "regresses" against it, and a `failed` entry makes reproducing the
+    // failure pass green.
+    const { runExport } = await import('../src/commands/export.js');
+    const dir = mkdtempSync(join(tmpdir(), 'ar-export-warn-'));
+    try {
+      const cdb = ensureDatabase(resolve(dir, 'traces.db'));
+      ingestTrace(cdb, baseline);
+      ingestTrace(cdb, { ...baseline, agent_name: 'flaky-bot', status: 'failed' });
+
+      const errs: string[] = [];
+      const errSpy = vi.spyOn(console, 'error').mockImplementation((m?: unknown) => void errs.push(String(m)));
+      const outSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+      try {
+        runExport(undefined, { format: 'golden', dir });
+      } finally {
+        errSpy.mockRestore();
+        outSpy.mockRestore();
+      }
+      expect(errs.join('\n')).toMatch(/1 of 2 baseline entry is not from a completed run/);
+
+      // A baseline built only from completed runs says nothing.
+      const clean: string[] = [];
+      const cleanSpy = vi.spyOn(console, 'error').mockImplementation((m?: unknown) => void clean.push(String(m)));
+      const outSpy2 = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+      try {
+        runExport(undefined, { format: 'golden', dir, status: 'completed' });
+      } finally {
+        cleanSpy.mockRestore();
+        outSpy2.mockRestore();
+      }
+      expect(clean.join('\n')).not.toMatch(/not from a completed run/);
     } finally {
       resetConnection();
       rmSync(dir, { recursive: true, force: true });

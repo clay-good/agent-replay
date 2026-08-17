@@ -341,7 +341,9 @@ agent-replay check --golden golden.json --fields model
 
 Comparable fields: `step_count`, `step_types`, `step_names`, `tool_inputs`, `status` (the default set), plus opt-in `model`. An unrecognized `--fields` value is rejected rather than silently comparing nothing.
 
-Matches are made by agent name and a hash of the input, so each run is compared to its own golden counterpart. A divergence report names the trace, the step, and the differing field.
+Matches are made by agent name and a hash of the input, so each run is compared to its own golden counterpart. A divergence report names the trace, the step, and the differing field. The summary also reports baseline entries **no candidate exercised** — a scenario whose run crashed or never happened at all, which otherwise leaves a gate green with nothing to say about it. Those count as failures under `--strict`, alongside unmatched runs.
+
+Build the baseline from runs that finished cleanly: `export --format golden` warns when entries come from a `running` trace (a partial shape the next correct run "regresses" against) or a `failed`/`timeout` one (which makes reproducing the failure pass green). Filter with `--tag known-good` or `--status completed`.
 
 A gate that cannot do its job fails loudly (exit `2`) instead of passing green. That covers a golden file with no entries — an empty baseline can never detect a regression, and the usual cause is an export filter that matched nothing, which the export warns about too — a file that isn't a golden dataset at all (`--format json` output is a common mix-up), and a run where no trace matched the filters, whether from a mistyped `--agent`, a `--since` window that outran the recording, or a `--dir` pointing somewhere the runs were never recorded.
 

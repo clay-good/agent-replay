@@ -35,7 +35,15 @@ export interface GoldenCheckReport {
   passed: number;
   failed: number;
   unmatched: number;
-  /** Overall CI verdict: no failures (and, in strict mode, no unmatched). */
+  /**
+   * Baseline entries no candidate reproduced — a scenario the gate was supposed
+   * to cover that this run never exercised. The verdict was candidate-driven
+   * only, so if the run that produces a scenario crashed, recorded under a
+   * different agent name, or ran a different input, the gate stayed green with
+   * nothing to say about it. Reported always; a failure only under --strict.
+   */
+  uncovered: number;
+  /** Overall CI verdict: no failures (and, in strict mode, no unmatched or uncovered). */
   ok: boolean;
 }
 
@@ -88,8 +96,10 @@ export function checkGolden(
   let failed = 0;
   let unmatched = 0;
 
+  const covered = new Set<string>();
   for (const trace of candidates) {
-    const bucket = index.get(goldenKey(trace.agent_name, trace.input));
+    const key = goldenKey(trace.agent_name, trace.input);
+    const bucket = index.get(key);
     if (!bucket || bucket.length === 0) {
       unmatched++;
       results.push({ trace_id: trace.id, agent_name: trace.agent_name, matched: false, passed: !opts.strict, divergences: [] });
@@ -111,13 +121,23 @@ export function checkGolden(
       }
     }
 
+    covered.add(key);
     const ok = divergences.length === 0;
     if (ok) passed++;
     else failed++;
     results.push({ trace_id: trace.id, agent_name: trace.agent_name, matched: true, passed: ok, divergences });
   }
 
-  return { results, passed, failed, unmatched, ok: failed === 0 && (!opts.strict || unmatched === 0) };
+  const uncovered = [...index.keys()].filter((k) => !covered.has(k)).length;
+
+  return {
+    results,
+    passed,
+    failed,
+    unmatched,
+    uncovered,
+    ok: failed === 0 && (!opts.strict || (unmatched === 0 && uncovered === 0)),
+  };
 }
 
 function diffAgainstGolden(trace: TraceWithDetails, golden: GoldenEntry, fields: string[]): Divergence[] {
