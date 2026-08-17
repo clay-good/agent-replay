@@ -12,6 +12,14 @@ export function renderDiff(
   diff: TraceDiffResult,
   leftTrace: Trace,
   rightTrace: Trace,
+  /**
+   * The `--fields` allowlist, when one was applied. Without it the renderer
+   * printed a flat "Traces are identical." over a comparison that had only
+   * looked at part of the data — under a header showing COMPLETED beside
+   * FAILED. A filter must never imply more similarity than was measured, the
+   * same rule the unknown-field guard already enforces.
+   */
+  fields?: string[],
 ): string {
   const lines: string[] = [];
 
@@ -46,7 +54,11 @@ export function renderDiff(
     );
   } else if (diff.diffs.length === 0) {
     lines.push('');
-    lines.push(chalk.greenBright.bold('  Traces are identical.'));
+    lines.push(
+      fields && fields.length > 0
+        ? chalk.greenBright.bold(`  No differences in the selected field(s): ${fields.join(', ')}.`)
+        : chalk.greenBright.bold('  Traces are identical.'),
+    );
     return lines.join('\n');
   }
 
@@ -68,8 +80,8 @@ export function renderDiff(
   });
 
   for (const d of diff.diffs) {
-    const leftVal = formatDiffValue(d.left_value, d.field);
-    const rightVal = formatDiffValue(d.right_value, d.field);
+    const leftVal = formatDiffValue(d.left_value, d.field, d.right_value);
+    const rightVal = formatDiffValue(d.right_value, d.field, d.left_value);
 
     table.push([
       // A trace-level field belongs to the run, not to any step.
@@ -90,7 +102,7 @@ export function renderDiff(
 function fieldBadge(field: string): string {
   switch (field) {
     case 'missing_right':
-      return chalk.red('+ Left only');
+      return chalk.red('- Left only');
     case 'missing_left':
       return chalk.green('+ Right only');
     default:
@@ -98,7 +110,7 @@ function fieldBadge(field: string): string {
   }
 }
 
-function formatDiffValue(val: unknown, field: string): string {
+function formatDiffValue(val: unknown, field: string, other?: unknown): string {
   if (val === null || val === undefined) {
     return chalk.dim('(none)');
   }
@@ -110,11 +122,34 @@ function formatDiffValue(val: unknown, field: string): string {
     return chalk.green(truncate(String(val), 34));
   }
 
-  if (typeof val === 'object') {
-    return chalk.white(truncate(JSON.stringify(val), 34));
-  }
+  const text = typeof val === 'object' ? JSON.stringify(val) : String(val);
+  const otherText = other == null ? '' : typeof other === 'object' ? JSON.stringify(other) : String(other);
+  return chalk.white(windowed(text, otherText, 34));
+}
 
-  return chalk.white(truncate(String(val), 34));
+/**
+ * Truncate around the first character that differs from `other`, rather than
+ * always from position 0.
+ *
+ * Agent payloads routinely share a long prefix (`{"file_path":"/Users/…"}`,
+ * `{"messages":[{"role":"user"…}]}`), so a fixed head-truncation printed the
+ * SAME 34 characters in both columns under a header reading "1 difference(s)
+ * found" — the user could only find out what changed by rerunning with --json,
+ * with nothing suggesting they should.
+ */
+function windowed(text: string, other: string, max: number): string {
+  if (text.length <= max) return text;
+  let i = 0;
+  while (i < text.length && i < other.length && text[i] === other[i]) i++;
+  // Keep some leading context, and never scroll past what fits.
+  const lead = 8;
+  // The leading "..." costs three of the budget, so the furthest useful start is
+  // `length - (max - 3)`; clamping to `length - max` instead left the differing
+  // tail cut off again, defeating the point of windowing.
+  const start = Math.min(Math.max(0, i - lead), Math.max(0, text.length - (max - 3)));
+  if (start === 0) return truncate(text, max);
+  const body = text.slice(start);
+  return `...${truncate(body, max - 3)}`;
 }
 
 function truncate(s: string, max: number): string {

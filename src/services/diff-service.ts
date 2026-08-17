@@ -168,14 +168,30 @@ export function diffTraces(
   // These carry `step_number: null`: they belong to the trace, not to a step,
   // and must not pin `divergence_step`, which means "the first step that went
   // different".
-  const leftTrace = db.prepare('SELECT status, error, output FROM agent_traces WHERE id = ?').get(leftTraceId) as
+  const leftTrace = db.prepare('SELECT status, error, output, input FROM agent_traces WHERE id = ?').get(leftTraceId) as
     | Record<string, unknown>
     | undefined;
-  const rightTrace = db.prepare('SELECT status, error, output FROM agent_traces WHERE id = ?').get(rightTraceId) as
+  const rightTrace = db.prepare('SELECT status, error, output, input FROM agent_traces WHERE id = ?').get(rightTraceId) as
     | Record<string, unknown>
     | undefined;
 
   if (leftTrace && rightTrace) {
+    // The trace's own input. Its absence hid the one thing `fork --modify-input`
+    // changes — and `fork` closes by telling the user to run exactly this diff,
+    // which then reported the modified run as differing only in status. Two
+    // separately-ingested traces whose only difference was the prompt compared
+    // as "identical". The AI summary already showed INPUT A / INPUT B, so
+    // `diff` and `diff --ai` could contradict each other about the same pair.
+    const leftIn = safeParseJson(leftTrace.input as string | null) ?? null;
+    const rightIn = safeParseJson(rightTrace.input as string | null) ?? null;
+    if (stableStringify(leftIn) !== stableStringify(rightIn)) {
+      diffs.push({
+        step_number: null,
+        field: 'trace_input',
+        left_value: leftIn,
+        right_value: rightIn,
+      });
+    }
     if (leftTrace.status !== rightTrace.status) {
       diffs.push({
         step_number: null,

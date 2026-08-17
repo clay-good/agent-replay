@@ -178,6 +178,26 @@ nothing else.
   numbering and loses everything after the first, but the count lived only in
   stderr lines while the summary still read "N event(s) recorded".
 
+- `diff` compares the trace's own `input`. It never did, so the one field
+  `fork --modify-input` changes was invisible — and `fork` closes by telling you
+  to run exactly that diff. Two separately-ingested traces differing only in
+  their prompt compared as "identical", while `diff --ai` (whose summary does
+  include the input) could reach the opposite conclusion about the same pair.
+
+- `diff --fields` no longer prints "Traces are identical." over a filtered
+  comparison — under a header showing COMPLETED beside FAILED, in the case that
+  prompted this. It now names the fields it actually compared.
+
+- The `diff` table windows each value around the first difference instead of
+  truncating both sides from the left. Agent payloads share long prefixes
+  (`{"file_path":"/Users/…"}`), so a real difference routinely rendered as two
+  byte-identical cells under "1 difference(s) found", with nothing to suggest
+  `--json` was needed to see it. A left-only step is also marked `-` rather than
+  a `+` that read backwards next to the green `+ Right only`.
+
+- `why`'s header counts steps rather than calling them "hops" — a one-step chain
+  involves no traversal at all.
+
 - `record` no longer finalizes a trace it did not open. Under the README's own
   nested example (`run -- sh -c '... | agent-replay record'`) the events carry
   the wrapper's trace id, so the end-of-stream `timeout` finalization marked a

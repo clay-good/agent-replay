@@ -81,7 +81,9 @@ export function runWhy(traceId: string, opts: WhyOptions = {}): void {
   }
 
   console.log('');
-  console.log(heading(`  Why step ${stepNumber}? — causal chain (${chain.length} hop${chain.length === 1 ? '' : 's'})`));
+  // Count STEPS, not "hops": a one-step chain has no traversal at all, and a
+  // three-step chain has two links — the label named the wrong quantity.
+  console.log(heading(`  Why step ${stepNumber}? — causal chain (${chain.length} step${chain.length === 1 ? '' : 's'})`));
   console.log('');
 
   for (let i = 0; i < chain.length; i++) {

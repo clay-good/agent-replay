@@ -203,6 +203,48 @@ describe('renderDiff', () => {
   });
 });
 
+describe('renderDiff verdict and value windowing', () => {
+  const trace = (id: string, status: string): Trace => ({
+    id, agent_name: 'a', agent_version: null, trigger: 'manual', status,
+    input: {}, output: null, started_at: '2026-08-17T00:00:00Z', ended_at: null,
+    total_duration_ms: null, total_tokens: null, total_cost_usd: null, error: null,
+    tags: [], metadata: {}, parent_trace_id: null, forked_from_step: null,
+    session_id: null, created_at: '2026-08-17T00:00:00Z',
+  } as unknown as Trace);
+
+  it('does not claim two traces are identical over a filtered comparison', () => {
+    // With --fields narrowing the diff to nothing, the renderer printed a flat
+    // "Traces are identical." under a header showing COMPLETED beside FAILED.
+    const empty = {
+      diffs: [], divergence_step: null,
+      left_trace_id: 'trc_left0000', right_trace_id: 'trc_right000',
+      left_step_count: 2, right_step_count: 2,
+    } as unknown as TraceDiffResult;
+    const unfiltered = noAnsi(renderDiff(empty, trace('l', 'completed'), trace('r', 'failed')));
+    expect(unfiltered).toContain('Traces are identical.');
+
+    const filtered = noAnsi(renderDiff(empty, trace('l', 'completed'), trace('r', 'failed'), ['model']));
+    expect(filtered).not.toContain('Traces are identical.');
+    expect(filtered).toContain('No differences in the selected field(s): model.');
+  });
+
+  it('shows the differing region of two values that share a long prefix', () => {
+    // Truncating both sides from position 0 rendered a real difference as two
+    // byte-identical cells under "1 difference(s) found" — the normal shape for
+    // agent payloads, which share a long JSON prefix.
+    const shared = 'A'.repeat(40);
+    const diff = {
+      diffs: [{ step_number: 1, field: 'input', left_value: { blob: `${shared}-LEFT` }, right_value: { blob: `${shared}-RIGHT` } }],
+      divergence_step: 1,
+      left_trace_id: 'trc_left0000', right_trace_id: 'trc_right000',
+      left_step_count: 1, right_step_count: 1,
+    } as unknown as TraceDiffResult;
+    const out = noAnsi(renderDiff(diff, trace('l', 'completed'), trace('r', 'completed')));
+    expect(out).toContain('LEFT');
+    expect(out).toContain('RIGHT');
+  });
+});
+
 describe('formatCostUsd — never reports real spend as zero', () => {
   it('widens past four decimals only for sub-cent amounts', () => {
     // `stats` printed "$0.0000" for a store where `show` displayed the same

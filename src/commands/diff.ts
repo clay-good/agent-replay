@@ -49,11 +49,13 @@ export async function runDiff(
   const diff = diffTraces(db, traceA.id, traceB.id);
 
   // Optionally filter by fields
+  let appliedFields: string[] | undefined;
   if (opts.fields) {
     const allowedFields = opts.fields.split(',').map((f) => f.trim()).filter(Boolean);
+    appliedFields = allowedFields;
     // Reject unknown field names so a typo doesn't silently hide real diffs and
     // imply the traces are more similar than they are.
-    const comparable = ['step_type', 'name', 'input', 'output', 'model', 'error', 'status', 'trace_error', 'trace_output'];
+    const comparable = ['step_type', 'name', 'input', 'output', 'model', 'error', 'status', 'trace_input', 'trace_error', 'trace_output'];
     const unknown = allowedFields.filter((f) => !comparable.includes(f));
     if (unknown.length > 0) {
       console.error(chalk.red(`  Unknown --fields value(s): ${unknown.join(', ')}. Comparable fields: ${comparable.join(', ')}`));
@@ -101,7 +103,7 @@ export async function runDiff(
   } else {
     // Full diff view
     console.log('');
-    console.log(renderDiff(diff, traceA, traceB));
+    console.log(renderDiff(diff, traceA, traceB, appliedFields));
     console.log('');
   }
 

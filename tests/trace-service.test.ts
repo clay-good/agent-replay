@@ -815,6 +815,36 @@ describe('eval', () => {
   });
 });
 
+describe('diffTraces compares the trace input', () => {
+  it('reports a modified input, the thing fork --modify-input changes', () => {
+    // Trace-level comparison covered status/error/output but not input, so the
+    // one field `fork --modify-input` changes was invisible — and `fork` closes
+    // by telling the user to run exactly this diff. Two separately-ingested
+    // traces differing only in their prompt compared as identical.
+    const left = ingestTrace(db, {
+      agent_name: 'inp', status: 'completed', input: { prompt: 'summarize the doc' },
+      steps: [{ step_number: 1, step_type: 'output', name: 'done' }],
+    });
+    const right = ingestTrace(db, {
+      agent_name: 'inp', status: 'completed', input: { prompt: 'TOTALLY DIFFERENT PROMPT' },
+      steps: [{ step_number: 1, step_type: 'output', name: 'done' }],
+    });
+
+    const diff = diffTraces(db, left.id, right.id);
+    const inputDiff = diff.diffs.find((d) => d.field === 'trace_input');
+    expect(inputDiff).toBeDefined();
+    expect(inputDiff!.step_number).toBeNull(); // trace-level: must not pin divergence_step
+    expect(diff.divergence_step).toBeNull();
+
+    // Identical inputs still produce no such row.
+    const same = ingestTrace(db, {
+      agent_name: 'inp', status: 'completed', input: { prompt: 'summarize the doc' },
+      steps: [{ step_number: 1, step_type: 'output', name: 'done' }],
+    });
+    expect(diffTraces(db, left.id, same.id).diffs.find((d) => d.field === 'trace_input')).toBeUndefined();
+  });
+});
+
 describe('listTraces --since compares instants, not bytes', () => {
   // Regression: `started_at` is TEXT and the filter used a plain `>=`, so the
   // comparison was byte-wise. Nothing constrains the format a producer writes

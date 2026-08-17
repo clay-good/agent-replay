@@ -309,11 +309,13 @@ agent-replay diff <a> <b> --ai
 ```
 
 Steps are compared on `step_type`, `name`, `input`, `output`, `model`, and
-`error`; the trace itself is compared on `status`, `trace_error`, and
-`trace_output`. Trace-level differences report a step of `trace` (`null` in
-`--json`) and never set `divergence_step`, which means "the first step that went
+`error`; the trace itself is compared on `trace_input`, `status`, `trace_error`,
+and `trace_output` — so a fork made with `--modify-input` shows the input you
+changed. Trace-level differences report a step of `trace` (`null` in `--json`)
+and never set `divergence_step`, which means "the first step that went
 different". Steps are paired by `step_number`, so gaps don't misalign the
-comparison. Narrow the comparison with `--fields`.
+comparison. Narrow the comparison with `--fields`; when a filter leaves nothing,
+the verdict says so rather than claiming the traces are identical.
 
 ### Fork
 
