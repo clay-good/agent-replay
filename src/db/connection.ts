@@ -33,14 +33,25 @@ export class DatabaseConnection {
 
     try {
       this.db = new Database(this.dbPath);
+      // Set the lock patience FIRST. Converting a rollback-journal database to
+      // WAL needs a brief exclusive lock, and with no busy_timeout in effect a
+      // concurrent holder makes that conversion fail immediately with
+      // SQLITE_BUSY. (Ordering only matters for the one-time conversion; a
+      // database already in WAL returns "wal" without taking the lock.)
+      //
+      // 10s, not the 3s this used to set: better-sqlite3 already defaults to
+      // 5000ms, so the old value was a 40% *reduction* in lock patience,
+      // written and commented as though it were an increase. Short-lived hook
+      // processes contending with a slow `otel serve` merge transaction were
+      // being aborted earlier than the library default would have — and a
+      // SQLITE_BUSY on the hook path is swallowed as a per-event warning, i.e.
+      // silently lost trace data. Never set this below the library default.
+      this.db.pragma('busy_timeout = 10000');
       // Enable WAL mode for better concurrent read performance — one writer plus
       // concurrent readers, which covers live capture (record/hook writers) and
       // watch/dashboard readers against the same file. (This pragma is also the
       // first real read of the file, so a corrupt DB surfaces here.)
       this.db.pragma('journal_mode = WAL');
-      // Wait up to 3s for a competing writer's lock instead of failing fast with
-      // SQLITE_BUSY, so short-lived hook processes and readers can coexist.
-      this.db.pragma('busy_timeout = 3000');
       // Enable foreign key enforcement
       this.db.pragma('foreign_keys = ON');
     } catch (err) {
@@ -52,10 +63,22 @@ export class DatabaseConnection {
         // ignore — we're already failing
       }
       this.db = null;
-      throw new Error(
-        `Could not open the database at ${this.dbPath}. It may be corrupted or not a valid SQLite file. ` +
-          `(${(err as Error).message})`,
-      );
+      // Don't tell every failure it's corruption. This catch covers a locked
+      // store, a read-only file or mount, and a permissions problem as well as
+      // a genuinely bad file — and "may be corrupted" invites the user to
+      // delete a trace store that was merely busy. Name the cause we actually
+      // have, and only say corrupt when SQLite says so.
+      const code = (err as { code?: string }).code ?? '';
+      const detail = (err as Error).message;
+      const cause =
+        code === 'SQLITE_NOTADB' || code.startsWith('SQLITE_CORRUPT')
+          ? 'It is corrupted or not a valid SQLite file.'
+          : code.startsWith('SQLITE_BUSY') || code.startsWith('SQLITE_LOCKED')
+            ? 'It is locked by another process — retry once that process exits.'
+            : code.startsWith('SQLITE_READONLY') || code.startsWith('SQLITE_PERM') || code === 'SQLITE_CANTOPEN'
+              ? 'It could not be opened for writing — check file and directory permissions.'
+              : 'It may be corrupted, locked, or unreadable.';
+      throw new Error(`Could not open the database at ${this.dbPath}. ${cause} (${detail})`);
     }
 
     return this.db;

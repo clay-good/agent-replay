@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { mkdtempSync, rmSync, statSync, mkdirSync, writeFileSync } from 'node:fs';
+import BetterSqlite3 from 'better-sqlite3';
+import { mkdtempSync, rmSync, statSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runMigrations } from '../src/db/migrations.js';
@@ -290,6 +291,39 @@ describe('corrupt database handling', () => {
       mkdirSync(join(root, '.agent-replay'), { recursive: true });
       writeFileSync(dbPath, 'this is not a sqlite database');
       expect(() => ensureDatabase(dbPath)).toThrow(/corrupted or not a valid SQLite file/i);
+    } finally {
+      resetConnection();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not blame corruption for a store it merely cannot open for writing', () => {
+    // Regression: the catch-all reported EVERY open failure as "may be
+    // corrupted" — including a read-only file or mount and a permissions
+    // problem. The natural response to "corrupted" is to delete the trace
+    // store, so a recoverable condition invited real data loss.
+    const root = mkdtempSync(join(tmpdir(), 'ar-readonly-'));
+    const dbPath = join(root, '.agent-replay', 'traces.db');
+    try {
+      mkdirSync(join(root, '.agent-replay'), { recursive: true });
+      // A real SQLite database, then made unwritable.
+      const seed = new BetterSqlite3(dbPath);
+      seed.exec('CREATE TABLE t (x)');
+      seed.close();
+      chmodSync(dbPath, 0o400);
+
+      let message = '';
+      try {
+        const db = ensureDatabase(dbPath);
+        // Some platforms/filesystems (and running as root) still allow the
+        // open; only assert the message when it genuinely failed.
+        db.prepare('SELECT 1').get();
+        return;
+      } catch (err) {
+        message = (err as Error).message;
+      }
+      expect(message).not.toMatch(/corrupted/i);
+      expect(message).toMatch(/permissions|locked/i);
     } finally {
       resetConnection();
       rmSync(root, { recursive: true, force: true });

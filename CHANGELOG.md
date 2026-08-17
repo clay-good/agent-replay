@@ -98,6 +98,17 @@ trace schema is unchanged.
 
 ### Fixed
 
+- Opening the trace store no longer *lowers* its own lock patience, and no
+  longer blames corruption for every failure. `busy_timeout` was set to 3s
+  where better-sqlite3 already defaults to 5s — a reduction, written as though
+  it were an increase — so a short-lived `hook` process contending with a slow
+  `otel serve` merge was aborted earlier than the default would have, and a
+  `SQLITE_BUSY` there is swallowed as a warning, i.e. silently lost capture.
+  It is now 10s and set *before* the WAL conversion, which itself needs a
+  lock. Separately, a store that is merely locked, read-only, or unreadable is
+  reported as such: the old message said "may be corrupted" for all of them,
+  and the natural response to that is to delete the store.
+
 - `guard add` now warns when a `deny` or `require_review` policy matches on
   `output_contains`. Enforcement evaluates a *proposed* tool call — before it
   runs, so there is no output yet — and every match key must match, so such a
