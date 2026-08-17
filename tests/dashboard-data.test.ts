@@ -213,3 +213,34 @@ describe('recentEvalScores', () => {
     }
   });
 });
+
+
+// ── store-wide totals must reflect the data that exists ────────────────────
+
+describe('dashboardStats token total', () => {
+  it('falls back to per-step tokens when the trace-level total is absent', () => {
+    // Regression: the sum read `agent_traces.total_tokens` only. That column is
+    // set solely when a producer sends one, while `ingest`, `record`, the OTel
+    // mapper and the importers all populate per-step `tokens_used` — so `stats`
+    // reported "Total tokens: -" (and `null` in the --json a CI job reads) for
+    // a store plainly holding tokens. The average duration beside it already
+    // needed exactly this fallback.
+    ingestTrace(db, {
+      agent_name: 'steps-only', status: 'completed',
+      steps: [
+        { step_number: 1, step_type: 'llm_call', name: 'a', tokens_used: 5000 },
+        { step_number: 2, step_type: 'llm_call', name: 'b', tokens_used: 7000 },
+      ],
+    } as never);
+
+    expect(dashboardStats(db).totalTokens).toBe(12000);
+  });
+
+  it('prefers a trace-level total when the producer reported one', () => {
+    ingestTrace(db, {
+      agent_name: 'reported', status: 'completed', total_tokens: 999,
+      steps: [{ step_number: 1, step_type: 'llm_call', name: 'a', tokens_used: 1 }],
+    } as never);
+    expect(dashboardStats(db).totalTokens).toBe(999);
+  });
+});

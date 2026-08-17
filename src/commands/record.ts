@@ -6,7 +6,7 @@ import { parseEventLine } from '../services/event-protocol.js';
 import type { CaptureEvent } from '../services/event-protocol.js';
 import { applyEvent } from '../services/recorder.js';
 import { makeTranslator } from '../services/stream-translators.js';
-import { updateTrace, getTrace } from '../services/trace-service.js';
+import { updateTrace } from '../services/trace-service.js';
 import { summaryPanel } from '../ui/boxen-panels.js';
 import { errorMessage } from '../utils/json.js';
 
@@ -44,6 +44,7 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
   const touched = new Set<string>();
   let applied = 0;
   let warnings = 0;
+  let totalSteps = 0;
 
   const apply = (event: CaptureEvent): void => {
     if (event.type === 'trace_start' && extraTags.length > 0) {
@@ -58,6 +59,7 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
       const { traceId } = applyEvent(db, event);
       touched.add(traceId);
       applied++;
+      if (event.type === 'step' || event.type === 'step_start') totalSteps++;
     } catch (err) {
       warnings++;
       console.error(chalk.yellow(`  ⚠ skipped ${event.type}: ${errorMessage(err)}`));
@@ -113,12 +115,12 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
     }
   }
 
-  // Summary
-  let totalSteps = 0;
-  for (const id of touched) {
-    const t = getTrace(db, id);
-    if (t) totalSteps += t.steps.length;
-  }
+  // Summary. Count the steps THIS stream recorded, not the touched traces'
+  // lifetime totals: a producer may resume an existing trace by id (the
+  // protocol supports it), and summing `getTrace(...).steps.length` then
+  // reported every step the trace had ever accumulated — "Total steps: 3" for a
+  // run that recorded one — while every other number in the panel is counted
+  // over this stream.
 
   console.log('');
   console.log(

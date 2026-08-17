@@ -81,7 +81,11 @@ export function runStats(opts: StatsOptions = {}): void {
     console.log('');
     console.log(heading('  By agent:'));
     for (const a of byAgent) {
-      const failed = a.failed > 0 ? chalk.red(` (${a.failed} failed)`) : '';
+      // The tally deliberately counts timeouts alongside failures (see
+      // agentStats), but the label said only "failed" — so a store with one
+      // timeout and no failures printed "1 failed" three lines below a status
+      // breakdown showing `timeout 1` and no failed row.
+      const failed = a.failed > 0 ? chalk.red(` (${a.failed} failed or timed out)`) : '';
       console.log(`    ${label(a.agent_name)} ${chalk.white(String(a.count))}${failed}`);
     }
   }

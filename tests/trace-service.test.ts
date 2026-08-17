@@ -857,3 +857,30 @@ describe('listTraces --since compares instants, not bytes', () => {
     expect(names).toEqual(['unparseable']);
   });
 });
+
+
+describe('listTraces --sort duration matches the displayed duration', () => {
+  it('orders by the effective duration, not the raw column', () => {
+    // Regression: the sort mapped to `total_duration_ms` while `list`/`show`
+    // display `effectiveDurationMs`, which falls back to ended_at - started_at.
+    // The hook finalizer sets ONLY ended_at, so every hook-captured trace has a
+    // null total_duration_ms and sorted last as a NULL — `list --sort -duration`
+    // visibly ended with its longest rows, and "my slowest traces" returned the
+    // wrong set.
+    ingestTrace(db, {
+      agent_name: 'explicit', status: 'completed', total_duration_ms: 35_000,
+      started_at: '2026-08-16T00:00:00.000Z', steps: [],
+    } as never);
+    ingestTrace(db, {
+      // 30 minutes, expressed only as a start/end pair — the hook shape.
+      agent_name: 'derived', status: 'completed',
+      started_at: '2026-08-16T00:00:00.000Z', ended_at: '2026-08-16T00:30:00.000Z',
+      steps: [],
+    } as never);
+
+    const desc = listTraces(db, { sort_by: 'duration', sort_order: 'desc' })
+      .items.map((t) => t.agent_name);
+    expect(desc[0]).toBe('derived'); // 30m is the longest, and must come first
+    expect(desc).toEqual(['derived', 'explicit']);
+  });
+});

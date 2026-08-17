@@ -61,7 +61,19 @@ export function dashboardStats(db: Database.Database, opts: StatsFilter = {}): D
        ))) as v FROM agent_traces ${traceWhere}`,
       p,
     ),
-    totalTokens: scalar(`SELECT SUM(total_tokens) as v FROM agent_traces WHERE total_tokens IS NOT NULL ${traceAnd}`, p),
+    // Same fallback the average duration above needs, for the same reason: the
+    // trace-level total is only set when the producer sends one (`trace_end`
+    // totals, or an ingested `total_tokens`), while `ingest`, `record`, the OTel
+    // mapper and the importers all populate per-step `tokens_used`. Summing the
+    // column alone reported "Total tokens: -" — and `null` in the --json a CI
+    // job reads — for a store plainly holding tokens.
+    totalTokens: scalar(
+      `SELECT SUM(COALESCE(
+         total_tokens,
+         (SELECT SUM(s.tokens_used) FROM agent_trace_steps s WHERE s.trace_id = agent_traces.id)
+       )) as v FROM agent_traces ${traceWhere}`,
+      p,
+    ),
     totalCost: scalar(`SELECT SUM(total_cost_usd) as v FROM agent_traces WHERE total_cost_usd IS NOT NULL ${traceAnd}`, p),
   };
 }

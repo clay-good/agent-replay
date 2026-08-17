@@ -1041,10 +1041,24 @@ export function listTraces(
   const whereClause =
     conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  // Sort — whitelist column names to prevent SQL injection
+  // Sort — whitelist expressions to prevent SQL injection.
+  //
+  // `duration` must sort by the SAME number the Duration column displays.
+  // `list`/`show` render `effectiveDurationMs`, which falls back to
+  // ended_at - started_at when total_duration_ms is null — and the hook
+  // finalizer sets ONLY ended_at, so every hook-captured trace has a null
+  // total_duration_ms. Sorting on the raw column pushed all of them to the end
+  // as NULLs, so `list --sort -duration` visibly ended with its longest rows and
+  // "my slowest traces" returned the wrong set. Mirror the fallback here, as
+  // `stats` already does for its average.
+  const DURATION_EXPR = `COALESCE(
+    total_duration_ms,
+    CASE WHEN ended_at IS NOT NULL AND julianday(ended_at) >= julianday(started_at)
+         THEN (julianday(ended_at) - julianday(started_at)) * 86400000.0 END
+  )`;
   const sortMap: Record<string, string> = {
     started_at: 'started_at',
-    duration: 'total_duration_ms',
+    duration: DURATION_EXPR,
     tokens: 'total_tokens',
     cost: 'total_cost_usd',
     agent_name: 'agent_name',

@@ -109,6 +109,19 @@ trace schema is unchanged.
 
 ### Fixed
 
+- Numbers the tool reports now match what it measured. `stats` summed only the
+  trace-level `total_tokens`, which is set solely when a producer sends one —
+  while `ingest`, `record`, the OTel mapper, and the importers all populate
+  per-step `tokens_used` — so a store plainly holding tokens reported "Total
+  tokens: -", and `null` in the `--json` a CI job reads. `list --sort duration`
+  ordered by the raw `total_duration_ms` while displaying the derived duration,
+  and the hook finalizer sets only `ended_at`: every hook-captured trace sorted
+  last as a NULL, so a descending list ended with its longest rows. `record`'s
+  "Total steps" reported each touched trace's lifetime step count rather than
+  what the run recorded. And `stats`' per-agent tally counts timeouts alongside
+  failures by design, but labeled them "failed" — three lines below a status
+  breakdown listing the timeout separately.
+
 - `show` and `replay` no longer hide a step's stored input or output when the
   value is falsy or scalar. Both fields hold arbitrary JSON, and the guards were
   a bare truthiness test on output and a key-count test on input — so a step

@@ -782,6 +782,28 @@ describe('CLI integration', () => {
     expect(run(['record'], partial).code).toBe(0);
   });
 
+  it('reports the steps this record run captured, not the traces lifetime total', () => {
+    // Regression: "Total steps" summed getTrace(...).steps.length over every
+    // touched trace, so resuming an existing trace by id — which the protocol
+    // supports — reported every step the trace had ever accumulated, while
+    // every other number in the panel counts this stream.
+    // Leave the trace open so a later stream can append to it.
+    run(['record', '--leave-open'], [
+      '{"v":1,"type":"trace_start","trace_id":"tresume","agent_name":"r"}',
+      '{"v":1,"type":"step","trace_id":"tresume","step_number":1,"step_type":"thought","name":"a"}',
+      '{"v":1,"type":"step","trace_id":"tresume","step_number":2,"step_type":"thought","name":"b"}',
+    ].join('\n'));
+
+    // A second run adds exactly one step to the same, still-running trace.
+    const second = run(['record', '--leave-open'], [
+      '{"v":1,"type":"step","trace_id":"tresume","step_number":3,"step_type":"thought","name":"c"}',
+    ].join('\n'));
+
+    expect(second.stdout).toMatch(/Total steps:\s+1/);
+    // The trace really does hold all three.
+    expect(JSON.parse(run(['show', 'tresume', '--json']).stdout).steps).toHaveLength(3);
+  });
+
   it('windows a large trace with show --from-step/--to-step', () => {
     const lines = ['{"v":1,"type":"trace_start","trace_id":"tbig","agent_name":"big"}'];
     for (let i = 1; i <= 8; i++) lines.push(`{"v":1,"type":"step","trace_id":"tbig","step_number":${i},"step_type":"thought","name":"s${i}"}`);
