@@ -375,3 +375,31 @@ describe('exportTraces jsonl with no matches', () => {
     expect(some.trim().split('\n')).toHaveLength(1);
   });
 });
+
+
+describe('golden metadata keeps a trace own keys', () => {
+  it('preserves a value displaced by a reserved key', () => {
+    // The four reserved keys must win — `check` compares metadata.status, so a
+    // trace's own `status` key displacing it would be a gate bypass, not just
+    // data loss. But they overwrote silently, making the baseline a lossy
+    // record of the run.
+    ingestTrace(db, {
+      ...baseline,
+      agent_name: 'meta-bot',
+      tags: ['real-tag'],
+      metadata: { status: 'approved', tags: ['v2'], owner: 'team-a' },
+    });
+    const [entry] = JSON.parse(exportTraces(db, { agent_name: 'meta-bot' }, 'golden')) as GoldenEntry[];
+    const meta = entry.metadata as Record<string, unknown>;
+
+    // The gate still reads the trace's real status and tags.
+    expect(meta.status).toBe('completed');
+    expect(meta.tags).toEqual(['real-tag']);
+    // The user's own values survive alongside, rather than vanishing.
+    expect(meta.trace_metadata_status).toBe('approved');
+    expect(meta.trace_metadata_tags).toEqual(['v2']);
+    // A non-colliding key is untouched, and no spurious keys appear.
+    expect(meta.owner).toBe('team-a');
+    expect(meta.trace_metadata_total_tokens).toBeUndefined();
+  });
+});

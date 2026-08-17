@@ -117,6 +117,13 @@ nothing else.
 
 ### Fixed
 
+- A golden entry no longer silently discards a trace's own metadata key when it
+  collides with one of the four the gate reads (`status`, `total_duration_ms`,
+  `total_tokens`, `tags`). The reserved keys still win — `check` compares
+  `metadata.status`, so letting a trace's own `status` displace it would be a
+  gate bypass — but the displaced value is now preserved beside it under a
+  `trace_metadata_` prefix, instead of the baseline being a lossy record.
+
 - An OTLP batch is now stored all-or-nothing. The receiver's upsert loop had no
   transaction around it, so a write failure part way through a multi-trace
   payload left the earlier traces committed and answered `500` — and a `5xx`

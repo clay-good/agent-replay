@@ -111,6 +111,31 @@ export function exportTraces(
   return JSON.stringify(traces, null, 2) + '\n';
 }
 
+/**
+ * A golden entry's metadata: the trace's own keys, plus the four the gate reads.
+ *
+ * The reserved keys must win — `check` compares `metadata.status`, so letting a
+ * trace's own `status` key displace it would be a gate bypass, not just data
+ * loss. But they were overwriting silently: a trace recorded with, say,
+ * `metadata: { status: 'approved', tags: ['v2'] }` exported with both values
+ * replaced and no trace of the originals, so the baseline was a lossy record of
+ * the run. Keep the reserved value authoritative and preserve the displaced one
+ * under a prefixed key, which nothing reads and every consumer can ignore.
+ */
+function goldenMetadata(trace: Trace): Record<string, unknown> {
+  const reserved = {
+    status: trace.status,
+    total_duration_ms: trace.total_duration_ms,
+    total_tokens: trace.total_tokens,
+    tags: trace.tags,
+  };
+  const shadowed: Record<string, unknown> = {};
+  for (const key of Object.keys(reserved)) {
+    if (Object.hasOwn(trace.metadata, key)) shadowed[`trace_metadata_${key}`] = trace.metadata[key];
+  }
+  return { ...trace.metadata, ...shadowed, ...reserved };
+}
+
 function exportGolden(db: Database.Database, items: Trace[]): string {
   const entries: GoldenEntry[] = items.map((trace) => {
     const full = getTrace(db, trace.id);
@@ -136,13 +161,7 @@ function exportGolden(db: Database.Database, items: Trace[]): string {
         score: e.score,
         passed: e.passed,
       })),
-      metadata: {
-        ...trace.metadata,
-        status: trace.status,
-        total_duration_ms: trace.total_duration_ms,
-        total_tokens: trace.total_tokens,
-        tags: trace.tags,
-      },
+      metadata: goldenMetadata(trace),
     };
   });
 
