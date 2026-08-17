@@ -398,9 +398,18 @@ agent-replay guard add --name no-deletes \
 # Test all policies against a trace
 agent-replay guard test <trace-id>
 
+# Turn a policy off without deleting it (by id or name), and back on
+agent-replay guard disable no-deletes
+agent-replay guard enable no-deletes
+
 # Remove a policy
 agent-replay guard remove <policy-id>
 ```
+
+A disabled policy stays in `guard list` (with `Enabled: No`) and is skipped by
+every evaluation path — `hook --enforce`, `guard check`, and `guard test` — so
+you can silence a noisy rule for a run without losing its id, priority, or
+description.
 
 Patterns support `step_type`, `name_contains`, `name_regex`, `input_contains`, and
 `output_contains`. `guard add` rejects an unusable pattern (an invalid or unsafe

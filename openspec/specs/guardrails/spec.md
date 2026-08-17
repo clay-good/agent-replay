@@ -6,7 +6,7 @@ Define kill-switch policies that pattern-match trace steps and prescribe actions
 ## Requirements
 ### Requirement: Policy management
 
-The system SHALL manage guardrail policies via `agent-replay guard add|list|remove`, where each policy has a unique name, an action (`allow`, `deny`, `warn`, `require_review`), a priority, an enabled flag, and a JSON match pattern.
+The system SHALL manage guardrail policies via `agent-replay guard add|list|remove|enable|disable`, where each policy has a unique name, an action (`allow`, `deny`, `warn`, `require_review`), a priority, an enabled flag, and a JSON match pattern.
 
 #### Scenario: Add a deny policy
 

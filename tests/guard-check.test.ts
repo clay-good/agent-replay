@@ -431,3 +431,33 @@ describe('runGuardCheck fails closed when policies cannot be evaluated', () => {
     }
   });
 });
+
+describe('guard enable/disable', () => {
+  it('silences a policy without deleting it, and restores it', async () => {
+    // `enabled` was write-once: addPolicy hard-codes 1 and no command could
+    // change it, so the only way to silence a policy was to delete it — losing
+    // its id, description and priority — and retype it to bring it back.
+    const { setPolicyEnabled, addPolicy: add } = await import('../src/services/guard-service.js');
+    const step = { step_type: 'tool_call', name: 'bash' } as unknown as TraceStep;
+    const db2 = new Database(':memory:');
+    try {
+      db2.pragma('foreign_keys = ON');
+      runMigrations(db2);
+      const pol = add(db2, { name: 'no-bash', action: 'deny', match_pattern: { name_contains: 'bash' } });
+      expect(evaluateStep(db2, step)).toHaveLength(1);
+
+      // By name…
+      expect(setPolicyEnabled(db2, 'no-bash', false)).toBe('no-bash');
+      expect(evaluateStep(db2, step)).toHaveLength(0);
+      // …and by id, which must resolve to the same row.
+      expect(setPolicyEnabled(db2, pol.id, true)).toBe('no-bash');
+      expect(evaluateStep(db2, step)).toHaveLength(1);
+      // The policy itself is untouched: same id, still listed.
+      expect(listPolicies(db2)[0].id).toBe(pol.id);
+
+      expect(() => setPolicyEnabled(db2, 'no-such-policy', false)).toThrow(/not found/);
+    } finally {
+      db2.close();
+    }
+  });
+});

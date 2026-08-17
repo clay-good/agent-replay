@@ -87,6 +87,24 @@ export function listPolicies(db: Database.Database): GuardrailPolicy[] {
   return rows.map(rowToPolicy);
 }
 
+/**
+ * Turn a policy off (or back on) without deleting it, resolving by id then by
+ * name exactly as `removePolicy` does. Evaluation already filters on `enabled`,
+ * but nothing could ever set it: `addPolicy` hard-codes 1, so the only way to
+ * silence a policy was to delete it — losing its id, description and priority —
+ * and the only way to bring it back was to retype it. Returns the stored name.
+ */
+export function setPolicyEnabled(db: Database.Database, policyId: string, enabled: boolean): string {
+  const now = new Date().toISOString();
+  const flag = enabled ? 1 : 0;
+  const row = (db
+    .prepare('SELECT id, name FROM guardrail_policies WHERE id = ? OR name = ? ORDER BY (id = ?) DESC LIMIT 1')
+    .get(policyId, policyId, policyId) ?? null) as { id: string; name: string } | null;
+  if (!row) throw new Error(`Policy '${policyId}' not found`);
+  db.prepare('UPDATE guardrail_policies SET enabled = ?, updated_at = ? WHERE id = ?').run(flag, now, row.id);
+  return row.name;
+}
+
 export function removePolicy(db: Database.Database, policyId: string): void {
   // Resolve by id first, then by name — `WHERE id = ? OR name = ?` deleted BOTH
   // rows when one policy happened to be named after another's id, and reported

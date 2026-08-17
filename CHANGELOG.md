@@ -117,6 +117,12 @@ nothing else.
 
 ### Added
 
+- `guard disable <policy>` and `guard enable <policy>` turn a policy off and on
+  without deleting it. Every policy carries an enabled flag that evaluation
+  already respected, but nothing could set it: silencing a rule meant deleting
+  it — losing its id, priority and description — and retyping it to bring it
+  back. Resolves by id or name, like `guard remove`.
+
 - `check --golden` reports baseline entries that no candidate exercised. The
   verdict was candidate-driven only, so a scenario whose run crashed, recorded
   under a different agent name, or ran a different input silently vanished from

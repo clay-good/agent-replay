@@ -5,6 +5,7 @@ import {
   addPolicy,
   listPolicies,
   removePolicy,
+  setPolicyEnabled,
   testPolicies,
   evaluateStep,
   verdictForMatches,
@@ -148,6 +149,32 @@ export function runGuardRemove(policyId: string, opts: GuardRemoveOptions = {}):
   try {
     removePolicy(db, policyId);
     console.log(chalk.greenBright(`  Policy "${policyId}" removed.`));
+    console.log('');
+  } catch (err) {
+    console.error(chalk.red(`  ${errorMessage(err)}`));
+    process.exitCode = 1;
+  }
+}
+
+// ── guard enable / disable ───────────────────────────────────────────────
+
+export interface GuardToggleOptions {
+  dir?: string;
+}
+
+/**
+ * `agent-replay guard enable|disable <policy>` — flip a policy's enabled flag,
+ * the one part of the policy model the CLI never exposed. Silencing a policy
+ * used to mean deleting it (and retyping it, with a new id, to bring it back).
+ */
+export function runGuardToggle(policyId: string, enabled: boolean, opts: GuardToggleOptions = {}): void {
+  const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
+  const db = ensureDatabase(dbPath);
+
+  try {
+    const name = setPolicyEnabled(db, policyId, enabled);
+    console.log(chalk.greenBright(`  Policy "${name}" ${enabled ? 'enabled' : 'disabled'}.`));
+    if (!enabled) console.log(chalk.dim('  It stays in "guard list" and stops matching until re-enabled.'));
     console.log('');
   } catch (err) {
     console.error(chalk.red(`  ${errorMessage(err)}`));

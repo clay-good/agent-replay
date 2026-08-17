@@ -279,6 +279,24 @@ guardCmd
   });
 
 guardCmd
+  .command('disable <policy>')
+  .description('Turn a policy off without deleting it (by id or name)')
+  .option('--dir <path>', 'Custom data directory')
+  .action(async (policy, opts) => {
+    const { runGuardToggle } = await import('./commands/guard.js');
+    runGuardToggle(policy, false, opts);
+  });
+
+guardCmd
+  .command('enable <policy>')
+  .description('Turn a disabled policy back on (by id or name)')
+  .option('--dir <path>', 'Custom data directory')
+  .action(async (policy, opts) => {
+    const { runGuardToggle } = await import('./commands/guard.js');
+    runGuardToggle(policy, true, opts);
+  });
+
+guardCmd
   .command('test <trace-id>')
   .description('Run all policies against a trace')
   .option('--dir <path>', 'Custom data directory')
