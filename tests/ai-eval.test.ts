@@ -98,6 +98,19 @@ describe('AI presets', () => {
       })).toBe(true);
     });
 
+    it('is applicable to a failed tool call, the shape live capture actually emits', () => {
+      // Regression: `applicable` keyed on step_type === 'error', but no capture
+      // path emits that step type — hook, record and both importers record a
+      // failed tool call as a `tool_call` step carrying `error`. The preset was
+      // therefore "skipped" for every real failure, which stores score 1.0 /
+      // passed, so `eval --ai` printed `ai-root-cause ✔ 100%` for a run that
+      // failed every tool call, without ever calling the provider.
+      expect(preset.applicable!({
+        input: {}, output: null, error: null,
+        steps: [{ step_type: 'tool_call', error: 'ENOENT: no such file' } as any],
+      })).toBe(true);
+    });
+
     it('is not applicable to clean traces', () => {
       expect(preset.applicable!({
         input: {}, output: { result: 'ok' }, error: null,
@@ -546,6 +559,30 @@ describe('runAiEval (stubbed LLM)', () => {
     expect(result.passed).toBe(true);
     expect(result.details.skipped).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('actually analyses a failed tool call instead of skipping it as a pass', async () => {
+    // Regression: a live-captured failure is a `tool_call` step carrying an
+    // `error` — no capture path emits step_type 'error' — so the applicability
+    // predicate was false, the preset was "skipped" (score 1.0, passed), and
+    // `eval --ai` reported `ai-root-cause ✔ 100%` for a trace whose every tool
+    // call failed, without ever consulting the provider.
+    const db = createTestDb();
+    const failed = ingestTrace(db, makeTrace({
+      status: 'completed', // the importers record this even when tools failed
+      error: undefined,
+      steps: [{ step_number: 1, step_type: 'tool_call', name: 'read_file', error: 'ENOENT: no such file' }],
+    }));
+    const fetchMock = vi.fn().mockResolvedValue(llmText(JSON.stringify({
+      root_cause: 'missing file', failing_step: 1, confidence: 0.4, severity: 'high',
+    })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runAiEval(db, failed.id, 'ai-root-cause', opts);
+    expect(fetchMock).toHaveBeenCalled();      // the provider was consulted
+    expect(result.details.skipped).toBeUndefined();
+    expect(result.score).toBe(0.4);
+    expect(result.passed).toBe(false);          // 0.4 < 0.5 threshold
   });
 
   it('falls back to a failed verdict when the model returns unparseable text', async () => {

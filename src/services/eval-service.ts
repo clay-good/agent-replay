@@ -411,7 +411,14 @@ const AI_ROOT_CAUSE: AiEvalPreset = {
   name: 'ai-root-cause',
   description: 'AI-powered root cause analysis for failed traces',
   threshold: 0.5,
-  applicable: (ctx) => ctx.error !== null || ctx.steps.some((s) => s.step_type === 'error'),
+  // `isErrorStep`, not `step_type === 'error'` — no capture path emits that step
+  // type (a failed tool call is a `tool_call` step carrying an `error`), so this
+  // predicate was false for every live-captured or imported failure. The preset
+  // was then "skipped" as not applicable, which stores score 1.0 / passed, and
+  // `eval --ai` reported `ai-root-cause ✔ 100%` for a run that failed every tool
+  // call — without ever calling the provider. The deterministic criteria were
+  // fixed the same way; this one was missed.
+  applicable: (ctx) => ctx.error !== null || ctx.steps.some(isErrorStep),
   system_prompt: `You are an AI agent trace analyzer. Given a trace of an AI agent execution that failed or errored, analyze the step sequence to identify the root cause.
 
 Respond in this exact JSON format (no other text):

@@ -98,6 +98,22 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `eval --ai` no longer reports `ai-root-cause ✔ 100%` for a trace whose every
+  tool call failed. The preset decided it was "not applicable" by looking for a
+  step of type `error`, but no capture path emits one — `hook`, `record`, and
+  both importers record a failed tool call as a `tool_call` step carrying an
+  `error` — so it was skipped for every real failure, and a skip stores a score
+  of 1.0. The provider was never called for the analysis the preset exists to
+  do. The deterministic criteria were corrected the same way; this one was
+  missed.
+
+- `eval --ai --max-cost` now exits non-zero when the budget stops the run part
+  way through. The remaining evaluators never reach the results list, and the
+  pass/fail gate can only reason about the ones that ran, so an unfinished run
+  reported green. (The pre-run estimate check already exited non-zero for the
+  same reason.) The notice also goes to stderr, so it can no longer corrupt
+  `--json` output.
+
 - `--since` now compares instants instead of bytes, across `list`, `stats`,
   `export`, and `check`. `started_at` is a TEXT column and nothing constrains
   the format a producer writes — `ingest`, `record`, and both importers pass a

@@ -177,9 +177,19 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
 
     let cumulativeCost = 0;
 
-    for (const presetName of presetsToRun) {
+    for (const [presetIndex, presetName] of presetsToRun.entries()) {
       if (cumulativeCost > maxCost) {
-        console.log(chalk.yellow(`  Budget limit reached ($${cumulativeCost.toFixed(4)}). Stopping.`));
+        // Same reasoning as the catch below: the remaining presets never reach
+        // `results`, so the pass/fail gate can't account for them — a run that
+        // stopped early would otherwise report green for evaluators that never
+        // ran. The pre-run estimate check already exits 1 for the same reason.
+        // stderr, not stdout, so this can't corrupt --json output.
+        console.error(
+          chalk.yellow(
+            `  Budget limit reached ($${cumulativeCost.toFixed(4)}). Stopping with ${presetsToRun.length - presetIndex} evaluator(s) unrun.`,
+          ),
+        );
+        process.exitCode = 1;
         break;
       }
 
