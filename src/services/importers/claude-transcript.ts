@@ -38,6 +38,39 @@ interface Block {
   is_error?: boolean;
 }
 
+/**
+ * A finite number from a vendor value, or 0 — never a string to concatenate.
+ *
+ * `usage` is only *cast* to numbers; JSON gives whatever the file says. A
+ * producer sending `"100"` made `0 + "100" + 20` concatenate to `"010020"`,
+ * which `numOrNull` then happily stores as 10,020 tokens instead of 120. The
+ * poisoning is sticky: once one record's usage is a string, every later `+=`
+ * concatenates too. The Codex *stream* translator was hardened against exactly
+ * this; the importers were missed.
+ */
+function toNum(v: unknown): number {
+  const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN;
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * A tool step's name, coerced.
+ *
+ * `Block.name` is typed `string | undefined` but comes straight from
+ * `JSON.parse`, and it was bound raw into a `TEXT NOT NULL` column — unlike
+ * every scalar beside it in the same insert, which is coerced precisely so one
+ * bad field can't cost the run. A single `{"type":"tool_use","name":{...}}`
+ * block anywhere in a 50,000-record transcript made better-sqlite3 refuse the
+ * bind, which threw out of the whole import: exit 1, nothing kept, in flat
+ * contradiction of this importer's documented best-effort contract. An empty
+ * name also produced a row `ingest` would reject (validateStepInput requires
+ * one), breaking the export → ingest round-trip. The Codex importer already
+ * did this correctly.
+ */
+function toolName(v: unknown): string {
+  return typeof v === 'string' && v ? v : 'tool';
+}
+
 function toText(content: unknown): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
@@ -109,10 +142,10 @@ export function importClaudeTranscript(
       continue;
     }
 
-    const message = rec.message as { content?: unknown; usage?: Record<string, number> } | undefined;
+    const message = rec.message as { content?: unknown; usage?: Record<string, unknown> } | undefined;
     const content = message?.content;
     if (message?.usage) {
-      totalTokens += (message.usage.input_tokens ?? 0) + (message.usage.output_tokens ?? 0);
+      totalTokens += toNum(message.usage.input_tokens) + toNum(message.usage.output_tokens);
     }
 
     let contributed = false;
@@ -157,7 +190,7 @@ export function importClaudeTranscript(
             steps.push({
               step_number: stepNumber++,
               step_type: 'tool_call',
-              name: block.name ?? 'tool',
+              name: toolName(block.name),
               input: block.input ?? {},
               output: result !== undefined ? { result: normalizeResult(result) } : null,
               // Mirror the live capture paths (hook-adapter): a failed tool call
@@ -237,7 +270,15 @@ export function importClaudeTranscript(
     }
   }
 
-  if (steps.length === 0 && !sessionId) {
+  // A file that yielded no steps AND no prompt has nothing of the session in
+  // it — only, at most, a session id from a header record. Creating a trace for
+  // that produced an empty row and a green exit, so `import X && use-trace`
+  // proceeded against content-free data; the command's own comment already says
+  // producing no trace should be a failed import. Keying this on `sessionId`
+  // alone let the empty case through, because a header record supplies the id.
+  // A file that captured a prompt but no steps still imports — the prompt is
+  // real content worth keeping.
+  if (steps.length === 0 && !input) {
     return { trace: null, imported, skipped, steps: 0 };
   }
 
@@ -300,8 +341,8 @@ function buildSubagentSteps(
     let contributedResult = false;
     const type = rec.type as string | undefined;
     if (type === 'user' || type === 'assistant') {
-      const message = rec.message as { content?: unknown; usage?: Record<string, number> } | undefined;
-      if (message?.usage) tokens += (message.usage.input_tokens ?? 0) + (message.usage.output_tokens ?? 0);
+      const message = rec.message as { content?: unknown; usage?: Record<string, unknown> } | undefined;
+      if (message?.usage) tokens += toNum(message.usage.input_tokens) + toNum(message.usage.output_tokens);
       const content = message?.content;
       if (!Array.isArray(content)) {
         if (typeof content === 'string' && type === 'assistant') {
@@ -319,7 +360,7 @@ function buildSubagentSteps(
             steps.push({
               step_number: n++,
               step_type: 'tool_call',
-              name: block.name ?? 'tool',
+              name: toolName(block.name),
               input: block.input ?? {},
               output: result !== undefined ? { result: normalizeResult(result) } : null,
               // A failed subagent tool call keeps its error too (see main loop).

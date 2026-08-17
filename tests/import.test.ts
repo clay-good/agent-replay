@@ -140,6 +140,69 @@ describe('importClaudeTranscript', () => {
   });
 });
 
+describe('importClaudeTranscript — malformed vendor values', () => {
+  it('adds string token counts instead of concatenating them', () => {
+    // Regression: `usage` is only *cast* to Record<string, number>; JSON gives
+    // whatever the file says. A producer sending "100" made 0 + "100" + 20
+    // concatenate to "010020", which numOrNull then stored as 10,020 tokens
+    // instead of 120 — and the poisoning is sticky, so every later record
+    // concatenated too. The Codex stream translator was hardened against
+    // exactly this; the importers were missed.
+    const path = fixture([
+      { type: 'user', sessionId: 's1', timestamp: '2026-07-01T00:00:00Z', message: { role: 'user', content: 'go' } },
+      { type: 'assistant', sessionId: 's1', message: { role: 'assistant', content: [{ type: 'text', text: 'a' }], usage: { input_tokens: '100', output_tokens: 20 } } },
+      { type: 'assistant', sessionId: 's1', message: { role: 'assistant', content: [{ type: 'text', text: 'b' }], usage: { input_tokens: 5, output_tokens: 5 } } },
+    ]);
+
+    const report = importClaudeTranscript(db, path);
+    expect(getTrace(db, report.trace!.id)!.total_tokens).toBe(130);
+  });
+
+  it('keeps the import when a tool_use name is not a string', () => {
+    // Regression: `block.name` was bound raw into a TEXT NOT NULL column, so a
+    // single non-string name anywhere in the file made better-sqlite3 refuse
+    // the bind and threw out of the whole import — exit 1, nothing kept —
+    // contradicting the importer's documented best-effort contract. Every
+    // scalar beside it in the same insert is coerced for this reason.
+    const path = fixture([
+      { type: 'user', sessionId: 's2', timestamp: '2026-07-01T00:00:00Z', message: { role: 'user', content: 'go' } },
+      { type: 'assistant', sessionId: 's2', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'tu1', name: { oops: 1 }, input: { x: 1 } }] } },
+      { type: 'assistant', sessionId: 's2', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'tu2', name: 'Bash', input: { command: 'ls' } }] } },
+    ]);
+
+    const report = importClaudeTranscript(db, path);
+    expect(report.trace).not.toBeNull();
+    const names = getTrace(db, report.trace!.id)!.steps.map((s) => s.name);
+    expect(names).toEqual(['tool', 'Bash']); // the good step survives alongside a safe fallback
+  });
+});
+
+describe('importClaudeTranscript — an empty session is a failed import', () => {
+  it('produces no trace when a file yields no steps and no prompt', () => {
+    // Regression: the guard was `no steps AND no sessionId`, but a header/
+    // summary record supplies a session id — so a session killed before its
+    // first turn produced a real, content-free trace row and `import` reported
+    // success and exited 0. Its own comment says producing no trace should be a
+    // failed import, so `import X && use-trace` was proceeding on nothing.
+    const path = fixture([
+      { type: 'summary', sessionId: 'sess-empty', timestamp: '2026-07-01T00:00:00Z', summary: 'a session that never ran' },
+    ]);
+    const report = importClaudeTranscript(db, path);
+    expect(report.trace).toBeNull();
+    expect(report.steps).toBe(0);
+  });
+
+  it('still imports a session that captured a prompt but no steps', () => {
+    // A prompt is real content — keep it.
+    const path = fixture([
+      { type: 'user', sessionId: 'sess-prompt', timestamp: '2026-07-01T00:00:00Z', message: { role: 'user', content: 'do the thing' } },
+    ]);
+    const report = importClaudeTranscript(db, path);
+    expect(report.trace).not.toBeNull();
+    expect(getTrace(db, report.trace!.id)!.input).toEqual({ prompt: 'do the thing' });
+  });
+});
+
 describe('importClaudeTranscript — subagents', () => {
   it('counts a content-less user/assistant record as skipped (every record accounted for)', () => {
     const path = fixture([

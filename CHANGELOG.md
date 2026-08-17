@@ -98,6 +98,17 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `import` no longer fabricates token totals from string counts. A transcript
+  whose `usage` carried `"100"` rather than `100` concatenated instead of
+  adding — `0 + "100" + 20` becomes `"010020"`, stored as 10,020 tokens instead
+  of 120 — and the poisoning was sticky, so every later record concatenated
+  too. (The Codex *stream* translator was hardened against exactly this; the
+  importers were missed.) A `tool_use` whose `name` is not a string no longer
+  aborts the entire import either: one bad block in a 50,000-record transcript
+  threw out of the whole run, contradicting the importer's best-effort
+  contract. And a file that yields no steps *and* no prompt now reports a
+  failed import rather than creating an empty trace and exiting `0`.
+
 - OTel spans in the OpenInference and OpenLLMetry dialects now carry their
   prompt and response content. Only the `gen_ai.*` content attributes were
   read, so a LangChain or LlamaIndex app — the frameworks these conventions

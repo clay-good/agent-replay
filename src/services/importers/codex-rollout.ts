@@ -174,7 +174,15 @@ export function importCodexRollout(
     if (contributed) imported++;
   }
 
-  if (steps.length === 0 && !sessionId) {
+  // A file that yielded no steps AND no prompt has nothing of the session in
+  // it — only, at most, a session id from a header record. Creating a trace for
+  // that produced an empty row and a green exit, so `import X && use-trace`
+  // proceeded against content-free data; the command's own comment already says
+  // producing no trace should be a failed import. Keying this on `sessionId`
+  // alone let the empty case through, because a header record supplies the id.
+  // A file that captured a prompt but no steps still imports — the prompt is
+  // real content worth keeping.
+  if (steps.length === 0 && !input) {
     return { trace: null as Trace | null, imported, skipped, steps: 0 };
   }
 
