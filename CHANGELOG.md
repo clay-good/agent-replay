@@ -98,6 +98,15 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `guard check` now fails closed when it cannot evaluate policies at all.
+  Opening the store and running the policy match were unguarded, so an
+  infrastructure error — an unopenable or read-only store, or `SQLITE_BUSY`
+  from a concurrent `hook` process — exited `1`. That is not the block signal
+  (`2` is), so every harness treated it as a non-blocking error and ran the
+  tool: a gate wired in as a blocking pre-exec check quietly stopped denying
+  the moment the database was locked. `hook --enforce` already failed closed
+  here, as does this command's own `require_review` path without a TTY.
+
 - `eval --ai` no longer reports `ai-root-cause ✔ 100%` for a trace whose every
   tool call failed. The preset decided it was "not applicable" by looking for a
   step of type `error`, but no capture path emits one — `hook`, `record`, and

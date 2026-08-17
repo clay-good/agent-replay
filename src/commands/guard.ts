@@ -294,10 +294,27 @@ export async function runGuardCheck(opts: GuardCheckOptions = {}): Promise<void>
     caused_by_step_number: null,
   };
 
+  // Opening the store and evaluating policies must fail CLOSED. Neither call
+  // was guarded, so an infrastructure error — an unopenable or read-only store,
+  // or SQLITE_BUSY from a concurrent hook process — propagated to the CLI's
+  // top-level handler, which exits 1. Exit 1 is not the block signal (2 is), so
+  // every harness treated it as a non-blocking error and ran the tool: a gate
+  // wired in as a blocking pre-exec check silently stopped denying the moment
+  // the DB was locked. `hook --enforce` already fails closed here, and this
+  // command's own require_review path fails closed without a TTY, so allowing
+  // on "cannot evaluate" contradicted the module's stated posture.
   const dbPath = resolve(opts.dir ?? '.agent-replay', 'traces.db');
-  const db = ensureDatabase(dbPath);
-
-  const verdict = verdictForMatches(evaluateStep(db, step));
+  let verdict: ReturnType<typeof verdictForMatches>;
+  try {
+    const db = ensureDatabase(dbPath);
+    verdict = verdictForMatches(evaluateStep(db, step));
+  } catch (err) {
+    console.error(chalk.redBright(`  DENY: cannot evaluate policies — ${errorMessage(err)}`));
+    console.error(chalk.dim('  Blocking to fail closed.'));
+    console.log(JSON.stringify({ action: 'deny', policy: null, reason: `policy evaluation failed: ${errorMessage(err)}` }));
+    process.exitCode = 2;
+    return;
+  }
 
   // require_review needs a human; prompt via /dev/tty when interactive.
   const isTty = process.stdout.isTTY === true;

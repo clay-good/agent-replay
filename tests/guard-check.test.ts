@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { Readable } from 'node:stream';
 import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
 import { addPolicy, evaluateStep, verdictForMatches, resolveGuardExit, testPolicies, removePolicy, validateMatchPattern, listPolicies } from '../src/services/guard-service.js';
@@ -369,5 +370,39 @@ describe('a policy with no usable match criteria', () => {
     addPolicy(db, { name: 'empty-warn', action: 'warn', match_pattern: {} });
     const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'anything' })));
     expect(v.action).toBe('allow');
+  });
+});
+
+// ── guard check: an unusable store must block, not allow ────────────────────
+
+describe('runGuardCheck fails closed when policies cannot be evaluated', () => {
+  it('exits 2 (block) instead of 1 when the store cannot be opened', async () => {
+    // Regression: opening the store and evaluating policies were unguarded, so
+    // an infrastructure error — an unopenable or read-only store, or
+    // SQLITE_BUSY from a concurrent hook process — reached the CLI's top-level
+    // handler, which exits 1. Exit 1 is not the block signal (2 is), so every
+    // harness treated it as a non-blocking error and ran the tool: a blocking
+    // pre-exec gate silently stopped denying the moment the DB was locked.
+    const { runGuardCheck } = await import('../src/commands/guard.js');
+
+    const prevExit = process.exitCode;
+    const out: string[] = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((m?: unknown) => { out.push(String(m)); });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // stdin: a well-formed step, so nothing else can account for the exit code.
+    const stdinSpy = vi
+      .spyOn(process, 'stdin', 'get')
+      .mockReturnValue(Readable.from(['{"step_type":"tool_call","name":"delete_user"}']) as typeof process.stdin);
+    try {
+      process.exitCode = 0;
+      await runGuardCheck({ dir: '/dev/null/not-a-directory' });
+      expect(process.exitCode).toBe(2);
+      expect(JSON.parse(out.join('\n')).action).toBe('deny');
+    } finally {
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+      stdinSpy.mockRestore();
+      process.exitCode = prevExit;
+    }
   });
 });
