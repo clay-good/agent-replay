@@ -122,7 +122,10 @@ export function runExport(traceId: string | undefined, opts: ExportOptions = {})
       spinner.stop();
       process.stdout.write(output);
     }
-    if (format === 'golden') warnAboutBaseline(output);
+    // Only for a file export: a warning on stdout-piped output is noise in the
+    // middle of someone's pipeline, and the empty/partial baseline it warns
+    // about is a thing you fix by re-running the export that wrote the file.
+    if (format === 'golden' && opts.output) warnAboutBaseline(output);
   } catch (err) {
     failSpinner(spinner, `Export failed: ${errorMessage(err)}`);
     process.exitCode = 1;

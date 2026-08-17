@@ -87,6 +87,25 @@ describe('checkGolden', () => {
     expect(checkGolden(golden, [candidate(baseline)], { fields: ['tool_inputs'] }).ok).toBe(true);
   });
 
+  it('counts uncovered baseline ENTRIES, not the scenarios they group into', () => {
+    // The golden index buckets entries by agent+input, so counting unmatched
+    // KEYS reported "1 baseline not exercised" for a file holding a hundred
+    // untouched entries — under-stating the very hole the message names.
+    const shape = (name: string): IngestTraceInput => ({
+      agent_name: 'twin-bot',
+      status: 'completed',
+      input: { task: 'same' },
+      steps: [{ step_number: 1, step_type: 'output', name }],
+    });
+    ingestTrace(db, shape('a'));
+    ingestTrace(db, shape('b'));
+    ingestTrace(db, shape('c'));
+    const golden = JSON.parse(exportTraces(db, { agent_name: 'twin-bot' }, 'golden')) as GoldenEntry[];
+    expect(golden).toHaveLength(3); // three entries, one bucket
+
+    expect(checkGolden(golden, []).uncovered).toBe(3);
+  });
+
   it('reports baselines no candidate exercised, and fails them under --strict', () => {
     // The verdict was candidate-driven only: a scenario whose run crashed, or
     // recorded under a different agent name, simply never appeared — the gate
@@ -446,6 +465,60 @@ describe('runCheck refuses a gate with nothing to check', () => {
     }
   });
 
+  it('answers in JSON when --json was asked for, on every refusal path', () => {
+    // `check --json | jq -r .ok` is the documented CI form. Printing only a red
+    // line on stderr turned "the gate could not run" into a jq parse error —
+    // breaking the --json contract rather than reporting a verdict.
+    const dir = mkdtempSync(join(tmpdir(), 'ar-check-jsonfail-'));
+    try {
+      const cdb = ensureDatabase(resolve(dir, 'traces.db'));
+      ingestTrace(cdb, baseline);
+      const goldenPath = join(dir, 'golden.json');
+      writeFileSync(goldenPath, exportTraces(cdb, { agent_name: 'travel-bot' }, 'golden'));
+
+      const out: string[] = [];
+      const prevExit = process.exitCode;
+      process.exitCode = 0;
+      const logSpy = vi.spyOn(console, 'log').mockImplementation((m?: unknown) => void out.push(String(m)));
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        runCheck({ golden: goldenPath, dir, agent: 'no-such-agent', json: true });
+      } finally {
+        logSpy.mockRestore();
+        errSpy.mockRestore();
+      }
+      const exit = process.exitCode;
+      process.exitCode = prevExit;
+
+      expect(exit).toBe(2);
+      const parsed = JSON.parse(out.join('\n')) as { ok: boolean; error: string };
+      expect(parsed.ok).toBe(false);
+      expect(parsed.error).toMatch(/no traces matched/i);
+    } finally {
+      resetConnection();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts an empty run under --allow-empty', () => {
+    // A nightly window with no runs, or a matrix job where this agent did not
+    // run, is legitimately empty — and the refusal has to have an escape hatch
+    // that is not "stop running the gate".
+    const dir = mkdtempSync(join(tmpdir(), 'ar-check-allowempty-'));
+    try {
+      const cdb = ensureDatabase(resolve(dir, 'traces.db'));
+      ingestTrace(cdb, baseline);
+      const goldenPath = join(dir, 'golden.json');
+      writeFileSync(goldenPath, exportTraces(cdb, { agent_name: 'travel-bot' }, 'golden'));
+
+      expect(checkWith({ golden: goldenPath, dir, agent: 'no-such-agent' }).exit).toBe(2);
+      expect(checkWith({ golden: goldenPath, dir, agent: 'no-such-agent', allowEmpty: true }).exit).toBe(0);
+    } finally {
+      resetConnection();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('exits 2 with a diagnosis when handed a full JSON export instead of a golden one', () => {
     // `--format json` and `--format golden` are one flag apart. The full export
     // has no steps_summary, so the comparison died on `.length` with a bare
@@ -481,26 +554,28 @@ describe('export --format golden warns about a baseline it cannot trust', () => 
       ingestTrace(cdb, baseline);
       ingestTrace(cdb, { ...baseline, agent_name: 'flaky-bot', status: 'failed' });
 
+      // Warned for a file export — where re-running with a filter is the fix.
+      // A piped stdout export stays clean, so it can feed another tool.
       const errs: string[] = [];
       const errSpy = vi.spyOn(console, 'error').mockImplementation((m?: unknown) => void errs.push(String(m)));
-      const outSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       try {
-        runExport(undefined, { format: 'golden', dir });
+        runExport(undefined, { format: 'golden', dir, output: join(dir, 'golden.json') });
       } finally {
         errSpy.mockRestore();
-        outSpy.mockRestore();
+        logSpy.mockRestore();
       }
       expect(errs.join('\n')).toMatch(/1 of 2 baseline entry is not from a completed run/);
 
       // A baseline built only from completed runs says nothing.
       const clean: string[] = [];
       const cleanSpy = vi.spyOn(console, 'error').mockImplementation((m?: unknown) => void clean.push(String(m)));
-      const outSpy2 = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+      const logSpy2 = vi.spyOn(console, 'log').mockImplementation(() => {});
       try {
-        runExport(undefined, { format: 'golden', dir, status: 'completed' });
+        runExport(undefined, { format: 'golden', dir, status: 'completed', output: join(dir, 'clean.json') });
       } finally {
         cleanSpy.mockRestore();
-        outSpy2.mockRestore();
+        logSpy2.mockRestore();
       }
       expect(clean.join('\n')).not.toMatch(/not from a completed run/);
     } finally {

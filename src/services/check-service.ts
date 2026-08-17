@@ -128,7 +128,11 @@ export function checkGolden(
     results.push({ trace_id: trace.id, agent_name: trace.agent_name, matched: true, passed: ok, divergences });
   }
 
-  const uncovered = [...index.keys()].filter((k) => !covered.has(k)).length;
+  // Count ENTRIES, not bucket keys: a key can hold several baselines (repeated
+  // runs of one agent+input), and reporting "1 baseline not exercised" for 100
+  // untouched entries under-states the hole the message is there to name.
+  let uncovered = 0;
+  for (const [key, bucket] of index) if (!covered.has(key)) uncovered += bucket.length;
 
   return {
     results,
@@ -188,7 +192,16 @@ function diffAgainstGolden(trace: TraceWithDetails, golden: GoldenEntry, fields:
       const step = cSteps[i];
       if (g.step_type !== 'tool_call' || g.input === undefined) continue;
       if (step.step_type !== 'tool_call') {
-        divergences.push({ field: 'tool_inputs', step_number: step.step_number, golden: g.input, candidate: null });
+        // Name what replaced it. A bare `candidate: null` reads as "golden null
+        // → got null" whenever the baseline itself recorded no tool input —
+        // exactly what `export --format golden` writes for a store captured
+        // with `hook --no-input`.
+        divergences.push({
+          field: 'tool_inputs',
+          step_number: step.step_number,
+          golden: g.input,
+          candidate: { replaced_by_step_type: step.step_type },
+        });
         break;
       }
       if (stableStringify(g.input) !== stableStringify(step.input)) {

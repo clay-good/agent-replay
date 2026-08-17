@@ -133,8 +133,11 @@ export async function runHook(eventArg: string | undefined, opts: HookOptions = 
     // any directory other than the project root got a brand-new store with zero
     // policies and cheerfully allowed everything — the one condition on this
     // path that failed OPEN. Throw into the fail-closed handler below, which
-    // blocks the call and says why. Capture mode still creates the store.
-    if (opts.enforce && !existsSync(dbPath)) {
+    // blocks the call and says why. Capture mode still creates the store — and
+    // so does every non-gating event under --enforce, so a user who registers
+    // one `--enforce` command line across all hook events can still bootstrap a
+    // store; only the tool call that would have gone unchecked is blocked.
+    if (opts.enforce && resolveHookRouting(payload, eventArg).action === 'pre_tool' && !existsSync(dbPath)) {
       throw new Error(`no trace store at ${dbPath} — run "agent-replay init" there, or point the hook at one with --dir`);
     }
     const db = ensureDatabase(dbPath);

@@ -137,6 +137,35 @@ nothing else.
 
 ### Fixed
 
+- `list`, the dashboard and every candidate fetch keep their index. Ordering by
+  the parsed instant (`julianday(started_at)`) is required for correctness, but
+  it cannot use the plain `started_at` index — measured over 50,000 traces, the
+  default `list` page went from an index seek to a full scan plus a temp B-tree
+  (0.19 ms → 3.9 ms, and linear in store size). Schema v4 adds a matching
+  expression index; the same page now takes 0.10 ms.
+
+- `check --json` answers in JSON on the paths that refuse to run (no candidates,
+  unreadable or non-golden baseline, bad `--since`). They printed only stderr,
+  so `check --json | jq -r .ok` got a parse error instead of a verdict.
+
+- `check` gained `--allow-empty` for a run where no candidate trace is expected —
+  a quiet nightly window, or a matrix job where a given agent didn't run. Failing
+  on zero candidates is right by default, but it needed an escape hatch that
+  isn't "stop running the gate".
+
+- `check` counts uncovered baseline *entries*, not the scenarios they group
+  into: a hundred untouched entries for one agent+input reported as "1".
+  A `tool_inputs` divergence also names what replaced a missing tool call,
+  instead of printing "golden null → got null" for a baseline captured with
+  `hook --no-input`.
+
+- `hook --enforce` blocks only the tool call it can't check when the store is
+  missing; other events still capture (and create the store), so a single
+  `--enforce` registration across all hook events can still bootstrap.
+
+- `export --format golden` warns only when writing to a file, keeping a piped
+  stdout export clean for the tool consuming it.
+
 - Guardrails now see the payload the harness actually sent. `hook` and `guard
   check` decoded stdin chunk by chunk, and a pipe delivers 64 KiB at a time, so
   any multi-byte character straddling a boundary (emoji, CJK, accented text, a

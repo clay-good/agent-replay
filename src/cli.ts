@@ -346,6 +346,7 @@ program
   .option('--since <duration>', 'Only check traces since this window (e.g. 1d)')
   .option('--fields <list>', 'Comma-separated field allowlist (default: step_count,step_types,step_names,tool_inputs,status)')
   .option('--strict', 'Treat unmatched candidate traces, and baselines no candidate exercised, as failures')
+  .option('--allow-empty', 'Pass when no candidate trace matched, instead of failing (a quiet window)')
   .option('--json', 'Output the report as JSON')
   .option('--dir <path>', 'Custom data directory')
   .action(async (opts) => {

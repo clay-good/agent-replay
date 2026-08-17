@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { SCHEMA_VERSION, getSchemaVersion, applySchemaV1, applySchemaV2, applySchemaV3 } from './schema.js';
+import { SCHEMA_VERSION, getSchemaVersion, applySchemaV1, applySchemaV2, applySchemaV3, applySchemaV4 } from './schema.js';
 
 /**
  * Run any pending migrations, upgrading the database to the latest schema.
@@ -32,6 +32,10 @@ export function runMigrations(db: Database.Database): number {
     // v2 → v3: indexes for the OTel merge lookup and the dashboard's recent
     // evals — both were full table scans. Additive only.
     if (current < 3) applySchemaV3(db);
+
+    // v3 → v4: an expression index for the parsed-instant ordering `list` and
+    // the dashboard use, which the plain started_at index cannot serve.
+    if (current < 4) applySchemaV4(db);
   }).immediate();
 
   return SCHEMA_VERSION;

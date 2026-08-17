@@ -14,7 +14,7 @@ import type Database from 'better-sqlite3';
  *   - Added guardrail_policies table (adapted from 002_policies.sql policy_rules)
  */
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 const SCHEMA_V1 = `
 -- ============================================================================
@@ -198,6 +198,19 @@ CREATE INDEX IF NOT EXISTS idx_agent_trace_evals_evaluated_at
     ON agent_trace_evals(evaluated_at);
 `;
 
+// v4: an expression index matching the ORDER BY that `list`, the dashboard and
+// every candidate fetch now use. Ordering by the PARSED instant is required for
+// correctness — `started_at` is TEXT and its byte order is not its time order —
+// but `julianday(started_at)` cannot use the plain `started_at` index, which
+// turned the default `list` page from an index seek into a full scan plus a temp
+// B-tree (measured 0.19 ms → 3.9 ms over 50k traces, and linear in store size).
+// The second column keeps the byte-order tiebreak (used for timestamps julianday
+// cannot parse) inside the same index, so the whole ORDER BY is covered.
+const SCHEMA_V4_OBJECTS = `
+CREATE INDEX IF NOT EXISTS idx_agent_traces_started_instant
+    ON agent_traces(julianday(started_at), started_at);
+`;
+
 /** True if `table` already has a column named `column`. */
 function hasColumn(db: Database.Database, table: string, column: string): boolean {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
@@ -223,6 +236,12 @@ export function applySchemaV2(db: Database.Database): void {
 export function applySchemaV3(db: Database.Database): void {
   db.exec(SCHEMA_V3_OBJECTS);
   db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(3);
+}
+
+/** Migrate a v3 database in place to v4 (records schema version 4). */
+export function applySchemaV4(db: Database.Database): void {
+  db.exec(SCHEMA_V4_OBJECTS);
+  db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(4);
 }
 
 /** Get the current schema version, or 0 if no schema exists. */

@@ -36,8 +36,16 @@ function run(args: string[], input?: string): RunResult {
     });
     return { stdout, stderr: '', code: 0 };
   } catch (e) {
-    const err = e as { stdout?: string; stderr?: string; status?: number };
-    return { stdout: err.stdout ?? '', stderr: err.stderr ?? '', code: err.status ?? 1 };
+    const err = e as { stdout?: string; stderr?: string; status?: number | null; signal?: string };
+    // A null status means the process never exited on its own — killed by the
+    // timeout or a signal under parallel load. Mapping that to 1 made an
+    // infrastructure kill indistinguishable from a real runtime failure, so a
+    // flake surfaced as "expected 1 to be 2" and sent the reader hunting a bug
+    // in the command. Report it as its own code with the signal in stderr.
+    if (err.status == null) {
+      return { stdout: err.stdout ?? '', stderr: `${err.stderr ?? ''}\n[killed by ${err.signal ?? 'unknown signal'}]`, code: -1 };
+    }
+    return { stdout: err.stdout ?? '', stderr: err.stderr ?? '', code: err.status };
   }
 }
 

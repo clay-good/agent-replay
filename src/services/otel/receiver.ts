@@ -156,7 +156,8 @@ export function handleTracesExportProtobuf(
  * log-event batches merge by (session id, source format). Returns the target
  * trace id, or undefined when this is the first batch (open a new trace).
  *
- * Forks are excluded and the tie is broken by start time: a fork inherits the
+ * Forks are excluded and the tie is broken by start time (parsed, not by the
+ * bytes of the timestamp — see the ordering in `listTraces`): a fork inherits the
  * original's session_id and metadata (so it matches both merge keys), and
  * without these clauses which of the two received later batches was left to
  * SQLite's scan order.
@@ -168,7 +169,7 @@ function findMergeTarget(db: Database.Database, input: IngestTraceInput): string
     const row = db
       .prepare(
         `SELECT id FROM agent_traces WHERE json_extract(metadata, '$.otel_trace_id') = ?
-           AND parent_trace_id IS NULL ORDER BY started_at ASC LIMIT 1`,
+           AND parent_trace_id IS NULL ORDER BY julianday(started_at) ASC, started_at ASC LIMIT 1`,
       )
       .get(otelTraceId) as { id: string } | undefined;
     return row?.id;
@@ -178,7 +179,7 @@ function findMergeTarget(db: Database.Database, input: IngestTraceInput): string
     const row = db
       .prepare(
         `SELECT id FROM agent_traces WHERE session_id = ? AND json_extract(metadata, '$.source_format') = ?
-           AND parent_trace_id IS NULL ORDER BY started_at ASC LIMIT 1`,
+           AND parent_trace_id IS NULL ORDER BY julianday(started_at) ASC, started_at ASC LIMIT 1`,
       )
       .get(input.session_id, sourceFormat) as { id: string } | undefined;
     return row?.id;

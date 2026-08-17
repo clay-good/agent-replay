@@ -17,6 +17,8 @@ export interface CheckOptions {
   since?: string;
   fields?: string;
   strict?: boolean;
+  /** Accept a run with no candidate traces (a quiet window) instead of failing. */
+  allowEmpty?: boolean;
   json?: boolean;
   dir?: string;
 }
@@ -27,9 +29,22 @@ export interface CheckOptions {
  * any matched trace regresses.
  */
 export function runCheck(opts: CheckOptions = {}): void {
+  // Every refusal below has to answer in the shape the caller asked for. `check
+  // --json | jq -r .ok` is the documented CI form, and printing only a red line
+  // on stderr turned a "the gate could not run" case into a jq parse error —
+  // breaking the --json contract instead of reporting the verdict.
+  const fail = (code: number, message: string, hint?: string): void => {
+    if (opts.json) {
+      console.log(JSON.stringify({ ok: false, error: message, ...(hint ? { hint } : {}) }, null, 2));
+    } else {
+      console.error(chalk.red(`  ${message}`));
+      if (hint) console.error(chalk.dim(`  ${hint}`));
+    }
+    process.exitCode = code;
+  };
+
   if (!opts.golden) {
-    console.error(chalk.red('  --golden <file> is required.'));
-    process.exitCode = 2;
+    fail(2, '--golden <file> is required.');
     return;
   }
 
@@ -38,8 +53,7 @@ export function runCheck(opts: CheckOptions = {}): void {
     const parsed = JSON.parse(readFileSync(resolve(opts.golden), 'utf-8'));
     golden = Array.isArray(parsed) ? parsed : [parsed];
   } catch (err) {
-    console.error(chalk.red(`  Failed to read golden file: ${errorMessage(err)}`));
-    process.exitCode = 2;
+    fail(2, `Failed to read golden file: ${errorMessage(err)}`);
     return;
   }
 
@@ -57,20 +71,20 @@ export function runCheck(opts: CheckOptions = {}): void {
   // whole check rather than being reported.
   const bad = golden.findIndex((g) => !g || !Array.isArray((g as GoldenEntry).steps_summary));
   if (bad !== -1) {
-    console.error(chalk.red(`  Not a golden dataset: ${opts.golden} (entry ${bad + 1} has no steps_summary).`));
-    console.error(chalk.dim('  Golden files come from "agent-replay export --format golden"; "--format json" exports full traces, which this gate cannot compare.'));
-    process.exitCode = 2;
+    fail(
+      2,
+      `Not a golden dataset: ${opts.golden} (entry ${bad + 1} has no steps_summary).`,
+      'Golden files come from "agent-replay export --format golden"; "--format json" exports full traces, which this gate cannot compare.',
+    );
     return;
   }
 
   if (golden.length === 0) {
-    console.error(
-      chalk.red(`  Golden file has no entries: ${opts.golden}`),
+    fail(
+      2,
+      `Golden file has no entries: ${opts.golden}`,
+      'An empty baseline can never detect a regression. Re-export it with a filter that matches.',
     );
-    console.error(
-      chalk.dim('  An empty baseline can never detect a regression. Re-export it with a filter that matches.'),
-    );
-    process.exitCode = 2;
     return;
   }
 
@@ -82,8 +96,7 @@ export function runCheck(opts: CheckOptions = {}): void {
   if (opts.trace) {
     const t = getTrace(db, opts.trace);
     if (!t) {
-      console.error(chalk.red(`  Trace not found: ${opts.trace}`));
-      process.exitCode = 2;
+      fail(2, `Trace not found: ${opts.trace}`);
       return;
     }
     candidates.push(t);
@@ -100,8 +113,7 @@ export function runCheck(opts: CheckOptions = {}): void {
       try {
         filter.since = parseSinceToIso(opts.since);
       } catch (err) {
-        console.error(chalk.red(`  ${errorMessage(err)}`));
-        process.exitCode = 2;
+        fail(2, errorMessage(err));
         return;
       }
     }
@@ -118,10 +130,12 @@ export function runCheck(opts: CheckOptions = {}): void {
   // actually fetched. A mistyped --agent, a --since window that outran the
   // recording step, or a --dir typo (ensureDatabase creates a fresh empty store
   // on the spot) all land here, and the gate then stays green forever.
-  if (candidates.length === 0) {
-    console.error(chalk.red('  No traces matched — nothing to check against the baseline.'));
-    console.error(chalk.dim('  A check with no candidates cannot detect a regression. Widen --agent/--since, or confirm --dir points at the store the run recorded into.'));
-    process.exitCode = 2;
+  if (candidates.length === 0 && !opts.allowEmpty) {
+    fail(
+      2,
+      'No traces matched — nothing to check against the baseline.',
+      'A check with no candidates cannot detect a regression. Widen --agent/--since, confirm --dir points at the store the run recorded into, or pass --allow-empty if a run with no traces is expected (a quiet nightly window, a matrix job where this agent did not run).',
+    );
     return;
   }
 
@@ -130,8 +144,7 @@ export function runCheck(opts: CheckOptions = {}): void {
   try {
     report = checkGolden(golden, candidates, { fields, strict: opts.strict });
   } catch (err) {
-    console.error(chalk.red(`  ${errorMessage(err)}`));
-    process.exitCode = 2;
+    fail(2, errorMessage(err));
     return;
   }
 
