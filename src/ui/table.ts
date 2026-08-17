@@ -108,7 +108,12 @@ export function policyTable(policies: GuardrailPolicy[]): string {
 
   for (const p of policies) {
     table.push([
-      chalk.dim(p.id.slice(0, 12)),
+      // The FULL id. Truncating it printed a value that `guard disable/enable/
+      // remove` then rejected as "not found" — they resolve by exact id or name,
+      // with no prefix matching — so copying the id straight out of this table
+      // was guaranteed to fail. A policy id is `pol_` + 12 chars, so the whole
+      // thing fits.
+      chalk.dim(p.id),
       chalk.white(p.name),
       guardActionBadge(p.action),
       chalk.white(String(p.priority)),

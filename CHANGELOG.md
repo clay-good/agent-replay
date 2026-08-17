@@ -79,7 +79,8 @@ between them, and nothing else.
   every count to traces started at or after the cutoff — steps and evals by
   their parent trace's start time, so the view is internally consistent — while
   the active-policy count stays store-wide (current config, not history). A
-  malformed `--since` is a usage error (exit `2`); `--json` adds a `since` field.
+  malformed `--since` is a usage error (exit `2`); `--json` always carries a
+  `since` field (null when no window was asked for).
 - `export` now accepts an optional `[trace-id]` positional, so you can export a
   single trace by id (with prefix matching, like `show`/`why`/`replay`) instead
   of only bulk-filtering. A trace id and the filter flags (`--status`, `--agent`,
@@ -182,6 +183,23 @@ between them, and nothing else.
   scales linearly. This is the same class of defect the schema v4 expression
   index exists to fix, on the path that builds golden datasets and backups.
 
+- `guard list` printed a truncated policy id that `guard disable`, `guard
+  enable` and `guard remove` then rejected as "not found" — they resolve by
+  exact id or name, with no prefix matching, so copying the id out of the table
+  was guaranteed to fail. The full id is shown.
+
+- `eval --json` reported `criteria[].critical` for only some critical criteria.
+  The flag was set when a check returned it (the conditionally-critical
+  `no_error_steps`) but not when the preset declared it, so
+  `all_tool_calls_completed` and `no_unresolved_errors` appeared in
+  `failed_critical` with no flag on the criterion itself. Every criterion that
+  can fail a preset on its own now says so.
+
+- `ingest --dry-run` did not mention the eval results the real run reports it
+  cannot restore. `--dry-run` is the documented preview of the real run, so a
+  preview that omits the one thing the real run warns about is the surprise it
+  exists to prevent.
+
 - An import that captured nothing exited 0 and stored an empty trace. The
   "nothing importable" guard in both importers keyed on `!input`, but an empty
   first user record still sets the input to `{prompt: ''}`, which is truthy —
@@ -214,18 +232,6 @@ between them, and nothing else.
   fallback, so a `| jq` pipeline got a parse error instead of a verdict. (No new
   test: reaching either catch requires an internal store failure rather than any
   user input.)
-
-- **Security (fail-open):** `hook --enforce` allowed every tool call, silently,
-  when it ran against a store holding no policies. A previous fix stopped an
-  enforcing event from *creating* the store, but that only closes the hole if
-  every registered hook line carries `--enforce` — which is not the documented
-  setup: plain capture hooks on `UserPromptSubmit`/`PostToolUse`/`Stop`, and
-  `--enforce` on `PreToolUse` alone. Capture mode creates the store and fires
-  first, so a session started from any directory other than the project root met
-  a brand-new, empty policy set and ran completely unguarded while the
-  configuration still looked correct. An enforcing gate that cannot fire now
-  blocks with the reason, like the other gates, and `--allow-empty` is there for
-  the case where an empty policy set is deliberate.
 
 - A root span arriving in a later OTLP batch was dropped entirely. The first
   root span becomes the trace, so it is deliberately not among the batch's
@@ -2130,6 +2136,18 @@ between them, and nothing else.
   error instead of a raw `SqliteError` stack trace.
 
 ### Security
+
+- `hook --enforce` allowed every tool call, silently, when it ran against a
+  store holding no policies. A previous fix stopped an enforcing event from
+  *creating* the store, but that only closes the hole if
+  every registered hook line carries `--enforce` — which is not the documented
+  setup: plain capture hooks on `UserPromptSubmit`/`PostToolUse`/`Stop`, and
+  `--enforce` on `PreToolUse` alone. Capture mode creates the store and fires
+  first, so a session started from any directory other than the project root met
+  a brand-new, empty policy set and ran completely unguarded while the
+  configuration still looked correct. An enforcing gate that cannot fire now
+  blocks with the reason, like the other gates, and `--allow-empty` is there for
+  the case where an empty policy set is deliberate.
 
 - The guardrail gate could be silenced by pointing it at the wrong directory.
   `ensureDatabase` creates what it does not find, so `guard check` run from

@@ -284,7 +284,10 @@ describe('CLI integration', () => {
     }]));
     const res = run(['ingest', file]);
     expect(res.code).toBe(0); // the traces themselves restore faithfully
-    expect(`${res.stdout}${res.stderr}`).toMatch(/1 stored eval result\(s\).*not restored/);
+    expect(`${res.stdout}${res.stderr}`).toMatch(/1 stored eval result\(s\).*cannot be restored/);
+    // --dry-run is the documented preview of the real run, so it must say so too.
+    const dry = run(['ingest', file, '--dry-run']);
+    expect(`${dry.stdout}${dry.stderr}`).toMatch(/1 stored eval result\(s\).*cannot be restored/);
     rmSync(evalDir, { recursive: true, force: true });
   });
 

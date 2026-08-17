@@ -117,6 +117,33 @@ export function runIngest(filePath: string, opts: IngestOptions = {}): void {
     console.log(chalk.yellow(`  Continuing with ${valid.length} valid trace(s).`));
   }
 
+  // Reported BEFORE the dry-run return: --dry-run is the documented preview of
+  // the real run, so a preview that omits the one thing the real run warns about
+  // is exactly the surprise it exists to prevent.
+  //
+  // `export --with-evals` writes an `evals` array that `ingest` has no field
+  // for, so it is dropped — silently, on the documented backup/restore path,
+  // for data the user opted in to keeping. Restoring it is a schema change and
+  // a maintainer call; reporting the loss is not, and a restore that reads as
+  // complete while it is not is exactly what the rest of this command refuses
+  // to do. The traces themselves restore faithfully.
+  const withEvals = valid.reduce(
+    (n, t) => n + (Array.isArray((t as unknown as { evals?: unknown[] }).evals)
+      ? (t as unknown as { evals: unknown[] }).evals.length
+      : 0),
+    0,
+  );
+  if (withEvals > 0) {
+    // On stdout, like the sibling "Continuing with N valid trace(s)" note:
+    // `ingest` has no --json mode, so stdout is the report.
+    console.log(
+      chalk.yellow(
+        `  Note: ${withEvals} stored eval result(s) in this file cannot be restored — ` +
+        'ingest has no evals field. Re-run `agent-replay eval` to regenerate them.',
+      ),
+    );
+  }
+
   // Dry run
   if (opts.dryRun) {
     successSpinner(spinner, `Dry run: ${valid.length} trace(s) validated, 0 inserted.`);
@@ -138,29 +165,6 @@ export function runIngest(filePath: string, opts: IngestOptions = {}): void {
       failedIds.push(input.agent_name ?? '?');
       console.error(chalk.red(`  Error inserting trace "${input.agent_name}": ${errorMessage(err)}`));
     }
-  }
-
-  // `export --with-evals` writes an `evals` array that `ingest` has no field
-  // for, so it is dropped — silently, on the documented backup/restore path,
-  // for data the user opted in to keeping. Restoring it is a schema change and
-  // a maintainer call; reporting the loss is not, and a restore that reads as
-  // complete while it is not is exactly what the rest of this command refuses
-  // to do. The traces themselves restore faithfully.
-  const withEvals = valid.reduce(
-    (n, t) => n + (Array.isArray((t as unknown as { evals?: unknown[] }).evals)
-      ? (t as unknown as { evals: unknown[] }).evals.length
-      : 0),
-    0,
-  );
-  if (withEvals > 0) {
-    // On stdout, like the sibling "Continuing with N valid trace(s)" note:
-    // `ingest` has no --json mode, so stdout is the report.
-    console.log(
-      chalk.yellow(
-        `  Note: ${withEvals} stored eval result(s) in this file were not restored — ` +
-        'ingest has no evals field. Re-run `agent-replay eval` to regenerate them.',
-      ),
-    );
   }
 
   if (failedIds.length > 0) {

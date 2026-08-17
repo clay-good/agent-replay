@@ -384,7 +384,13 @@ export function runEval(
       score: result.score,
       weight: criterion.weight,
       details: result.details,
-      ...(result.critical ? { critical: true } : {}),
+      // A criterion is critical either because the PRESET declares it so, or
+      // because this particular check decided it (a conditionally-critical one
+      // such as `no_error_steps`). The reported flag only carried the second,
+      // so `criteria[].critical` was absent for the two statically-critical
+      // criteria even when they scored 0 and appeared in `failed_critical` —
+      // a consumer reading the flag got the wrong answer for half of them.
+      ...(result.critical || criterion.critical ? { critical: true } : {}),
     });
     weightedSum += result.score * criterion.weight;
     totalWeight += criterion.weight;
@@ -401,7 +407,7 @@ export function runEval(
   // landed on exactly the threshold and passed, so it could never fail the preset
   // by itself.
   const failedCritical = criteriaResults
-    .filter((r) => r.score === 0 && (r.critical || preset.criteria.find((c) => c.name === r.name)?.critical))
+    .filter((r) => r.score === 0 && r.critical)
     .map((r) => r.name);
   const passed = score >= preset.threshold && failedCritical.length === 0;
 

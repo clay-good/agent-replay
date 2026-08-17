@@ -206,7 +206,8 @@ reporting `deny` with a "review required (no TTY — failed closed)" reason.
 ### Browse
 
 ```bash
-# List all traces
+# List the most recent traces (25 per page by default; the header
+# reports the full count, and --limit / --offset page through it)
 agent-replay list
 
 # Filter by status, agent, tag, or time

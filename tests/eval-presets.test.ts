@@ -451,3 +451,36 @@ describe('a recovered error is not a failed run', () => {
     expect(res.passed).toBe(false);
   });
 });
+
+describe('the reported criteria flag agrees with failed_critical', () => {
+  it('marks a statically-critical criterion as critical in the report', () => {
+    // `critical` was reported only when the CHECK returned it (the
+    // conditionally-critical `no_error_steps`), never when the PRESET declared
+    // it — so `all_tool_calls_completed` and `no_unresolved_errors` appeared in
+    // `failed_critical` while `criteria[].critical` was absent, and a consumer
+    // reading the flag got the wrong answer for half of them.
+    const id = ingestTrace(db, {
+      agent_name: 'critbot',
+      status: 'completed',
+      input: { task: 'x' },
+      output: { answer: 'done' },
+      steps: [
+        { step_number: 1, step_type: 'tool_call', name: 'search' }, // no output
+        { step_number: 2, step_type: 'output', name: 'answer', output: { text: 'done' } },
+      ],
+    }).id;
+
+    const res = runEval(db, id, 'completeness-check');
+    const details = res.details as {
+      criteria: { name: string; score: number; critical?: boolean }[];
+      failed_critical?: string[];
+    };
+    const flagged = details.criteria.filter((c) => c.critical).map((c) => c.name);
+    // Every criterion named in failed_critical carries the flag.
+    for (const name of details.failed_critical ?? []) {
+      expect(flagged).toContain(name);
+    }
+    expect(details.failed_critical).toContain('all_tool_calls_completed');
+  });
+});
+
