@@ -283,6 +283,17 @@ export interface GuardCheckOptions {
  * isolation.
  */
 export async function runGuardCheck(opts: GuardCheckOptions = {}): Promise<void> {
+  // Every "we could not evaluate this step" answer is a DENY with exit 2, the
+  // block signal a wrapper gates on. These paths used to exit 1, which callers
+  // read as a non-blocking error and ran the tool — a fail-open on exactly the
+  // malformed input a caller cannot vouch for.
+  const denied = (reason: string): void => {
+    console.error(chalk.redBright(`  DENY: ${reason}`));
+    console.error(chalk.dim('  Blocking to fail closed.'));
+    console.log(JSON.stringify({ action: 'deny', policy: null, reason }));
+    process.exitCode = 2;
+  };
+
   let raw = '';
   try {
     // Decode once over the whole body, not per chunk — see the same read in
@@ -294,8 +305,10 @@ export async function runGuardCheck(opts: GuardCheckOptions = {}): Promise<void>
     }
     raw = Buffer.concat(chunks).toString('utf8');
   } catch (err) {
-    console.error(chalk.red(`  Failed to read stdin: ${errorMessage(err)}`));
-    process.exitCode = 1;
+    // Fail CLOSED, like the policy-evaluation failure below. A step we could not
+    // read is a step we could not clear, and exit 1 is not the block signal — 2
+    // is — so a wrapper gating on `$? == 2` ran the tool anyway.
+    denied(`cannot read the step — ${errorMessage(err)}`);
     return;
   }
 
@@ -303,8 +316,7 @@ export async function runGuardCheck(opts: GuardCheckOptions = {}): Promise<void>
   try {
     parsed = JSON.parse(raw.trim());
   } catch {
-    console.error(chalk.red('  Invalid JSON on stdin — expected a single step object.'));
-    process.exitCode = 1;
+    denied('invalid JSON on stdin — expected a single step object');
     return;
   }
 
@@ -312,15 +324,13 @@ export async function runGuardCheck(opts: GuardCheckOptions = {}): Promise<void>
   // object — reject them with a clean message rather than crashing on the
   // property access below (`null.step_type` throws a raw TypeError).
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    console.error(chalk.red('  Invalid step on stdin — expected a single step object.'));
-    process.exitCode = 1;
+    denied('invalid step on stdin — expected a single step object');
     return;
   }
   const step_input = parsed as Record<string, unknown>;
 
   if (typeof step_input.step_type !== 'string' || !isValidStepType(step_input.step_type)) {
-    console.error(chalk.red('  Step must include a valid "step_type".'));
-    process.exitCode = 1;
+    denied('step must include a valid "step_type"');
     return;
   }
 

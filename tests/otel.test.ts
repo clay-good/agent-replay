@@ -797,3 +797,24 @@ describe('an OTLP batch commits atomically', () => {
     expect(listTraces(db, {}).total).toBe(0);
   });
 });
+
+describe('mapOtlpTraces — a step stamp the formatter cannot render', () => {
+  // The trace-level window was guarded, the per-STEP duration was not: a step
+  // came back with `ended_at: null` beside a duration of ~56,000 years, computed
+  // from the very stamp the formatter had just rejected — and the value is finite
+  // and non-negative, so validation stores it and every view renders it.
+  it('reports no duration rather than one derived from a rejected stamp', () => {
+    const [trace] = mapOtlpTraces(otlp([
+      span({ traceId: 'ts', spanId: 's0', name: 'invoke_agent', start: 1 * MS, end: 5 * MS, attrs: { 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'bot' } }),
+      // Nanoseconds mistakenly stamped as ms*1e9 — the documented producer error.
+      span({ traceId: 'ts', spanId: 's1', parentSpanId: 's0', name: 'chat', start: 2 * MS, end: 1.7e27, attrs: { 'gen_ai.operation.name': 'chat' } }),
+    ]));
+
+    const step = trace.steps![0];
+    expect(step.ended_at).toBeNull();
+    expect(step.duration_ms).toBeNull();
+    // And the trace's own window is unaffected by the bad stamp.
+    expect(trace.total_duration_ms).toBe(4);
+    expect(() => ingestTrace(db, trace)).not.toThrow();
+  });
+});

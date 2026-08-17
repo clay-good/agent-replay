@@ -6,6 +6,7 @@ import { loadConfig, resolveProvider } from '../services/config-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { renderDiff, describeFilteredCount } from '../ui/diff-renderer.js';
 import { summaryPanel, aiDiffPanel } from '../ui/boxen-panels.js';
+import { safeText } from '../ui/theme.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage } from '../utils/json.js';
 import { resolveDataDir } from '../utils/paths.js';
@@ -91,8 +92,8 @@ export async function runDiff(
   if (opts.compact) {
     console.log('');
     const stats: Record<string, string | number> = {
-      'Left trace': `${traceA.agent_name} (${traceA.id.slice(0, 12)})`,
-      'Right trace': `${traceB.agent_name} (${traceB.id.slice(0, 12)})`,
+      'Left trace': `${safeText(traceA.agent_name)} (${traceA.id.slice(0, 12)})`,
+      'Right trace': `${safeText(traceB.agent_name)} (${traceB.id.slice(0, 12)})`,
       'Left steps': diff.left_step_count,
       'Right steps': diff.right_step_count,
       // Name the scope honestly — `--fields` keeps step-presence rows whatever

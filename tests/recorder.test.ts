@@ -564,3 +564,28 @@ describe('validateEvent — unusable numeric fields', () => {
     expect((event as unknown as { tokens_used: number }).tokens_used).toBe(0);
   });
 });
+
+describe('validateEvent — total_cost_usd', () => {
+  // `ingest` rejects a negative total_cost_usd exactly as it rejects a negative
+  // token count, so storing one verbatim broke the same export → ingest round
+  // trip the token clamp was added to protect — and cost is what `stats` and
+  // `list --sort cost` read.
+  it('drops a negative total_cost_usd from trace_end but keeps the event', () => {
+    const { event, warning } = validateEvent({
+      v: 1, type: 'trace_end', trace_id: 't1', status: 'completed',
+      total_cost_usd: -3.5, total_tokens: 10,
+    });
+    expect(event).not.toBeNull();
+    expect(warning).toMatch(/total_cost_usd/);
+    expect((event as unknown as { total_cost_usd?: number }).total_cost_usd).toBeUndefined();
+    expect((event as unknown as { total_tokens: number }).total_tokens).toBe(10);
+  });
+
+  it('keeps a legitimate cost', () => {
+    const { event, warning } = validateEvent({
+      v: 1, type: 'trace_end', trace_id: 't1', status: 'completed', total_cost_usd: 0.0002,
+    });
+    expect(warning).toBeNull();
+    expect((event as unknown as { total_cost_usd: number }).total_cost_usd).toBe(0.0002);
+  });
+});

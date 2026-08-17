@@ -2,7 +2,7 @@ import Table from 'cli-table3';
 import chalk from 'chalk';
 import type { Trace, EvalResult, GuardrailPolicy } from '../models/types.js';
 import type { TraceStatus } from '../models/enums.js';
-import { statusBadge, scoreBadge, passBadge, guardActionBadge, colors } from './theme.js';
+import { statusBadge, scoreBadge, passBadge, guardActionBadge, colors, safeText } from './theme.js';
 import { isPossiblyAbandoned } from '../services/trace-service.js';
 import { effectiveDurationMs, formatDuration } from '../utils/time.js';
 
@@ -44,7 +44,7 @@ export function traceTable(traces: Trace[]): string {
       : statusBadge(t.status as TraceStatus);
     table.push([
       chalk.dim(t.id.slice(0, 12)),
-      chalk.white(t.agent_name),
+      chalk.white(safeText(t.agent_name)),
       status,
       chalk.white(stepCountStr(t)),
       formatDurationShort(effectiveDurationMs(t)),

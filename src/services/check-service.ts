@@ -11,7 +11,7 @@ import type { GoldenEntry } from './export-service.js';
 
 // Compared by default. `model` is opt-in via --fields (model swaps are often
 // intentional, so it shouldn't fail a default regression check).
-export const DEFAULT_FIELDS = ['step_count', 'step_types', 'step_names', 'tool_inputs', 'status'] as const;
+export const DEFAULT_FIELDS = ['step_count', 'step_types', 'step_names', 'tool_inputs', 'step_errors', 'status'] as const;
 export const KNOWN_FIELDS = [...DEFAULT_FIELDS, 'model'] as const;
 export type CheckField = (typeof KNOWN_FIELDS)[number];
 
@@ -206,6 +206,33 @@ function diffAgainstGolden(trace: TraceWithDetails, golden: GoldenEntry, fields:
       }
       if (stableStringify(g.input) !== stableStringify(step.input)) {
         divergences.push({ field: 'tool_inputs', step_number: step.step_number, golden: g.input, candidate: step.input });
+        break;
+      }
+    }
+  }
+
+  // A step that now fails where the baseline succeeded is a regression even when
+  // every other field matches — and it is invisible to `status`, because a
+  // hook-captured session finalizes `completed` from its Stop event however many
+  // tool calls failed inside it. Positional, like the checks above.
+  //
+  // Steps from a baseline exported before this field are skipped individually —
+  // see the guard inside the loop.
+  if (fields.includes('step_errors')) {
+    for (let i = 0; i < n; i++) {
+      // Absent means the baseline predates the field, so this step's outcome is
+      // unknown — skip it rather than reading absence as success, which would
+      // report a false regression for every failing step in an old baseline.
+      if (gSteps[i].failed === undefined) continue;
+      const goldenFailed = gSteps[i].failed === true;
+      const candidateFailed = cSteps[i].error != null;
+      if (goldenFailed !== candidateFailed) {
+        divergences.push({
+          field: 'step_errors',
+          step_number: cSteps[i].step_number,
+          golden: goldenFailed ? 'failed' : 'ok',
+          candidate: candidateFailed ? 'failed' : 'ok',
+        });
         break;
       }
     }

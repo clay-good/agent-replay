@@ -339,14 +339,22 @@ describe('CLI integration', () => {
     expect(run(['list', '--no-such-flag']).code).toBe(2);
   });
 
-  it('guard check rejects non-object JSON stdin cleanly (no crash)', () => {
-    // `null`/array/primitive are valid JSON but not a step object; they must
-    // yield a clean error + exit 1, not a raw TypeError from `null.step_type`.
-    for (const body of ['null', '[]', '42']) {
+  it('guard check fails CLOSED on stdin it cannot evaluate', () => {
+    // `null`/array/primitive/malformed are not step objects. They must yield a
+    // clean error — never a raw TypeError from `null.step_type` — and exit 2,
+    // the block signal. Exit 1 read as a non-blocking error, so a wrapper gating
+    // on `$? == 2` ran the tool it could not get a verdict for: a fail-open on
+    // exactly the input a caller cannot vouch for, in the same function whose
+    // DB-failure path already denies with 2.
+    for (const body of ['null', '[]', '42', '{bad', '', '{"name":"x"}']) {
       const r = run(['guard', 'check'], body);
-      expect(r.code).toBe(1);
+      expect(r.code).toBe(2);
       expect(r.stderr + r.stdout).not.toMatch(/TypeError|Cannot read/i);
+      expect(JSON.parse(r.stdout).action).toBe('deny');
     }
+
+    // A well-formed step no policy denies still passes.
+    expect(run(['guard', 'check'], JSON.stringify({ step_type: 'thought', name: 'ok' })).code).toBe(0);
   });
 
   it('runs a golden regression check with correct exit codes', () => {

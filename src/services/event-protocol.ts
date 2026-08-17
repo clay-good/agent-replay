@@ -7,9 +7,9 @@ import { STEP_TYPES } from '../models/enums.js';
  * Every event is a single JSON object on its own line carrying `v: 1`, a
  * `type`, and (except `trace_start`, which may assign one) a `trace_id`. The
  * producer generates the `trace_id` and stamps it on every event of a run so a
- * one-way stdin stream needs no back-channel. Unknown event types and unknown
- * fields are ignored with a warning — forward compatibility with newer
- * producers.
+ * one-way stdin stream needs no back-channel. An unknown event TYPE is skipped
+ * with a warning; an unknown FIELD is ignored silently, so a newer producer's
+ * extra keys cost nothing.
  */
 
 export const EVENT_PROTOCOL_VERSION = 1;
@@ -232,7 +232,7 @@ export function validateEvent(obj: unknown): ParseResult {
   // depends on was broken by data this very tool wrote. Drop the field with a
   // warning rather than the whole step; every other field of it is still good.
   const dropped: string[] = [];
-  for (const field of ['tokens_used', 'duration_ms', 'total_tokens', 'total_duration_ms'] as const) {
+  for (const field of ['tokens_used', 'duration_ms', 'total_tokens', 'total_duration_ms', 'total_cost_usd'] as const) {
     const v = e[field];
     if (v == null) continue;
     if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) {

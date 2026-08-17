@@ -107,7 +107,19 @@ export function runCheck(opts: CheckOptions = {}): void {
   }
 
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
-  const db = ensureDatabase(dbPath);
+  let db;
+  try {
+    db = ensureDatabase(dbPath);
+  } catch (err) {
+    // "The gate could not run" is exit 2 answered in the requested shape, like
+    // every other refusal here. Letting this escape to the top-level catch gave
+    // a bare stderr line and exit 1 — so `check --json | jq -r .ok` died on a
+    // parse error, and a CI script that separates "regression" (1) from "gate
+    // broken" (2) read an unopenable store as a regression. Reachable from a
+    // `--dir` typo landing on a file, a read-only workspace, or a locked store.
+    fail(2, `Could not open the store: ${errorMessage(err)}`, `Store path: ${dbPath}`);
+    return;
+  }
 
   // Gather candidate traces.
   const candidates: TraceWithDetails[] = [];
@@ -135,10 +147,15 @@ export function runCheck(opts: CheckOptions = {}): void {
         return;
       }
     }
-    const { items } = listTraces(db, filter);
-    for (const item of items) {
-      const full = getTrace(db, item.id);
-      if (full) candidates.push(full);
+    try {
+      const { items } = listTraces(db, filter);
+      for (const item of items) {
+        const full = getTrace(db, item.id);
+        if (full) candidates.push(full);
+      }
+    } catch (err) {
+      fail(2, `Could not read candidate traces: ${errorMessage(err)}`);
+      return;
     }
   }
 
@@ -162,6 +179,22 @@ export function runCheck(opts: CheckOptions = {}): void {
     report = checkGolden(golden, candidates, { fields, strict: opts.strict });
   } catch (err) {
     fail(2, errorMessage(err));
+    return;
+  }
+
+  // Candidates that match NO baseline compare exactly as much as no candidates
+  // at all — nothing — yet an unmatched candidate is a pass by default while
+  // zero candidates is refused above. So a change that alters every goldenKey
+  // (adding `--no-input` to a hook registration blanks every trace's input;
+  // renaming an agent; editing an input template) left the gate green forever,
+  // on runs it had stopped comparing. Refuse it as the same class of failure,
+  // with the same opt-out.
+  if (candidates.length > 0 && report.passed + report.failed === 0 && !opts.allowEmpty) {
+    fail(
+      2,
+      `No candidate matched the baseline — ${candidates.length} trace(s) checked, none compared.`,
+      'A check that matches nothing cannot detect a regression. Candidates are matched by agent name and a hash of the trace input, so this usually means the agent was renamed, the input template changed, or capture stopped recording the input (`hook --no-input`). Re-export the baseline from current runs, or pass --allow-empty if this is expected.',
+    );
     return;
   }
 

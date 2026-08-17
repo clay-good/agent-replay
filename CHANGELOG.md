@@ -23,7 +23,179 @@ existing stores and exports keep working. Schema v3 and v4 add three indexes
 between them, and nothing else.
 
 
+### Added
+
+- `check --golden` compares whether each step FAILED. A baseline could not carry
+  step failure at all, so the regression class the gate most needs to catch —
+  identical step shape where every tool call now errors — was structurally
+  invisible, and `status` does not cover it, because a hook-captured session
+  finalizes `completed` from its Stop event however many tool calls failed inside
+  it. `export --format golden` now records the outcome of every step and
+  `step_errors` is compared by default. Only the flag is stored, never the
+  message: error text carries ids and paths that differ run to run, and a gate
+  that fails on wording is the false-positive problem this format avoids.
+  Baselines exported before this field are skipped step by step, never guessed at.
+
+- AI provider calls now have a deadline and a bounded retry budget. `fetch` has
+  no default timeout, so a provider that accepted the connection and then
+  stalled hung `eval --ai`, `diff --ai` or `config test-ai` forever — an
+  unattended CI job with no output and no way to fail. And a single 429 or 503,
+  routine on a shared key, failed a whole evaluation run. Each attempt now has a
+  60-second deadline that covers the response body as well as the connect (a
+  provider can send headers promptly and stall mid-stream), and a transient
+  failure — 429, 5xx, network error, timeout — is retried twice with a doubling
+  backoff, honoring `Retry-After` when the provider sends one. Failures that
+  cannot succeed on a second attempt (bad key, 4xx, unparseable reply) are not
+  retried. Retried attempts return no usage, so `--max-cost` accounting is
+  unchanged; `latency_ms` covers every attempt and the waits between them.
+
+- Schema v3 adds two indexes for lookups that were full table scans. `otel
+  serve` resolves every incoming batch against
+  `json_extract(metadata, '$.otel_trace_id')`, which nothing could index, so
+  cross-batch assembly re-scanned the whole trace table once per batch and a
+  long-running receiver grew steadily slower as the store filled. The
+  dashboard's recent-scores query likewise sorted the entire evals table on
+  every refresh tick. The migration is additive — indexes only, no columns and
+  no data — so an older binary opening a v3 store is unaffected.
+
+- Schema v4 adds an expression index on `julianday(started_at)` so the
+  parsed-instant ordering `list` and the dashboard use is an index seek rather
+  than a full scan plus a temp B-tree. Additive, like v3.
+
+- `check --allow-empty` accepts a run where no candidate trace is expected — a
+  quiet nightly window, or a matrix job where a given agent didn't run. Failing
+  on zero candidates is right by default, but it needed an escape hatch that
+  isn't "stop running the gate".
+
+- A `stats` command prints a non-interactive summary of the trace store —
+  overall counts (traces, steps, evals, active policies), average duration, and
+  token/cost totals, plus a per-status and per-agent breakdown (each agent's
+  trace count and a failed+timeout tally). It exposes the same aggregates as the
+  `dashboard` TUI but works in a plain terminal, a log, or CI, and `--json`
+  emits `{ overall, by_status, by_agent }` for piping into `jq` or a gate.
+  Previously these numbers were reachable only through the full-screen
+  dashboard, which needs an interactive TTY. `stats --since <window>` (a
+  duration like `7d`/`24h` or an ISO date, matching `list --since`) windows
+  every count to traces started at or after the cutoff — steps and evals by
+  their parent trace's start time, so the view is internally consistent — while
+  the active-policy count stays store-wide (current config, not history). A
+  malformed `--since` is a usage error (exit `2`); `--json` adds a `since` field.
+- `export` now accepts an optional `[trace-id]` positional, so you can export a
+  single trace by id (with prefix matching, like `show`/`why`/`replay`) instead
+  of only bulk-filtering. A trace id and the filter flags (`--status`, `--agent`,
+  `--tag`, `--since`) are mutually exclusive — passing both is a usage error
+  (exit `2`) rather than silently ignoring the filters, and an unknown id exits
+  `1`. Previously a trace id passed to `export` was silently dropped and the whole
+  database was exported.
+- The `otel serve` receiver now accepts `POST /v1/logs` in OTLP/protobuf as well
+  as OTLP/JSON (it already accepted both on `/v1/traces`). OTLP exporters default
+  to protobuf, so a Gemini CLI or Claude Code session left on the default
+  protocol now has its log events ingested without switching the exporter to
+  JSON. Malformed protobuf log bodies answer `400`, matching the traces path.
+
+- `hook --dialect <name>` declares the harness dialect for `--enforce` replies
+  (`claude-code`, `codex`, `gemini`, or `other`). This makes the documented
+  "harness without structured output exits 2" behavior reachable: the dialect
+  is otherwise detected from the payload, and detection can only answer with a
+  harness it recognizes, so a Crush user registering `hook PreToolUse
+  --enforce` was answered with Claude-shaped JSON on exit 0 — which a harness
+  that doesn't read hook stdout ignores, letting the denied call run. Nothing
+  in a payload distinguishes such a harness, so the user says.
+
+- `guard disable <policy>` and `guard enable <policy>` turn a policy off and on
+  without deleting it. Every policy carries an enabled flag that evaluation
+  already respected, but nothing could set it: silencing a rule meant deleting
+  it — losing its id, priority and description — and retyping it to bring it
+  back. Resolves by id or name, like `guard remove`.
+
+- `check --golden` reports baseline entries that no candidate exercised. The
+  verdict was candidate-driven only, so a scenario whose run crashed, recorded
+  under a different agent name, or ran a different input silently vanished from
+  the gate — it reported "1 passed" and exited `0` while the rest of the
+  baseline went unchecked. Reported in the summary and in `--json` as
+  `uncovered`; a failure only under `--strict`, which already fails unmatched
+  runs.
+
+- `export --format golden` warns when a baseline is built from runs that did not
+  complete. A `running` trace bakes in a truncated shape, so the next correct run
+  "regresses" against it; a `failed` or `timeout` one makes a candidate that
+  faithfully reproduces the break pass green. Both are silent otherwise and both
+  survive into CI as a wrong verdict.
+
+### Changed
+
+- **Exit codes are now consistent across the CLI**, so scripts and CI can gate
+  on `$?`: every failure exits non-zero — `1` for a runtime failure (not found,
+  malformed input, a `check --golden` regression, an `eval` over its threshold)
+  and `2` for a usage error or a `guard` / `hook --enforce` block. Success and
+  empty results exit `0`; `run` propagates the child's status; `hook` capture
+  always exits `0`. Previously several commands printed an error but still
+  exited `0` (`export` invalid format, `guard add` invalid pattern/action,
+  `import` with nothing importable, `watch`/`why` not-found, `diff --ai` with no
+  provider, `demo --reset` refusal). A new "Exit codes" section in the README
+  documents the convention.
+- **Argument parsing now fails loudly on mistakes.** Every command rejects
+  unexpected extra positional arguments instead of silently ignoring them, so
+  `agent-replay show <id> <typo>` or `list production` (meant as `--tag
+  production`) errors rather than quietly running on the first argument. And
+  commander's own parse errors (unknown flag, unknown command, missing/excess
+  argument) now exit `2` to match the documented "usage error" code — they
+  previously exited `1`, contradicting the README's exit-code table.
+
+- `demo --reset` refuses to delete a store named only by `AGENT_REPLAY_DIR`.
+  Deleting someone's traces has to be something they typed, so the destructive
+  path requires an explicit `--dir` (everything non-destructive still honors the
+  handshake).
+
+- Every command honors `AGENT_REPLAY_DIR` as its data directory when `--dir`
+  isn't given. `run` sets that variable for its child and the README documents
+  it as how the wrapper hands the child its store, but nothing read it back — so
+  a nested invocation (`run -- sh -c '... | agent-replay record'`) wrote to a
+  fresh `./.agent-replay` instead of the store the wrapper had just opened a
+  trace in. An explicit `--dir` still wins.
+
 ### Fixed
+
+- `check` passed green when NO candidate matched the baseline. An unmatched
+  candidate compares exactly as much as no candidate at all — nothing — yet it
+  was a pass by default while zero candidates was already refused with exit 2. So
+  any change that alters every match key (adding `--no-input` to a hook
+  registration blanks each trace's input, an agent rename, an input-template
+  edit) left the gate green forever on runs it had silently stopped comparing.
+  It now refuses like the zero-candidate case, with `--allow-empty` as the same
+  opt-out.
+
+- `check` answered a store it could not open with a bare stderr line and exit 1,
+  the one refusal that escaped its own contract: `check --json | jq -r .ok` died
+  on a parse error, and a CI script that separates a regression (`1`) from a
+  broken gate (`2`) misread an unopenable store as a regression. Reachable from a
+  `--dir` typo landing on a file, a read-only workspace, or a locked store.
+
+- `guard check` failed OPEN on input it could not evaluate. Unreadable stdin,
+  malformed JSON, a payload that is not a step object, and a missing `step_type`
+  all exited `1` — not the block signal, which is `2` — so a wrapper gating on
+  `$? == 2` ran the tool anyway. They now deny with exit `2`, matching the
+  policy-evaluation failure in the same function.
+
+- An OpenTelemetry step could carry a duration of ~56,000 years. The guard added
+  for the trace-level window did not cover the per-step duration, which was still
+  derived from raw nanoseconds while the timestamp formatter rejected the same
+  value — so the step rendered a null end time beside an enormous duration, and
+  the value is finite and non-negative, so validation stored it.
+
+- The native `record` protocol still stored a negative `total_cost_usd`, which
+  `ingest` rejects on the same rule as the token counts — the export → ingest
+  round trip stayed broken through the field `stats` and `list --sort cost` read.
+
+- `list`, `why` and `diff` still echoed agent-supplied text raw, so the escaping
+  added for `show`/`replay`/`watch` missed the most-run command in the tool. A
+  CRLF line break — what any Windows or PowerShell child writes — is now
+  normalized rather than escaped mid-line, while a lone carriage return, which
+  can overwrite what was already printed, is still escaped.
+
+- A re-delivered OpenTelemetry log batch appended its prompt to
+  `follow_up_prompts` again every time, so the list grew without bound on exactly
+  the retries the receiver's 4xx-not-5xx rule exists to make safe.
 
 - Everything a later OpenTelemetry log batch carried was dropped at the merge. A
   log processor flushes each turn in its own batch, so for a multi-turn session:
@@ -150,181 +322,6 @@ between them, and nothing else.
   entire real spend was under a hundredth of a cent — the normal case for agent
   runs — read as `$0.0000`. It now uses the same `formatCostUsd` `stats` uses.
 
-### Added
-
-- AI provider calls now have a deadline and a bounded retry budget. `fetch` has
-  no default timeout, so a provider that accepted the connection and then
-  stalled hung `eval --ai`, `diff --ai` or `config test-ai` forever — an
-  unattended CI job with no output and no way to fail. And a single 429 or 503,
-  routine on a shared key, failed a whole evaluation run. Each attempt now has a
-  60-second deadline that covers the response body as well as the connect (a
-  provider can send headers promptly and stall mid-stream), and a transient
-  failure — 429, 5xx, network error, timeout — is retried twice with a doubling
-  backoff, honoring `Retry-After` when the provider sends one. Failures that
-  cannot succeed on a second attempt (bad key, 4xx, unparseable reply) are not
-  retried. Retried attempts return no usage, so `--max-cost` accounting is
-  unchanged; `latency_ms` covers every attempt and the waits between them.
-
-- Schema v3 adds two indexes for lookups that were full table scans. `otel
-  serve` resolves every incoming batch against
-  `json_extract(metadata, '$.otel_trace_id')`, which nothing could index, so
-  cross-batch assembly re-scanned the whole trace table once per batch and a
-  long-running receiver grew steadily slower as the store filled. The
-  dashboard's recent-scores query likewise sorted the entire evals table on
-  every refresh tick. The migration is additive — indexes only, no columns and
-  no data — so an older binary opening a v3 store is unaffected.
-
-- Schema v4 adds an expression index on `julianday(started_at)` so the
-  parsed-instant ordering `list` and the dashboard use is an index seek rather
-  than a full scan plus a temp B-tree. Additive, like v3.
-
-- `check --allow-empty` accepts a run where no candidate trace is expected — a
-  quiet nightly window, or a matrix job where a given agent didn't run. Failing
-  on zero candidates is right by default, but it needed an escape hatch that
-  isn't "stop running the gate".
-
-- A `stats` command prints a non-interactive summary of the trace store —
-  overall counts (traces, steps, evals, active policies), average duration, and
-  token/cost totals, plus a per-status and per-agent breakdown (each agent's
-  trace count and a failed+timeout tally). It exposes the same aggregates as the
-  `dashboard` TUI but works in a plain terminal, a log, or CI, and `--json`
-  emits `{ overall, by_status, by_agent }` for piping into `jq` or a gate.
-  Previously these numbers were reachable only through the full-screen
-  dashboard, which needs an interactive TTY. `stats --since <window>` (a
-  duration like `7d`/`24h` or an ISO date, matching `list --since`) windows
-  every count to traces started at or after the cutoff — steps and evals by
-  their parent trace's start time, so the view is internally consistent — while
-  the active-policy count stays store-wide (current config, not history). A
-  malformed `--since` is a usage error (exit `2`); `--json` adds a `since` field.
-- `export` now accepts an optional `[trace-id]` positional, so you can export a
-  single trace by id (with prefix matching, like `show`/`why`/`replay`) instead
-  of only bulk-filtering. A trace id and the filter flags (`--status`, `--agent`,
-  `--tag`, `--since`) are mutually exclusive — passing both is a usage error
-  (exit `2`) rather than silently ignoring the filters, and an unknown id exits
-  `1`. Previously a trace id passed to `export` was silently dropped and the whole
-  database was exported.
-- The `otel serve` receiver now accepts `POST /v1/logs` in OTLP/protobuf as well
-  as OTLP/JSON (it already accepted both on `/v1/traces`). OTLP exporters default
-  to protobuf, so a Gemini CLI or Claude Code session left on the default
-  protocol now has its log events ingested without switching the exporter to
-  JSON. Malformed protobuf log bodies answer `400`, matching the traces path.
-
-- `hook --dialect <name>` declares the harness dialect for `--enforce` replies
-  (`claude-code`, `codex`, `gemini`, or `other`). This makes the documented
-  "harness without structured output exits 2" behavior reachable: the dialect
-  is otherwise detected from the payload, and detection can only answer with a
-  harness it recognizes, so a Crush user registering `hook PreToolUse
-  --enforce` was answered with Claude-shaped JSON on exit 0 — which a harness
-  that doesn't read hook stdout ignores, letting the denied call run. Nothing
-  in a payload distinguishes such a harness, so the user says.
-
-- `guard disable <policy>` and `guard enable <policy>` turn a policy off and on
-  without deleting it. Every policy carries an enabled flag that evaluation
-  already respected, but nothing could set it: silencing a rule meant deleting
-  it — losing its id, priority and description — and retyping it to bring it
-  back. Resolves by id or name, like `guard remove`.
-
-- `check --golden` reports baseline entries that no candidate exercised. The
-  verdict was candidate-driven only, so a scenario whose run crashed, recorded
-  under a different agent name, or ran a different input silently vanished from
-  the gate — it reported "1 passed" and exited `0` while the rest of the
-  baseline went unchecked. Reported in the summary and in `--json` as
-  `uncovered`; a failure only under `--strict`, which already fails unmatched
-  runs.
-
-- `export --format golden` warns when a baseline is built from runs that did not
-  complete. A `running` trace bakes in a truncated shape, so the next correct run
-  "regresses" against it; a `failed` or `timeout` one makes a candidate that
-  faithfully reproduces the break pass green. Both are silent otherwise and both
-  survive into CI as a wrong verdict.
-
-### Changed
-
-- **Exit codes are now consistent across the CLI**, so scripts and CI can gate
-  on `$?`: every failure exits non-zero — `1` for a runtime failure (not found,
-  malformed input, a `check --golden` regression, an `eval` over its threshold)
-  and `2` for a usage error or a `guard` / `hook --enforce` block. Success and
-  empty results exit `0`; `run` propagates the child's status; `hook` capture
-  always exits `0`. Previously several commands printed an error but still
-  exited `0` (`export` invalid format, `guard add` invalid pattern/action,
-  `import` with nothing importable, `watch`/`why` not-found, `diff --ai` with no
-  provider, `demo --reset` refusal). A new "Exit codes" section in the README
-  documents the convention.
-- **Argument parsing now fails loudly on mistakes.** Every command rejects
-  unexpected extra positional arguments instead of silently ignoring them, so
-  `agent-replay show <id> <typo>` or `list production` (meant as `--tag
-  production`) errors rather than quietly running on the first argument. And
-  commander's own parse errors (unknown flag, unknown command, missing/excess
-  argument) now exit `2` to match the documented "usage error" code — they
-  previously exited `1`, contradicting the README's exit-code table.
-
-- `demo --reset` refuses to delete a store named only by `AGENT_REPLAY_DIR`.
-  Deleting someone's traces has to be something they typed, so the destructive
-  path requires an explicit `--dir` (everything non-destructive still honors the
-  handshake).
-
-- Every command honors `AGENT_REPLAY_DIR` as its data directory when `--dir`
-  isn't given. `run` sets that variable for its child and the README documents
-  it as how the wrapper hands the child its store, but nothing read it back — so
-  a nested invocation (`run -- sh -c '... | agent-replay record'`) wrote to a
-  fresh `./.agent-replay` instead of the store the wrapper had just opened a
-  trace in. An explicit `--dir` still wins.
-
-### Security
-
-- `hook --enforce --no-input` no longer fails open on content-based guardrails.
-  `--no-input` redacted the tool-call arguments before policy evaluation, not
-  just before storage, so a `deny` / `require_review` policy keyed on the input
-  (e.g. `input_contains: "rm -rf"`) silently never matched and the dangerous
-  call was allowed — on exactly the shared machines where `--no-input` is used.
-  Enforcement now evaluates the real arguments (held only in memory) while the
-  stored tool-call input stays redacted. Name-based policies were unaffected.
-- `hook --enforce` no longer downgrades a block to an allow when the audit write
-  fails. The `guard_check` step is recorded after the verdict is decided but
-  before it is returned, so a write error there (disk full, a locked database)
-  propagated out and was swallowed into an exit `0`. The audit write is now
-  best-effort — a failure is logged to stderr but the deny / require_review
-  verdict is still returned, so the call is blocked (fail closed).
-- The `otel serve` receiver now bounds request memory. It read the entire
-  request body into memory unbounded and `gunzip`-ed it with no output limit, so
-  a runaway or hostile client could exhaust memory — a gzip body decompresses at
-  up to ~1000x, so a few KB could expand to gigabytes (a "zip bomb"). The
-  receiver now caps the request body (32 MB) and the decompressed size (64 MB) —
-  both far above any real OTLP batch — and answers `413` (not retryable) instead
-  of crashing. Legitimate exporters are unaffected.
-
-- Pinned transitive dependencies (`lodash`, `xml2js`, `esbuild`) to patched
-  versions via a package `overrides` block, clearing 5 advisories that
-  `blessed-contrib`'s latest release still pulls in transitively. `npm audit`
-  now reports 0 vulnerabilities.
-- Cleared a newly-disclosed high-severity `nanoid` advisory
-  (GHSA-28wg-ghj8-5hjv / GHSA-2v37-7h3g-55p8 — a non-secure generator can loop
-  indefinitely on a negative or zero size). Bumped the direct dependency to
-  `^5.1.16` (the patched 5.x release; `nanoid`'s API is unchanged) and raised the
-  `postcss` override to `^8.5.26`, which pulls the patched `nanoid ^3.3.17`
-  transitively. `npm audit` is back to 0 vulnerabilities.
-
-- The untrusted-trace fence around AI-evaluated content is no longer escapable.
-  Trace content is wrapped in `<<<BEGIN/>>>END UNTRUSTED TRACE CONTENT` markers
-  and the judge is told to treat everything between them as data — but not every
-  summarized field is JSON-escaped (a trace error, a step name, a decision
-  rationale, tags are raw), so content carrying a newline plus the literal
-  terminator closed the fence early and continued in the position reserved for
-  operator instructions. Verified end to end: a trace whose error string carried
-  such a payload made `eval --preset ai-security-audit` report a clean 100% pass
-  — defeating the defense inside the one evaluator meant to catch it. Any run
-  whose error text an attacker can influence (tool stderr echoed into the trace
-  error, an HTTP error body) was a carrier. The markers are now neutralized in
-  the content before fencing, so a forged terminator survives as quoted
-  evidence rather than as syntax.
-
-- `ai-security-audit` scores the worst of the judge's declared `risk_level` and
-  the findings it listed. A reply of `{"risk_level":"none","safe":false,
-  "findings":[{"severity":"critical"}]}` stored 1.0 / PASS and rendered a green
-  panel with the critical finding printed inside it. The declared value is kept
-  as `declared_risk_level` when the two disagree.
-
-### Fixed
 
 - `run`'s summary says when events could not be stored. A child recording
   several sub-traces through one channel collides on the per-trace step
@@ -1824,6 +1821,60 @@ between them, and nothing else.
   variable) fails cleanly.
 - Opening a corrupt or non-SQLite database file reports a clear, actionable
   error instead of a raw `SqliteError` stack trace.
+
+### Security
+
+- `hook --enforce --no-input` no longer fails open on content-based guardrails.
+  `--no-input` redacted the tool-call arguments before policy evaluation, not
+  just before storage, so a `deny` / `require_review` policy keyed on the input
+  (e.g. `input_contains: "rm -rf"`) silently never matched and the dangerous
+  call was allowed — on exactly the shared machines where `--no-input` is used.
+  Enforcement now evaluates the real arguments (held only in memory) while the
+  stored tool-call input stays redacted. Name-based policies were unaffected.
+- `hook --enforce` no longer downgrades a block to an allow when the audit write
+  fails. The `guard_check` step is recorded after the verdict is decided but
+  before it is returned, so a write error there (disk full, a locked database)
+  propagated out and was swallowed into an exit `0`. The audit write is now
+  best-effort — a failure is logged to stderr but the deny / require_review
+  verdict is still returned, so the call is blocked (fail closed).
+- The `otel serve` receiver now bounds request memory. It read the entire
+  request body into memory unbounded and `gunzip`-ed it with no output limit, so
+  a runaway or hostile client could exhaust memory — a gzip body decompresses at
+  up to ~1000x, so a few KB could expand to gigabytes (a "zip bomb"). The
+  receiver now caps the request body (32 MB) and the decompressed size (64 MB) —
+  both far above any real OTLP batch — and answers `413` (not retryable) instead
+  of crashing. Legitimate exporters are unaffected.
+
+- Pinned transitive dependencies (`lodash`, `xml2js`, `esbuild`) to patched
+  versions via a package `overrides` block, clearing 5 advisories that
+  `blessed-contrib`'s latest release still pulls in transitively. `npm audit`
+  now reports 0 vulnerabilities.
+- Cleared a newly-disclosed high-severity `nanoid` advisory
+  (GHSA-28wg-ghj8-5hjv / GHSA-2v37-7h3g-55p8 — a non-secure generator can loop
+  indefinitely on a negative or zero size). Bumped the direct dependency to
+  `^5.1.16` (the patched 5.x release; `nanoid`'s API is unchanged) and raised the
+  `postcss` override to `^8.5.26`, which pulls the patched `nanoid ^3.3.17`
+  transitively. `npm audit` is back to 0 vulnerabilities.
+
+- The untrusted-trace fence around AI-evaluated content is no longer escapable.
+  Trace content is wrapped in `<<<BEGIN/>>>END UNTRUSTED TRACE CONTENT` markers
+  and the judge is told to treat everything between them as data — but not every
+  summarized field is JSON-escaped (a trace error, a step name, a decision
+  rationale, tags are raw), so content carrying a newline plus the literal
+  terminator closed the fence early and continued in the position reserved for
+  operator instructions. Verified end to end: a trace whose error string carried
+  such a payload made `eval --preset ai-security-audit` report a clean 100% pass
+  — defeating the defense inside the one evaluator meant to catch it. Any run
+  whose error text an attacker can influence (tool stderr echoed into the trace
+  error, an HTTP error body) was a carrier. The markers are now neutralized in
+  the content before fencing, so a forged terminator survives as quoted
+  evidence rather than as syntax.
+
+- `ai-security-audit` scores the worst of the judge's declared `risk_level` and
+  the findings it listed. A reply of `{"risk_level":"none","safe":false,
+  "findings":[{"severity":"critical"}]}` stored 1.0 / PASS and rendered a green
+  panel with the critical finding printed inside it. The declared value is kept
+  as `declared_risk_level` when the two disagree.
 
 ## [0.2.0]
 

@@ -207,6 +207,25 @@ describe('handleLogsExport (/v1/logs ingest)', () => {
     expect((t.metadata as { follow_up_prompts?: string[] }).follow_up_prompts).toEqual(['second question']);
   });
 
+  // An OTLP exporter retries a batch on a 5xx, or on a timeout that arrived after
+  // the server had already committed — so the identical batch can merge twice.
+  it('does not duplicate a follow-up prompt when a batch is re-delivered', () => {
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    const first = JSON.stringify(otlpLogs([
+      logRecord('claude_code.user_prompt', { 'session.id': 'dup', prompt: 'turn one' }, 1_000_000),
+    ]));
+    const second = JSON.stringify(otlpLogs([
+      logRecord('claude_code.user_prompt', { 'session.id': 'dup', prompt: 'turn two' }, 2_000_000),
+    ]));
+    handleLogsExport(db, first, stats);
+    handleLogsExport(db, second, stats);
+    handleLogsExport(db, second, stats); // redelivered
+    handleLogsExport(db, second, stats); // and again
+
+    const t = getTrace(db, listTraces(db, { session_id: 'dup' }).items[0].id)!;
+    expect((t.metadata as { follow_up_prompts?: string[] }).follow_up_prompts).toEqual(['turn two']);
+  });
+
   // One out-of-range stamp used to poison the whole session's aggregate: the max
   // was taken over RAW nanos, and the formatter then rejected it, so ended_at and
   // total_duration_ms went null even though every other record was properly timed.

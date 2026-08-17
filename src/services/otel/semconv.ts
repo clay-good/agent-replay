@@ -297,7 +297,16 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
       // where null truthfully says the timing is unknown — exactly what the
       // no-timing branch does, and what `effectiveDurationMs` already does with
       // a backwards started_at/ended_at pair.
-      const duration = s.end && s.start && s.end >= s.start ? Math.round((s.end - s.start) / 1e6) : null;
+      // Both stamps must be ones `isoFromNanos` can render, exactly like the
+      // trace-level window below. Guarding only the FORMATTING left a step with
+      // `ended_at: null` beside a duration of ~56,000 years, computed from the
+      // very stamp the formatter had just rejected — and the value is finite and
+      // non-negative, so validation stores it.
+      const stepEnd = s.end != null && isoFromNanos(s.end) != null ? s.end : null;
+      const stepStart = s.start != null && isoFromNanos(s.start) != null ? s.start : null;
+      const duration = stepEnd != null && stepStart != null && stepEnd >= stepStart
+        ? Math.round((stepEnd - stepStart) / 1e6)
+        : null;
       // Same guard as the trace root below: messageContent never returns null (it
       // omits the `messages` key when the span has no output messages), so a
       // message-less step — the common case for tool/thought spans — must be

@@ -26,6 +26,22 @@ export interface GoldenStepSummary {
   input?: Record<string, unknown>;
   /** Present when the step recorded a model, so checks can opt into diffing it. */
   model?: string | null;
+  /**
+   * Whether this step recorded an error; written for every step of a baseline
+   * exported by this version, so an ABSENT key means the baseline predates the
+   * field and that step's outcome is unknown.
+   *
+   * A baseline could not carry step failure
+   * at all, so the gate was structurally blind to the regression class it most
+   * needs to catch: identical step shape where every tool call now FAILS. The
+   * trace status does not cover it — a hook-captured session finalizes
+   * `completed` from its Stop event however many tool calls failed inside it.
+   *
+   * Only the flag is stored, never the message: error text carries model output,
+   * paths and ids that differ run to run, and a gate that fails on wording is
+   * the false-positive problem this format exists to avoid.
+   */
+  failed?: boolean;
 }
 
 export interface GoldenEntry {
@@ -152,6 +168,12 @@ function exportGolden(db: Database.Database, items: Trace[]): string {
         name: s.name,
         ...(s.step_type === 'tool_call' ? { input: s.input } : {}),
         ...(s.model != null ? { model: s.model } : {}),
+        // Written for every step, true or false. Emitting it only for failures
+        // made "no key" ambiguous between "this step succeeded" and "this
+        // baseline predates the field", and the check then skipped the entry —
+        // silently disabling the comparison for exactly the clean baselines it
+        // exists to protect.
+        failed: s.error != null,
       })),
       // A skipped evaluator is stored with score 1.0 so it can't fail a gate,
       // but it measured nothing — baking that into a baseline asserts a result

@@ -391,6 +391,24 @@ describe('terminal control sequences in trace text', () => {
     const out = renderTimeline([step({ step_type: 'error', name: 'x', error: 'line one\nline two' })]);
     expect(noAnsi(out)).toContain('line two');
   });
+
+  it('keeps CRLF line breaks (a Windows child) but escapes a lone carriage return', () => {
+    // A CR that ends a line is formatting; a LONE CR returns the cursor to
+    // column 0, which lets later text overwrite what was already printed.
+    const crlf = noAnsi(renderTimeline([step({ step_type: 'error', name: 'x', error: 'line1\r\nline2' })]));
+    expect(crlf).toContain('line2');
+    expect(crlf).not.toContain('\\x0d');
+
+    const lone = noAnsi(renderTimeline([step({ step_type: 'error', name: 'x', error: 'real\roverwrite' })]));
+    expect(lone).toContain('\\x0d');
+  });
+
+  it('escapes them in list, why and diff too', () => {
+    // `list` is the most-run command in the tool and was missed by the first pass.
+    const rendered = noAnsi(traceTable([trace({ agent_name: payload })]));
+    expect(hasControls(rendered)).toBe(false);
+    expect(rendered).toMatch(/\\x1b/);
+  });
 });
 
 describe('traceHeaderPanel cost precision', () => {

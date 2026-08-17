@@ -698,11 +698,19 @@ export function mergeBatchIntoTrace(
     // here, because the input is only adopted for a synthetic trace and the
     // metadata was copied from the existing trace alone. A multi-turn session
     // kept only its first question, with the rest nowhere in the store.
-    const followUps = [
+    // Deduped, because an OTLP exporter retries a batch on a 5xx or on a timeout
+    // that arrived after the server had already committed — the same retry loop
+    // the receiver's 4xx-not-5xx rule exists for. Without this an identical
+    // redelivered batch appended its prompt again every time and the list grew
+    // without bound, with `show` rendering every copy.
+    const followUps: string[] = [];
+    for (const prompt of [
       ...asPromptList(existing.metadata.follow_up_prompts),
       ...promptOf(traceInput, input.input),
       ...asPromptList(input.metadata?.follow_up_prompts),
-    ];
+    ]) {
+      if (!followUps.includes(prompt)) followUps.push(prompt);
+    }
     if (followUps.length > 0) mergedMeta.follow_up_prompts = followUps;
 
     db.prepare(

@@ -92,12 +92,16 @@ export function formatCostUsd(cost: number): string {
  * boxen uses, so a panel with one in it drew misaligned borders.
  *
  * Newline and tab survive: they carry real formatting for multi-line errors and
- * cannot move the cursor or address the terminal. Everything else in C0, plus
- * DEL, is rendered visibly as `\xNN`.
+ * cannot move the cursor or address the terminal. A CRLF pair — what any
+ * Windows or PowerShell child writes — is normalized to a newline rather than
+ * having its `\r` escaped mid-line. A LONE carriage return is still escaped: it
+ * returns the cursor to column 0, which lets text overwrite what was already
+ * printed. Everything else in C0, plus DEL, is rendered visibly as `\xNN`.
  */
 export function safeText(text: string): string {
+  const normalized = text.replace(/\r\n/g, '\n');
   // eslint-disable-next-line no-control-regex
-  return text.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
+  return normalized.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
 }
 
 export function scoreBadge(score: number): string {

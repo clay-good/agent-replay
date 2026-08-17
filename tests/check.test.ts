@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { runMigrations } from '../src/db/migrations.js';
-import { ingestTrace, getTrace, createEval } from '../src/services/trace-service.js';
+import { ingestTrace, getTrace, createEval, deleteTrace } from '../src/services/trace-service.js';
 import { exportTraces } from '../src/services/export-service.js';
 import { checkGolden, inputHash, stableStringify } from '../src/services/check-service.js';
 import { ensureDatabase, resetConnection } from '../src/db/index.js';
@@ -629,5 +629,140 @@ describe('golden metadata keeps a trace own keys', () => {
     // A non-colliding key is untouched, and no spurious keys appear.
     expect(meta.owner).toBe('team-a');
     expect(meta.trace_metadata_total_tokens).toBeUndefined();
+  });
+});
+
+// ── check command: a gate that compares nothing is not a passing gate ────────
+
+/** Run `check` in-process, capturing stdout/stderr and the exit code it sets. */
+function runCheckCapturing(opts: Parameters<typeof runCheck>[0]): { code: number; out: string; err: string } {
+  const out: string[] = [];
+  const err: string[] = [];
+  const prevExit = process.exitCode;
+  process.exitCode = 0;
+  const logSpy = vi.spyOn(console, 'log').mockImplementation((m?: unknown) => { out.push(String(m)); });
+  const errSpy = vi.spyOn(console, 'error').mockImplementation((m?: unknown) => { err.push(String(m)); });
+  try {
+    runCheck(opts);
+  } finally {
+    logSpy.mockRestore();
+    errSpy.mockRestore();
+  }
+  const code = Number(process.exitCode ?? 0);
+  process.exitCode = prevExit;
+  return { code, out: out.join('\n'), err: err.join('\n') };
+}
+
+describe('runCheck refuses when no candidate matched the baseline', () => {
+  // A candidate that matches NO baseline compares exactly as much as no
+  // candidate at all — nothing — yet unmatched was a pass by default while zero
+  // candidates was already refused. Any change that alters every goldenKey
+  // (`hook --no-input` blanking the input, an agent rename, an input-template
+  // edit) left the gate green forever on runs it had stopped comparing.
+  it('exits 2 in both output modes, with --allow-empty as the opt-out', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ar-check-nomatch-'));
+    try {
+      const cdb = ensureDatabase(resolve(dir, 'traces.db'));
+      const source = ingestTrace(cdb, baseline);
+      const goldenPath = join(dir, 'golden.json');
+      writeFileSync(goldenPath, exportTraces(cdb, { agent_name: 'travel-bot' }, 'golden'));
+      // The baseline run itself is not a candidate of the next CI run.
+      deleteTrace(cdb, source.id);
+
+      // The same run, captured without its input — so its goldenKey differs and
+      // it can never match, however badly it regressed.
+      ingestTrace(cdb, {
+        ...baseline,
+        input: {},
+        steps: [{ step_number: 1, step_type: 'tool_call', name: 'Bash', input: { command: 'rm -rf /' } }],
+      });
+
+      const human = runCheckCapturing({ golden: goldenPath, dir });
+      expect(human.code).toBe(2);
+      expect(human.err).toMatch(/No candidate matched/);
+
+      const asJson = runCheckCapturing({ golden: goldenPath, dir, json: true });
+      expect(asJson.code).toBe(2);
+      expect(JSON.parse(asJson.out).ok).toBe(false);
+
+      expect(runCheckCapturing({ golden: goldenPath, dir, allowEmpty: true }).code).toBe(0);
+    } finally {
+      resetConnection();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('answers a store it cannot open in the requested shape, with the gate-broken code', () => {
+    // This escaped to the top-level catch: a bare stderr line and exit 1, so
+    // `check --json | jq -r .ok` died on a parse error, and a CI script that
+    // separates regression (1) from gate-broken (2) misread an unopenable store.
+    const dir = mkdtempSync(join(tmpdir(), 'ar-check-nodb-'));
+    try {
+      const goldenPath = join(dir, 'golden.json');
+      writeFileSync(goldenPath, JSON.stringify([{
+        id: 'g1', agent_name: 'travel-bot', input: {}, expected_output: null,
+        steps_summary: [], eval_criteria: [], metadata: {},
+      }]));
+      const notADir = join(dir, 'a-file');
+      writeFileSync(notADir, 'not a directory');
+
+      const r = runCheckCapturing({ golden: goldenPath, dir: notADir, json: true });
+      expect(r.code).toBe(2);
+      expect(JSON.parse(r.out).ok).toBe(false);
+    } finally {
+      resetConnection();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ── step failure is part of the baseline ─────────────────────────────────────
+
+describe('a step that now fails is a regression', () => {
+  // The baseline could not carry step failure at all, so identical step shape
+  // with every tool call now FAILING passed green — and `status` does not cover
+  // it, because a hook-captured session finalizes `completed` from its Stop
+  // event however many tool calls failed inside it.
+  const withTool = (error?: string): IngestTraceInput => ({
+    agent_name: 'errbot',
+    status: 'completed',
+    input: { prompt: 'go' },
+    steps: [{ step_number: 1, step_type: 'tool_call', name: 'Bash', input: { command: 'ls' }, ...(error ? { error } : {}) }],
+  });
+
+  it('catches a tool call that fails where the baseline succeeded', () => {
+    ingestTrace(db, withTool());
+    const golden = JSON.parse(exportTraces(db, { agent_name: 'errbot' }, 'golden')) as GoldenEntry[];
+    expect(golden[0].steps_summary[0].failed).toBe(false); // recorded explicitly, so absence means "predates the field"
+
+    const report = checkGolden(golden, [candidate(withTool('permission denied'))]);
+    expect(report.ok).toBe(false);
+    expect(report.results[0].divergences.map((d) => d.field)).toContain('step_errors');
+  });
+
+  it('catches the reverse — a step the baseline recorded as failing that now succeeds', () => {
+    ingestTrace(db, withTool('permission denied'));
+    const golden = JSON.parse(exportTraces(db, { agent_name: 'errbot' }, 'golden')) as GoldenEntry[];
+    expect(golden[0].steps_summary[0].failed).toBe(true);
+
+    const report = checkGolden(golden, [candidate(withTool())]);
+    expect(report.ok).toBe(false);
+  });
+
+  it('passes an identical failing step', () => {
+    ingestTrace(db, withTool('permission denied'));
+    const golden = JSON.parse(exportTraces(db, { agent_name: 'errbot' }, 'golden')) as GoldenEntry[];
+    expect(checkGolden(golden, [candidate(withTool('permission denied'))]).ok).toBe(true);
+  });
+
+  it('does not flag a failure against a baseline exported before the field existed', () => {
+    // An entry with no failure information anywhere is skipped, not guessed at —
+    // otherwise every pre-existing baseline would report a false regression.
+    const legacy: GoldenEntry[] = [{
+      id: 'g1', agent_name: 'errbot', input: { prompt: 'go' }, expected_output: null,
+      steps_summary: [{ step_number: 1, step_type: 'tool_call', name: 'Bash', input: { command: 'ls' } }],
+      eval_criteria: [], metadata: {},
+    }];
+    expect(checkGolden(legacy, [candidate(withTool('boom'))]).ok).toBe(true);
   });
 });

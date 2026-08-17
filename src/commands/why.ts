@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import type { CausalHop } from '../services/decision-service.js';
 import { causalWalk } from '../services/decision-service.js';
 import { ensureDatabase } from '../db/index.js';
-import { stepIcon, stepLabel, heading, label } from '../ui/theme.js';
+import { stepIcon, stepLabel, heading, label, safeText } from '../ui/theme.js';
 import type { StepType } from '../models/enums.js';
 import { resolveDataDir } from '../utils/paths.js';
 
@@ -95,14 +95,14 @@ export function runWhy(traceId: string, opts: WhyOptions = {}): void {
     console.log(
       `  ${arrow} ${chalk.dim(`#${hop.step.step_number}`)} ` +
         `${stepIcon(hop.step.step_type as StepType)} ${stepLabel(hop.step.step_type as StepType)} ` +
-        `${chalk.white.bold(`"${hop.step.name}"`)}${via}`,
+        `${chalk.white.bold(`"${safeText(hop.step.name)}"`)}${via}`,
     );
 
     if (hop.decision) {
       const d = hop.decision;
-      console.log(`      ${label('Chose:')} ${chalk.greenBright(d.chosen)}` + (d.confidence != null ? chalk.dim(`  (confidence ${d.confidence})`) : ''));
+      console.log(`      ${label('Chose:')} ${chalk.greenBright(safeText(d.chosen))}` + (d.confidence != null ? chalk.dim(`  (confidence ${d.confidence})`) : ''));
       if (d.rationale) {
-        console.log(`      ${label('Because:')} ${chalk.white(d.rationale)}`);
+        console.log(`      ${label('Because:')} ${chalk.white(safeText(d.rationale))}`);
       }
     }
 
@@ -111,6 +111,6 @@ export function runWhy(traceId: string, opts: WhyOptions = {}): void {
 
   console.log('');
   const root = chain[chain.length - 1];
-  console.log(chalk.dim(`  Chain terminates at step ${root.step.step_number} ("${root.step.name}").`));
+  console.log(chalk.dim(`  Chain terminates at step ${root.step.step_number} ("${safeText(root.step.name)}").`));
   console.log('');
 }
