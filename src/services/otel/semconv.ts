@@ -193,7 +193,7 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
     // correlation key there is, so with none present, correlate nothing: give
     // each orphan its own group. The stored `otel_trace_id` stays '', which
     // findMergeTarget already refuses to merge across batches.
-    const key = s.traceId || ` orphan:${i}`;
+    const key = s.traceId || `!orphan:${i}`;
     const list = byTrace.get(key) ?? [];
     list.push(s);
     byTrace.set(key, list);
@@ -268,7 +268,14 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
       return {
         step_number: i + 1,
         step_type: stepType,
-        name: str(s.attrs['gen_ai.tool.name']) ?? str(s.attrs['traceloop.entity.name']) ?? s.name,
+        // `tool.name` is OpenInference's spelling, alongside GenAI's
+        // `gen_ai.tool.name` and OpenLLMetry's `traceloop.entity.name`; without
+        // it an OpenInference tool span fell back to the raw span name.
+        name:
+          str(s.attrs['gen_ai.tool.name']) ??
+          str(s.attrs['tool.name']) ??
+          str(s.attrs['traceloop.entity.name']) ??
+          s.name,
         input: messageContent(s.attrs, 'input'),
         output,
         started_at: isoFromNanos(s.start),
@@ -344,15 +351,38 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
   return traces;
 }
 
+/**
+ * The span's prompt/response content.
+ *
+ * GenAI first, then the two other dialects this receiver already classifies by:
+ * OpenInference (`input.value` / `output.value`, and the `llm.prompts` /
+ * `llm.completions` pair) and OpenLLMetry (`traceloop.entity.input/output`).
+ * Only the `gen_ai.*` forms were read, so a LangChain or LlamaIndex app — the
+ * frameworks these conventions come from, and the ones the README names —
+ * produced traces whose every step had `input: {}` and `output: null`. The
+ * spans were classified, timed and token-counted correctly; they just carried
+ * no content, and the raw attributes were not preserved anywhere either, so
+ * nothing downstream could recover them.
+ *
+ * These values are frequently JSON *strings* rather than objects, which is
+ * fine: the storage layer passes a JSON string through as-is and encodes
+ * anything else, so both survive a round-trip.
+ */
 function messageContent(a: Record<string, unknown>, dir: 'input' | 'output'): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  if (dir === 'input') {
-    const msgs = a['gen_ai.input.messages'] ?? a['gen_ai.prompt'];
-    if (msgs != null) out.messages = msgs;
-  } else {
-    const msgs = a['gen_ai.output.messages'] ?? a['gen_ai.completion'];
-    if (msgs != null) out.messages = msgs;
-  }
+  const msgs =
+    dir === 'input'
+      ? (a['gen_ai.input.messages'] ??
+        a['gen_ai.prompt'] ??
+        a['input.value'] ??
+        a['llm.prompts'] ??
+        a['traceloop.entity.input'])
+      : (a['gen_ai.output.messages'] ??
+        a['gen_ai.completion'] ??
+        a['output.value'] ??
+        a['llm.completions'] ??
+        a['traceloop.entity.output']);
+  if (msgs != null) out.messages = msgs;
   return out;
 }
 
@@ -361,7 +391,9 @@ function stepMetadata(a: Record<string, unknown>, spanId: string, parentSpanId?:
   // Preserve the OTel parent span id so a child arriving in a later export batch
   // can be re-linked to a parent step already stored from an earlier batch.
   if (parentSpanId) meta.otel_parent_span_id = parentSpanId;
-  const provider = str(a['gen_ai.provider.name']) ?? str(a['gen_ai.system']);
+  // `llm.provider` is OpenInference's spelling — dropped entirely before, so an
+  // OpenInference trace recorded no provider despite carrying one.
+  const provider = str(a['gen_ai.provider.name']) ?? str(a['gen_ai.system']) ?? str(a['llm.provider']);
   if (provider) meta.provider = provider;
   // Preserve any gen_ai.* attributes we didn't explicitly map.
   for (const [k, v] of Object.entries(a)) {

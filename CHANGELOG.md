@@ -98,6 +98,17 @@ trace schema is unchanged.
 
 ### Fixed
 
+- OTel spans in the OpenInference and OpenLLMetry dialects now carry their
+  prompt and response content. Only the `gen_ai.*` content attributes were
+  read, so a LangChain or LlamaIndex app — the frameworks these conventions
+  come from, and the ones the README names — produced traces whose every step
+  had an empty input and no output. The spans were classified, timed, and
+  token-counted correctly; they simply carried nothing to read, and the raw
+  attributes were preserved nowhere either. `input.value`/`output.value`,
+  `llm.prompts`/`llm.completions`, `traceloop.entity.input`/`output`,
+  `llm.provider`, and `tool.name` are now mapped alongside their GenAI
+  equivalents.
+
 - Opening the trace store no longer *lowers* its own lock patience, and no
   longer blames corruption for every failure. `busy_timeout` was set to 3s
   where better-sqlite3 already defaults to 5s — a reduction, written as though

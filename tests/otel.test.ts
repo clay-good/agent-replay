@@ -184,6 +184,46 @@ describe('mapOtlpTraces (GenAI semconv)', () => {
     expect(trace.total_tokens).toBe(60);
   });
 
+  it('maps OpenInference and OpenLLMetry content, not just their span kinds', () => {
+    // Regression: only the gen_ai.* content attributes were read, so a
+    // LangChain / LlamaIndex app — the frameworks these conventions come from —
+    // produced traces whose every step had `input: {}` and `output: null`. The
+    // spans were classified, timed and token-counted correctly; they just
+    // carried no content, and the raw attributes were preserved nowhere either.
+    const payload = otlp([
+      span({
+        traceId: 'toi', spanId: 's1', name: 'ChatOpenAI', start: 1 * MS, end: 2 * MS,
+        attrs: {
+          'openinference.span.kind': 'LLM',
+          'input.value': '{"messages":[{"role":"user","content":"hi"}]}',
+          'output.value': '{"content":"hello"}',
+          'llm.provider': 'openai',
+          'llm.model_name': 'gpt-4o-mini',
+        },
+      }),
+      span({
+        traceId: 'toi', spanId: 's2', name: 'span-name-not-tool-name', start: 2 * MS, end: 3 * MS,
+        attrs: { 'openinference.span.kind': 'TOOL', 'tool.name': 'search_flights' },
+      }),
+      span({
+        traceId: 'toi', spanId: 's3', name: 'task', start: 3 * MS, end: 4 * MS,
+        attrs: { 'traceloop.span.kind': 'task', 'traceloop.entity.input': 'do the thing' },
+      }),
+    ]);
+    const [trace] = mapOtlpTraces(payload);
+    const [llm, tool, task] = trace.steps!;
+
+    expect(llm.input).toEqual({ messages: '{"messages":[{"role":"user","content":"hi"}]}' });
+    expect(llm.output).toEqual({ messages: '{"content":"hello"}' });
+    expect(llm.model).toBe('gpt-4o-mini');
+    expect(llm.metadata!.provider).toBe('openai');
+    // A tool span is named by its tool, not by the raw span name.
+    expect(tool.name).toBe('search_flights');
+    expect(task.input).toEqual({ messages: 'do the thing' });
+    // A span with no content still stores null output, not a spurious {}.
+    expect(tool.output).toBeNull();
+  });
+
   it('records span ERROR status as a step error and fails the trace', () => {
     const payload = otlp([
       span({ traceId: 't4', spanId: 's1', name: 'execute_tool', start: 1 * MS, end: 2 * MS, attrs: { 'gen_ai.operation.name': 'execute_tool' }, error: 'tool blew up' }),
