@@ -225,6 +225,28 @@ export function validateEvent(obj: unknown): ParseResult {
     }
   }
 
+  // A negative or non-finite usage/timing count is not a measurement. It used to
+  // be stored verbatim on this path only — the importers and the stream
+  // translators both clamp — and `ingest` REJECTS such a value, so an export of
+  // the resulting trace could not be restored: the round-trip the golden gate
+  // depends on was broken by data this very tool wrote. Drop the field with a
+  // warning rather than the whole step; every other field of it is still good.
+  const dropped: string[] = [];
+  for (const field of ['tokens_used', 'duration_ms', 'total_tokens', 'total_duration_ms'] as const) {
+    const v = e[field];
+    if (v == null) continue;
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) {
+      delete e[field];
+      dropped.push(field);
+    }
+  }
+  if (dropped.length > 0) {
+    return {
+      event: obj as CaptureEvent,
+      warning: `ignored ${dropped.join(', ')}: must be a non-negative finite number`,
+    };
+  }
+
   return { event: obj as CaptureEvent, warning: null };
 }
 

@@ -536,3 +536,31 @@ describe('record finalization contract', () => {
     }
   });
 });
+
+describe('validateEvent — unusable numeric fields', () => {
+  // The importers and the stream translators both clamp a negative usage count,
+  // but the NATIVE protocol stored it verbatim — and `ingest` rejects such a
+  // value, so an export of the resulting trace could not be restored: this tool
+  // wrote data its own gate refuses. The field is dropped, not the step.
+  for (const bad of [-5, Infinity, NaN, '12']) {
+    it(`ignores tokens_used: ${String(bad)} but keeps the step`, () => {
+      const { event, warning } = validateEvent({
+        v: 1, type: 'step', trace_id: 't1', step_number: 1,
+        step_type: 'llm_call', name: 'call', tokens_used: bad,
+      });
+      expect(event).not.toBeNull();
+      expect(warning).toMatch(/tokens_used/);
+      expect((event as unknown as { tokens_used?: number }).tokens_used).toBeUndefined();
+      expect((event as unknown as { name: string }).name).toBe('call');
+    });
+  }
+
+  it('keeps a legitimate zero', () => {
+    const { event, warning } = validateEvent({
+      v: 1, type: 'step', trace_id: 't1', step_number: 1,
+      step_type: 'llm_call', name: 'call', tokens_used: 0, duration_ms: 0,
+    });
+    expect(warning).toBeNull();
+    expect((event as unknown as { tokens_used: number }).tokens_used).toBe(0);
+  });
+});

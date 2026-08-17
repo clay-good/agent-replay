@@ -6,7 +6,7 @@ import { getTrace } from '../services/trace-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { traceHeaderPanel } from '../ui/boxen-panels.js';
 import { stepSpinner, successSpinner, failSpinner, warnSpinner } from '../ui/spinner.js';
-import { stepIcon, stepLabel, heading, separator, colors } from '../ui/theme.js';
+import { stepIcon, stepLabel, heading, separator, colors, safeText } from '../ui/theme.js';
 
 import { errorMessage, truncate, hasRenderableContent } from '../utils/json.js';
 import { formatDuration } from '../utils/time.js';
@@ -148,7 +148,7 @@ export async function runReplay(
 async function replayStep(step: TraceStep, speed: number): Promise<void> {
   const icon = stepIcon(step.step_type as StepType);
   const typeLabel = stepLabel(step.step_type as StepType);
-  const name = chalk.white.bold(`"${step.name}"`);
+  const name = chalk.white.bold(`"${safeText(step.name)}"`);
   const num = chalk.dim(String(step.step_number).padStart(2));
 
   // Calculate simulated delay
@@ -160,7 +160,7 @@ async function replayStep(step: TraceStep, speed: number): Promise<void> {
   spinner.text = `${num}  ${icon} ${typeLabel}  ${name}`;
 
   if (step.model) {
-    spinner.text += chalk.dim(`  [${step.model}]`);
+    spinner.text += chalk.dim(`  [${safeText(step.model)}]`);
   }
 
   // Wait for simulated duration
@@ -175,7 +175,7 @@ async function replayStep(step: TraceStep, speed: number): Promise<void> {
 
   if (step.error) {
     failSpinner(spinner, resultText);
-    console.log(chalk.red(`       Error: ${step.error}`));
+    console.log(chalk.red(`       Error: ${safeText(step.error)}`));
   } else if (step.step_type === 'guard_check') {
     warnSpinner(spinner, resultText);
   } else {
@@ -186,8 +186,8 @@ async function replayStep(step: TraceStep, speed: number): Promise<void> {
   if (step.decision) {
     console.log(
       chalk.dim('       Chose: ') +
-        chalk.greenBright(step.decision.chosen) +
-        (step.decision.rationale ? chalk.dim(` — ${step.decision.rationale}`) : ''),
+        chalk.greenBright(safeText(step.decision.chosen)) +
+        (step.decision.rationale ? chalk.dim(` — ${safeText(step.decision.rationale)}`) : ''),
     );
   }
 

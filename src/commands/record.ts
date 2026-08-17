@@ -110,8 +110,11 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
     if (warning) {
       warnings++;
       console.error(chalk.yellow(`  ⚠ ${warning}`));
-      continue;
     }
+    // A warning does not always mean the line was dropped: validation may keep
+    // the event and report a single unusable FIELD it ignored. Applying whatever
+    // survived (as `run` already does) keeps the step rather than losing it over
+    // one bad number.
     if (!event) continue;
     apply(event);
   }
@@ -180,7 +183,7 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
     console.error(
       chalk.red(
         warnings > 0
-          ? `  Nothing was recorded: all ${warnings} event(s) were rejected.`
+          ? `  Nothing was recorded: ${warnings} line(s) drew a warning and none produced an event.`
           : `  Nothing was recorded: none of the ${inputLines} line(s) matched the ${format} format.`,
       ),
     );

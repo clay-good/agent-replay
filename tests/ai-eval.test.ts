@@ -14,6 +14,7 @@ import {
 import { summarizeTrace, summarizeDiffForLlm } from '../src/services/trace-summarizer.js';
 import { diffTraces } from '../src/services/diff-service.js';
 import { estimateCost, COST_TABLE, LlmError } from '../src/services/llm-client.js';
+import { aiEvalPanel } from '../src/ui/boxen-panels.js';
 import type { IngestTraceInput } from '../src/models/types.js';
 
 function createTestDb() {
@@ -180,6 +181,47 @@ describe('AI presets', () => {
       }));
       expect(parsed.score).toBe(0.7);
       expect(parsed.passed).toBe(true);
+    });
+  });
+
+  // A model answering a list field with a bare string ("issues": "too long") is a
+  // routine deviation, and the shape an injected trace aims for. `?? []` only
+  // replaces null/undefined, so the string flowed through typed as an array: the
+  // renderer's `.length > 0` was true and iterating it emitted ONE BULLET PER
+  // CHARACTER, with the malformed value persisted in `details` for show/export.
+  describe('a list field the model sent as a bare string', () => {
+    const cases: [string, string, Record<string, unknown>][] = [
+      ['ai-root-cause', 'contributing_factors', { root_cause: 'x', confidence: 0.9, contributing_factors: 'API timed out' }],
+      ['ai-quality-review', 'issues', { relevance: 5, completeness: 5, coherence: 5, accuracy: 5, issues: 'too long' }],
+      ['ai-security-audit', 'recommendations', { risk_level: 'none', safe: true, findings: [], recommendations: 'rotate keys now' }],
+      ['ai-optimization', 'optimizations', { efficiency_score: 7, optimizations: 'cache it' }],
+    ];
+
+    for (const [presetName, field, reply] of cases) {
+      it(`${presetName}: keeps ${field} a one-item list, not a string`, () => {
+        const parsed = AI_PRESETS[presetName].parse_response(JSON.stringify(reply));
+        expect(parsed.details[field]).toEqual([reply[field]]);
+      });
+
+      it(`${presetName}: a non-array, non-string ${field} carries no list`, () => {
+        const parsed = AI_PRESETS[presetName].parse_response(JSON.stringify({ ...reply, [field]: { a: 1 } }));
+        expect(parsed.details[field]).toEqual([]);
+      });
+    }
+
+    it('renders a string-valued list as one bullet, not one per character', () => {
+      const parsed = AI_PRESETS['ai-quality-review'].parse_response(JSON.stringify({
+        relevance: 5, completeness: 5, coherence: 5, accuracy: 5, issues: 'too long',
+      }));
+      const out = aiEvalPanel({
+        evaluator_name: 'ai-quality-review',
+        score: parsed.score,
+        passed: parsed.passed,
+        details: parsed.details,
+      });
+      const bullets = out.split('\n').filter((l) => l.includes('- '));
+      expect(bullets).toHaveLength(1);
+      expect(out).toContain('too long');
     });
   });
 

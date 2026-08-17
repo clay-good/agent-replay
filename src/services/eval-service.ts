@@ -446,7 +446,7 @@ Respond in this exact JSON format (no other text):
       details: {
         root_cause: data.root_cause ?? 'Unknown',
         failing_step: data.failing_step ?? null,
-        contributing_factors: data.contributing_factors ?? [],
+        contributing_factors: asList(data.contributing_factors),
         suggested_fix: data.suggested_fix ?? null,
         severity: data.severity ?? 'medium',
         confidence,
@@ -454,6 +454,22 @@ Respond in this exact JSON format (no other text):
     };
   },
 };
+
+/**
+ * A model-supplied list field, normalized to an array.
+ *
+ * These come from parsed LLM JSON, where a list field arriving as a bare string
+ * is a routine deviation ("issues": "too long") — and the shape an injected trace
+ * aims for. `?? []` only replaces null/undefined, so the string flowed through
+ * typed as an array: the renderer's `.length > 0` was true and iterating it
+ * emitted ONE BULLET PER CHARACTER, with the malformed value persisted in
+ * `details` for `show` and `export`. A single string becomes a single item; any
+ * other non-array (object, number, bool) carries no list to show.
+ */
+function asList(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  return typeof value === 'string' && value !== '' ? [value] : [];
+}
 
 // ── AI Preset: Quality Review ───────────────────────────────────────────
 
@@ -495,7 +511,7 @@ Respond in this exact JSON format (no other text):
       details: {
         relevance, completeness, coherence, accuracy,
         overall_assessment: data.overall_assessment ?? '',
-        issues: data.issues ?? [],
+        issues: asList(data.issues),
       },
     };
   },
@@ -562,7 +578,7 @@ Respond in this exact JSON format (no other text):
         risk_level: riskLevel,
         ...(riskLevel !== declared ? { declared_risk_level: declared } : {}),
         findings,
-        recommendations: data.recommendations ?? [],
+        recommendations: asList(data.recommendations),
         safe,
       },
     };
@@ -605,7 +621,7 @@ Respond in this exact JSON format (no other text):
       details: {
         efficiency_score: effScore,
         total_waste_estimate_pct: data.total_waste_estimate_pct ?? 0,
-        optimizations: data.optimizations ?? [],
+        optimizations: asList(data.optimizations),
         summary: data.summary ?? '',
       },
     };

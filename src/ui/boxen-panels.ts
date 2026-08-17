@@ -2,7 +2,7 @@ import boxen from 'boxen';
 import chalk from 'chalk';
 import type { Trace } from '../models/types.js';
 import type { TraceStatus } from '../models/enums.js';
-import { statusBadge, colors, label, formatScorePct, formatCostUsd } from './theme.js';
+import { statusBadge, colors, label, formatScorePct, formatCostUsd, safeText } from './theme.js';
 import { effectiveDurationMs } from '../utils/time.js';
 import { effectiveTokens } from '../utils/totals.js';
 
@@ -13,7 +13,7 @@ export function traceHeaderPanel(trace: Trace): string {
   const lines: string[] = [];
 
   lines.push(
-    `${label('Agent:')}     ${chalk.whiteBright.bold(trace.agent_name)}${trace.agent_version ? chalk.dim(` v${trace.agent_version}`) : ''}`,
+    `${label('Agent:')}     ${chalk.whiteBright.bold(safeText(trace.agent_name))}${trace.agent_version ? chalk.dim(` v${trace.agent_version}`) : ''}`,
   );
   lines.push(`${label('Trace ID:')}  ${chalk.dim(trace.id)}`);
   lines.push(`${label('Status:')}    ${statusBadge(trace.status as TraceStatus)}`);
@@ -45,7 +45,7 @@ export function traceHeaderPanel(trace: Trace): string {
     );
   }
   if (trace.error) {
-    lines.push(`${label('Error:')}     ${chalk.redBright(trace.error)}`);
+    lines.push(`${label('Error:')}     ${chalk.redBright(safeText(trace.error))}`);
   }
   if (trace.parent_trace_id) {
     lines.push(`${label('Fork of:')}   ${chalk.dim(trace.parent_trace_id)} ${chalk.dim(`(step ${trace.forked_from_step})`)}`);
@@ -113,17 +113,17 @@ export function aiEvalPanel(evalResult: { evaluator_name: string; score: number;
   const lines: string[] = [];
 
   if (evalResult.evaluator_name === 'ai-root-cause') {
-    lines.push(`${label('Root cause:')}  ${chalk.white(String(d.root_cause ?? 'Unknown'))}`);
+    lines.push(`${label('Root cause:')}  ${chalk.white(safeText(String(d.root_cause ?? 'Unknown')))}`);
     if (d.failing_step != null) {
       lines.push(`${label('Failing step:')} ${chalk.white(String(d.failing_step))}`);
     }
     const factors = d.contributing_factors as string[] | undefined;
     if (factors && factors.length > 0) {
       lines.push(`${label('Factors:')}`);
-      for (const f of factors) lines.push(`  ${chalk.dim('-')} ${chalk.white(f)}`);
+      for (const f of factors) lines.push(`  ${chalk.dim('-')} ${chalk.white(safeText(String(f)))}`);
     }
     if (d.suggested_fix) {
-      lines.push(`${label('Suggested fix:')} ${chalk.white(String(d.suggested_fix))}`);
+      lines.push(`${label('Suggested fix:')} ${chalk.white(safeText(String(d.suggested_fix)))}`);
     }
     lines.push(`${label('Severity:')} ${chalk.white(String(d.severity ?? 'medium'))}  ${label('Confidence:')} ${chalk.white(formatScorePct(evalResult.score))}`);
 
@@ -136,13 +136,13 @@ export function aiEvalPanel(evalResult: { evaluator_name: string; score: number;
     }
     if (d.overall_assessment) {
       lines.push('');
-      lines.push(chalk.white(String(d.overall_assessment)));
+      lines.push(chalk.white(safeText(String(d.overall_assessment))));
     }
     const issues = d.issues as string[] | undefined;
     if (issues && issues.length > 0) {
       lines.push('');
       lines.push(`${label('Issues:')}`);
-      for (const issue of issues) lines.push(`  ${chalk.dim('-')} ${chalk.yellow(issue)}`);
+      for (const issue of issues) lines.push(`  ${chalk.dim('-')} ${chalk.yellow(safeText(String(issue)))}`);
     }
 
   } else if (evalResult.evaluator_name === 'ai-security-audit') {
@@ -156,30 +156,37 @@ export function aiEvalPanel(evalResult: { evaluator_name: string; score: number;
       for (const f of findings) {
         const sev = f.severity ? chalk.dim(` [${f.severity}]`) : '';
         const step = f.step != null ? chalk.dim(` (step ${f.step})`) : '';
-        lines.push(`  ${chalk.dim('-')} ${chalk.white(f.description)}${step}${sev}`);
+        lines.push(`  ${chalk.dim('-')} ${chalk.white(safeText(String(f.description)))}${step}${sev}`);
       }
     }
     const recs = d.recommendations as string[] | undefined;
     if (recs && recs.length > 0) {
       lines.push('');
       lines.push(`${label('Recommendations:')}`);
-      for (const r of recs) lines.push(`  ${chalk.dim('-')} ${chalk.white(r)}`);
+      for (const r of recs) lines.push(`  ${chalk.dim('-')} ${chalk.white(safeText(String(r)))}`);
     }
 
   } else if (evalResult.evaluator_name === 'ai-optimization') {
     lines.push(`${label('Efficiency:')} ${chalk.white(String(d.efficiency_score ?? 0) + '/10')}  ${label('Est. waste:')} ${chalk.white(String(d.total_waste_estimate_pct ?? 0) + '%')}`);
-    const opts = d.optimizations as Array<{ step: number; type: string; description: string; estimated_savings?: string }> | undefined;
+    const opts = d.optimizations as Array<string | { step: number; type: string; description: string; estimated_savings?: string }> | undefined;
     if (opts && opts.length > 0) {
       lines.push('');
       lines.push(`${label('Optimizations:')}`);
       for (const o of opts) {
+        // An entry the model wrote as a bare string has no step/description to
+        // read; printing the object template anyway rendered "Step undefined:
+        // undefined".
+        if (typeof o === 'string') {
+          lines.push(`  ${chalk.dim('-')} ${chalk.white(safeText(o))}`);
+          continue;
+        }
         const savings = o.estimated_savings ? chalk.dim(` (save ~${o.estimated_savings})`) : '';
-        lines.push(`  ${chalk.dim('-')} Step ${o.step}: ${chalk.white(o.description)}${savings}`);
+        lines.push(`  ${chalk.dim('-')} Step ${o.step}: ${chalk.white(safeText(String(o.description)))}${savings}`);
       }
     }
     if (d.summary) {
       lines.push('');
-      lines.push(chalk.white(String(d.summary)));
+      lines.push(chalk.white(safeText(String(d.summary))));
     }
   } else {
     lines.push(chalk.dim(JSON.stringify(d, null, 2).slice(0, 500)));

@@ -159,10 +159,19 @@ export function resolveProvider(config: AgentReplayConfig | null): ResolvedProvi
   if (preferred !== 'auto') {
     const apiKey = resolveApiKey(preferred, config);
     if (apiKey) {
+      const configured = config?.ai?.model;
       return {
         provider: preferred,
         apiKey,
-        model: typeof config?.ai?.model === 'string' ? config.ai.model : DEFAULT_MODELS[preferred],
+        // Same rule as the auto path below: a model is applied only to a provider
+        // it belongs to. An explicit `ai.provider = openai` with a leftover
+        // `ai.model = claude-*` otherwise sent that name to OpenAI — a confusing
+        // auth/400 error at eval time — and priced the request off Anthropic's
+        // sheet, so `--max-cost` gated on a number for a different vendor. A
+        // model of no known family (a proxy's own name) still passes through.
+        model: typeof configured === 'string' && modelSuitsProvider(configured, preferred)
+          ? configured
+          : DEFAULT_MODELS[preferred],
       };
     }
     // Explicit provider set but no key — return null

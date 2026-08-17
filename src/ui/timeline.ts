@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import type { TraceStep } from '../models/types.js';
 import type { StepType } from '../models/enums.js';
-import { stepIcon, stepLabel, colors, label, separator } from './theme.js';
+import { stepIcon, stepLabel, colors, label, separator, safeText } from './theme.js';
 import { hasRenderableContent } from '../utils/json.js';
 
 export interface TimelineOptions {
@@ -55,7 +55,7 @@ export function renderTimeline(
     const num = chalk.dim(String(step.step_number).padStart(2));
     const icon = stepIcon(step.step_type as StepType);
     const typeLabel = stepLabel(step.step_type as StepType);
-    const name = chalk.white.bold(`"${step.name}"`);
+    const name = chalk.white.bold(`"${safeText(step.name)}"`);
     const dur = step.duration_ms != null
       ? chalk.dim(formatDuration(step.duration_ms))
       : '';
@@ -75,7 +75,7 @@ export function renderTimeline(
 
     // Model info for llm_call steps
     if (step.model) {
-      lines.push(`  ${chalk.dim(pipe)}      ${label('Model:')} ${chalk.white(step.model)}`);
+      lines.push(`  ${chalk.dim(pipe)}      ${label('Model:')} ${chalk.white(safeText(step.model))}`);
     }
 
     // Input
@@ -93,15 +93,15 @@ export function renderTimeline(
     // Decision record (for decision steps)
     if (step.decision) {
       const conf = step.decision.confidence != null ? chalk.dim(` (confidence ${step.decision.confidence})`) : '';
-      lines.push(`  ${chalk.dim(pipe)}      ${label('Chose:')} ${chalk.greenBright(step.decision.chosen)}${conf}`);
+      lines.push(`  ${chalk.dim(pipe)}      ${label('Chose:')} ${chalk.greenBright(safeText(step.decision.chosen))}${conf}`);
       if (step.decision.rationale) {
-        lines.push(`  ${chalk.dim(pipe)}      ${label('Because:')} ${chalk.dim(step.decision.rationale)}`);
+        lines.push(`  ${chalk.dim(pipe)}      ${label('Because:')} ${chalk.dim(safeText(step.decision.rationale))}`);
       }
     }
 
     // Error
     if (step.error) {
-      lines.push(`  ${chalk.dim(pipe)}      ${chalk.redBright('Error:')} ${chalk.red(step.error)}`);
+      lines.push(`  ${chalk.dim(pipe)}      ${chalk.redBright('Error:')} ${chalk.red(safeText(step.error))}`);
     }
 
     // Token usage
@@ -163,7 +163,7 @@ export function renderTree(steps: TraceStep[], options: TimelineOptions = {}): s
   const emit = (step: TraceStep, indent: string): void => {
     const icon = stepIcon(step.step_type as StepType);
     const typeLabel = stepLabel(step.step_type as StepType);
-    const name = chalk.white.bold(`"${step.name}"`);
+    const name = chalk.white.bold(`"${safeText(step.name)}"`);
     const causal =
       step.caused_by_step_number != null
         ? chalk.dim(` ⟵ caused by #${step.caused_by_step_number}`)
@@ -172,7 +172,7 @@ export function renderTree(steps: TraceStep[], options: TimelineOptions = {}): s
     const branch = indent ? chalk.dim('└─ ') : '';
     lines.push(`  ${indent}${branch}${chalk.dim(`#${step.step_number}`)} ${icon} ${typeLabel}  ${name}${causal}${dur}`);
     if (step.decision) {
-      lines.push(`  ${indent}   ${label('chose')} ${chalk.greenBright(step.decision.chosen)}`);
+      lines.push(`  ${indent}   ${label('chose')} ${chalk.greenBright(safeText(step.decision.chosen))}`);
     }
     // The tree is the view for understanding why an agent did what it did, and
     // it is only reached when a trace HAS causal structure — so on a failed
@@ -180,7 +180,7 @@ export function renderTree(steps: TraceStep[], options: TimelineOptions = {}): s
     // default timeline prints. The compact view still omits input/output and
     // per-step detail by design; an error is not detail.
     if (step.error) {
-      lines.push(`  ${indent}   ${label('error')} ${chalk.redBright(truncateJson(step.error, 100))}`);
+      lines.push(`  ${indent}   ${label('error')} ${chalk.redBright(safeText(truncateJson(step.error, 100)))}`);
     }
   };
 

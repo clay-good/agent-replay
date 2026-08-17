@@ -4,7 +4,7 @@ import type { TraceStep } from '../models/types.js';
 import type { StepType, TraceStatus } from '../models/enums.js';
 import { getTrace, getStepsAfter, getMostRecentRunningTrace } from '../services/trace-service.js';
 import { ensureDatabase } from '../db/index.js';
-import { stepIcon, stepLabel, heading, statusBadge } from '../ui/theme.js';
+import { stepIcon, stepLabel, heading, statusBadge, safeText } from '../ui/theme.js';
 import { formatDuration } from '../utils/time.js';
 import { resolveDataDir } from '../utils/paths.js';
 
@@ -55,7 +55,7 @@ export function runWatch(traceId: string | undefined, opts: WatchOptions = {}): 
   const id = resolved.id;
 
   console.log('');
-  console.log(heading(`  Watching ${id} — ${resolved.agent_name}`));
+  console.log(heading(`  Watching ${id} — ${safeText(resolved.agent_name)}`));
   console.log(chalk.dim(`  Polling every ${pollMs}ms. Press Ctrl-C to stop.`));
   console.log('');
 
@@ -120,9 +120,9 @@ export function renderStepLine(step: TraceStep): string {
   const num = chalk.dim(`#${step.step_number}`.padStart(4));
   const icon = stepIcon(step.step_type as StepType);
   const type = stepLabel(step.step_type as StepType);
-  const name = chalk.white.bold(`"${step.name}"`);
+  const name = chalk.white.bold(`"${safeText(step.name)}"`);
   const dur = step.duration_ms != null ? chalk.dim(`  ${formatDuration(step.duration_ms)}`) : '';
   const tokens = step.tokens_used != null ? chalk.dim(`  ${step.tokens_used.toLocaleString()} tok`) : '';
-  const err = step.error ? `  ${chalk.redBright('error:')} ${chalk.red(step.error)}` : '';
+  const err = step.error ? `  ${chalk.redBright('error:')} ${chalk.red(safeText(step.error))}` : '';
   return `  ${num} ${icon} ${type}  ${name}${dur}${tokens}${err}`;
 }

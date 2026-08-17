@@ -233,3 +233,31 @@ describe('resolveProvider with a model from another provider', () => {
     expect(resolved!.model).toBe('gpt-5.4-mini');
   });
 });
+
+describe('an explicit ai.provider with a model from another family', () => {
+  // The auto-detect path already refused to hand a `claude-*` model to OpenAI;
+  // the explicit branch applied any string, so a leftover model setting produced
+  // a confusing auth/400 at eval time and priced `--max-cost` off the wrong
+  // vendor's sheet.
+  it('falls back to the provider\'s default model', () => {
+    const resolved = resolveProvider({
+      ai: { provider: 'openai', model: 'claude-haiku-4-5-20251001', api_keys: { openai: 'sk-o' } },
+    } as unknown as Parameters<typeof resolveProvider>[0]);
+    expect(resolved?.provider).toBe('openai');
+    expect(resolved?.model).not.toMatch(/claude/);
+  });
+
+  it('still honors a model of no known family (a proxy\'s own name)', () => {
+    const resolved = resolveProvider({
+      ai: { provider: 'openai', model: 'my-proxy-model-v2', api_keys: { openai: 'sk-o' } },
+    } as unknown as Parameters<typeof resolveProvider>[0]);
+    expect(resolved?.model).toBe('my-proxy-model-v2');
+  });
+
+  it('honors a model that does belong to the chosen provider', () => {
+    const resolved = resolveProvider({
+      ai: { provider: 'anthropic', model: 'claude-haiku-4-5-20251001', api_keys: { anthropic: 'sk-a' } },
+    } as unknown as Parameters<typeof resolveProvider>[0]);
+    expect(resolved?.model).toBe('claude-haiku-4-5-20251001');
+  });
+});

@@ -346,6 +346,44 @@ describe('renderTimeline / renderTree fidelity', () => {
   });
 });
 
+/**
+ * Step names, errors, models and decision text are producer output — tool
+ * stderr, an HTTP error body, a sub-agent's reply. Rendered raw, an ESC sequence
+ * in any of them retargets the terminal of the operator reading the run (recolor,
+ * clear, or set the window title via OSC) and breaks the width math boxen uses.
+ * The live event protocol already escapes a rejected line for exactly this
+ * reason; these are its sibling render paths.
+ */
+describe('terminal control sequences in trace text', () => {
+  const ESC = String.fromCharCode(27);
+  const BEL = String.fromCharCode(7);
+  const payload = `inj${ESC}[31mRED${ESC}[0m${ESC}]0;PWNED${BEL}`;
+  const hasControls = (out: string) => /[\u0000-\u0008\u000b-\u001f\u007f]/.test(noAnsi(out));
+
+  it('escapes them in the timeline, the tree and the header panel', () => {
+    const evil = step({
+      step_type: 'llm_call', name: payload, model: payload,
+      error: `${ESC}[2Kboom`,
+      decision: { chosen: payload, rationale: payload, confidence: null, decided_by: 'model' },
+    } as Partial<TraceStep> & { step_type: StepType });
+
+    for (const out of [
+      renderTimeline([evil], { showInput: true, showOutput: true }),
+      renderTree([evil]),
+      traceHeaderPanel(trace({ agent_name: payload, error: `child${ESC}[31m died` })),
+    ]) {
+      expect(hasControls(out)).toBe(false);
+      // The text itself is still shown, with the sequence made visible.
+      expect(noAnsi(out)).toMatch(/\\x1b/);
+    }
+  });
+
+  it('keeps a newline in a multi-line error', () => {
+    const out = renderTimeline([step({ step_type: 'error', name: 'x', error: 'line one\nline two' })]);
+    expect(noAnsi(out)).toContain('line two');
+  });
+});
+
 describe('traceHeaderPanel cost precision', () => {
   it('does not render a real sub-cent cost as $0.0000', () => {
     // Regression: toFixed(4) turned anything under $0.00005 into "$0.0000" —

@@ -80,6 +80,26 @@ export function formatCostUsd(cost: number): string {
   return cost > 0 && cost < 0.0001 ? `$${cost.toFixed(8)}` : `$${cost.toFixed(4)}`;
 }
 
+/**
+ * Escape terminal control sequences in text that came from a trace.
+ *
+ * Step names, errors, models, decision rationales and agent names are producer
+ * output: tool stderr, an HTTP error body, a sub-agent's reply. Echoed raw, an
+ * ESC sequence in any of them can recolor or clear the terminal of the operator
+ * reading the run, or set the window title via OSC — the same threat the live
+ * event protocol already escapes for a rejected event line, and the reason the
+ * AI-eval prompt fences trace content. ESC bytes also break the width math
+ * boxen uses, so a panel with one in it drew misaligned borders.
+ *
+ * Newline and tab survive: they carry real formatting for multi-line errors and
+ * cannot move the cursor or address the terminal. Everything else in C0, plus
+ * DEL, is rendered visibly as `\xNN`.
+ */
+export function safeText(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
+}
+
 export function scoreBadge(score: number): string {
   const display = formatScorePct(score);
   if (score >= 0.8) return chalk.greenBright.bold(display);

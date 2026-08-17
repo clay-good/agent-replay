@@ -44,6 +44,35 @@ between them, and nothing else.
   OTel Python SDK sends, since `str(False)` capitalizes — read as a clean call,
   dropping the error text. The check is now case-insensitive.
 
+- Trace text is escaped before it reaches the terminal. Step names, errors,
+  models, decision rationales and agent names are producer output — tool stderr,
+  an HTTP error body, a sub-agent's reply — and `show`, `show --tree`, `replay`
+  and `watch` echoed them raw, so an ESC sequence in any of them could recolor or
+  clear the terminal of the operator reading the run, or set the window title via
+  OSC. The same bytes also broke the width math behind the header panel's
+  borders. `run` already escaped a rejected event line for this reason; these
+  were its sibling render paths. Newlines and tabs still render as formatting.
+
+- An AI evaluator's list field that the model sent as a bare string ("issues":
+  "too long" instead of a list) rendered as one bullet PER CHARACTER, and the
+  malformed value was persisted in `details` for `show` and `export`. Such a
+  reply now carries a single item, and a value that is neither a list nor a
+  string carries none.
+
+- The native `record` protocol stored a negative or non-finite `tokens_used` /
+  `duration_ms` verbatim, while `ingest` rejects those values — so a trace this
+  tool captured could not be re-ingested from its own export, breaking the
+  round-trip the golden gate depends on. Both importers and the stream
+  translators already clamped. The unusable field is now dropped with a warning
+  and the step is kept.
+
+- An explicit `ai.provider` applied a configured `ai.model` from another vendor's
+  family, so `provider = openai` with a leftover `model = claude-*` sent that
+  name to OpenAI (a confusing auth error at eval time) and priced `--max-cost`
+  off Anthropic's sheet. It now falls back to the provider's default model, as
+  auto-detection already did, and the README's claim is true again. A model of no
+  known family — a proxy's own name — still passes through.
+
 - `demo --reset` could delete a working tree that merely looked like a store. The
   guard accepted any directory whose name starts with `agent-replay`, which a
   source checkout called `agent-replay-project` does, and then removed the tree
