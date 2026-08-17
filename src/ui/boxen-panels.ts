@@ -22,8 +22,18 @@ export function traceHeaderPanel(trace: Trace): string {
   if (durationMs != null) {
     lines.push(`${label('Duration:')}  ${chalk.white(formatDuration(durationMs))}`);
   }
-  if (trace.total_tokens != null) {
-    lines.push(`${label('Tokens:')}    ${chalk.white(trace.total_tokens.toLocaleString())}`);
+  // Fall back to the steps' own counts. The trace-level column is set only when
+  // a producer reports a total, so `show` omitted the Tokens line entirely for a
+  // trace whose tokens are recorded per step — while `replay` of the same trace
+  // printed a total and `stats` counted it in the store roll-up.
+  const steps = (trace as { steps?: { tokens_used: number | null }[] }).steps;
+  const stepTokens = steps?.reduce<number | null>(
+    (sum, s) => (s.tokens_used == null ? sum : (sum ?? 0) + s.tokens_used),
+    null,
+  );
+  const tokens = trace.total_tokens ?? trace.effective_tokens ?? stepTokens ?? null;
+  if (tokens != null) {
+    lines.push(`${label('Tokens:')}    ${chalk.white(tokens.toLocaleString())}`);
   }
   if (trace.total_cost_usd != null) {
     // A per-trace cost is routinely a fraction of a cent, and toFixed(4)

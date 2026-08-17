@@ -32,6 +32,12 @@ export interface Trace {
   created_at: string;
   /** Not a stored column — populated by listTraces for display (step count). */
   step_count?: number;
+  /**
+   * Not a stored column — the trace's token usage as it should be DISPLAYED:
+   * `total_tokens` when the producer reported one, otherwise the sum of the
+   * steps' `tokens_used`. The stored column stays exactly as written.
+   */
+  effective_tokens?: number | null;
 }
 
 // ── Decision records ──────────────────────────────────────────────────────

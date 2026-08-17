@@ -1051,15 +1051,24 @@ export function listTraces(
   // as NULLs, so `list --sort -duration` visibly ended with its longest rows and
   // "my slowest traces" returned the wrong set. Mirror the fallback here, as
   // `stats` already does for its average.
+  const TOKENS_EXPR = `COALESCE(
+    total_tokens,
+    (SELECT SUM(s.tokens_used) FROM agent_trace_steps s WHERE s.trace_id = agent_traces.id)
+  )`;
   const DURATION_EXPR = `COALESCE(
     total_duration_ms,
     CASE WHEN ended_at IS NOT NULL AND julianday(ended_at) >= julianday(started_at)
          THEN (julianday(ended_at) - julianday(started_at)) * 86400000.0 END
   )`;
+  // `tokens` needs the same treatment as `duration`, for the same reason: the
+  // trace-level column is set only when a producer reports a total, while
+  // `ingest`, `record`, the OTel mapper and the importers all populate per-step
+  // `tokens_used`. Sorting on the raw column ranked a 50,000-token trace BELOW
+  // a 7-token one — "show me my most expensive runs" returned the cheapest.
   const sortMap: Record<string, string> = {
     started_at: 'started_at',
     duration: DURATION_EXPR,
-    tokens: 'total_tokens',
+    tokens: TOKENS_EXPR,
     cost: 'total_cost_usd',
     agent_name: 'agent_name',
   };
@@ -1085,7 +1094,8 @@ export function listTraces(
   const rows = db
     .prepare(
       `SELECT *,
-        (SELECT COUNT(*) FROM agent_trace_steps s WHERE s.trace_id = agent_traces.id) AS step_count
+        (SELECT COUNT(*) FROM agent_trace_steps s WHERE s.trace_id = agent_traces.id) AS step_count,
+        ${TOKENS_EXPR} AS effective_tokens
        FROM agent_traces ${whereClause} ORDER BY ${sortCol} ${sortDir}, id ASC LIMIT ? OFFSET ?`,
     )
     .all([...params, limit, offset]) as Record<string, unknown>[];
@@ -1094,6 +1104,7 @@ export function listTraces(
     items: rows.map((row) => {
       const trace = rowToTrace(row);
       trace.step_count = (row.step_count as number) ?? 0;
+      trace.effective_tokens = (row.effective_tokens as number | null) ?? null;
       return trace;
     }),
     total: countRow.cnt,

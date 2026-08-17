@@ -48,7 +48,10 @@ export function traceTable(traces: Trace[]): string {
       status,
       chalk.white(stepCountStr(t)),
       formatDurationShort(effectiveDurationMs(t)),
-      t.total_tokens != null ? chalk.white(t.total_tokens.toLocaleString()) : chalk.dim('-'),
+      // `effective_tokens` falls back to the steps' own counts; the trace-level
+      // column is only set when a producer reports a total, so this column read
+      // "-" for every trace whose tokens are recorded per step.
+      tokensCell(t),
       formatRelative(t.started_at),
     ]);
   }
@@ -118,6 +121,12 @@ export function policyTable(policies: GuardrailPolicy[]): string {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
+
+/** The trace's token usage as displayed: reported total, else the steps' sum. */
+function tokensCell(t: Trace): string {
+  const tokens = t.effective_tokens ?? t.total_tokens;
+  return tokens != null ? chalk.white(tokens.toLocaleString()) : chalk.dim('-');
+}
 
 function stepCountStr(trace: Trace): string {
   // listTraces computes step_count; fall back to metadata, then a dash.

@@ -884,3 +884,31 @@ describe('listTraces --sort duration matches the displayed duration', () => {
     expect(desc).toEqual(['derived', 'explicit']);
   });
 });
+
+
+describe('token totals fall back to the steps that carry them', () => {
+  it('displays and sorts by the effective token count', () => {
+    // Regression: the trace-level column is set only when a producer reports a
+    // total, while ingest/record/OTel/importers all populate per-step
+    // tokens_used — so `list` showed "-" for a measured trace and
+    // `--sort -tokens` ranked a 50,000-token trace BELOW a 7-token one:
+    // "my most expensive runs" returned the cheapest. `stats` and `replay`
+    // already derived from the steps, so the tool disagreed with itself.
+    ingestTrace(db, {
+      agent_name: 'big-steps', status: 'completed',
+      steps: [{ step_number: 1, step_type: 'llm_call', name: 'x', tokens_used: 50_000 }],
+    } as never);
+    ingestTrace(db, {
+      agent_name: 'small-total', status: 'completed', total_tokens: 7,
+      steps: [{ step_number: 1, step_type: 'llm_call', name: 'y' }],
+    } as never);
+
+    const byTokens = listTraces(db, { sort_by: 'tokens', sort_order: 'desc' }).items;
+    expect(byTokens.map((t) => t.agent_name)).toEqual(['big-steps', 'small-total']);
+    expect(byTokens[0].effective_tokens).toBe(50_000);
+    // A producer-reported total still wins over the steps' sum.
+    expect(byTokens[1].effective_tokens).toBe(7);
+    // The stored column is untouched — this is a display value.
+    expect(byTokens[0].total_tokens).toBeNull();
+  });
+});

@@ -117,6 +117,15 @@ nothing else.
 
 ### Fixed
 
+- `list` and `show` now report token usage from the steps that carry it when
+  the trace-level total is absent, and `--sort tokens` orders by the same
+  number. The trace column is set only when a producer reports a total, so a
+  measured trace showed "-" in the Tokens column and no Tokens line in `show`,
+  while `replay` printed a total and `stats` counted it — the tool disagreeing
+  with itself about one trace. Worse, `list --sort -tokens` ranked a
+  50,000-token trace below a 7-token one, so "my most expensive runs" returned
+  the cheapest. The stored column is unchanged; this is a display value.
+
 - `eval --ai` now treats trace content as data rather than instruction. The
   summary handed to the judge is built from the agent's prompts, tool inputs,
   and tool *outputs* — content an attacker can influence — and it was
