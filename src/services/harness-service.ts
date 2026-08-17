@@ -28,6 +28,10 @@ export interface RunWrappedOptions {
 }
 
 export interface RunWrappedResult {
+  /** The status the trace ACTUALLY ended with — which is not always derivable
+   * from the exit code, because an explicit `trace_end` status from the child
+   * is honored over it. The caller must report this rather than re-deriving. */
+  status: string;
   traceId: string;
   exitCode: number;
   eventsApplied: number;
@@ -271,5 +275,9 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
 
   rmSync(channelDir, { recursive: true, force: true });
 
-  return { traceId: trace.id, exitCode, eventsApplied: applied };
+  const finalStatus = (db.prepare('SELECT status FROM agent_traces WHERE id = ?').get(trace.id) as
+    | { status: string }
+    | undefined)?.status ?? 'unknown';
+
+  return { traceId: trace.id, status: finalStatus, exitCode, eventsApplied: applied };
 }

@@ -35,7 +35,17 @@ export async function runRun(parts: string[] = [], opts: RunOptions = {}): Promi
     dbDir,
   });
 
-  const status = result.exitCode === 0 ? chalk.green('completed') : chalk.redBright(`failed (exit ${result.exitCode})`);
+  // Report the status the trace was actually stored with. Deriving it from the
+  // exit code alone made the wrapper contradict its own database: a child that
+  // declares `trace_end {status: completed}` and then exits non-zero — a crash
+  // during shutdown, after the agent's work succeeded — keeps its declared
+  // status (that is deliberate), but this line announced "failed". Name both
+  // when they disagree, so neither fact is hidden.
+  const disagrees = (result.exitCode === 0) !== (result.status === 'completed');
+  const status =
+    result.status === 'completed'
+      ? chalk.green(disagrees ? `completed (child exited ${result.exitCode})` : 'completed')
+      : chalk.redBright(`${result.status} (exit ${result.exitCode})`);
   console.error(
     chalk.dim(`\n  agent-replay: trace ${shortId(result.traceId)} ${status}, ${result.eventsApplied} event(s) recorded.`),
   );

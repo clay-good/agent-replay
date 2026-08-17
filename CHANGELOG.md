@@ -117,6 +117,13 @@ nothing else.
 
 ### Fixed
 
+- `run`'s summary line now reports the status the trace was actually stored
+  with. It was derived from the exit code alone, so a child that declares
+  `trace_end {status: completed}` and then exits non-zero — a crash during
+  shutdown, after the agent's work succeeded — was announced as "failed" while
+  the database recorded `completed`. Honoring the child's explicit status is
+  deliberate; contradicting it was not. When the two disagree, both are named.
+
 - An AI preset's declared `threshold` now actually drives its verdict and is
   recorded in the result's details. Each preset hardcoded a literal that
   happened to equal its declared value, so editing the field silently did

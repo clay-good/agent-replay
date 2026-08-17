@@ -225,3 +225,32 @@ fs.appendFileSync(f, ev(3));
     expect(getTrace(db, res.traceId)!.status).toBe('completed');
   }, 15000);
 });
+
+
+describe('runWrapped reports the status it stored', () => {
+  it('returns the child-declared status alongside a disagreeing exit code', async () => {
+    // Regression: the CLI summary derived its wording from the exit code alone,
+    // so a child that declares trace_end {status: completed} and then exits
+    // non-zero — a crash during shutdown, after the work succeeded — was
+    // announced as "failed" while the database recorded `completed`. Honoring
+    // the child's explicit status is deliberate; contradicting it is not.
+    const LIAR = `
+const fs = require('fs');
+fs.appendFileSync(process.env.AGENT_REPLAY_EVENTS,
+  JSON.stringify({ v: 1, type: 'trace_end', trace_id: process.env.AGENT_REPLAY_TRACE_ID, status: 'completed' }) + '\\n');
+process.exit(3);
+`;
+    const res = await runWrapped(db, { command: process.execPath, args: ['-e', LIAR], agentName: 'liar' });
+
+    expect(res.exitCode).toBe(3);            // the child's status still propagates
+    expect(res.status).toBe('completed');    // and matches what was stored
+    expect(getTrace(db, res.traceId)!.status).toBe('completed');
+    expect(getTrace(db, res.traceId)!.metadata.exit_code).toBe(3);
+  }, 15000);
+
+  it('reports failed when nothing overrode the exit code', async () => {
+    const res = await runWrapped(db, { command: process.execPath, args: ['-e', 'process.exit(4)'], agentName: 'plain' });
+    expect(res.status).toBe('failed');
+    expect(res.exitCode).toBe(4);
+  }, 15000);
+});
