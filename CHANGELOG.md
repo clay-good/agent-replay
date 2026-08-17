@@ -2156,6 +2156,40 @@ between them, and nothing else.
 
 ### Security
 
+- `show` and `replay` echoed three producer-authored header fields raw —
+  `agent_version`, `tags` and `session_id` — beside `agent_name` and `error`,
+  which were already escaped. Ingest validation only checks that these are
+  strings, so an ESC or OSC sequence survived it and reached the terminal of
+  whoever inspected the trace: setting the window title, leaving an attribute set
+  after the command, or (a lone carriage return) overwriting the line it sits on.
+  The model-authored fields in the `diff --ai` and `eval --ai` panels are escaped
+  now too.
+
+- A fork turned `check --golden` permanently red. A fork is a never-executed copy
+  — same agent name and input, a truncated step prefix, status `running` — so it
+  matched its own baseline and diverged on step count and status, reported as
+  REGRESSED at exit 1, the code reserved for a real regression. One `fork` on a
+  shared store failed every later gate run, indistinguishably from a genuine
+  failure. Candidates now exclude forks by lineage, as the hook, OTel and `watch`
+  lookups already did, and also exclude `running` traces, whose partial shape is
+  not a regression.
+
+- `export --format golden` baked forks into the baseline, which then let a real
+  run that crashed part way reproduce the fork's shorter shape and pass. A golden
+  dataset is a set of known-good runs; a `json`/`jsonl` export is a backup and
+  still carries them.
+
+- `watch` announced a failed run without saying why. The earlier fix covered a
+  failure a STEP recorded, but the two most common failure paths write a
+  trace-level error and no step error at all — `run` finalizing a non-zero child
+  exit, and a `trace_end` event carrying `error` — so the one view open when a run
+  died showed only "FAILED" while `show` printed the reason.
+
+- `list` had its own copy of the relative-time formatter, drifted from the shared
+  one: no month bucket ("45d ago" where the dashboard said "1mo ago") and no
+  future guard, so a skewed future timestamp read as "just now" while sorting to
+  the top.
+
 - `guard check` answered `allow` at exit 0 against a store holding no enabled
   policies — the same fail-open as `hook --enforce`, in the command documented
   as the gate for harnesses without hooks, and reachable through the same door

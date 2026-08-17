@@ -159,6 +159,19 @@ export function runCheck(opts: CheckOptions = {}): void {
     try {
       const { items } = listTraces(db, filter);
       for (const item of items) {
+        // A FORK is a never-executed copy: `fork` duplicates a step prefix under
+        // the same agent name and input, so it matches its own baseline's key and
+        // then diverges on step_count and status — reported as REGRESSED, at exit
+        // 1, the code reserved for a real regression. One `fork` (the debugging
+        // feature this tool leads with) would turn a CI gate permanently red on a
+        // shared store, indistinguishably from a genuine failure. Every other
+        // consumer already excludes forks by lineage: the hook's open-trace
+        // lookup, the OTel merge target, and the running-trace lookup `watch` uses.
+        //
+        // A RUNNING trace is excluded for the same reason: it is mid-flight, so
+        // its partial shape is not a regression. A run that hangs still reaches
+        // the gate once it finalizes as `timeout`.
+        if (item.parent_trace_id != null || item.status === 'running') continue;
         const full = getTrace(db, item.id);
         if (full) candidates.push(full);
       }

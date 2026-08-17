@@ -422,3 +422,28 @@ describe('traceHeaderPanel cost precision', () => {
     expect(noAnsi(traceHeaderPanel(trace({ total_cost_usd: 0.1972 })))).toMatch(/\$0\.1972/);
   });
 });
+
+describe('the trace header escapes every producer field, not just some', () => {
+  it('escapes agent_version, tags and session_id', () => {
+    // `validateTraceInput` only checks these are strings, so an ESC/OSC sequence
+    // survives `ingest` untouched and reached the terminal of whoever ran `show`
+    // or `replay`: setting the window title, leaving an attribute set past the
+    // command, or (a lone CR) overwriting the line it sits on. agent_name and
+    // error on the same panel were already escaped.
+    const panel = traceHeaderPanel({
+      ...trace(),
+      agent_version: '1\u001b[5m',
+      tags: ['t\u001b[31mRED', 'aaa\rbbb'],
+      session_id: 's\u001b]0;PWNED\u0007',
+    });
+    expect(panel).not.toContain('\u001b[5m');
+    expect(panel).not.toContain('\u001b[31m');
+    expect(panel).not.toContain('\u001b]0;');
+    expect(panel).not.toContain('\u0007');
+    expect(panel).not.toMatch(/\r(?!\n)/);
+    // The content is still shown, just neutralized.
+    expect(panel).toContain('PWNED');
+    expect(panel).toContain('RED');
+  });
+});
+

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseDurationString, parseSinceToIso, formatDuration, effectiveDurationMs, formatRelativeTime, formatTimestamp } from '../src/utils/time.js';
+import { traceTable } from '../src/ui/table.js';
 
 describe('parseDurationString', () => {
   it('parses units to milliseconds', () => {
@@ -114,3 +115,35 @@ describe('formatRelativeTime', () => {
     expect(formatRelativeTime(new Date(Date.now() + 60_000).toISOString())).toBe('in the future');
   });
 });
+
+describe('list and dashboard format the same timestamp identically', () => {
+  it('uses one relative-time formatter, with month and future handling', () => {
+    // `list` had a private copy that stopped at days and had no future guard, so
+    // it said "45d ago" where the dashboard said "1mo ago", and a skewed future
+    // timestamp read as "just now" while sorting to the top.
+    const rows = traceTable([
+      {
+        id: 'trc_old', agent_name: 'old', agent_version: null, trigger: 'manual',
+        status: 'completed', input: {}, output: null, error: null, tags: [], metadata: {},
+        started_at: new Date(Date.now() - 45 * 86_400_000).toISOString(),
+        ended_at: null, total_duration_ms: null, total_tokens: null, total_cost_usd: null,
+        parent_trace_id: null, forked_from_step: null, session_id: null,
+        created_at: new Date().toISOString(), step_count: 0,
+      },
+      {
+        id: 'trc_fut', agent_name: 'fut', agent_version: null, trigger: 'manual',
+        status: 'completed', input: {}, output: null, error: null, tags: [], metadata: {},
+        started_at: new Date(Date.now() + 3 * 86_400_000).toISOString(),
+        ended_at: null, total_duration_ms: null, total_tokens: null, total_cost_usd: null,
+        parent_trace_id: null, forked_from_step: null, session_id: null,
+        created_at: new Date().toISOString(), step_count: 0,
+      },
+    ] as never);
+
+    expect(rows).toContain(formatRelativeTime(new Date(Date.now() - 45 * 86_400_000).toISOString()));
+    expect(rows).toContain('1mo ago');
+    expect(rows).toContain('in the future');
+    expect(rows).not.toContain('45d ago');
+  });
+});
+

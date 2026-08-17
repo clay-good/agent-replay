@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { runMigrations } from '../src/db/migrations.js';
-import { ensureDatabase } from '../src/db/index.js';
+import { ensureDatabase, resetConnection } from '../src/db/index.js';
 import {
   startTrace,
   appendStep,
@@ -272,6 +272,38 @@ describe('runWatch shows a step\'s outcome, not just its start', () => {
     expect(plain).toContain('999 tok');
     // And it closes exactly once, however many polls follow.
     expect(plain.match(/TOOL BLEW UP/g)).toHaveLength(1);
+  });
+
+  it('shows WHY a run failed, not just that it did', () => {
+    // The step-level fix covers a failure a STEP recorded. The two most common
+    // failure paths write a TRACE-level error and no step error at all: `run`
+    // finalizing a non-zero child exit, and a `trace_end` event carrying `error`.
+    // So the one view open at the moment a run died said "FAILED" and nothing
+    // else, while `show` on the same trace printed the reason.
+    const dir = mkdtempSync(join(tmpdir(), 'ar-watch-err-'));
+    const db = ensureDatabase(resolve(dir, 'traces.db'));
+    const t = startTrace(db, { agent_name: 'w', status: 'running' }, { id: 'trc_watcherr' });
+    appendStep(db, t.id, { step_number: 1, step_type: 'tool_call', name: 'fetch' });
+
+    const logs: string[] = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((m?: unknown) => { logs.push(String(m ?? '')); });
+
+    vi.useFakeTimers();
+    try {
+      runWatch(t.id, { dir, interval: '20' });
+      updateTrace(db, t.id, { status: 'failed', error: 'child exited with code 3' });
+      vi.advanceTimersByTime(20);
+    } finally {
+      vi.useRealTimers();
+      logSpy.mockRestore();
+      process.removeAllListeners('SIGINT');
+      resetConnection();
+      rmSync(dir, { recursive: true, force: true });
+    }
+
+    const plain = logs.map((l) => l.replace(/\x1B\[[0-9;]*m/g, '')).join('\n');
+    expect(plain).toContain('FAILED');
+    expect(plain).toContain('child exited with code 3');
   });
 
   it('does not add a closing line for a single-phase step', () => {

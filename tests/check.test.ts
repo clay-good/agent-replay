@@ -9,6 +9,7 @@ import { exportTraces } from '../src/services/export-service.js';
 import { checkGolden, inputHash, stableStringify } from '../src/services/check-service.js';
 import { ensureDatabase, resetConnection } from '../src/db/index.js';
 import { runCheck } from '../src/commands/check.js';
+import { forkTrace } from '../src/services/fork-service.js';
 import type { GoldenEntry } from '../src/services/export-service.js';
 import type { IngestTraceInput, TraceWithDetails } from '../src/models/types.js';
 
@@ -832,3 +833,63 @@ describe('a step that now fails is a regression', () => {
     expect(checkGolden(legacy, [candidate(withTool('boom'))]).ok).toBe(true);
   });
 });
+
+describe('a fork is not a candidate run and not a baseline', () => {
+  it('does not let a fork turn the gate red', () => {
+    // `fork` duplicates a step prefix under the same agent name and input, so a
+    // fork matches its own baseline's key and then diverges on step_count and
+    // status — reported REGRESSED at exit 1, the code reserved for a real
+    // regression. One fork on a shared store turned a CI gate permanently red,
+    // indistinguishably from a genuine failure. Every other consumer already
+    // excludes forks by lineage.
+    const dir = mkdtempSync(join(tmpdir(), 'ar-check-fork-'));
+    try {
+      const cdb = ensureDatabase(resolve(dir, 'traces.db'));
+      const traceId = ingestTrace(cdb, baseline).id;
+      const goldenPath = join(dir, 'golden.json');
+      writeFileSync(goldenPath, exportTraces(cdb, { agent_name: 'travel-bot' }, 'golden'));
+
+      const before = runCheckReport(goldenPath, dir);
+      expect(before.ok).toBe(true);
+
+      forkTrace(cdb, traceId, 2);
+
+      const after = runCheckReport(goldenPath, dir);
+      expect(after.ok).toBe(true); // the real run is unchanged; nothing regressed
+      expect(after.failed).toBe(0);
+    } finally {
+      resetConnection();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not bake a fork into a golden baseline', () => {
+    // A golden dataset is a set of known-good RUNS. A fork is a never-executed
+    // copy, so baking one in gives `check` a SHORTER shape to match: a real run
+    // that crashed part way then reproduces the fork and is certified green.
+    const traceId = ingestTrace(db, baseline).id;
+    forkTrace(db, traceId, 2);
+    const entries = JSON.parse(exportTraces(db, { agent_name: 'travel-bot' }, 'golden')) as GoldenEntry[];
+    expect(entries).toHaveLength(1);
+    expect(entries[0].steps_summary).toHaveLength(3);
+    // A json export is a backup and must still carry the fork.
+    expect(JSON.parse(exportTraces(db, { agent_name: 'travel-bot' }, 'json'))).toHaveLength(2);
+  });
+});
+
+/** Run `check --golden` in `dir` and return the parsed --json report. */
+function runCheckReport(goldenPath: string, dir: string): { ok: boolean; failed: number } {
+  const out: string[] = [];
+  const prevExit = process.exitCode;
+  const spy = vi.spyOn(console, 'log').mockImplementation((m?: unknown) => {
+    out.push(String(m));
+  });
+  try {
+    runCheck({ golden: goldenPath, dir, json: true });
+  } finally {
+    spy.mockRestore();
+    process.exitCode = prevExit;
+  }
+  return JSON.parse(out.join('\n')) as { ok: boolean; failed: number };
+}
+

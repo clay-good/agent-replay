@@ -9,11 +9,19 @@ import { effectiveTokens } from '../utils/totals.js';
 /**
  * Trace metadata header panel (shown at top of `show` command).
  */
+/**
+ * Every producer-authored field here is escaped. `agent_version`, `tags` and
+ * `session_id` were not: `validateTraceInput` only checks that they are strings,
+ * so an ESC/OSC sequence survives `ingest` untouched and reached the terminal of
+ * whoever ran `show` or `replay` — setting the window title, leaving a colour or
+ * blink attribute set past the command, or (a lone CR) overwriting the line it
+ * sits on. It also broke the width math boxen uses, visibly misaligning the box.
+ */
 export function traceHeaderPanel(trace: Trace): string {
   const lines: string[] = [];
 
   lines.push(
-    `${label('Agent:')}     ${chalk.whiteBright.bold(safeText(trace.agent_name))}${trace.agent_version ? chalk.dim(` v${trace.agent_version}`) : ''}`,
+    `${label('Agent:')}     ${chalk.whiteBright.bold(safeText(trace.agent_name))}${trace.agent_version ? chalk.dim(` v${safeText(trace.agent_version)}`) : ''}`,
   );
   lines.push(`${label('Trace ID:')}  ${chalk.dim(trace.id)}`);
   lines.push(`${label('Status:')}    ${statusBadge(trace.status as TraceStatus)}`);
@@ -41,7 +49,7 @@ export function traceHeaderPanel(trace: Trace): string {
   }
   if (trace.tags.length > 0) {
     lines.push(
-      `${label('Tags:')}      ${trace.tags.map((t) => colors.info(`[${t}]`)).join(' ')}`,
+      `${label('Tags:')}      ${trace.tags.map((t) => colors.info(`[${safeText(t)}]`)).join(' ')}`,
     );
   }
   if (trace.error) {
@@ -51,7 +59,7 @@ export function traceHeaderPanel(trace: Trace): string {
     lines.push(`${label('Fork of:')}   ${chalk.dim(trace.parent_trace_id)} ${chalk.dim(`(step ${trace.forked_from_step})`)}`);
   }
   if (trace.session_id) {
-    lines.push(`${label('Session:')}   ${chalk.white(trace.session_id)}`);
+    lines.push(`${label('Session:')}   ${chalk.white(safeText(trace.session_id))}`);
   }
 
   return boxen(lines.join('\n'), {
@@ -125,7 +133,7 @@ export function aiEvalPanel(evalResult: { evaluator_name: string; score: number;
     if (d.suggested_fix) {
       lines.push(`${label('Suggested fix:')} ${chalk.white(safeText(String(d.suggested_fix)))}`);
     }
-    lines.push(`${label('Severity:')} ${chalk.white(String(d.severity ?? 'medium'))}  ${label('Confidence:')} ${chalk.white(formatScorePct(evalResult.score))}`);
+    lines.push(`${label('Severity:')} ${chalk.white(safeText(String(d.severity ?? 'medium')))}  ${label('Confidence:')} ${chalk.white(formatScorePct(evalResult.score))}`);
 
   } else if (evalResult.evaluator_name === 'ai-quality-review') {
     const dims = ['relevance', 'completeness', 'coherence', 'accuracy'] as const;
@@ -146,7 +154,7 @@ export function aiEvalPanel(evalResult: { evaluator_name: string; score: number;
     }
 
   } else if (evalResult.evaluator_name === 'ai-security-audit') {
-    const risk = String(d.risk_level ?? 'unknown');
+    const risk = safeText(String(d.risk_level ?? 'unknown'));
     const riskColor = risk === 'none' || risk === 'low' ? chalk.green : risk === 'medium' ? chalk.yellow : chalk.red;
     lines.push(`${label('Risk level:')} ${riskColor(risk.toUpperCase())}  ${label('Safe:')} ${d.safe ? chalk.green('YES') : chalk.red('NO')}`);
     const findings = d.findings as Array<{ type: string; description: string; step?: number; severity?: string }> | undefined;
@@ -195,7 +203,7 @@ export function aiEvalPanel(evalResult: { evaluator_name: string; score: number;
   // Cost footer
   if (d.cost_usd != null) {
     lines.push('');
-    lines.push(chalk.dim(`Cost: ${d.input_tokens ?? '?'} in + ${d.output_tokens ?? '?'} out tokens = $${Number(d.cost_usd).toFixed(6)} (${d.llm_provider}/${d.llm_model})`));
+    lines.push(chalk.dim(`Cost: ${d.input_tokens ?? '?'} in + ${d.output_tokens ?? '?'} out tokens = $${Number(d.cost_usd).toFixed(6)} (${safeText(String(d.llm_provider ?? '?'))}/${safeText(String(d.llm_model ?? '?'))})`));
   }
 
   const title = evalResult.evaluator_name.replace('ai-', 'AI ').replace(/-/g, ' ')
@@ -222,16 +230,16 @@ export function aiDiffPanel(analysis: {
 }): string {
   const lines: string[] = [];
 
-  lines.push(chalk.white(analysis.explanation));
+  lines.push(chalk.white(safeText(analysis.explanation)));
   lines.push('');
-  lines.push(`${label('Better trace:')} ${chalk.whiteBright(analysis.better_trace)}`);
-  lines.push(`${label('Reasoning:')} ${chalk.white(analysis.reasoning)}`);
+  lines.push(`${label('Better trace:')} ${chalk.whiteBright(safeText(analysis.better_trace))}`);
+  lines.push(`${label('Reasoning:')} ${chalk.white(safeText(analysis.reasoning))}`);
 
   if (analysis.key_differences.length > 0) {
     lines.push('');
     lines.push(`${label('Key differences:')}`);
     for (const diff of analysis.key_differences) {
-      lines.push(`  ${chalk.dim('-')} ${chalk.white(diff)}`);
+      lines.push(`  ${chalk.dim('-')} ${chalk.white(safeText(String(diff)))}`);
     }
   }
 

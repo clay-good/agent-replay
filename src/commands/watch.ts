@@ -98,6 +98,16 @@ export function runWatch(traceId: string | undefined, opts: WatchOptions = {}): 
     printNew();
     console.log('');
     console.log(`  ${chalk.dim('trace finished:')} ${statusBadge(status)}`);
+    // ...and WHY, when the trace carries a reason. The step-level fix above only
+    // covers a failure a step recorded; the two most common failure paths write a
+    // TRACE-level error and no step error at all — `run` finalizing a non-zero
+    // child exit, and a `trace_end` event carrying `error`. So the one view open
+    // at the moment a run dies said "FAILED" and nothing else, while `show` on
+    // the same trace printed the reason.
+    const finished = getTrace(db, id);
+    if (finished?.error) {
+      console.log(`  ${chalk.dim('error:')} ${chalk.redBright(safeText(finished.error))}`);
+    }
     console.log('');
   };
 

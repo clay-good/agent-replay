@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import type { Trace, EvalResult, GuardrailPolicy } from '../models/types.js';
 import type { TraceStatus } from '../models/enums.js';
 import { statusBadge, scoreBadge, passBadge, guardActionBadge, colors, safeText } from './theme.js';
+import { formatRelativeTime } from '../utils/time.js';
 import { isPossiblyAbandoned } from '../services/trace-service.js';
 import { effectiveDurationMs, formatDuration } from '../utils/time.js';
 
@@ -149,19 +150,15 @@ function formatDurationShort(ms: number | null): string {
   return ms == null ? chalk.dim('-') : chalk.white(formatDuration(ms));
 }
 
+/**
+ * The SHARED formatter, so `list` cannot disagree with `dashboard` about the
+ * same timestamp — the drift `formatDurationShort` above was consolidated to
+ * stop. The private copy this replaces had no month bucket ("45d ago" where the
+ * dashboard said "1mo ago") and no future guard, so a skewed future timestamp
+ * rendered as "just now" while sorting to the top of the list.
+ */
 function formatRelative(iso: string): string {
-  const d = new Date(iso);
-  // Guard an unparseable/empty started_at: getTime() is NaN, so every `<`
-  // comparison below is false and the last branch would print "NaNd ago". Show
-  // "-" instead, matching the sibling helpers formatRelativeTime/formatTimestamp.
-  if (Number.isNaN(d.getTime())) return chalk.dim('-');
-  const diffMs = Date.now() - d.getTime();
-  const diffSec = Math.floor(diffMs / 1000);
-
-  if (diffSec < 60) return chalk.dim('just now');
-  if (diffSec < 3600) return chalk.dim(`${Math.floor(diffSec / 60)}m ago`);
-  if (diffSec < 86400) return chalk.dim(`${Math.floor(diffSec / 3600)}h ago`);
-  return chalk.dim(`${Math.floor(diffSec / 86400)}d ago`);
+  return chalk.dim(formatRelativeTime(iso));
 }
 
 function summarizeDetails(details: Record<string, unknown>): string {

@@ -153,7 +153,12 @@ function goldenMetadata(trace: Trace): Record<string, unknown> {
 }
 
 function exportGolden(db: Database.Database, items: Trace[]): string {
-  const entries: GoldenEntry[] = items.map((trace) => {
+  // A golden dataset is a set of known-good RUNS. A fork is a never-executed
+  // copy — `fork` duplicates a step prefix and leaves it `running` — so baking
+  // one in gives `check` a shorter shape to match: a real run that crashed part
+  // way then reproduces the fork and the gate certifies it green. Excluded here
+  // only; a json/jsonl export is a backup and must still carry the forks.
+  const entries: GoldenEntry[] = items.filter((t) => t.parent_trace_id == null).map((trace) => {
     const full = getTrace(db, trace.id);
     const evals = full?.evals ?? [];
 
