@@ -15,8 +15,13 @@ correctness of the comparison, evaluation, and golden-regression paths
 (`diff`, `eval`, `check --golden`); guardrail enforcement that fails closed
 (`hook --enforce`); readers that show what is actually stored (`show`,
 `replay`, `list`, `stats`); more faithful live capture and import (`record`,
-`run`, `import`, `fork`); and a more robust OpenTelemetry receiver that keeps
-the content, timing, and identity its dialects carry.
+`run`, `import`, `fork`); a more robust OpenTelemetry receiver that keeps the
+content, timing, and identity its dialects carry; output that is safe to look
+at, since a trace is written by the agent under test and every command that
+prints one now escapes what it shows (and an id, which is rendered nearly
+everywhere, must be an identifier before it can be stored at all); and a
+whole-store `export` that no longer costs time quadratic in the size of the
+store.
 
 The recorded trace *data* model is unchanged — same tables and columns, so
 existing stores and exports keep working. Schema v3 and v4 add three indexes
