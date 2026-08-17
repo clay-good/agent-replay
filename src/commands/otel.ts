@@ -40,7 +40,8 @@ export async function runOtelServe(opts: OtelServeOptions = {}): Promise<void> {
 
   console.log('');
   console.log(heading(`  OTLP receiver listening on http://localhost:${handle.port}`));
-  console.log(chalk.dim('  POST /v1/traces (application/json). Press Ctrl-C to stop.'));
+  console.log(chalk.dim('  POST /v1/traces and /v1/logs — OTLP/JSON or OTLP/protobuf, gzip accepted.'));
+  console.log(chalk.dim('  Press Ctrl-C to stop.'));
   console.log('');
 
   const shutdown = async (): Promise<void> => {

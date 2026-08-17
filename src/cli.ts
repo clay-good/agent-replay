@@ -355,7 +355,7 @@ const otelCmd = program
 
 otelCmd
   .command('serve')
-  .description('Run a local OTLP/HTTP receiver mapping GenAI semconv spans (OTLP/JSON) into traces')
+  .description('Run a local OTLP/HTTP receiver: /v1/traces and /v1/logs, JSON or protobuf, into traces')
   .option('--port <port>', 'Port to listen on (default 4318)', '4318')
   .option('--dir <path>', 'Custom data directory')
   .action(async (opts) => {

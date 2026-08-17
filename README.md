@@ -49,6 +49,8 @@ Requires **Node.js 18+**.
 
 ## Commands
 
+Every command accepts `--dir <path>` to point at a data directory other than `./.agent-replay`, and `--help` lists a command's full set of flags — the sections below cover the ones worth explaining, not every switch.
+
 ### Record
 
 ```bash
@@ -91,7 +93,7 @@ For the native protocol, each event is one JSON object on its own line carrying 
 | `trace_start` | Open a trace (`agent_name` required; optional `trace_id`, `session_id`, `input`, `tags`) |
 | `step_start` / `step_end` | Open a step, then close it with output/error/timing/tokens |
 | `step` | A complete step in one event (may include a `decision` and `snapshot`) |
-| `decision` | Attach a decision record to a `decision` step |
+| `decision` | Attach a decision record to a step (any step type) |
 | `snapshot` | Freeze context/environment/tool state at a step |
 | `trace_end` | Finalize the trace (`status`, `output`, token/cost totals) |
 
@@ -161,7 +163,7 @@ command = "agent-replay hook"
 }
 ```
 
-Then watch a live session with [`agent-replay watch`](#explain-decisions).
+Then watch a live session with [`agent-replay watch`](#watch-a-live-run).
 
 #### Import existing session logs
 
@@ -229,6 +231,20 @@ agent-replay show <trace-id> --from-step 100 --to-step 150
 A windowed `show --json` carries a `step_window` object (`from`, `to`, `shown`, `omitted`) so a consumer can tell a subset from a whole trace; an unwindowed one has no such field.
 
 Trace IDs support prefix matching — just type the first few characters.
+
+### Watch a live run
+
+While a trace is still being captured — by `hook`, `record`, `run`, or the OTel receiver — `watch` live-tails it, printing each new step as it lands:
+
+```bash
+# Follow the most recent still-running trace
+agent-replay watch
+
+# Follow a specific trace, polling faster
+agent-replay watch <trace-id> --interval 200
+```
+
+With no id it picks the most recent `running` trace, so it's the natural companion to a hook-instrumented session in another terminal. It exits when the trace is finalized.
 
 ### Explain decisions
 
@@ -485,7 +501,7 @@ Every command exits non-zero on failure, so it drops cleanly into scripts and CI
 | ---- | ------- |
 | `0`  | Success — including "no matches" for queries like `list` and empty exports. |
 | `1`  | Runtime failure — trace not found, a malformed ingest, a `record` stream whose every event was rejected, a `check --golden` regression, or an `eval` that fails (a rubric below its threshold or a built-in preset that fails). |
-| `2`  | Usage error — an unknown flag, an unknown command, a missing or bad argument value, or an unexpected extra argument (a typo'd second id or a bare word meant to be a flag is rejected, not silently ignored). Also the **guard block** signal: `guard check` and `hook --enforce` exit `2` when a policy denies a step (the harness "block" convention). |
+| `2`  | Usage error — an unknown flag, an unknown command, a missing or bad argument value, or an unexpected extra argument (a typo'd second id or a bare word meant to be a flag is rejected, not silently ignored). Also the **guard block** signal: `guard check` exits `2` when a policy denies a step (the harness "block" convention), as does `hook --enforce --dialect other`. For a detected harness dialect, `hook --enforce` answers with that harness's own JSON on stdout and exits `0` — the block is the JSON, not the code — so don't gate a script on `$?` there. |
 
 Two commands instead propagate a child's own status: `run` exits with the wrapped command's exit code, and `hook` (capture mode) always exits `0` so it can never interfere with the host agent.
 
@@ -521,7 +537,7 @@ trace-level `error`, so a run that died before emitting a final step is caught.
 
 ### AI-Powered Presets
 
-These require an API key. They use the cheapest models by default (Haiku 4.5, Gemini 2.0 Flash, or GPT-4o-mini) and typically cost less than $0.01 per evaluation.
+These require an API key. They use the cheapest models by default (see the provider table below for the current defaults) and typically cost less than $0.01 per evaluation.
 
 **ai-root-cause** — For failed traces. Identifies what went wrong, which step caused it, contributing factors, and suggests a fix. Returns a confidence score.
 
@@ -604,9 +620,9 @@ Traces and steps carry optional fields that record *why* an agent acted, not jus
 | Field | On | Meaning |
 |-------|----|---------|
 | `session_id` | trace | Correlation key grouping traces from one harness session/conversation (e.g. a Claude Code / Codex `session_id`, a Gemini `session.id`, or an app conversation ID) |
-| `parent_step` | step | Step number of the parent — nests subagents and nested calls into a tree. Must reference an earlier step |
-| `caused_by_step` | step | Step number that triggered this step. Must reference a strictly earlier step (chains are acyclic) |
-| `decision` | step | Structured decision record, valid only on `decision` steps (see below) |
+| `parent_step` | step | Step number of the parent — nests subagents and nested calls into a tree. Must reference an earlier step. (Stored and returned by `show --json` as `parent_step_number`.) |
+| `caused_by_step` | step | Step number that triggered this step. Must reference a strictly earlier step (chains are acyclic). (Stored and returned by `show --json` as `caused_by_step_number`.) |
+| `decision` | step | Structured decision record, valid on a step of any type (see below) |
 
 A `decision` block:
 
