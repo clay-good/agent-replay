@@ -10,5 +10,12 @@
  * in. An explicit --dir always wins.
  */
 export function resolveDataDir(dir?: string): string {
-  return dir ?? process.env.AGENT_REPLAY_DIR ?? '.agent-replay';
+  // An EMPTY value is not a directory. `resolve('')` is the CWD, so
+  // `AGENT_REPLAY_DIR= agent-replay init` wrote the store loose into the working
+  // directory — and `demo --reset` then passed its "is this an agent-replay
+  // directory?" name check for anyone standing in a checkout named agent-replay,
+  // and rm -r'd their working tree. Treat empty as unset, everywhere.
+  if (dir != null && dir !== '') return dir;
+  const fromEnv = process.env.AGENT_REPLAY_DIR;
+  return fromEnv != null && fromEnv !== '' ? fromEnv : '.agent-replay';
 }

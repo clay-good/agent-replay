@@ -198,7 +198,14 @@ nothing else.
 - `why`'s header counts steps rather than calling them "hops" — a one-step chain
   involves no traversal at all.
 
-- `record` no longer finalizes a trace it did not open. Under the README's own
+- An empty `AGENT_REPLAY_DIR` is treated as unset rather than resolving to the
+  working directory. `AGENT_REPLAY_DIR= agent-replay init` wrote the store loose
+  into the CWD — and `demo --reset` then passed its "is this an agent-replay
+  data directory?" name check for anyone standing in a checkout named
+  `agent-replay`, and deleted their working tree.
+
+- `record` finalizes a trace it resumed by id, as documented, while leaving
+  alone the one trace an enclosing `agent-replay run` handed it. Under the README's own
   nested example (`run -- sh -c '... | agent-replay record'`) the events carry
   the wrapper's trace id, so the end-of-stream `timeout` finalization marked a
   clean run red — and permanently, since the wrapper then sees a non-running

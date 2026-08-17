@@ -34,7 +34,7 @@ export async function runDemo(opts: DemoOptions = {}): Promise<void> {
     // export it), so honoring it here meant `demo --reset` from ANY directory
     // could delete a real store that merely happens to be named .agent-replay.
     // Deleting someone's traces has to be something they typed.
-    if (!opts.dir && process.env.AGENT_REPLAY_DIR) {
+    if (!opts.dir && process.env.AGENT_REPLAY_DIR != null && process.env.AGENT_REPLAY_DIR !== '') {
       console.error(chalk.red('  Refusing to reset a store named only by AGENT_REPLAY_DIR.'));
       console.error(chalk.dim(`  Pass it explicitly if that is what you mean: --dir ${process.env.AGENT_REPLAY_DIR}`));
       process.exitCode = 1;

@@ -1,10 +1,20 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
+import { Readable } from 'node:stream';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { runMigrations } from '../src/db/migrations.js';
-import { ingestTrace, getTrace, getStepSnapshot } from '../src/services/trace-service.js';
+import { ingestTrace, getTrace, getStepSnapshot, startTrace } from '../src/services/trace-service.js';
+import { ensureDatabase, resetConnection } from '../src/db/index.js';
+
+/** Feed `runRecord` a stdin stream of pre-split lines (readline needs a real stream). */
+function setStdin(chunks: string[]): void {
+  Object.defineProperty(process, 'stdin', {
+    value: Readable.from(chunks),
+    configurable: true,
+  });
+}
 import { parseEventLine, validateEvent } from '../src/services/event-protocol.js';
 import { applyEvent, TraceRecorder } from '../src/services/recorder.js';
 import type { CaptureEvent } from '../src/services/event-protocol.js';
@@ -460,5 +470,46 @@ describe('preview escapes control characters', () => {
     expect(res.event).toBeNull();
     expect(res.warning).not.toContain('\u001b');
     expect(res.warning).toContain('\\x1b');
+  });
+});
+
+describe('record finalization contract', () => {
+  it('finalizes a trace it resumed by id, but not the wrapper trace it was handed', async () => {
+    // Narrowing finalization to traces this stream OPENED fixed a nested-`run`
+    // case but broke the documented contract for every OTHER resumed trace:
+    // "EOF with a trace still open and no --leave-open → finalized as timeout so
+    // it cannot dangle silently". Only the enclosing wrapper's own trace is
+    // exempt, and it is identifiable exactly — AGENT_REPLAY_TRACE_ID.
+    const { runRecord } = await import('../src/commands/record.js');
+    const dir = mkdtempSync(join(tmpdir(), 'ar-record-fin-'));
+    const prevTraceEnv = process.env.AGENT_REPLAY_TRACE_ID;
+    try {
+      const rdb = ensureDatabase(resolve(dir, 'traces.db'));
+      const resumed = startTrace(rdb, { agent_name: 'resumed' });
+      const wrapper = startTrace(rdb, { agent_name: 'wrapper' });
+      resetConnection();
+
+      process.env.AGENT_REPLAY_TRACE_ID = wrapper.id;
+      const line = (id: string, n: number) =>
+        JSON.stringify({ v: 1, type: 'step', trace_id: id, step_number: n, step_type: 'thought', name: 's' }) + '\n';
+      setStdin([line(resumed.id, 1), line(wrapper.id, 1)]);
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        await runRecord({ dir });
+      } finally {
+        logSpy.mockRestore();
+      }
+
+      const db2 = ensureDatabase(resolve(dir, 'traces.db'));
+      const statusOf = (id: string) =>
+        (db2.prepare('SELECT status FROM agent_traces WHERE id = ?').get(id) as { status: string }).status;
+      expect(statusOf(resumed.id)).toBe('timeout'); // cannot dangle silently
+      expect(statusOf(wrapper.id)).toBe('running'); // the wrapper finalizes its own
+    } finally {
+      if (prevTraceEnv === undefined) delete process.env.AGENT_REPLAY_TRACE_ID;
+      else process.env.AGENT_REPLAY_TRACE_ID = prevTraceEnv;
+      resetConnection();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

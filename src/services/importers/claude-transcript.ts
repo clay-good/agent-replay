@@ -99,6 +99,12 @@ export function importClaudeTranscript(
   // adding them to `skipped` reported a record count in the wrong unit (1
   // skipped where zero records existed).
   let unreadableSubagentFiles = 0;
+  let reportedUnreadable = false;
+  const reportUnreadable = (): void => {
+    if (reportedUnreadable || unreadableSubagentFiles === 0) return;
+    reportedUnreadable = true;
+    console.error(`  ⚠ ${unreadableSubagentFiles} subagent file(s) could not be read and were left out.`);
+  };
   for (const line of lines) {
     let parsed: unknown;
     try {
@@ -319,14 +325,14 @@ export function importClaudeTranscript(
   // A file that captured a prompt but no steps still imports — the prompt is
   // real content worth keeping.
   if (steps.length === 0 && !input) {
+    // Warn BEFORE this early return, not after: "nothing importable" plus
+    // "0 record(s) skipped" is exactly when the user most needs to hear that a
+    // permissions problem, not an empty session, caused it.
+    reportUnreadable();
     return { trace: null, imported, skipped, steps: 0 };
   }
 
-  if (unreadableSubagentFiles > 0) {
-    console.error(
-      `  ⚠ ${unreadableSubagentFiles} subagent file(s) could not be read and were left out.`,
-    );
-  }
+  reportUnreadable();
 
   const traceInput: IngestTraceInput = {
     agent_name: 'claude-code',

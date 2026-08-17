@@ -282,6 +282,24 @@ fs.appendFileSync(f, JSON.stringify({ v: 1, type: 'trace_end', trace_id: t, stat
 });
 
 describe('AGENT_REPLAY_DIR handshake', () => {
+  it('treats an empty value as unset', () => {
+    // `resolve('')` is the CWD, so an exported-but-empty AGENT_REPLAY_DIR wrote
+    // the store loose into the working directory — and `demo --reset` then
+    // passed its "is this an agent-replay directory?" name check for anyone
+    // standing in a checkout named agent-replay, and rm -r'd their working tree.
+    const prev = process.env.AGENT_REPLAY_DIR;
+    try {
+      process.env.AGENT_REPLAY_DIR = '';
+      expect(resolveDataDir()).toBe('.agent-replay');
+      expect(resolveDataDir('')).toBe('.agent-replay');
+      process.env.AGENT_REPLAY_DIR = '/handed/down';
+      expect(resolveDataDir('')).toBe('/handed/down');
+    } finally {
+      if (prev === undefined) delete process.env.AGENT_REPLAY_DIR;
+      else process.env.AGENT_REPLAY_DIR = prev;
+    }
+  });
+
   it('is honored by a nested agent-replay command, with --dir still winning', async () => {
     // `run` sets AGENT_REPLAY_DIR for its child and the README documents it as
     // how the wrapper hands the child its store — but nothing read it back, so a

@@ -136,7 +136,11 @@ export function resolveApiKey(
  * it. An unrecognized model name still applies, since a user naming a model the
  * table doesn't know is usually right about their own provider.
  */
-function modelOwner(model: string): 'anthropic' | 'google' | 'openai' | null {
+function modelOwner(model: unknown): 'anthropic' | 'google' | 'openai' | null {
+  // `loadConfig` does a bare JSON.parse with no schema check, so a hand-edited
+  // `"model": 123` reaches here; it used to return null from the key loop and
+  // produce eval's friendly "No AI provider configured", not a TypeError.
+  if (typeof model !== 'string') return null;
   const m = model.toLowerCase();
   if (m.startsWith('claude')) return 'anthropic';
   if (m.startsWith('gemini')) return 'google';
@@ -144,7 +148,7 @@ function modelOwner(model: string): 'anthropic' | 'google' | 'openai' | null {
   return null;
 }
 
-function modelSuitsProvider(model: string, provider: 'anthropic' | 'google' | 'openai'): boolean {
+function modelSuitsProvider(model: unknown, provider: 'anthropic' | 'google' | 'openai'): boolean {
   const owner = modelOwner(model);
   return owner === null || owner === provider;
 }

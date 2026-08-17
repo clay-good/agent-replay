@@ -252,7 +252,10 @@ export function makeTranslator(format: string): StreamTranslator | null {
 /** A finite number from a producer value, or 0 — never a string to concatenate. */
 function toNum(v: unknown): number {
   const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN;
-  return Number.isFinite(n) ? n : 0;
+  // Clamp at zero, like the importers': a negative usage count is not a token
+  // total, and it survived capture only to be REJECTED on re-ingest, so an
+  // export of such a trace could not be restored.
+  return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 function str(v: unknown): string | undefined {

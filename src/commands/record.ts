@@ -120,15 +120,19 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
     for (const ev of translator.finalize()) apply(ev);
   }
 
-  // Finalize any trace still running when the stream ended — but only traces
-  // THIS stream opened. A producer may resume an existing trace by id, and
-  // under `run -- sh -c '... | agent-replay record'` (the README's own nested
-  // example) those events carry the WRAPPER's trace id: finalizing it as
-  // `timeout` when the pipe closed marked a clean run red and permanently
-  // wrong, since the wrapper then sees a non-running status and leaves it be.
+  // Finalize any trace still running when the stream ended, so it cannot dangle
+  // silently (the documented contract). The ONE exception is the trace this
+  // process was handed by an enclosing `agent-replay run`: under the README's
+  // nested example (`run -- sh -c '... | agent-replay record'`) the events carry
+  // the WRAPPER's trace id, and finalizing it as `timeout` when the pipe closed
+  // marked a clean run red and permanently wrong. Excluding only that id keeps
+  // the contract for every trace this stream resumed by id, which excluding all
+  // non-opened traces had broken — they dangled `running` forever.
+  const wrapperTraceId = process.env.AGENT_REPLAY_TRACE_ID;
   let finalized = 0;
   if (!opts.leaveOpen) {
-    for (const id of opened) {
+    for (const id of touched) {
+      if (id === wrapperTraceId && !opened.has(id)) continue;
       const row = db.prepare('SELECT status FROM agent_traces WHERE id = ?').get(id) as
         | { status: string }
         | undefined;
