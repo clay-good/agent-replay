@@ -115,8 +115,6 @@ nothing else.
   that doesn't read hook stdout ignores, letting the denied call run. Nothing
   in a payload distinguishes such a harness, so the user says.
 
-### Added
-
 - `guard disable <policy>` and `guard enable <policy>` turn a policy off and on
   without deleting it. Every policy carries an enabled flag that evaluation
   already respected, but nothing could set it: silencing a rule meant deleting
@@ -138,6 +136,24 @@ nothing else.
   survive into CI as a wrong verdict.
 
 ### Fixed
+
+- Guardrails now see the payload the harness actually sent. `hook` and `guard
+  check` decoded stdin chunk by chunk, and a pipe delivers 64 KiB at a time, so
+  any multi-byte character straddling a boundary (emoji, CJK, accented text, a
+  smart quote) became U+FFFD. The JSON stayed valid, so nothing reported it: a
+  content-based `deny` stopped matching the corrupted text and the tool call was
+  **allowed**, and the same mangled text was stored as the audit record.
+
+- `hook --enforce` no longer allows everything when it cannot find the store.
+  The path resolves from the hook process's working directory and was *created*
+  when missing, so a hook firing from any other directory silently ran against
+  an empty policy set. It now blocks and says why — the same fail-closed posture
+  as every other "could not evaluate" case on that path.
+
+- A `name_regex` using a Unicode property escape (`\p{Script=Han}`) now works.
+  Patterns compiled without the `u` flag, which degrades `\p` to a literal `p`,
+  so such a policy validated cleanly, listed as an active deny, and matched
+  nothing at all. Patterns that are only legal without `u` still compile.
 
 - `list` and the dashboard's recent-traces table now order by the *instant* a
   trace started, not by the bytes of its timestamp. `started_at` is TEXT and

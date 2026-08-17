@@ -192,6 +192,13 @@ You can also evaluate a single step out of band:
 echo '{"step_type":"tool_call","name":"delete_user"}' | agent-replay guard check   # exit 2 if denied
 ```
 
+It prints a machine-readable verdict on stdout — `{"action", "policy", "reason"}`
+— with the human-readable line on stderr, so it scripts cleanly:
+`{"action":"deny","policy":"no-deletes","reason":"..."}` on a block,
+`{"action":"allow","policy":null,"reason":null}` otherwise. Standalone,
+`require_review` prompts when a TTY is present and otherwise fails closed,
+reporting `deny` with a "review required (no TTY — failed closed)" reason.
+
 > **Guardrail, not a boundary.** Hook-level enforcement is a guardrail, not a complete security boundary — the harness vendors say so themselves (a determined agent can often reach equivalent effects through another tool path). For hard isolation, use OS-level sandboxing: Claude Code's sandbox, Codex `sandbox_mode`, or Gemini CLI's sandbox.
 
 ### Browse
@@ -203,16 +210,22 @@ agent-replay list
 # Filter by status, agent, tag, or time
 agent-replay list --status failed
 agent-replay list --agent travel-bot --since 7d
-agent-replay list --tag production --sort tokens --limit 10
+agent-replay list --tag production --sort -tokens --limit 10
 
 # JSON output for piping
 agent-replay list --json
 ```
 
-`--agent` and `--session` match by substring, so `--agent travel` finds
-`travel-bot` and `travel-assistant` alike. That is convenient for browsing, but
-worth knowing wherever the selection decides a verdict: `check --golden --agent
-travel-bot` in a store that also holds `travel-bot-v2` traces checks both.
+`--agent` matches by **substring**, so `--agent travel` finds `travel-bot` and
+`travel-assistant` alike; `--session` matches by **prefix**, like a trace id.
+Convenient for browsing, but worth knowing wherever the selection decides a
+verdict: `check --golden --agent travel-bot` in a store that also holds
+`travel-bot-v2` traces checks both.
+
+`--sort` orders ascending; prefix the field with `-` for descending. So "my ten
+most expensive runs" is `--sort -tokens --limit 10` — `--sort tokens` returns the
+cheapest ten. Sortable fields: `started_at` (default), `duration`, `tokens`,
+`cost`, `agent_name`.
 
 ### Inspect
 
