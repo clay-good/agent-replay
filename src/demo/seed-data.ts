@@ -43,12 +43,18 @@ export function seedDemoData(db: Database.Database): void {
     },
   });
 
-  // Policy 2: Warn on high token usage
+  // Policy 2: Flag LLM calls that configure an output-token cap.
+  //
+  // The description used to claim it fires "when a call uses more than 5000
+  // tokens". It cannot: the match keys are substring/step-type tests, with no
+  // numeric threshold among them — so this matches any llm_call whose input
+  // MENTIONS max_output_tokens, whatever the value. (The demo's own occurrence
+  // is 4000, below the number the old text claimed.) Describe what it does.
   addPolicy(db, {
     name: 'token-limit-warning',
     description:
-      'Triggers a warning when a single LLM call uses more than 5000 tokens, ' +
-      'indicating potential context window bloat.',
+      'Warns on an LLM call that configures an output-token cap, as a hook for ' +
+      'reviewing context-window growth.',
     action: 'warn',
     priority: 50,
     match_pattern: {
@@ -57,13 +63,21 @@ export function seedDemoData(db: Database.Database): void {
     },
   });
 
-  // Policy 3: Block external URL references
+  // Policy 3: Flag responses carrying external URLs.
+  //
+  // `warn`, deliberately, not `deny`. Live enforcement evaluates a PROPOSED
+  // tool call, before it runs and therefore before it has any output, so a
+  // BLOCKING policy keyed on `output_contains` can never fire — `guard add`
+  // warns about exactly this shape. Seeding it as a deny taught users to write
+  // a kill switch that silently does nothing, and the seed path bypasses that
+  // warning. As a warn it is what it actually is: an auditing pattern, which
+  // `guard test` and a recorded step both evaluate.
   addPolicy(db, {
     name: 'no-external-urls',
     description:
-      'Blocks agent responses that contain external URLs to prevent ' +
-      'prompt injection via URL-based payloads.',
-    action: 'deny',
+      'Flags agent responses containing external URLs (post-hoc review — an ' +
+      'output pattern cannot block a call before it runs).',
+    action: 'warn',
     priority: 75,
     match_pattern: {
       output_contains: 'http',

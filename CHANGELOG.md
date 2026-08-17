@@ -117,6 +117,15 @@ nothing else.
 
 ### Fixed
 
+- `demo` no longer seeds a guardrail that cannot do what it says. Its
+  `no-external-urls` policy was a `deny` keyed on `output_contains`, which
+  enforcement can never fire — it evaluates a proposed call, before there is any
+  output — so the shipped example taught a kill-switch shape that silently does
+  nothing, and the seed path bypasses the warning `guard add` now gives. It is
+  a `warn` (an auditing pattern) with a description that says so. The
+  `token-limit-warning` description likewise claimed a numeric threshold the
+  match keys cannot express; it now describes the substring test it actually is.
+
 - `--since` resolves its cutoff to a UTC instant before querying. `Date.parse`
   accepts more formats than SQLite's `julianday`, and while an unparseable
   stored timestamp falls back to the old comparison, an unparseable *bound* made
