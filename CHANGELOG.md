@@ -117,6 +117,14 @@ nothing else.
 
 ### Fixed
 
+- An AI preset's declared `threshold` now actually drives its verdict and is
+  recorded in the result's details. Each preset hardcoded a literal that
+  happened to equal its declared value, so editing the field silently did
+  nothing — and unlike the deterministic presets, an AI result never stored the
+  threshold it was judged against, so a saved verdict could not be explained
+  after the fact. No verdict changes today; the declaration is simply now the
+  one source of truth.
+
 - The AI evaluators are no longer shown a trace with its falsy results removed.
   The summary they reason from used a bare truthiness test, so a run whose
   answer was `false` or `0` — a failed check, a "not found", a boolean verdict —

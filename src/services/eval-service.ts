@@ -683,6 +683,15 @@ ${TRACE_CONTENT_END}`,
     };
   }
 
+  // The declared `threshold` is authoritative. Each preset's parse_response
+  // hardcodes a literal that happens to equal it, so editing the field silently
+  // did nothing — and unlike the deterministic path, the AI path never recorded
+  // the threshold in `details`, so a stored llm_judge verdict could not be
+  // explained or re-interpreted after the fact. Behavior is unchanged today
+  // (every literal already matches); the declaration now actually drives it.
+  parsed.passed = parsed.score >= preset.threshold;
+  parsed.details.threshold = preset.threshold;
+
   // Add LLM metadata to details
   parsed.details.llm_model = response.model;
   parsed.details.llm_provider = response.provider;

@@ -707,3 +707,26 @@ describe('summarizeTrace shows falsy results to the judge', () => {
     expect(text).toMatch(/-> 0/);
   });
 });
+
+
+describe('AI preset thresholds are declared, not hardcoded', () => {
+  const opts = { provider: 'anthropic' as const, api_key: 'k', model: 'claude-haiku-4-5-20251001' };
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('records the threshold and derives passed from it', async () => {
+    // Every parse_response hardcoded a literal that happened to equal the
+    // preset's declared `threshold`, so editing the field did nothing — and
+    // unlike the deterministic path, the AI path never recorded the threshold,
+    // so a stored llm_judge verdict could not be explained afterwards.
+    const db = createTestDb();
+    const trace = ingestTrace(db, makeTrace());
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(llmText(JSON.stringify({
+      root_cause: 'x', failing_step: 1, confidence: 0.5, severity: 'high',
+    }))));
+
+    const result = await runAiEval(db, trace.id, 'ai-root-cause', opts);
+    expect(result.details.threshold).toBe(AI_PRESETS['ai-root-cause'].threshold);
+    // 0.5 >= 0.5 — the verdict follows the declared threshold.
+    expect(result.passed).toBe(true);
+  });
+});
