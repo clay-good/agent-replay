@@ -23,6 +23,36 @@ existing stores and exports keep working. Schema v3 and v4 add three indexes
 between them, and nothing else.
 
 
+### Fixed
+
+- `show --from-step/--to-step` reported the WINDOW's token subtotal on the
+  trace-level `Tokens:` line. The header falls back to summing the steps when no
+  producer set a trace-level total — the shape of every hook-, `record`-, OTel-
+  and import-captured trace — and the window was applied by narrowing the step
+  array in place, so a 30-token trace showed `Tokens: 20` beside a trace-level
+  `Duration:`, disagreeing with `list` and `stats` for the same trace. The steps
+  rendered are unchanged; only the header is trace-level again.
+
+- `stats` and the dashboard silently excluded a trace whose timestamps use an
+  ISO-8601 *basic*-format offset (`+0200` — what `date +%FT%T%z` emits and
+  `ingest` stores verbatim) from the average duration, because `julianday()`
+  returns NULL for that form and `AVG` skips NULLs. The average was therefore
+  taken over a subset while `overall.traces` counted every trace, and a store
+  built entirely that way printed "Avg duration: -" for traces `list` showed a
+  duration for. A timestamp nothing can parse still counts as unmeasured.
+
+- `watch` with no trace id, and the hook capture path's "open trace for this
+  session" lookup, ranked candidates by the BYTES of `started_at` rather than the
+  parsed instant. SQLite's own space form sorts below every `T`-separated
+  timestamp and a negative offset sorts above the UTC instant it precedes, so a
+  bare `watch` attached to an older run and showed a live session doing nothing,
+  and a hook event could append to the wrong open trace. These were the last two
+  raw-TEXT orderings on `started_at`.
+
+- The dashboard TUI rendered total cost with a flat `toFixed(4)`, so a store whose
+  entire real spend was under a hundredth of a cent — the normal case for agent
+  runs — read as `$0.0000`. It now uses the same `formatCostUsd` `stats` uses.
+
 ### Added
 
 - AI provider calls now have a deadline and a bounded retry budget. `fetch` has

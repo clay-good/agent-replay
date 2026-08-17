@@ -28,6 +28,43 @@ export function sinceParams(since: string): [string, string] {
 }
 
 /**
+ * SQL that parses a TEXT timestamp column to a Julian day, retrying an ISO-8601
+ * *basic*-format offset as the extended form SQLite requires.
+ *
+ * `julianday()` handles `Z`, `+02:00` and SQLite's own space form, but returns
+ * NULL for `+0200` — which is exactly what `date +%FT%T%z` emits in a shell
+ * script and what `ingest` then stores verbatim. A NULL made the duration
+ * fallback below yield NULL, so `AVG` silently skipped the trace: `stats`
+ * reported an average over a SUBSET while counting every trace in `overall`, and
+ * printed "Avg duration: -" for a store whose every row `list` showed a duration
+ * for. Inserting the missing colon recovers those rows; a timestamp julianday
+ * cannot parse at all still yields NULL, as before.
+ *
+ * Use this for aggregates and computed values, NOT in an `ORDER BY` or `WHERE`
+ * on `started_at`: schema v4 indexes `julianday(started_at)` exactly, and
+ * wrapping it in COALESCE would make those queries full-scan again.
+ */
+export function julianDayExpr(col: string): string {
+  return `COALESCE(
+    julianday(${col}),
+    julianday(substr(${col}, 1, length(${col}) - 2) || ':' || substr(${col}, -2))
+  )`;
+}
+
+/**
+ * SQL for a trace's effective duration in ms — the TS twin of
+ * {@link effectiveDurationMs}. Falls back to `ended_at - started_at` when the
+ * producer reported no explicit total (the hook finalizer sets only `ended_at`).
+ * NULL when neither is usable, so `AVG`/`SUM` skip the trace as before.
+ */
+export const DURATION_MS_EXPR = `COALESCE(
+  total_duration_ms,
+  CASE WHEN ended_at IS NOT NULL
+            AND ${julianDayExpr('ended_at')} >= ${julianDayExpr('started_at')}
+       THEN (${julianDayExpr('ended_at')} - ${julianDayExpr('started_at')}) * 86400000.0 END
+)`;
+
+/**
  * Format a duration in milliseconds to a human-readable string.
  * Examples: "120ms", "3.2s", "1m 5s", "2h 30m"
  */

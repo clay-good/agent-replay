@@ -5,6 +5,7 @@ import type { Trace, EvalResult } from '../models/types.js';
 import type { TraceStatus } from '../models/enums.js';
 import { formatDuration, formatRelativeTime } from '../utils/time.js';
 import { truncate } from '../utils/json.js';
+import { formatCostUsd } from './theme.js';
 import { dashboardStats, statusCounts, recentTraces, recentEvalScores } from './dashboard-data.js';
 
 /**
@@ -184,7 +185,10 @@ export class DashboardView {
       '',
       `{cyan-fg}Avg Duration:{/cyan-fg} ${s.avgDurationMs != null ? formatDuration(s.avgDurationMs) : '-'}`,
       `{cyan-fg}Total Tokens:{/cyan-fg} ${s.totalTokens != null ? s.totalTokens.toLocaleString() : '-'}`,
-      `{cyan-fg}Total Cost:{/cyan-fg}   ${s.totalCost != null ? '$' + s.totalCost.toFixed(4) : '-'}`,
+      // formatCostUsd, not a flat toFixed(4): sub-cent runs are the normal case,
+      // and four decimals rendered a store's whole real spend as "$0.0000" while
+      // `stats` (which already uses it) reported the same number correctly.
+      `{cyan-fg}Total Cost:{/cyan-fg}   ${s.totalCost != null ? formatCostUsd(s.totalCost) : '-'}`,
     ];
 
     this.statsBox.setContent(lines.join('\n'));

@@ -869,6 +869,23 @@ describe('CLI integration', () => {
     // An in-range-but-empty window (valid numbers past the end) is still a success.
     expect(run(['show', 'tbig', '--from-step', '999']).code).toBe(0);
 
+    // The header panel keeps reporting the TRACE, not the window. The Tokens
+    // line falls back to summing the steps when no producer set a trace-level
+    // total (every hook/record/OTel/imported trace), so narrowing the step array
+    // in place made `show --from-step` print a window subtotal on a trace-level
+    // line — beside a trace-level Duration, and disagreeing with `list`/`stats`.
+    const toks = ['{"v":1,"type":"trace_start","trace_id":"ttok","agent_name":"tok"}',
+      '{"v":1,"type":"step","trace_id":"ttok","step_number":1,"step_type":"llm_call","name":"one","tokens_used":10}',
+      '{"v":1,"type":"step","trace_id":"ttok","step_number":2,"step_type":"llm_call","name":"two","tokens_used":20}',
+      '{"v":1,"type":"trace_end","trace_id":"ttok","status":"completed"}'];
+    run(['record'], toks.join('\n'));
+    const header = (args: string[]) => run(['show', 'ttok', ...args]).stdout.split('\n').find((l) => l.includes('Tokens:'))!;
+    expect(header([])).toMatch(/30/);
+    expect(header(['--from-step', '2'])).toMatch(/30/);
+    expect(header(['--to-step', '1'])).toMatch(/30/);
+    // The steps shown are still only the windowed ones.
+    expect(run(['show', 'ttok', '--from-step', '2', '--steps-only']).stdout).not.toMatch(/"one"/);
+
     // replay shares the window flags and adds --speed; same validation applies
     // (--speed 0 keeps the run instant).
     expect(run(['replay', 'tbig', '--speed', '0', '--from-step', 'abc']).code).toBe(2);

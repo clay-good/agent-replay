@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { TRACE_STATUSES } from '../models/enums.js';
-import { SINCE_PREDICATE, sinceParams } from '../utils/time.js';
+import { SINCE_PREDICATE, sinceParams, DURATION_MS_EXPR } from '../utils/time.js';
 
 /**
  * Pure data queries behind the dashboard TUI. Kept separate from the blessed
@@ -54,11 +54,7 @@ export function dashboardStats(db: Database.Database, opts: StatsFilter = {}): D
     // while `stats` reported "Avg duration: -". AVG already skips NULLs, so the
     // CASE yielding NULL for an unusable pair excludes that trace, as before.
     avgDurationMs: scalar(
-      `SELECT ROUND(AVG(COALESCE(
-         total_duration_ms,
-         CASE WHEN ended_at IS NOT NULL AND julianday(ended_at) >= julianday(started_at)
-              THEN (julianday(ended_at) - julianday(started_at)) * 86400000.0 END
-       ))) as v FROM agent_traces ${traceWhere}`,
+      `SELECT ROUND(AVG(${DURATION_MS_EXPR})) as v FROM agent_traces ${traceWhere}`,
       p,
     ),
     // Same fallback the average duration above needs, for the same reason: the

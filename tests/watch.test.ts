@@ -100,6 +100,31 @@ describe('getMostRecentRunningTrace', () => {
     expect(getMostRecentRunningTrace(db)).toBeNull();
   });
 
+  // "Most recent" must be the parsed instant. This resolver ranks traces from
+  // different producers, each writing started_at in whatever form it received,
+  // and byte order is not time order: SQLite's space form sorts below every
+  // `T`-separated timestamp, and a negative offset sorts above the UTC instant it
+  // precedes. Bare `watch` then tailed an older run and showed nothing happening.
+  it('ranks by the parsed instant, not the byte order of started_at', () => {
+    const cases: [string, string][] = [
+      // space form (SQLite's own) is later but sorts below every `T` form
+      ['2026-08-17T10:00:00Z', '2026-08-17 16:00:00'],
+      // 09:10-07:00 is 16:10Z — later than 16:00Z, but sorts below it
+      ['2026-08-17T16:00:00Z', '2026-08-17T09:10:00-07:00'],
+    ];
+    for (const [earlier, later] of cases) {
+      db.exec('DELETE FROM agent_traces');
+      startTrace(db, { agent_name: 'earlier', started_at: earlier });
+      const newest = startTrace(db, { agent_name: 'later', started_at: later });
+      expect(getMostRecentRunningTrace(db)!.id).toBe(newest.id);
+    }
+  });
+
+  it('still returns a trace whose timestamp julianday cannot parse', () => {
+    const t = startTrace(db, { agent_name: 'odd', started_at: 'whenever' });
+    expect(getMostRecentRunningTrace(db)!.id).toBe(t.id);
+  });
+
   it('ignores forks, which open as running with a newer start time', () => {
     // `watch` with no trace id follows this. A fork is a static what-if copy, so
     // attaching to one shows nothing happening while the live run scrolls by.

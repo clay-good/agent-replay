@@ -17,7 +17,7 @@ import type {
   ListTracesFilter,
 } from '../models/types.js';
 import { DECIDED_BY, TRACE_STATUSES, TRIGGER_TYPES } from '../models/enums.js';
-import { SINCE_PREDICATE, sinceParams } from '../utils/time.js';
+import { SINCE_PREDICATE, sinceParams, DURATION_MS_EXPR } from '../utils/time.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -1021,11 +1021,20 @@ export function getStepsAfter(
  * Forks are excluded: `fork` opens its copy as `running` with a fresh
  * started_at, so a fork always sorted first here and a bare `watch` attached to
  * the static copy — showing nothing happening — instead of the live run.
+ *
+ * "Most recent" is the parsed instant, not the byte order. This resolver ranks
+ * traces from DIFFERENT producers against each other — `hook`, `record`, the
+ * OTel receiver and `ingest` each write `started_at` in whatever form they
+ * received — and a `2026-08-16 23:00:00` (SQLite's space form) sorts below every
+ * `T`-separated timestamp, so a bare `watch` attached to an older run and showed
+ * a live session doing nothing. Byte order stays the secondary key so a
+ * timestamp julianday cannot parse is never dropped.
  */
 export function getMostRecentRunningTrace(db: Database.Database): Trace | null {
   const row = db
     .prepare(
-      "SELECT * FROM agent_traces WHERE status = 'running' AND parent_trace_id IS NULL ORDER BY started_at DESC LIMIT 1",
+      "SELECT * FROM agent_traces WHERE status = 'running' AND parent_trace_id IS NULL" +
+        ' ORDER BY julianday(started_at) DESC, started_at DESC LIMIT 1',
     )
     .get() as Record<string, unknown> | undefined;
   return row ? rowToTrace(row) : null;
@@ -1122,11 +1131,7 @@ export function listTraces(
     total_tokens,
     (SELECT SUM(s.tokens_used) FROM agent_trace_steps s WHERE s.trace_id = agent_traces.id)
   )`;
-  const DURATION_EXPR = `COALESCE(
-    total_duration_ms,
-    CASE WHEN ended_at IS NOT NULL AND julianday(ended_at) >= julianday(started_at)
-         THEN (julianday(ended_at) - julianday(started_at)) * 86400000.0 END
-  )`;
+  const DURATION_EXPR = DURATION_MS_EXPR;
   // `tokens` needs the same treatment as `duration`, for the same reason: the
   // trace-level column is set only when a producer reports a total, while
   // `ingest`, `record`, the OTel mapper and the importers all populate per-step

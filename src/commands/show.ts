@@ -76,7 +76,6 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
     ? trace.steps
     : trace.steps.filter((s) => (fromStep == null || s.step_number >= fromStep) && (toStep == null || s.step_number <= toStep));
   const omitted = trace.steps.length - windowed.length;
-  trace.steps = windowed;
 
   // Raw JSON output (respects the window). The human path prints what it left
   // out; the JSON path said nothing, so a consumer received a complete-looking
@@ -85,7 +84,7 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
   // steps. Additive: an unwindowed `show --json` is byte-for-byte unchanged.
   if (opts.json) {
     const payload = omitted > 0
-      ? { ...trace, step_window: { from: fromStep ?? null, to: toStep ?? null, shown: windowed.length, omitted } }
+      ? { ...trace, steps: windowed, step_window: { from: fromStep ?? null, to: toStep ?? null, shown: windowed.length, omitted } }
       : trace;
     console.log(JSON.stringify(payload, null, 2));
     return;
@@ -97,7 +96,14 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
       console.log('');
     }
   };
-  const renderSteps = () => (opts.tree ? renderTree(trace.steps) : renderTimeline(trace.steps));
+  // Render from `windowed`, never by narrowing `trace.steps` itself: the header
+  // panel's Tokens line falls back to summing the steps when the trace-level
+  // column is null (every hook/record/OTel/imported trace), so a narrowed
+  // `trace.steps` made `show --from-step` print a WINDOW SUBTOTAL on the
+  // trace-level `Tokens:` line — beside a trace-level `Duration:`, and differing
+  // from what `list`/`stats` report for the same trace. `replay` already keeps
+  // the two separate.
+  const renderSteps = () => (opts.tree ? renderTree(windowed) : renderTimeline(windowed));
 
   // Steps-only mode
   if (opts.stepsOnly) {
@@ -138,15 +144,19 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
     console.log('');
     console.log(heading('  Snapshots'));
     console.log('');
-    renderSnapshots(db, trace);
+    renderSnapshots(db, trace.id, windowed);
   }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-function renderSnapshots(db: Database.Database, trace: TraceWithDetails): void {
-  for (const step of trace.steps) {
-    const snapshot = getStepSnapshot(db, trace.id, step.step_number);
+function renderSnapshots(
+  db: Database.Database,
+  traceId: string,
+  steps: TraceWithDetails['steps'],
+): void {
+  for (const step of steps) {
+    const snapshot = getStepSnapshot(db, traceId, step.step_number);
     if (!snapshot) continue;
 
     console.log(

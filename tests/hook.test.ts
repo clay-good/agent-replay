@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
-import { getTrace, listTraces } from '../src/services/trace-service.js';
+import { getTrace, listTraces, ingestTrace } from '../src/services/trace-service.js';
 import { applyHookPayload, detectDialect } from '../src/services/hook-adapter.js';
 import { forkTrace } from '../src/services/fork-service.js';
 import { addPolicy } from '../src/services/guard-service.js';
@@ -181,6 +181,32 @@ describe('correlation and privacy', () => {
     const r = apply({ hook_event_name: 'Stop', session_id: 'ghost' });
     expect(r.traceId).toBeNull();
     expect(listTraces(db, {}).total).toBe(0);
+  });
+
+  it('resolves the session\'s open trace by parsed instant, not byte order', () => {
+    // The lookup ranks candidates by started_at, which producers write in
+    // whatever form they received. A session-tagged trace from `ingest`/`record`
+    // in SQLite's space form (or a negative offset) sorted above a newer live
+    // trace under a byte comparison, so hook events appended to the wrong run.
+    const session = 's-mixed';
+    ingestTrace(db, {
+      agent_name: 'earlier',
+      session_id: session,
+      status: 'running',
+      started_at: '2026-08-17T10:00:00Z',
+      steps: [{ step_number: 1, step_type: 'thought', name: 'a' }],
+    });
+    ingestTrace(db, {
+      agent_name: 'later',
+      session_id: session,
+      status: 'running',
+      started_at: '2026-08-17 16:00:00', // later instant, lower byte order
+      steps: [{ step_number: 1, step_type: 'thought', name: 'b' }],
+    });
+    const later = listTraces(db, { session_id: session }).items.find((t) => t.agent_name === 'later')!;
+
+    const r = apply({ hook_event_name: 'PreToolUse', session_id: session, tool_name: 'Bash', tool_input: { command: 'ls' } });
+    expect(r.traceId).toBe(later.id);
   });
 
   it('keeps capturing into the live trace after it has been forked', () => {

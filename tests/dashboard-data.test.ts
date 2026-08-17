@@ -84,6 +84,29 @@ describe('dashboardStats', () => {
     expect(dashboardStats(db).avgDurationMs).toBe(30000);
   });
 
+  // `julianday()` returns NULL for an ISO-8601 BASIC-format offset (`+0200`) —
+  // exactly what `date +%FT%T%z` emits and `ingest` stores verbatim — so the
+  // duration fallback yielded NULL and AVG silently skipped the trace: an average
+  // over a subset while every trace showed a duration in `list`.
+  it('parses a basic-format offset (+0200) rather than dropping the trace', () => {
+    ingestTrace(db, trace({
+      started_at: '2026-08-16T10:00:00+0200',
+      ended_at: '2026-08-16T10:00:30+0200',
+    }));
+    expect(dashboardStats(db).avgDurationMs).toBe(30000);
+  });
+
+  it('averages basic- and extended-offset traces together', () => {
+    ingestTrace(db, trace({ started_at: '2026-08-16T10:00:00+0200', ended_at: '2026-08-16T10:00:30+0200' }));
+    ingestTrace(db, trace({ started_at: '2026-08-16T10:00:00+02:00', ended_at: '2026-08-16T10:00:10+02:00' }));
+    expect(dashboardStats(db).avgDurationMs).toBe(20000);
+  });
+
+  it('still reports no duration for a timestamp nothing can parse', () => {
+    ingestTrace(db, trace({ started_at: 'not-a-timestamp', ended_at: 'also-not' }));
+    expect(dashboardStats(db).avgDurationMs).toBeNull();
+  });
+
   it('returns null totals when there is nothing to aggregate', () => {
     const s = dashboardStats(db);
     expect(s).toMatchObject({ traces: 0, steps: 0, evals: 0, policies: 0, avgDurationMs: null, totalTokens: null, totalCost: null });

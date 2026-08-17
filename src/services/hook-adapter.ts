@@ -193,7 +193,11 @@ function appendStepRetrying(
  * finalized, and polluting the fork with post-fork steps it never ran.
  */
 const OPEN_SESSION_TRACE_SQL =
-  "SELECT id FROM agent_traces WHERE session_id = ? AND status = 'running' AND parent_trace_id IS NULL ORDER BY started_at DESC LIMIT 1";
+  "SELECT id FROM agent_traces WHERE session_id = ? AND status = 'running' AND parent_trace_id IS NULL" +
+  // By parsed instant, not byte order — see getMostRecentRunningTrace. One
+  // session normally has one open trace, but a resumed session can hold traces
+  // written in different timestamp forms.
+  ' ORDER BY julianday(started_at) DESC, started_at DESC LIMIT 1';
 
 /** Find (or create) the open trace for a session. */
 function ensureTrace(
