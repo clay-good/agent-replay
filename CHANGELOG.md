@@ -98,6 +98,14 @@ trace schema is unchanged.
 
 ### Fixed
 
+- `record` now exits `1` when a stream produced input but **every** event was
+  rejected, instead of reporting a total capture failure as success. Piping the
+  wrong `--format` (or a broken producer) into `record` dropped every line as a
+  warning, recorded nothing, and still exited `0` — so `agent | agent-replay
+  record && agent-replay check` treated an empty recording as a clean run.
+  Per-event leniency is unchanged: a stream where some events survive still
+  exits `0`, and an empty stream is still not a failure.
+
 - `why` no longer presents time-travelling causality as fact. `ingest` validates
   that `parent_step` / `caused_by_step` reference an earlier step, but the live
   `record`/SDK path passed producer values straight through — and the causal

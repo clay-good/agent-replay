@@ -708,6 +708,25 @@ describe('CLI integration', () => {
     expect(full.steps[0].name).toBe('ok');
   });
 
+  it('fails when record drops every event, but stays lenient otherwise', () => {
+    // A stream where nothing survives: the recording is empty even though the
+    // producer sent data. Exiting 0 let `agent | record && check` read a total
+    // capture failure (wrong --format, broken producer) as a clean run.
+    const allBad = ['{ truncated', '{"v":999,"type":"trace_start","agent_name":"x"}', 'null'].join('\n');
+    expect(run(['record'], allBad).code).toBe(1);
+
+    // An empty stream is not a failure — there was nothing to record.
+    expect(run(['record'], '').code).toBe(0);
+
+    // And a partial failure stays exit 0: per-event leniency is the contract.
+    const partial = [
+      '{ truncated',
+      '{"v":1,"type":"trace_start","trace_id":"tpart","agent_name":"partial"}',
+      '{"v":1,"type":"trace_end","trace_id":"tpart","status":"completed"}',
+    ].join('\n');
+    expect(run(['record'], partial).code).toBe(0);
+  });
+
   it('windows a large trace with show --from-step/--to-step', () => {
     const lines = ['{"v":1,"type":"trace_start","trace_id":"tbig","agent_name":"big"}'];
     for (let i = 1; i <= 8; i++) lines.push(`{"v":1,"type":"step","trace_id":"tbig","step_number":${i},"step_type":"thought","name":"s${i}"}`);

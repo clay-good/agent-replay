@@ -131,4 +131,17 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
     }),
   );
   console.log('');
+
+  // Per-event leniency is deliberate — one bad line must never cost the rest of
+  // the stream (see the hostile-input test). But leniency about *some* events is
+  // not the same as reporting a total capture failure as success: when the
+  // producer sent input and EVERY event was dropped, nothing was recorded and a
+  // CI pipeline (`agent | agent-replay record && agent-replay check`) read that
+  // as a clean run. An empty stream stays exit 0 — no input is not a failure.
+  if (applied === 0 && warnings > 0) {
+    console.error(
+      chalk.red(`  Nothing was recorded: all ${warnings} event(s) were rejected.`),
+    );
+    process.exitCode = 1;
+  }
 }

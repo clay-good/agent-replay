@@ -472,7 +472,7 @@ Every command exits non-zero on failure, so it drops cleanly into scripts and CI
 | Code | Meaning |
 | ---- | ------- |
 | `0`  | Success — including "no matches" for queries like `list` and empty exports. |
-| `1`  | Runtime failure — trace not found, a malformed ingest, a `check --golden` regression, or an `eval` that fails (a rubric below its threshold or a built-in preset that fails). |
+| `1`  | Runtime failure — trace not found, a malformed ingest, a `record` stream whose every event was rejected, a `check --golden` regression, or an `eval` that fails (a rubric below its threshold or a built-in preset that fails). |
 | `2`  | Usage error — an unknown flag, an unknown command, a missing or bad argument value, or an unexpected extra argument (a typo'd second id or a bare word meant to be a flag is rejected, not silently ignored). Also the **guard block** signal: `guard check` and `hook --enforce` exit `2` when a policy denies a step (the harness "block" convention). |
 
 Two commands instead propagate a child's own status: `run` exits with the wrapped command's exit code, and `hook` (capture mode) always exits `0` so it can never interfere with the host agent.
