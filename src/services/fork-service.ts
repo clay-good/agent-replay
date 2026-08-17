@@ -21,6 +21,12 @@ export function forkTrace(
     throw new Error(`Invalid fromStep: ${fromStep} (must be >= 1)`);
   }
 
+  // `immediate` (see the receiver's storeOtelBatch for the full reasoning): this
+  // transaction reads before it writes, and a DEFERRED transaction that upgrades
+  // to a write after another process has committed fails with
+  // SQLITE_BUSY_SNAPSHOT, which bypasses `busy_timeout` entirely — so forking
+  // while a hook or `otel serve` was writing died with a bare "database is
+  // locked" instead of waiting its turn.
   const fork = db.transaction(() => {
     // Get the original trace
     const original = db
@@ -202,5 +208,5 @@ export function forkTrace(
     } satisfies ForkResult;
   });
 
-  return fork();
+  return fork.immediate();
 }

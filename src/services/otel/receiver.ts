@@ -186,6 +186,31 @@ function findMergeTarget(db: Database.Database, input: IngestTraceInput): string
   return undefined;
 }
 
+/**
+ * Store a whole batch atomically, returning what it accepted.
+ *
+ * `immediate` matters here: better-sqlite3's default transaction is DEFERRED,
+ * and the first statement inside is findMergeTarget's SELECT, which takes the
+ * WAL read snapshot. If another process (a `hook`, `run`, or `ingest` sharing
+ * the store) commits before the first INSERT, the upgrade to a write
+ * transaction fails with SQLITE_BUSY_SNAPSHOT — which does NOT invoke the busy
+ * handler, so `busy_timeout` gave no protection and the receiver answered 500
+ * "database is locked" for the whole batch. Taking the write lock up front lets
+ * busy_timeout serialize the writers instead, the way `migrations` already does.
+ *
+ * The accepted counters are returned rather than incremented in place, so a
+ * rolled-back batch cannot leave the shutdown summary reporting spans that were
+ * never stored (and counting them again when the exporter retries).
+ */
+function storeOtelBatch(db: Database.Database, traces: IngestTraceInput[], stats: OtelStats): void {
+  const accepted: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+  db.transaction(() => {
+    for (const t of traces) upsertOtelTrace(db, t, accepted);
+  }).immediate();
+  stats.acceptedTraces += accepted.acceptedTraces;
+  stats.acceptedSpans += accepted.acceptedSpans;
+}
+
 /** Merge a mapped batch into its existing trace, or open a new one. */
 function upsertOtelTrace(db: Database.Database, input: IngestTraceInput, stats: OtelStats): void {
   const target = findMergeTarget(db, input);
@@ -224,11 +249,7 @@ function ingestOtlpTraces(
   // deliveries are deliberately not de-duplicated. All-or-nothing makes the
   // retry safe instead. (better-sqlite3 nests via savepoints, so the per-trace
   // transactions inside still work.)
-  db.transaction(() => {
-    for (const t of traces) {
-      upsertOtelTrace(db, t, stats);
-    }
-  })();
+  storeOtelBatch(db, traces, stats);
 
   // Root/agent spans define traces rather than steps, so mappedSpans can be
   // fewer than totalSpans without any rejection. Only report partial_success
@@ -290,11 +311,7 @@ function ingestOtlpLogs(
   }
   // All-or-nothing, for the same reason as the traces endpoint above: a partial
   // commit plus the exporter's retry duplicates everything it already stored.
-  db.transaction(() => {
-    for (const t of traces) {
-      upsertOtelTrace(db, t, stats);
-    }
-  })();
+  storeOtelBatch(db, traces, stats);
   // The traces endpoint reports partial_success when a batch mapped to nothing;
   // this one answered a bare 200 unconditionally. mapOtlpLogs keeps only
   // `gemini_cli.*` / `claude_code.*` events, so an emitter whose event names

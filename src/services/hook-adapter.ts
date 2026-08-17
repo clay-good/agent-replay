@@ -202,23 +202,36 @@ function ensureTrace(
   dialect: HookDialect,
   payload: Record<string, unknown>,
 ): string {
-  const existing = db
-    .prepare(OPEN_SESSION_TRACE_SQL)
-    .get(sessionId) as { id: string } | undefined;
+  const find = () => db.prepare(OPEN_SESSION_TRACE_SQL).get(sessionId) as { id: string } | undefined;
+  const existing = find();
   if (existing) return existing.id;
 
-  const trace = startTrace(db, {
-    agent_name: dialect === 'unknown' ? 'agent' : dialect,
-    trigger: 'user_message',
-    session_id: sessionId,
-    metadata: {
-      dialect,
-      cwd: str(payload.cwd),
-      transcript_path: str(payload.transcript_path),
-      permission_mode: str(payload.permission_mode),
-    },
-  });
-  return trace.id;
+  // Creating the trace has to be serialized across processes. Every hook fires
+  // as its own process, so when a session's first events arrive in parallel
+  // (a harness dispatching two tools at once, SessionStart racing the first
+  // prompt) both processes read "no open trace" and both created one: the
+  // session's steps split across several traces, `watch`/`show`/`why` saw only
+  // a fragment, and since `finalize` closes exactly one of them the losers
+  // stayed `running` forever — the same zombie-trace symptom `eventAction`
+  // documents from a different cause. An IMMEDIATE transaction takes the write
+  // lock up front, so the loser's re-check runs after the winner committed and
+  // reuses its trace. The unlocked read above keeps the common case (session
+  // already open) off the write lock entirely.
+  return db.transaction(() => {
+    const raced = find();
+    if (raced) return raced.id;
+    return startTrace(db, {
+      agent_name: dialect === 'unknown' ? 'agent' : dialect,
+      trigger: 'user_message',
+      session_id: sessionId,
+      metadata: {
+        dialect,
+        cwd: str(payload.cwd),
+        transcript_path: str(payload.transcript_path),
+        permission_mode: str(payload.permission_mode),
+      },
+    }).id;
+  }).immediate();
 }
 
 /** The most recent open (unclosed) tool_call step matching a tool name. */

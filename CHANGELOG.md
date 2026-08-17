@@ -117,6 +117,24 @@ nothing else.
 
 ### Fixed
 
+- Writers that share a store no longer collide. Three problems, one cause —
+  reading before writing without holding the write lock:
+  - `otel serve` answered `500 {"error":"database is locked"}` and dropped a
+    whole export batch whenever another process (a `hook`, `run`, or `ingest`)
+    committed while the batch was being stored. The batch transaction opened
+    DEFERRED and read first, so upgrading to a write failed with
+    `SQLITE_BUSY_SNAPSHOT` — which bypasses `busy_timeout` entirely. Measured
+    at 1 dropped batch in 100 under light contention and 89% under load; now
+    zero, because the transaction takes the write lock up front. `fork` could
+    die with the same bare "database is locked" and is fixed the same way.
+  - Concurrent first events for one session opened several traces for it (the
+    lookup and the create were not serialized), splitting the session's steps
+    and leaving every trace but one `running` forever, since `Stop` finalizes
+    only one. Reproduced at 4 sessions in 25 with real parallel hook processes;
+    now one trace, verified over repeated runs.
+  - `otel serve`'s "Accepted N trace(s), M step(s)" counted spans from batches
+    that were rolled back, and counted them again when the exporter retried.
+
 - Forking a trace no longer hijacks the session it was forked from. `fork`
   copies the original's `session_id` and opens the copy as `running` with a
   newer start time, and live capture resolves "the open trace for this session"

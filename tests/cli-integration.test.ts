@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1072,5 +1072,29 @@ describe('CLI integration', () => {
     expect(code).toBe(1); // refused
     expect(existsSync(keep)).toBe(true); // and nothing was deleted
     rmSync(stranger, { recursive: true, force: true });
+  });
+
+  it('opens exactly one trace when a session\'s first hook events fire concurrently', async () => {
+    // Each hook is its own process. When a session's first events arrive in
+    // parallel, every process used to read "no open trace" and create its own:
+    // the session split across several traces and the losers stayed `running`
+    // forever, since finalize closes only one. Real concurrent processes — the
+    // race is between processes, so an in-process test cannot reach it.
+    const payload = (tool: string) =>
+      JSON.stringify({ hook_event_name: 'PreToolUse', session_id: 'sess_race', tool_name: tool, tool_input: {} });
+    await Promise.all(
+      ['A', 'B', 'C', 'D', 'E', 'F'].map(
+        (tool) =>
+          new Promise<void>((done) => {
+            execFile(process.execPath, [CLI, 'hook', 'PreToolUse', '--dir', dir], (): void => done(), )
+              .stdin!.end(payload(tool));
+          }),
+      ),
+    );
+
+    const traces = JSON.parse(run(['list', '--json']).stdout).items as { id: string; step_count: number }[];
+    expect(traces).toHaveLength(1);
+    // And no step was lost to the uniqueness retry while they raced.
+    expect(traces[0].step_count).toBe(6);
   });
 });
