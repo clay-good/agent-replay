@@ -154,7 +154,7 @@ program
 program
   .command('why <trace-id>')
   .description('Explain a step by walking its causal chain back to the root')
-  .requiredOption('--step <n>', 'Step number to explain')
+  .requiredOption('--step <n>', 'Step number to explain (required)')
   .option('--json', 'Output raw JSON')
   .option('--dir <path>', 'Custom data directory')
   .action(async (traceId, opts) => {
