@@ -117,6 +117,17 @@ nothing else.
 
 ### Fixed
 
+- `eval --ai` now treats trace content as data rather than instruction. The
+  summary handed to the judge is built from the agent's prompts, tool inputs,
+  and tool *outputs* — content an attacker can influence — and it was
+  concatenated into the prompt with no delimiter and no statement of how to
+  treat it, in the evaluators whose job is to catch exactly that. It is now
+  fenced, and every AI system prompt says the fenced material is recorded data
+  and never an instruction. Relatedly, a model's verdict is read from the *last*
+  JSON block in its reply, not the first: a model that quoted the trace back
+  before answering had the quoted block parsed as its verdict, even when its own
+  answer said the opposite.
+
 - A log-derived `llm_call` step now records its model in the `model` column,
   not only in the step name — an `otel serve` capture of Gemini CLI or Claude
   Code previously had no model recorded anywhere, while the span path set it.
