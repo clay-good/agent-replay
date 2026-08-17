@@ -97,7 +97,7 @@ For the native protocol, each event is one JSON object on its own line carrying 
 | `snapshot` | Freeze context/environment/tool state at a step |
 | `trace_end` | Finalize the trace (`status`, `output`, token/cost totals) |
 
-Unknown event types and fields are skipped with a warning, never a crash — a newer producer stays compatible. A trace left open when the stream ends is finalized as `timeout` unless `--leave-open`.
+Unknown event types and fields are skipped with a warning, never a crash — a newer producer stays compatible. A trace left open when the stream ends is finalized as `timeout` unless `--leave-open` — including one this stream resumed by id, so a trace can't dangle silently. The single exception is the trace a *live* enclosing `agent-replay run` handed down (via `AGENT_REPLAY_TRACE_ID`): that one belongs to the wrapper, which finalizes it from the child's exit.
 
 #### OpenTelemetry ingest
 
@@ -338,7 +338,9 @@ Wrap any agent command to record it end-to-end and propagate its exit status —
 agent-replay run --agent-name my-bot -- node agent.js
 ```
 
-The wrapper pre-creates a trace and hands the child a recording channel via environment variables (`AGENT_REPLAY_DIR`, `AGENT_REPLAY_TRACE_ID`, `AGENT_REPLAY_EVENTS`). Every `agent-replay` command honors `AGENT_REPLAY_DIR` as its data directory when `--dir` isn't given, so a nested invocation (`run -- sh -c '... | agent-replay record'`) writes to the wrapper's store rather than a fresh one in the working directory. An instrumented child (using the [`TraceRecorder` SDK](#programmatic-api) or writing JSONL events to `$AGENT_REPLAY_EVENTS`) records a full step-by-step trace; an uninstrumented child still gets a trace with timing and exit metadata. The child's stdio passes through untouched, and the trace is finalized from its exit — `0` → completed, non-zero → failed with the code recorded. `agent-replay run` exits with the child's own status, so it drops cleanly into scripts and CI.
+The wrapper pre-creates a trace and hands the child a recording channel via environment variables (`AGENT_REPLAY_DIR`, `AGENT_REPLAY_TRACE_ID`, `AGENT_REPLAY_EVENTS`). Every `agent-replay` command honors `AGENT_REPLAY_DIR` as its data directory when `--dir` isn't given, so a nested invocation (`run -- sh -c '... | agent-replay record'`) writes to the wrapper's store rather than a fresh one in the working directory. An instrumented child (using the [`TraceRecorder` SDK](#programmatic-api) or writing JSONL events to `$AGENT_REPLAY_EVENTS`) records a full step-by-step trace; an uninstrumented child still gets a trace with timing and exit metadata. The child's stdio passes through untouched, and the trace is finalized from its exit — `0` → completed, non-zero → failed with the code recorded. A child that sends its own `trace_end` owns the status: that declaration is kept even when it disagrees with the exit code, and the summary names both (`completed (child exited 7)`). `agent-replay run` exits with the child's own status either way, so it drops cleanly into scripts and CI.
+
+The events channel is **append-only**: open it with `a`, never `w`. A producer that rewrites it is detected and warned about, but events written before the rewrite are gone. If the store refuses an event (a child recording several sub-traces collides on per-trace step numbering), the run summary says how many could not be stored.
 
 ### Regression check (CI)
 
@@ -350,6 +352,9 @@ agent-replay export --format golden --tag known-good --output golden.json
 
 # Fail the build if recent runs diverge from golden
 agent-replay check --golden golden.json --agent travel-bot --since 1d
+
+# Check one trace by id (instead of every trace matching the filters)
+agent-replay check --golden golden.json --trace <trace-id>
 
 # Narrow the comparison, or treat unmatched runs as failures
 agent-replay check --golden golden.json --fields step_types,tool_inputs
@@ -363,7 +368,7 @@ Comparable fields: `step_count`, `step_types`, `step_names`, `tool_inputs`, `sta
 
 Matches are made by agent name and a hash of the input, so each run is compared to its own golden counterpart. A divergence report names the trace, the step, and the differing field. The summary also reports baseline entries **no candidate exercised** — a scenario whose run crashed or never happened at all, which otherwise leaves a gate green with nothing to say about it. Those count as failures under `--strict`, alongside unmatched runs.
 
-Build the baseline from runs that finished cleanly: `export --format golden` warns when entries come from a `running` trace (a partial shape the next correct run "regresses" against) or a `failed`/`timeout` one (which makes reproducing the failure pass green). Filter with `--tag known-good` or `--status completed`.
+Build the baseline from runs that finished cleanly: `export --format golden` warns when entries did not come from a completed run — a `running` trace bakes in a partial shape the next correct run "regresses" against, and a `failed`/`timeout` one makes reproducing the failure pass green. The warning reports how many of the entries that covers, not which condition each hit; filter with `--tag known-good` or `--status completed`.
 
 A gate that cannot do its job fails loudly (exit `2`) instead of passing green. That covers a golden file with no entries — an empty baseline can never detect a regression, and the usual cause is an export filter that matched nothing, which the export warns about too — a file that isn't a golden dataset at all (`--format json` output is a common mix-up), and a run where no trace matched the filters, whether from a mistyped `--agent`, a `--since` window that outran the recording, or a `--dir` pointing somewhere the runs were never recorded. If an empty run is expected — a quiet nightly window, a matrix job where this agent didn't run — pass `--allow-empty`. With `--json`, a refusal is reported as `{"ok": false, "error": ...}` rather than bare stderr, so a `check --json | jq -r .ok` pipeline still reads a verdict.
 
@@ -522,6 +527,10 @@ agent-replay config set ai.api_keys.openai sk-...
 # Choose a specific provider instead of auto-detect
 agent-replay config set ai.provider anthropic
 
+# Pin a model, and raise the judge's output ceiling if verdicts get truncated
+agent-replay config set ai.model claude-haiku-4-5-20251001
+agent-replay config set ai.max_tokens 4096
+
 # Test that your API key works
 agent-replay config test-ai
 
@@ -530,6 +539,8 @@ agent-replay config get ai.provider
 ```
 
 You can also set API keys via environment variables: `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `OPENAI_API_KEY`. Environment variables take priority over config file values.
+
+`ai.max_tokens` caps the judge's reply (default 1024) and is what the `--max-cost` estimate prices, so raising it raises both the ceiling and the quoted cost. `ai.model` is only applied to a provider it belongs to — a `claude-*` model is never sent to OpenAI.
 
 ## Exit codes
 
@@ -685,7 +696,7 @@ A `decision` block:
 
 `decided_by` is one of `agent` (the model chose), `user` (a human at a permission prompt), or `policy` (a policy engine). `confidence` is between 0 and 1. Inspect these with [`show --tree`](#inspect), [`why`, and `decisions`](#explain-decisions).
 
-> **Schema migration:** these fields arrived in schema v2. Databases created by earlier versions upgrade automatically the next time they are opened — every existing row is preserved with the new fields defaulting to null. The upgrade is one-way (there is no down-migration).
+> **Schema migration:** these fields arrived in schema v2; the current schema is v4 (v3 and v4 add indexes only, no columns). Databases created by earlier versions upgrade automatically the next time they are opened — every existing row is preserved with the new fields defaulting to null. The upgrade is one-way (there is no down-migration).
 
 ### Step Types
 
@@ -731,7 +742,7 @@ would match nothing. When multiple fields are specified, all must match (AND log
 
 ## AI Provider Setup
 
-`agent-replay` auto-detects your API key in this priority order:
+`agent-replay` auto-detects your API key. A configured `ai.model` naming a known family picks its own provider first (a `claude-*` model chooses Anthropic if that key is present); otherwise the order is:
 
 1. **Anthropic** (default model: `claude-haiku-4-5-20251001`)
 2. **Google Gemini** (default model: `gemini-2.5-flash-lite`)

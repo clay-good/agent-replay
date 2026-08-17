@@ -19,10 +19,29 @@ correctness of the comparison, evaluation, and golden-regression paths
 the content, timing, and identity its dialects carry.
 
 The recorded trace *data* model is unchanged — same tables and columns, so
-existing stores and exports keep working. Schema v4 adds three indexes and
-nothing else.
+existing stores and exports keep working. Schema v3 and v4 add three indexes
+between them, and nothing else.
+
 
 ### Added
+
+- Schema v3 adds two indexes for lookups that were full table scans. `otel
+  serve` resolves every incoming batch against
+  `json_extract(metadata, '$.otel_trace_id')`, which nothing could index, so
+  cross-batch assembly re-scanned the whole trace table once per batch and a
+  long-running receiver grew steadily slower as the store filled. The
+  dashboard's recent-scores query likewise sorted the entire evals table on
+  every refresh tick. The migration is additive — indexes only, no columns and
+  no data — so an older binary opening a v3 store is unaffected.
+
+- Schema v4 adds an expression index on `julianday(started_at)` so the
+  parsed-instant ordering `list` and the dashboard use is an index seek rather
+  than a full scan plus a temp B-tree. Additive, like v3.
+
+- `check --allow-empty` accepts a run where no candidate trace is expected — a
+  quiet nightly window, or a matrix job where a given agent didn't run. Failing
+  on zero candidates is right by default, but it needed an escape hatch that
+  isn't "stop running the gate".
 
 - A `stats` command prints a non-interactive summary of the trace store —
   overall counts (traces, steps, evals, active policies), average duration, and
@@ -49,6 +68,67 @@ nothing else.
   to protobuf, so a Gemini CLI or Claude Code session left on the default
   protocol now has its log events ingested without switching the exporter to
   JSON. Malformed protobuf log bodies answer `400`, matching the traces path.
+
+- `hook --dialect <name>` declares the harness dialect for `--enforce` replies
+  (`claude-code`, `codex`, `gemini`, or `other`). This makes the documented
+  "harness without structured output exits 2" behavior reachable: the dialect
+  is otherwise detected from the payload, and detection can only answer with a
+  harness it recognizes, so a Crush user registering `hook PreToolUse
+  --enforce` was answered with Claude-shaped JSON on exit 0 — which a harness
+  that doesn't read hook stdout ignores, letting the denied call run. Nothing
+  in a payload distinguishes such a harness, so the user says.
+
+- `guard disable <policy>` and `guard enable <policy>` turn a policy off and on
+  without deleting it. Every policy carries an enabled flag that evaluation
+  already respected, but nothing could set it: silencing a rule meant deleting
+  it — losing its id, priority and description — and retyping it to bring it
+  back. Resolves by id or name, like `guard remove`.
+
+- `check --golden` reports baseline entries that no candidate exercised. The
+  verdict was candidate-driven only, so a scenario whose run crashed, recorded
+  under a different agent name, or ran a different input silently vanished from
+  the gate — it reported "1 passed" and exited `0` while the rest of the
+  baseline went unchecked. Reported in the summary and in `--json` as
+  `uncovered`; a failure only under `--strict`, which already fails unmatched
+  runs.
+
+- `export --format golden` warns when a baseline is built from runs that did not
+  complete. A `running` trace bakes in a truncated shape, so the next correct run
+  "regresses" against it; a `failed` or `timeout` one makes a candidate that
+  faithfully reproduces the break pass green. Both are silent otherwise and both
+  survive into CI as a wrong verdict.
+
+### Changed
+
+- **Exit codes are now consistent across the CLI**, so scripts and CI can gate
+  on `$?`: every failure exits non-zero — `1` for a runtime failure (not found,
+  malformed input, a `check --golden` regression, an `eval` over its threshold)
+  and `2` for a usage error or a `guard` / `hook --enforce` block. Success and
+  empty results exit `0`; `run` propagates the child's status; `hook` capture
+  always exits `0`. Previously several commands printed an error but still
+  exited `0` (`export` invalid format, `guard add` invalid pattern/action,
+  `import` with nothing importable, `watch`/`why` not-found, `diff --ai` with no
+  provider, `demo --reset` refusal). A new "Exit codes" section in the README
+  documents the convention.
+- **Argument parsing now fails loudly on mistakes.** Every command rejects
+  unexpected extra positional arguments instead of silently ignoring them, so
+  `agent-replay show <id> <typo>` or `list production` (meant as `--tag
+  production`) errors rather than quietly running on the first argument. And
+  commander's own parse errors (unknown flag, unknown command, missing/excess
+  argument) now exit `2` to match the documented "usage error" code — they
+  previously exited `1`, contradicting the README's exit-code table.
+
+- `demo --reset` refuses to delete a store named only by `AGENT_REPLAY_DIR`.
+  Deleting someone's traces has to be something they typed, so the destructive
+  path requires an explicit `--dir` (everything non-destructive still honors the
+  handshake).
+
+- Every command honors `AGENT_REPLAY_DIR` as its data directory when `--dir`
+  isn't given. `run` sets that variable for its child and the README documents
+  it as how the wrapper hands the child its store, but nothing read it back — so
+  a nested invocation (`run -- sh -c '... | agent-replay record'`) wrote to a
+  fresh `./.agent-replay` instead of the store the wrapper had just opened a
+  trace in. An explicit `--dir` still wins.
 
 ### Security
 
@@ -84,59 +164,6 @@ nothing else.
   `postcss` override to `^8.5.26`, which pulls the patched `nanoid ^3.3.17`
   transitively. `npm audit` is back to 0 vulnerabilities.
 
-### Changed
-
-- **Exit codes are now consistent across the CLI**, so scripts and CI can gate
-  on `$?`: every failure exits non-zero — `1` for a runtime failure (not found,
-  malformed input, a `check --golden` regression, an `eval` over its threshold)
-  and `2` for a usage error or a `guard` / `hook --enforce` block. Success and
-  empty results exit `0`; `run` propagates the child's status; `hook` capture
-  always exits `0`. Previously several commands printed an error but still
-  exited `0` (`export` invalid format, `guard add` invalid pattern/action,
-  `import` with nothing importable, `watch`/`why` not-found, `diff --ai` with no
-  provider, `demo --reset` refusal). A new "Exit codes" section in the README
-  documents the convention.
-- **Argument parsing now fails loudly on mistakes.** Every command rejects
-  unexpected extra positional arguments instead of silently ignoring them, so
-  `agent-replay show <id> <typo>` or `list production` (meant as `--tag
-  production`) errors rather than quietly running on the first argument. And
-  commander's own parse errors (unknown flag, unknown command, missing/excess
-  argument) now exit `2` to match the documented "usage error" code — they
-  previously exited `1`, contradicting the README's exit-code table.
-
-### Added
-
-- `hook --dialect <name>` declares the harness dialect for `--enforce` replies
-  (`claude-code`, `codex`, `gemini`, or `other`). This makes the documented
-  "harness without structured output exits 2" behavior reachable: the dialect
-  is otherwise detected from the payload, and detection can only answer with a
-  harness it recognizes, so a Crush user registering `hook PreToolUse
-  --enforce` was answered with Claude-shaped JSON on exit 0 — which a harness
-  that doesn't read hook stdout ignores, letting the denied call run. Nothing
-  in a payload distinguishes such a harness, so the user says.
-
-- `guard disable <policy>` and `guard enable <policy>` turn a policy off and on
-  without deleting it. Every policy carries an enabled flag that evaluation
-  already respected, but nothing could set it: silencing a rule meant deleting
-  it — losing its id, priority and description — and retyping it to bring it
-  back. Resolves by id or name, like `guard remove`.
-
-- `check --golden` reports baseline entries that no candidate exercised. The
-  verdict was candidate-driven only, so a scenario whose run crashed, recorded
-  under a different agent name, or ran a different input silently vanished from
-  the gate — it reported "1 passed" and exited `0` while the rest of the
-  baseline went unchecked. Reported in the summary and in `--json` as
-  `uncovered`; a failure only under `--strict`, which already fails unmatched
-  runs.
-
-- `export --format golden` warns when a baseline is built from runs that did not
-  complete. A `running` trace bakes in a truncated shape, so the next correct run
-  "regresses" against it; a `failed` or `timeout` one makes a candidate that
-  faithfully reproduces the break pass green. Both are silent otherwise and both
-  survive into CI as a wrong verdict.
-
-### Security
-
 - The untrusted-trace fence around AI-evaluated content is no longer escapable.
   Trace content is wrapped in `<<<BEGIN/>>>END UNTRUSTED TRACE CONTENT` markers
   and the judge is told to treat everything between them as data — but not every
@@ -156,20 +183,6 @@ nothing else.
   "findings":[{"severity":"critical"}]}` stored 1.0 / PASS and rendered a green
   panel with the critical finding printed inside it. The declared value is kept
   as `declared_risk_level` when the two disagree.
-
-### Changed
-
-- `demo --reset` refuses to delete a store named only by `AGENT_REPLAY_DIR`.
-  Deleting someone's traces has to be something they typed, so the destructive
-  path requires an explicit `--dir` (everything non-destructive still honors the
-  handshake).
-
-- Every command honors `AGENT_REPLAY_DIR` as its data directory when `--dir`
-  isn't given. `run` sets that variable for its child and the README documents
-  it as how the wrapper hands the child its store, but nothing read it back — so
-  a nested invocation (`run -- sh -c '... | agent-replay record'`) wrote to a
-  fresh `./.agent-replay` instead of the store the wrapper had just opened a
-  trace in. An explicit `--dir` still wins.
 
 ### Fixed
 
@@ -307,11 +320,6 @@ nothing else.
 - `check --json` answers in JSON on the paths that refuse to run (no candidates,
   unreadable or non-golden baseline, bad `--since`). They printed only stderr,
   so `check --json | jq -r .ok` got a parse error instead of a verdict.
-
-- `check` gained `--allow-empty` for a run where no candidate trace is expected —
-  a quiet nightly window, or a matrix job where a given agent didn't run. Failing
-  on zero candidates is right by default, but it needed an escape hatch that
-  isn't "stop running the gate".
 
 - `check` counts uncovered baseline *entries*, not the scenarios they group
   into: a hundred untouched entries for one agent+input reported as "1".
@@ -588,18 +596,6 @@ nothing else.
   is only reached when a trace has causal structure, so on a failed trace — the
   case the view exists for — it was hiding the failure message.
 
-- Schema v4 adds an expression index on `julianday(started_at)` so the
-  parsed-instant ordering `list` and the dashboard use is an index seek rather
-  than a full scan plus a temp B-tree. Additive, like v3.
-
-- Schema v3 adds two indexes for lookups that were full table scans. `otel
-  serve` resolves every incoming batch against
-  `json_extract(metadata, '$.otel_trace_id')`, which nothing could index, so
-  cross-batch assembly re-scanned the whole trace table once per batch and a
-  long-running receiver grew steadily slower as the store filled. The
-  dashboard's recent-scores query likewise sorted the entire evals table on
-  every refresh tick. The migration is additive — indexes only, no columns and
-  no data — so an older binary opening a v3 store is unaffected.
 
 - `otel serve` now reports `partial_success` when a `/v1/logs` batch mapped to
   nothing, instead of a bare `200`. Only `gemini_cli.*` and `claude_code.*`
