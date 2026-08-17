@@ -98,6 +98,15 @@ trace schema is unchanged.
 
 ### Fixed
 
+- OTel spans that end before they start (clock skew between hosts, or a
+  hand-rolled exporter) no longer persist a negative duration at the step or
+  trace level. Those values are exactly what `validateTraceInput` rejects, so
+  `otel serve` was writing rows `ingest` refuses — the same round-trip break
+  already fixed for span parentage — and the UI printed a negative millisecond
+  count. Contradictory timing is now recorded as unknown rather than clamped to
+  zero, which would claim the call was instant. A genuine 0 ms span is
+  unaffected.
+
 - `check --golden` now refuses a golden file with no entries (exit `2`) instead
   of reporting a vacuous green gate. An empty baseline matches nothing, so every
   candidate fell to the `unmatched` branch — which passes unless `--strict` —

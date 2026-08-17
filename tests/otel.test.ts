@@ -496,6 +496,34 @@ describe('mapOtlpTraces — root span and parent ordering', () => {
     expect(validateTraceInput(traces[0]).valid).toBe(true);
   });
 
+  // Regression: a span whose end precedes its own start (clock skew between
+  // hosts, or a hand-rolled exporter) produced a negative duration at BOTH the
+  // step and trace level — values validateTraceInput rejects, so `otel serve`
+  // persisted rows `ingest` refuses, and the UI printed a negative millisecond
+  // count. Contradictory timing is now dropped as unknown, not clamped to 0.
+  it('drops a negative duration when a span ends before it starts', () => {
+    const traces = mapOtlpTraces(otlp([
+      span({ traceId: 'tskew', spanId: 'a', name: 'chat', start: 5 * MS, end: 2 * MS, attrs: {} }),
+    ]) as never);
+
+    expect(traces[0].steps![0].duration_ms).toBeNull();
+    expect(traces[0].total_duration_ms).toBeNull();
+    expect(validateTraceInput(traces[0]).valid).toBe(true);
+  });
+
+  it('keeps a well-ordered duration, including a genuine zero', () => {
+    const traces = mapOtlpTraces(otlp([
+      span({ traceId: 'tok', spanId: 'a', name: 'chat', start: 2 * MS, end: 5 * MS, attrs: {} }),
+      // Same start and end: an instant/cached call is 0ms, not unknown.
+      span({ traceId: 'tok', spanId: 'b', name: 'execute_tool', start: 6 * MS, end: 6 * MS, attrs: {} }),
+    ]) as never);
+
+    const steps = traces[0].steps!;
+    expect(steps.find((s) => s.name === 'chat')!.duration_ms).toBe(3);
+    expect(steps.find((s) => s.name === 'execute_tool')!.duration_ms).toBe(0);
+    expect(traces[0].total_duration_ms).toBe(4);
+  });
+
   it('drops a self-referencing parent', () => {
     const traces = mapOtlpTraces(otlp([
       span({ traceId: 't1', spanId: 'x', parentSpanId: 'x', name: 'chat', start: MS, end: 2 * MS, attrs: {} }),

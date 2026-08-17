@@ -235,7 +235,16 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
       // way, which is what the cross-batch re-link uses.
       const resolvedParent = s.parentSpanId ? stepNumberOf.get(s.parentSpanId) : undefined;
       const parent = resolvedParent != null && resolvedParent < i + 1 ? resolvedParent : undefined;
-      const duration = s.end && s.start ? Math.round((s.end - s.start) / 1e6) : null;
+      // A span whose end precedes its own start (clock skew across hosts, or a
+      // hand-rolled exporter) produced a NEGATIVE duration, which
+      // `validateTraceInput` rejects — so `otel serve` persisted rows `ingest`
+      // refuses, the same round-trip break already fixed for parentage above,
+      // and the UI rendered a negative millisecond count. Drop the contradictory
+      // value rather than clamping it to 0: 0 would assert the call was instant,
+      // where null truthfully says the timing is unknown — exactly what the
+      // no-timing branch does, and what `effectiveDurationMs` already does with
+      // a backwards started_at/ended_at pair.
+      const duration = s.end && s.start && s.end >= s.start ? Math.round((s.end - s.start) / 1e6) : null;
       // Same guard as the trace root below: messageContent never returns null (it
       // omits the `messages` key when the span has no output messages), so a
       // message-less step — the common case for tool/thought spans — must be
@@ -299,8 +308,13 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): IngestTraceInput[]
       // nanos 0, so trusting it would give `maxEnd - 0` — an absurd epoch-based
       // duration — or, once such spans sort last, would wrongly null a duration
       // that the timed spans do define.
+      // Same skew guard as the per-step duration: maxEnd and minStart come from
+      // independent sets, so one backwards span can put the latest end before
+      // the earliest start and make the whole trace's duration negative.
       total_duration_ms:
-        maxEnd != null && minStart != null ? Math.round((maxEnd - minStart) / 1e6) : null,
+        maxEnd != null && minStart != null && maxEnd >= minStart
+          ? Math.round((maxEnd - minStart) / 1e6)
+          : null,
       total_tokens: totalTokens || null,
       // Carry the root's own attributes (model, provider, and any unmapped
       // gen_ai.* keys) the way every step already does — they were dropped
