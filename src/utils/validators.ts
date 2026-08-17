@@ -205,13 +205,20 @@ export function validateStepInput(input: unknown, index?: number): ValidationRes
     }
   }
 
-  // Decision record — only valid on a `decision` step
+  // Decision record — valid on a step of ANY type.
+  //
+  // This used to require step_type === 'decision', but nothing else in the
+  // system maintains that invariant: the live recorder's `attachDecision` and
+  // the SDK's inline `step({ decision })` attach a record to whatever step is
+  // being written, `appendStep`/`ingestTrace` insert it unconditionally, and
+  // the readers were all deliberately corrected to surface it wherever it sits
+  // (`decisions`, `why`, the timeline, the summarizer). The validator was the
+  // only holdout — and it rejected the tool's OWN output: a decision captured
+  // live, displayed by `decisions` and written by `export`, could not be
+  // re-ingested, so a backup could not be restored and a store could not be
+  // moved between machines. The record's own shape is still validated.
   if (data.decision != null) {
-    if (data.step_type !== 'decision') {
-      errors.push({ field: `${prefix}decision`, message: 'decision records are only allowed on steps of type "decision"' });
-    } else {
-      errors.push(...validateDecision(data.decision, prefix));
-    }
+    errors.push(...validateDecision(data.decision, prefix));
   }
 
   return { valid: errors.length === 0, errors };

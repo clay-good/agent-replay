@@ -117,6 +117,17 @@ nothing else.
 
 ### Fixed
 
+- `ingest` now accepts a decision record on a step of any type, so a trace
+  captured live can be re-ingested from its own export. **This reverses a
+  previously-enforced rule.** Nothing else in the system maintained it: the
+  live recorder and the SDK attach a decision to whatever step is being
+  written, the writers insert it unconditionally, and the readers were all
+  corrected to surface it wherever it sits. The validator was the sole holdout,
+  and it rejected the tool's own output — a decision that `record` captured,
+  `decisions` displayed, and `export` wrote could not be loaded back, so a
+  backup could not be restored and a store could not be moved between machines.
+  The decision record's own shape is still validated.
+
 - `agent-replay run` now finalizes its trace and cleans up on every exit path.
   Interrupting the wrapper — Ctrl-C, or a CI job timeout killing it — left the
   trace `running` forever with no end time, no error, and no exit code, leaked

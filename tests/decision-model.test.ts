@@ -153,13 +153,26 @@ describe('structural + decision validation', () => {
     expect(r.errors.some((e) => e.field === 'steps[1].caused_by_step')).toBe(true);
   });
 
-  it('rejects a decision block on a non-decision step', () => {
+  it('accepts a decision block on a non-decision step, as every other layer does', () => {
+    // This assertion was inverted deliberately. It used to require
+    // step_type === 'decision', but nothing else maintains that invariant: the
+    // live recorder and the SDK attach a decision to whatever step is being
+    // written, the writers insert it unconditionally, and the readers were all
+    // corrected to surface it wherever it sits (see "lists a decision attached
+    // to a non-decision step" below, whose comment names this asymmetry). The
+    // validator was rejecting the tool's own output — a decision captured live
+    // and written by `export` could not be re-ingested, so a backup could not
+    // be restored. The record's shape is still validated.
     const input = base([
       { step_number: 1, step_type: 'tool_call', name: 'x', decision: { chosen: 'a' } },
     ]);
-    const r = validateTraceInput(input);
-    expect(r.valid).toBe(false);
-    expect(r.errors.some((e) => e.field === 'steps[0].decision')).toBe(true);
+    expect(validateTraceInput(input).valid).toBe(true);
+
+    // A malformed decision is still rejected, wherever it is attached.
+    const bad = base([
+      { step_number: 1, step_type: 'tool_call', name: 'x', decision: { chosen: 'a', confidence: 1.5 } },
+    ]);
+    expect(validateTraceInput(bad).valid).toBe(false);
   });
 
   it('rejects confidence outside [0, 1]', () => {
