@@ -43,6 +43,9 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
     .filter(Boolean);
 
   const touched = new Set<string>();
+  // Traces this stream OPENED (saw a trace_start for), as distinct from traces
+  // it merely wrote into — only the former are ours to finalize.
+  const opened = new Set<string>();
   let applied = 0;
   let warnings = 0;
   let totalSteps = 0;
@@ -66,6 +69,7 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
     try {
       const { traceId } = applyEvent(db, event);
       touched.add(traceId);
+      if (event.type === 'trace_start') opened.add(traceId);
       applied++;
       if (event.type === 'step' || event.type === 'step_start') totalSteps++;
     } catch (err) {
@@ -78,11 +82,13 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
   const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
 
   for await (const line of rl) {
-    // A `//` comment line is explicitly part of the native protocol (see
-    // parseEventLine), so counting it as input made a legal comment-only stream
-    // report "none of the N line(s) matched the format" and exit 1.
+    // A `//` comment line is part of the NATIVE protocol only (see
+    // parseEventLine), so counting it as input made a legal comment-only native
+    // stream report "none of the N line(s) matched the format" and exit 1. In a
+    // translated format `//` is just a line the translator rejects, and skipping
+    // it there let a wholly rejected stream exit 0.
     const trimmed = line.trim();
-    if (trimmed && !trimmed.startsWith('//')) inputLines++;
+    if (trimmed && (translator != null || !trimmed.startsWith('//'))) inputLines++;
     if (translator) {
       // Native harness stream: parse the line, then translate to our events.
       const trimmed = line.trim();
@@ -114,10 +120,15 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
     for (const ev of translator.finalize()) apply(ev);
   }
 
-  // Finalize any trace still running when the stream ended.
+  // Finalize any trace still running when the stream ended — but only traces
+  // THIS stream opened. A producer may resume an existing trace by id, and
+  // under `run -- sh -c '... | agent-replay record'` (the README's own nested
+  // example) those events carry the WRAPPER's trace id: finalizing it as
+  // `timeout` when the pipe closed marked a clean run red and permanently
+  // wrong, since the wrapper then sees a non-running status and leaves it be.
   let finalized = 0;
   if (!opts.leaveOpen) {
-    for (const id of touched) {
+    for (const id of opened) {
       const row = db.prepare('SELECT status FROM agent_traces WHERE id = ?').get(id) as
         | { status: string }
         | undefined;

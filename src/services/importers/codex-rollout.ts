@@ -63,11 +63,22 @@ export function importCodexRollout(
   const records: Record<string, unknown>[] = [];
   let skipped = 0;
   for (const line of lines) {
+    let parsed: unknown;
     try {
-      records.push(JSON.parse(line));
+      parsed = JSON.parse(line);
     } catch {
       skipped++;
+      continue;
     }
+    // A line that parses to a non-object is not a record. `null` in particular
+    // used to be pushed and then dereferenced unguarded in the first pass, so
+    // ONE such line threw and aborted the whole import — nothing kept from a
+    // large rollout, against the documented best-effort contract.
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      skipped++;
+      continue;
+    }
+    records.push(parsed as Record<string, unknown>);
   }
 
   // First pass: index function_call_output by call_id.

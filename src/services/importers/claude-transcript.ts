@@ -50,7 +50,10 @@ interface Block {
  */
 function toNum(v: unknown): number {
   const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN;
-  return Number.isFinite(n) ? n : 0;
+  // Clamp at zero: a negative usage count is not a token total, and it survived
+  // import only to be REJECTED on the way back in — `ingest` requires a
+  // non-negative total, so an export of such a trace could not be restored.
+  return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 /**
@@ -92,12 +95,28 @@ export function importClaudeTranscript(
 
   const records: Record<string, unknown>[] = [];
   let skipped = 0;
+  // Subagent FILES that could not be read. Counted separately from records:
+  // adding them to `skipped` reported a record count in the wrong unit (1
+  // skipped where zero records existed).
+  let unreadableSubagentFiles = 0;
   for (const line of lines) {
+    let parsed: unknown;
     try {
-      records.push(JSON.parse(line));
+      parsed = JSON.parse(line);
     } catch {
       skipped++;
+      continue;
     }
+    // A line that parses to a non-object is not a record. `null` in particular
+    // used to be pushed and then dereferenced unguarded in the first pass, so
+    // ONE such line threw and aborted the whole import — nothing kept from a
+    // 50,000-record transcript, against the documented best-effort contract.
+    // (Other scalars happened to survive; null alone was fatal.)
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      skipped++;
+      continue;
+    }
+    records.push(parsed as Record<string, unknown>);
   }
 
   // First pass: index tool_result content by tool_use_id, and remember which
@@ -233,13 +252,7 @@ export function importClaudeTranscript(
     }
     for (const f of subFiles) {
       const agentId = basename(f, '.jsonl').replace(/^agent-/, '');
-      const anchor = stepNumber++;
-      steps.push({
-        step_number: anchor,
-        step_type: 'thought',
-        name: `subagent:${agentId}`,
-        metadata: { hook_anchor: 1, agent_id: agentId, source: 'subagent-transcript' },
-      });
+      const anchor = stepNumber;
       const subRecords: Record<string, unknown>[] = [];
       try {
         for (const l of readFileSync(join(subDir, f), 'utf-8').split('\n')) {
@@ -248,18 +261,45 @@ export function importClaudeTranscript(
           // Parse each line on its own, like the main transcript, so one bad
           // line (e.g. a truncated final line from a killed run) skips only
           // that line instead of discarding the whole subagent file.
+          let parsed: unknown;
           try {
-            subRecords.push(JSON.parse(trimmed));
+            parsed = JSON.parse(trimmed);
           } catch {
             skipped++;
+            continue;
           }
+          if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            skipped++;
+            continue;
+          }
+          subRecords.push(parsed as Record<string, unknown>);
         }
       } catch {
-        // The file itself is unreadable — skip it whole.
-        skipped++;
+        // The file itself is unreadable. Report it, but do NOT count it as a
+        // skipped RECORD: it is a file, and "Records skipped" then reported a
+        // number in the wrong unit (1 skipped where zero records existed).
+        unreadableSubagentFiles++;
         continue;
       }
-      const built = buildSubagentSteps(subRecords, stepNumber, anchor);
+      // Build the children FIRST, and only anchor them if there are any. The
+      // anchor used to be pushed before the file was even read, so an empty or
+      // unreadable subagent file left a childless `subagent:<id>` thought step —
+      // which also made `steps.length` non-zero, defeating the "nothing
+      // importable → exit 1" guard below: `Records imported: 0` and exit 0 at
+      // the same time. The spec says not to fabricate steps for unknown records.
+      const built = buildSubagentSteps(subRecords, stepNumber + 1, anchor);
+      if (built.steps.length === 0) {
+        imported += built.imported;
+        skipped += built.skipped;
+        continue;
+      }
+      stepNumber++; // consume the anchor's number now that it has children
+      steps.push({
+        step_number: anchor,
+        step_type: 'thought',
+        name: `subagent:${agentId}`,
+        metadata: { hook_anchor: 1, agent_id: agentId, source: 'subagent-transcript' },
+      });
       steps.push(...built.steps);
       stepNumber += built.steps.length;
       totalTokens += built.tokens;
@@ -280,6 +320,12 @@ export function importClaudeTranscript(
   // real content worth keeping.
   if (steps.length === 0 && !input) {
     return { trace: null, imported, skipped, steps: 0 };
+  }
+
+  if (unreadableSubagentFiles > 0) {
+    console.error(
+      `  ⚠ ${unreadableSubagentFiles} subagent file(s) could not be read and were left out.`,
+    );
   }
 
   const traceInput: IngestTraceInput = {

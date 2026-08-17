@@ -27,8 +27,19 @@ export async function runDemo(opts: DemoOptions = {}): Promise<void> {
   const baseDir = resolve(resolveDataDir(opts.dir));
   const dbPath = resolve(baseDir, 'traces.db');
 
-  // Reset if requested — safety check: only delete .agent-replay directories
+  // Reset if requested — safety checks before an rmSync.
   if (opts.reset && existsSync(baseDir)) {
+    // A destructive command must not inherit its target from the environment.
+    // `AGENT_REPLAY_DIR` is a handshake `run` sets for its child (and users may
+    // export it), so honoring it here meant `demo --reset` from ANY directory
+    // could delete a real store that merely happens to be named .agent-replay.
+    // Deleting someone's traces has to be something they typed.
+    if (!opts.dir && process.env.AGENT_REPLAY_DIR) {
+      console.error(chalk.red('  Refusing to reset a store named only by AGENT_REPLAY_DIR.'));
+      console.error(chalk.dim(`  Pass it explicitly if that is what you mean: --dir ${process.env.AGENT_REPLAY_DIR}`));
+      process.exitCode = 1;
+      return;
+    }
     const baseName = basename(baseDir);
     if (!baseName.startsWith('.agent-replay') && !baseName.startsWith('agent-replay')) {
       console.error(chalk.red(`  Refusing to delete "${baseDir}" — expected an agent-replay data directory.`));

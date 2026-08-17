@@ -35,14 +35,27 @@ export interface EvalOptions {
  * using built-in presets, custom rubric files, or AI-powered analysis.
  */
 export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): Promise<void> {
+  // Every refusal has to answer in the shape the caller asked for. `eval --json`
+  // printed nothing at all on stdout for a missing trace, an unknown preset, no
+  // configured provider, or a budget refusal, so a `| jq` pipeline got a parse
+  // error where it expected a document it could read a verdict from.
+  const refuse = (code: number, message: string, hints: string[] = []): void => {
+    if (opts.json) {
+      console.log(JSON.stringify({ ok: false, error: message, ...(hints.length ? { hints } : {}) }, null, 2));
+    } else {
+      console.error(chalk.red(`  ${message}`));
+      for (const h of hints) console.error(chalk.dim(`  ${h}`));
+    }
+    process.exitCode = code;
+  };
+
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   // Resolve trace
   const trace = getTrace(db, traceId);
   if (!trace) {
-    console.error(chalk.red(`  Trace not found: ${traceId}`));
-    process.exitCode = 1;
+    refuse(1, `Trace not found: ${traceId}`);
     return;
   }
 
@@ -98,10 +111,10 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
     }
   } else if (opts.preset && !isAiPreset) {
     if (!PRESET_NAMES.includes(opts.preset)) {
-      console.error(chalk.red(`  Unknown preset: ${opts.preset}`));
-      console.error(chalk.dim(`  Deterministic: ${PRESET_NAMES.join(', ')}`));
-      console.error(chalk.dim(`  AI-powered:    ${AI_PRESET_NAMES.join(', ')}`));
-      process.exitCode = 2;
+      refuse(2, `Unknown preset: ${opts.preset}`, [
+        `Deterministic: ${PRESET_NAMES.join(', ')}`,
+        `AI-powered:    ${AI_PRESET_NAMES.join(', ')}`,
+      ]);
       return;
     }
 
@@ -142,10 +155,10 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
     const config = loadConfig(opts.dir);
     const resolved = resolveProvider(config);
     if (!resolved) {
-      console.error(chalk.red('  No AI provider configured.'));
-      console.error(chalk.dim('  Set an API key: agent-replay config set ai.api_keys.anthropic <key>'));
-      console.error(chalk.dim('  Or set env var: ANTHROPIC_API_KEY, GOOGLE_API_KEY, or OPENAI_API_KEY'));
-      process.exitCode = 1;
+      refuse(1, 'No AI provider configured.', [
+        'Set an API key: agent-replay config set ai.api_keys.anthropic <key>',
+        'Or set env var: ANTHROPIC_API_KEY, GOOGLE_API_KEY, or OPENAI_API_KEY',
+      ]);
       return;
     }
 
@@ -166,7 +179,7 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
     const presetsToRun = isAiPreset ? [opts.preset!] : AI_PRESET_NAMES;
 
     // Show cost estimate
-    const estimate = estimateAiEvalCost(trace, presetsToRun, resolved.model);
+    const estimate = estimateAiEvalCost(trace, presetsToRun, resolved.model, llmOpts.max_tokens);
     if (!opts.json) {
       console.log('');
       console.log(
@@ -179,8 +192,7 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
     }
 
     if (estimate.total_estimated_usd > maxCost) {
-      console.error(chalk.red(`  Estimated cost $${estimate.total_estimated_usd.toFixed(4)} exceeds budget $${maxCost.toFixed(4)}`));
-      process.exitCode = 1;
+      refuse(1, `Estimated cost $${estimate.total_estimated_usd.toFixed(4)} exceeds budget $${maxCost.toFixed(4)}`);
       return;
     }
 

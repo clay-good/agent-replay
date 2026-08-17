@@ -136,9 +136,16 @@ export function resolveApiKey(
  * it. An unrecognized model name still applies, since a user naming a model the
  * table doesn't know is usually right about their own provider.
  */
-function modelSuitsProvider(model: string, provider: 'anthropic' | 'google' | 'openai'): boolean {
+function modelOwner(model: string): 'anthropic' | 'google' | 'openai' | null {
   const m = model.toLowerCase();
-  const owner = m.startsWith('claude') ? 'anthropic' : m.startsWith('gemini') ? 'google' : /^(gpt|o\d)/.test(m) ? 'openai' : null;
+  if (m.startsWith('claude')) return 'anthropic';
+  if (m.startsWith('gemini')) return 'google';
+  if (/^(gpt|o\d)/.test(m)) return 'openai';
+  return null;
+}
+
+function modelSuitsProvider(model: string, provider: 'anthropic' | 'google' | 'openai'): boolean {
+  const owner = modelOwner(model);
   return owner === null || owner === provider;
 }
 
@@ -158,8 +165,19 @@ export function resolveProvider(config: AgentReplayConfig | null): ResolvedProvi
     return null;
   }
 
-  // Auto-detect: try in priority order
+  // Auto-detect. A configured model that names a family gets first refusal on
+  // the provider: with two keys present, the fixed priority order otherwise won
+  // over the user's explicit `ai.model`, silently billing a different vendor and
+  // returning results from a model they did not choose.
   const providers: Array<'anthropic' | 'google' | 'openai'> = ['anthropic', 'google', 'openai'];
+  const configuredModel = config?.ai?.model;
+  const preferredByModel = configuredModel
+    ? providers.find((p) => modelOwner(configuredModel) === p)
+    : undefined;
+  if (preferredByModel) {
+    const apiKey = resolveApiKey(preferredByModel, config);
+    if (apiKey) return { provider: preferredByModel, apiKey, model: configuredModel! };
+  }
   for (const p of providers) {
     const apiKey = resolveApiKey(p, config);
     if (apiKey) {

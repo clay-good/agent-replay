@@ -367,3 +367,60 @@ describe('importClaudeTranscript — subagents', () => {
     expect(trace.steps.find((s) => s.name === 'Grep')!.output).toEqual({ result: '3 matches' });
   });
 });
+
+describe('importer robustness', () => {
+  it('keeps the rest of a transcript when one line parses to null', () => {
+    // Both importers pushed any parsed JSON value into their record list and
+    // dereferenced it unguarded, so ONE `null` line threw and aborted the whole
+    // import — nothing kept from a 50,000-record transcript, against the
+    // documented best-effort contract. Other scalars happened to survive.
+    const dir = mkdtempSync(join(tmpdir(), 'ar-import-null-'));
+    try {
+      const file = join(dir, 'session.jsonl');
+      writeFileSync(file, [
+        JSON.stringify({ type: 'user', message: { content: 'do the thing' } }),
+        'null',
+        JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } }),
+      ].join('\n') + '\n');
+
+      const db = new Database(':memory:');
+      try {
+        runMigrations(db);
+        const res = importClaudeTranscript(db, file, {});
+        expect(res.trace).not.toBeNull();
+        expect(res.imported).toBe(2);
+        expect(res.skipped).toBe(1);
+      } finally {
+        db.close();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not invent a subagent step for a subagent file that yields nothing', () => {
+    // The anchor was pushed BEFORE the subagent file was read, so an empty one
+    // left a childless `subagent:<id>` thought step — which also made
+    // steps.length non-zero, defeating the "nothing importable → exit 1" guard:
+    // "Records imported: 0" and success at the same time.
+    const dir = mkdtempSync(join(tmpdir(), 'ar-import-ghost-'));
+    try {
+      const file = join(dir, 'm2.jsonl');
+      writeFileSync(file, JSON.stringify({ type: 'summary', summary: 'x', leafUuid: 'y' }) + '\n');
+      mkdirSync(join(dir, 'm2', 'subagents'), { recursive: true });
+      writeFileSync(join(dir, 'm2', 'subagents', 'agent-ghost.jsonl'), '');
+
+      const db = new Database(':memory:');
+      try {
+        runMigrations(db);
+        const res = importClaudeTranscript(db, file, {});
+        expect(res.steps).toBe(0);
+        expect(res.trace).toBeNull(); // nothing importable — the guard fires
+      } finally {
+        db.close();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

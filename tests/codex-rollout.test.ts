@@ -135,3 +135,31 @@ describe('importCodexRollout', () => {
     expect(trace.metadata.source_format).toBe('codex-rollout');
   });
 });
+
+describe('codex-rollout robustness', () => {
+  it('keeps the rest of a rollout when one line parses to null', () => {
+    // Same defect as the claude importer: `null` was pushed into the record
+    // list and dereferenced unguarded, aborting the entire import.
+    const dir = mkdtempSync(join(tmpdir(), 'ar-codex-null-'));
+    try {
+      const file = join(dir, 'rollout.jsonl');
+      writeFileSync(file, [
+        JSON.stringify({ type: 'session_meta', payload: { id: 's1' } }),
+        'null',
+        JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'go' }] } }),
+      ].join('\n') + '\n');
+
+      const db = new Database(':memory:');
+      try {
+        runMigrations(db);
+        const res = importCodexRollout(db, file, {});
+        expect(res.skipped).toBeGreaterThanOrEqual(1);
+        expect(res.imported + res.skipped).toBe(3);
+      } finally {
+        db.close();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

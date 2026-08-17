@@ -204,6 +204,17 @@ describe('resolveProvider with a model from another provider', () => {
     expect(resolveProvider({ ai: { model: 'my-finetune-v3' } } as never)!.model).toBe('my-finetune-v3');
   });
 
+  it('lets a recognized model family choose its provider over the priority order', () => {
+    // With two keys present, the fixed anthropic→google→openai order won over
+    // the user's explicit ai.model: a different vendor was billed and the
+    // results came from a model they had not chosen, with no warning.
+    process.env.ANTHROPIC_API_KEY = 'ant-key';
+    const resolved = resolveProvider({ ai: { model: 'gpt-5.4-nano' } } as never);
+    expect(resolved!.provider).toBe('openai');
+    expect(resolved!.model).toBe('gpt-5.4-nano');
+    delete process.env.ANTHROPIC_API_KEY;
+  });
+
   it('still honors a model when the provider is set explicitly', () => {
     const resolved = resolveProvider({ ai: { provider: 'openai', model: 'gpt-5.4-mini' } } as never);
     expect(resolved!.model).toBe('gpt-5.4-mini');

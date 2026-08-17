@@ -190,6 +190,12 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
       );
       bytesRead = size;
       partial = '';
+      // Adopt the NEW file's head. Keeping the dead file's fingerprint made the
+      // very next poll compare fresh bytes against it, declare a second
+      // "rewrite" that had not happened, and skip reading — dropping every event
+      // written after the truncation, which is precisely the silent loss this
+      // branch exists to prevent.
+      channelHead = head;
       // Reset the decoder too: its buffered partial multi-byte sequence belongs
       // to the file that was just replaced, and would corrupt the first
       // character read from the new one.

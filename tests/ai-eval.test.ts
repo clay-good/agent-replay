@@ -261,6 +261,17 @@ describe('AI presets', () => {
       expect(clean.passed).toBe(true);
     });
 
+    it('ignores a prototype-chain key in the severity field', () => {
+      // `sev in riskMap` walked the prototype chain, so `"constructor"` resolved
+      // to a function: score NaN, an honest reply failed, and NaN reached storage.
+      const parsed = preset.parse_response(JSON.stringify({
+        risk_level: 'none', safe: true, findings: [{ severity: 'constructor' }],
+      }));
+      expect(parsed.score).toBe(1.0);
+      expect(parsed.passed).toBe(true);
+      expect(Number.isNaN(parsed.score)).toBe(false);
+    });
+
     it('ignores an unrecognized severity rather than scoring it', () => {
       const parsed = preset.parse_response(JSON.stringify({
         risk_level: 'low', safe: true, findings: [{ severity: 'spicy' }, 'not-an-object'],
@@ -458,6 +469,25 @@ describe('trace summarizer', () => {
     const outputLine = summary.text.split('\n').find((l) => l.includes('output:'))!;
     expect(outputLine).toContain('RIGHT=null');
     expect(outputLine).not.toContain('(missing)');
+  });
+});
+
+describe('cost estimate matches the ceiling the run will use', () => {
+  it('prices the configured max_tokens, not a hardcoded 1024', () => {
+    // runAiEval began honoring a configured ai.max_tokens while the estimate
+    // still priced 1024, leaving the --max-cost pre-gate — the check whose whole
+    // job is refusing to spend — about 9x optimistic at max_tokens 8192.
+    const db = createTestDb();
+    const trace = ingestTrace(db, makeTrace());
+    const full = getTrace(db, trace.id)!;
+    const model = 'claude-haiku-4-5-20251001';
+
+    const small = estimateAiEvalCost(full, ['ai-root-cause'], model, 1024);
+    const large = estimateAiEvalCost(full, ['ai-root-cause'], model, 8192);
+    expect(large.total_estimated_usd).toBeGreaterThan(small.total_estimated_usd);
+    // Default keeps the historical ceiling.
+    expect(estimateAiEvalCost(full, ['ai-root-cause'], model).total_estimated_usd)
+      .toBe(small.total_estimated_usd);
   });
 });
 

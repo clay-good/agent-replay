@@ -159,6 +159,11 @@ nothing else.
 
 ### Changed
 
+- `demo --reset` refuses to delete a store named only by `AGENT_REPLAY_DIR`.
+  Deleting someone's traces has to be something they typed, so the destructive
+  path requires an explicit `--dir` (everything non-destructive still honors the
+  handshake).
+
 - Every command honors `AGENT_REPLAY_DIR` as its data directory when `--dir`
   isn't given. `run` sets that variable for its child and the README documents
   it as how the wrapper hands the child its store, but nothing read it back — so
@@ -172,6 +177,34 @@ nothing else.
   several sub-traces through one channel collides on the per-trace step
   numbering and loses everything after the first, but the count lived only in
   stderr lines while the summary still read "N event(s) recorded".
+
+- `record` no longer finalizes a trace it did not open. Under the README's own
+  nested example (`run -- sh -c '... | agent-replay record'`) the events carry
+  the wrapper's trace id, so the end-of-stream `timeout` finalization marked a
+  clean run red — and permanently, since the wrapper then sees a non-running
+  status and leaves it alone. Only traces this stream opened are finalized.
+
+- `eval --json` answers in JSON on every refusal — a missing trace, an unknown
+  preset, no configured provider, a `--max-cost` rejection — instead of leaving
+  a `| jq` pipeline with an empty document.
+
+- The `--max-cost` pre-gate prices the ceiling the run will actually use. It
+  hardcoded 1024 output tokens while the run began honoring a configured
+  `ai.max_tokens`, leaving the check whose job is refusing to spend about 9x
+  optimistic at `max_tokens 8192`.
+
+- In auto-detection, a configured `ai.model` naming a known family now selects
+  its provider. With two keys present the fixed priority order won instead:
+  a different vendor was billed and the verdict came from a model the user had
+  not chosen, silently.
+
+- Importing a transcript survives a line that parses to `null`. Both importers
+  pushed any parsed JSON value into their record list and dereferenced it
+  unguarded, so one such line aborted the entire import — nothing kept from a
+  50,000-record transcript. An empty or unreadable subagent file also no longer
+  leaves a childless `subagent:<id>` step behind, which had made "nothing
+  importable" undetectable (`Records imported: 0` alongside exit 0), and an
+  unreadable subagent *file* is no longer counted as a skipped *record*.
 
 - `agent-replay run` keeps its headline guarantee when the store hiccups.
   Finalization was unguarded, so a write that failed (another process holding
