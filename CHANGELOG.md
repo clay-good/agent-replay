@@ -96,6 +96,17 @@ trace schema is unchanged.
   argument) now exit `2` to match the documented "usage error" code — they
   previously exited `1`, contradicting the README's exit-code table.
 
+### Added
+
+- `hook --dialect <name>` declares the harness dialect for `--enforce` replies
+  (`claude-code`, `codex`, `gemini`, or `other`). This makes the documented
+  "harness without structured output exits 2" behavior reachable: the dialect
+  is otherwise detected from the payload, and detection can only answer with a
+  harness it recognizes, so a Crush user registering `hook PreToolUse
+  --enforce` was answered with Claude-shaped JSON on exit 0 — which a harness
+  that doesn't read hook stdout ignores, letting the denied call run. Nothing
+  in a payload distinguishes such a harness, so the user says.
+
 ### Fixed
 
 - `export --format jsonl` with no matches now writes an empty file instead of

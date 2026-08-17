@@ -214,6 +214,41 @@ describe('CLI integration', () => {
     expect(inputDeny.stdout).not.toMatch(/cannot block live/);
   });
 
+  it('--dialect other blocks by exit code for a harness that ignores hook stdout', () => {
+    // The README documents "Crush / others without structured output: exits 2".
+    // That was unreachable: detectDialect only answers 'unknown' for an
+    // unrecognized EVENT, and an unrecognized event returns before enforcement.
+    // So a Crush user registering `hook PreToolUse --enforce` was detected as
+    // claude-code and answered with Claude-shaped JSON on exit 0 — which a
+    // harness that doesn't read hook stdout ignores, and the call ran. Nothing
+    // in a payload distinguishes such a harness, so the user declares it.
+    run(['guard', 'add', '--name', 'rm', '--action', 'deny', '--pattern', '{"input_contains":"rm -rf"}']);
+    const payload = JSON.stringify({
+      hook_event_name: 'PreToolUse', session_id: 's1', tool_name: 'Bash', tool_input: { command: 'rm -rf /' },
+    });
+
+    // Detected dialect: a JSON decision on stdout, exit 0.
+    const detected = run(['hook', 'PreToolUse', '--enforce'], payload);
+    expect(detected.code).toBe(0);
+    expect(JSON.parse(detected.stdout).hookSpecificOutput.permissionDecision).toBe('deny');
+
+    // Declared dialect: the exit-code convention instead.
+    const forced = run(['hook', 'PreToolUse', '--enforce', '--dialect', 'other'], payload);
+    expect(forced.code).toBe(2);
+    expect(forced.stdout).toBe('');
+    expect(forced.stderr).toMatch(/rm -rf/);
+
+    // An allowed call is still allowed under a declared dialect.
+    const safe = JSON.stringify({
+      hook_event_name: 'PreToolUse', session_id: 's1', tool_name: 'Bash', tool_input: { command: 'ls' },
+    });
+    expect(run(['hook', 'PreToolUse', '--enforce', '--dialect', 'other'], safe).code).toBe(0);
+
+    // A bad value is a usage error, and capture mode still never blocks.
+    expect(run(['hook', 'PreToolUse', '--enforce', '--dialect', 'nonsense'], payload).code).toBe(2);
+    expect(run(['hook', 'PreToolUse', '--dialect', 'nonsense'], payload).code).toBe(0);
+  });
+
   it('enforce mode fails CLOSED when the store cannot be read', () => {
     // Corrupt the store so opening/reading it throws part-way through the
     // enforcement evaluation (the real-world case is a transient SQLITE_BUSY on

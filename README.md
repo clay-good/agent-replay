@@ -180,7 +180,7 @@ Add `--enforce` to the hook to evaluate each proposed tool call against your [gu
 
 - **Claude Code / Codex CLI**: emits `{"hookSpecificOutput": {"permissionDecision": "deny" | "ask", ...}}` — `deny` policies block, `require_review` policies defer to the harness's own approval prompt (`"ask"`).
 - **Gemini CLI**: emits `{"decision": "deny", "reason": ...}` (its hooks are allow/deny only, so `require_review` denies with a "review required" reason).
-- **Crush / others without structured output**: exits 2 with the reason on stderr.
+- **Crush / others without structured output**: exits 2 with the reason on stderr. The dialect is detected from the payload, and nothing in a payload identifies a harness that doesn't read hook stdout — so declare it with `--dialect other` (also `claude-code`, `codex`, `gemini` to pin detection), and denied calls are answered by exit code alone.
 
 `warn` policies never block — they surface a message and allow the call. Every enforcement decision that matches a policy is recorded as a `guard_check` step in the session's trace, linked to the attempted `tool_call`, so blocked attempts show up in [`show`](#inspect) and [`why`](#explain-decisions).
 

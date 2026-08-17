@@ -1,13 +1,36 @@
 import { resolve } from 'node:path';
 import { ensureDatabase } from '../db/index.js';
 import { applyHookPayload, formatEnforcementResponse, resolveHookRouting } from '../services/hook-adapter.js';
+import type { HookDialect } from '../services/hook-adapter.js';
 import { errorMessage } from '../utils/json.js';
 
 export interface HookOptions {
   noInput?: boolean;
   enforce?: boolean;
+  dialect?: string;
   dir?: string;
 }
+
+/**
+ * `--dialect` values, and why the flag exists.
+ *
+ * The dialect is normally detected from the payload, and detection can only
+ * ever answer with a harness it recognizes: `unknown` is returned solely when
+ * the event name is unrecognized, and an unrecognized event returns before any
+ * enforcement. So the documented "harness without structured output — exits 2
+ * with the reason on stderr" behaviour was unreachable in practice. A Crush
+ * user registering `hook PreToolUse --enforce` was detected as claude-code and
+ * answered with Claude-shaped JSON on exit 0, which a harness that doesn't read
+ * hook stdout ignores — the call ran. Nothing about a payload distinguishes
+ * such a harness, so the user has to say, which is what this flag is for.
+ */
+const DIALECTS: Record<string, HookDialect> = {
+  'claude-code': 'claude-code',
+  codex: 'codex',
+  gemini: 'gemini',
+  // The exit-code convention, for anything that doesn't parse hook stdout.
+  other: 'unknown',
+};
 
 /**
  * `agent-replay hook [event]` — capture adapter for the stdin-JSON hook
@@ -17,6 +40,18 @@ export interface HookOptions {
  * failure is logged to stderr and swallowed so the host agent is never affected.
  */
 export async function runHook(eventArg: string | undefined, opts: HookOptions = {}): Promise<void> {
+  let forced: HookDialect | undefined;
+  if (opts.dialect != null) {
+    forced = DIALECTS[opts.dialect];
+    if (!forced) {
+      console.error(`agent-replay hook: unknown --dialect "${opts.dialect}". Options: ${Object.keys(DIALECTS).join(', ')}.`);
+      // A usage error must not block the host agent in capture mode; under
+      // --enforce it is fail-closed territory, so 2 stands.
+      process.exitCode = opts.enforce ? 2 : 0;
+      return;
+    }
+  }
+
   /**
    * We never saw a payload, so we could not evaluate policies — the same
    * position as a throw before the verdict below, which deliberately fails
@@ -33,7 +68,7 @@ export async function runHook(eventArg: string | undefined, opts: HookOptions = 
     const { action, dialect } = resolveHookRouting({}, eventArg);
     if (action !== 'pre_tool') return false;
     const resp = formatEnforcementResponse(
-      dialect,
+      forced ?? dialect,
       { action: 'deny', policy: null, reason: `agent-replay received no hook payload (${reason}); blocking to fail closed` },
       eventArg ?? 'PreToolUse',
     );
@@ -88,7 +123,7 @@ export async function runHook(eventArg: string | undefined, opts: HookOptions = 
     // Enforce mode: answer the harness in its documented dialect.
     if (opts.enforce && result.enforcement) {
       const hookEventName = (typeof payload.hook_event_name === 'string' ? payload.hook_event_name : eventArg) ?? 'PreToolUse';
-      const resp = formatEnforcementResponse(result.dialect, result.enforcement, hookEventName);
+      const resp = formatEnforcementResponse(forced ?? result.dialect, result.enforcement, hookEventName);
       if (resp.stdout) process.stdout.write(`${JSON.stringify(resp.stdout)}\n`);
       if (resp.stderrReason) console.error(`agent-replay hook: BLOCK — ${resp.stderrReason}`);
       process.exitCode = resp.exitCode;
@@ -107,7 +142,7 @@ export async function runHook(eventArg: string | undefined, opts: HookOptions = 
       if (action === 'pre_tool') {
         const hookEventName = (typeof payload.hook_event_name === 'string' ? payload.hook_event_name : eventArg) ?? 'PreToolUse';
         const resp = formatEnforcementResponse(
-          dialect,
+          forced ?? dialect,
           { action: 'deny', policy: null, reason: `agent-replay could not evaluate guard policies (${errorMessage(err)}); blocking to fail closed` },
           hookEventName,
         );
