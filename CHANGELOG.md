@@ -117,6 +117,19 @@ nothing else.
 
 ### Fixed
 
+- Forking a trace no longer hijacks the session it was forked from. `fork`
+  copies the original's `session_id` and opens the copy as `running` with a
+  newer start time, and live capture resolves "the open trace for this session"
+  as the newest running one — so every hook event after a fork was written into
+  the what-if copy. The real run stopped growing mid-capture and was never
+  finalized (left `running` forever), while the fork silently accumulated steps
+  it never ran, so `diff original fork` reported fabricated divergence. A bare
+  `agent-replay watch` had the same problem: it attached to the static fork and
+  showed nothing happening while the live run scrolled by. Live-capture
+  resolution now skips forks (`hook`, `watch`, and the OpenTelemetry receiver's
+  cross-batch merge target, which a fork also matched because it inherits the
+  original's metadata).
+
 - `demo` no longer seeds a guardrail that cannot do what it says. Its
   `no-external-urls` policy was a `deny` keyed on `output_contains`, which
   enforcement can never fire — it evaluates a proposed call, before there is any

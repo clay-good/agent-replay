@@ -10,9 +10,11 @@ import {
   appendStep,
   getStepsAfter,
   getMostRecentRunningTrace,
+  getTrace,
   isPossiblyAbandoned,
   updateTrace,
 } from '../src/services/trace-service.js';
+import { forkTrace } from '../src/services/fork-service.js';
 import { runWatch, renderStepLine, unseenSteps } from '../src/commands/watch.js';
 
 let db: Database.Database;
@@ -96,6 +98,18 @@ describe('getMostRecentRunningTrace', () => {
     const t = startTrace(db, { agent_name: 'x' });
     updateTrace(db, t.id, { status: 'completed' });
     expect(getMostRecentRunningTrace(db)).toBeNull();
+  });
+
+  it('ignores forks, which open as running with a newer start time', () => {
+    // `watch` with no trace id follows this. A fork is a static what-if copy, so
+    // attaching to one shows nothing happening while the live run scrolls by.
+    const live = startTrace(db, { agent_name: 'live', started_at: '2026-01-01T00:00:00Z' });
+    appendStep(db, live.id, { step_number: 1, step_type: 'thought', name: 'a' });
+    const fork = forkTrace(db, live.id, 1);
+
+    expect(getMostRecentRunningTrace(db)!.id).toBe(live.id);
+    // The fork is still `running` and still newer — it is skipped by lineage, not by status.
+    expect(getTrace(db, fork.forked_trace_id)!.status).toBe('running');
   });
 });
 

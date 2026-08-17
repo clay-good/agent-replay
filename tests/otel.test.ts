@@ -5,6 +5,7 @@ import { ingestTrace, getTrace, listTraces } from '../src/services/trace-service
 import { mapOtlpTraces, attrsToMap, decodeAnyValue } from '../src/services/otel/semconv.js';
 import { handleTracesExport, startOtelReceiver, type OtelStats } from '../src/services/otel/receiver.js';
 import { validateTraceInput } from '../src/utils/validators.js';
+import { forkTrace } from '../src/services/fork-service.js';
 
 let db: Database.Database;
 
@@ -354,6 +355,26 @@ describe('OTLP receiver', () => {
     expect(trace.total_tokens).toBe(180);
     expect(trace.started_at).toBe('1970-01-01T00:00:00.001Z');
     expect(trace.ended_at).toBe('1970-01-01T00:00:00.009Z');
+  });
+
+  it('assembles later batches into the original trace, never into a fork of it', () => {
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    handleTracesExport(db, JSON.stringify(otlp([
+      span({ traceId: 't8', spanId: 'r', name: 'invoke_agent', start: 1 * MS, end: 9 * MS, attrs: { 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'forkbot' } }),
+      span({ traceId: 't8', spanId: 'c1', parentSpanId: 'r', name: 'chat', start: 2 * MS, end: 3 * MS, attrs: { 'gen_ai.operation.name': 'chat' } }),
+    ])), stats);
+    const live = listTraces(db, {}).items[0].id;
+
+    // A fork inherits the original's session_id and metadata, so it matches
+    // both merge keys; only lineage distinguishes it from the real trace.
+    const fork = forkTrace(db, live, 1);
+
+    handleTracesExport(db, JSON.stringify(otlp([
+      span({ traceId: 't8', spanId: 'c2', parentSpanId: 'c1', name: 'execute_tool', start: 4 * MS, end: 5 * MS, attrs: { 'gen_ai.operation.name': 'execute_tool', 'gen_ai.tool.name': 'search' } }),
+    ])), stats);
+
+    expect(getTrace(db, live)!.steps.map((s) => s.name)).toContain('search');
+    expect(getTrace(db, fork.forked_trace_id)!.steps.map((s) => s.name)).not.toContain('search');
   });
 
   it('upgrades a rootless synthetic trace in place when the root batch arrives last', () => {

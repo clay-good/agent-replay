@@ -1011,10 +1011,17 @@ export function getStepsAfter(
   return rows.map(rowToStep);
 }
 
-/** The most recently started trace still in status `running`, or null. */
+/**
+ * The most recently started live trace still in status `running`, or null.
+ * Forks are excluded: `fork` opens its copy as `running` with a fresh
+ * started_at, so a fork always sorted first here and a bare `watch` attached to
+ * the static copy — showing nothing happening — instead of the live run.
+ */
 export function getMostRecentRunningTrace(db: Database.Database): Trace | null {
   const row = db
-    .prepare("SELECT * FROM agent_traces WHERE status = 'running' ORDER BY started_at DESC LIMIT 1")
+    .prepare(
+      "SELECT * FROM agent_traces WHERE status = 'running' AND parent_trace_id IS NULL ORDER BY started_at DESC LIMIT 1",
+    )
     .get() as Record<string, unknown> | undefined;
   return row ? rowToTrace(row) : null;
 }

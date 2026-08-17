@@ -155,13 +155,21 @@ export function handleTracesExportProtobuf(
  * across batches assemble into one trace. Span batches merge by OTel trace id;
  * log-event batches merge by (session id, source format). Returns the target
  * trace id, or undefined when this is the first batch (open a new trace).
+ *
+ * Forks are excluded and the tie is broken by start time: a fork inherits the
+ * original's session_id and metadata (so it matches both merge keys), and
+ * without these clauses which of the two received later batches was left to
+ * SQLite's scan order.
  */
 function findMergeTarget(db: Database.Database, input: IngestTraceInput): string | undefined {
   const meta = input.metadata ?? {};
   const otelTraceId = meta.otel_trace_id;
   if (typeof otelTraceId === 'string' && otelTraceId) {
     const row = db
-      .prepare("SELECT id FROM agent_traces WHERE json_extract(metadata, '$.otel_trace_id') = ? LIMIT 1")
+      .prepare(
+        `SELECT id FROM agent_traces WHERE json_extract(metadata, '$.otel_trace_id') = ?
+           AND parent_trace_id IS NULL ORDER BY started_at ASC LIMIT 1`,
+      )
       .get(otelTraceId) as { id: string } | undefined;
     return row?.id;
   }
@@ -169,7 +177,8 @@ function findMergeTarget(db: Database.Database, input: IngestTraceInput): string
   if (input.session_id && typeof sourceFormat === 'string') {
     const row = db
       .prepare(
-        "SELECT id FROM agent_traces WHERE session_id = ? AND json_extract(metadata, '$.source_format') = ? LIMIT 1",
+        `SELECT id FROM agent_traces WHERE session_id = ? AND json_extract(metadata, '$.source_format') = ?
+           AND parent_trace_id IS NULL ORDER BY started_at ASC LIMIT 1`,
       )
       .get(input.session_id, sourceFormat) as { id: string } | undefined;
     return row?.id;

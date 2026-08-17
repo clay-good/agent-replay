@@ -3,6 +3,7 @@ import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
 import { getTrace, listTraces } from '../src/services/trace-service.js';
 import { applyHookPayload, detectDialect } from '../src/services/hook-adapter.js';
+import { forkTrace } from '../src/services/fork-service.js';
 
 let db: Database.Database;
 
@@ -175,6 +176,32 @@ describe('correlation and privacy', () => {
     const r = apply({ hook_event_name: 'Stop', session_id: 'ghost' });
     expect(r.traceId).toBeNull();
     expect(listTraces(db, {}).total).toBe(0);
+  });
+
+  it('keeps capturing into the live trace after it has been forked', () => {
+    // A fork copies the original's session_id and opens the copy as `running`
+    // with a newer started_at, so it used to win "newest running trace for this
+    // session": every later hook event landed in the what-if copy, leaving the
+    // real run stranded mid-capture and never finalized.
+    const session = 's-forked';
+    apply({ hook_event_name: 'PreToolUse', session_id: session, tool_name: 'Bash', tool_input: { command: 'ls' } });
+    apply({ hook_event_name: 'PostToolUse', session_id: session, tool_name: 'Bash', tool_response: { ok: true } });
+    const live = listTraces(db, { session_id: session }).items[0].id;
+
+    const fork = forkTrace(db, live, 1);
+
+    apply({ hook_event_name: 'PreToolUse', session_id: session, tool_name: 'Read', tool_input: { path: '/f' } });
+    const stop = apply({ hook_event_name: 'Stop', session_id: session });
+
+    // The live run received the later tool call and the finalization.
+    expect(stop.traceId).toBe(live);
+    const liveTrace = getTrace(db, live)!;
+    expect(liveTrace.status).toBe('completed');
+    expect(liveTrace.steps.map((s) => s.name)).toContain('Read');
+    // The fork stayed a clean copy of the steps it was forked from.
+    const forked = getTrace(db, fork.forked_trace_id)!;
+    expect(forked.status).toBe('running');
+    expect(forked.steps.map((s) => s.name)).not.toContain('Read');
   });
 });
 

@@ -184,6 +184,17 @@ function appendStepRetrying(
   throw new Error('appendStepRetrying: exhausted attempts');
 }
 
+/**
+ * The live trace for a session: the newest one still `running` that is not a
+ * fork. `fork` copies the original's session_id and opens the copy as `running`
+ * with a fresh (newer) started_at, so without the `parent_trace_id IS NULL`
+ * filter a fork always won this ordering — every hook event after a fork was
+ * written to the what-if copy, stranding the real run half-captured and never
+ * finalized, and polluting the fork with post-fork steps it never ran.
+ */
+const OPEN_SESSION_TRACE_SQL =
+  "SELECT id FROM agent_traces WHERE session_id = ? AND status = 'running' AND parent_trace_id IS NULL ORDER BY started_at DESC LIMIT 1";
+
 /** Find (or create) the open trace for a session. */
 function ensureTrace(
   db: Database.Database,
@@ -192,7 +203,7 @@ function ensureTrace(
   payload: Record<string, unknown>,
 ): string {
   const existing = db
-    .prepare("SELECT id FROM agent_traces WHERE session_id = ? AND status = 'running' ORDER BY started_at DESC LIMIT 1")
+    .prepare(OPEN_SESSION_TRACE_SQL)
     .get(sessionId) as { id: string } | undefined;
   if (existing) return existing.id;
 
@@ -267,9 +278,7 @@ export function applyHookPayload(
 
   // finalize is the only action that must not create a trace it would immediately close.
   if (action === 'finalize') {
-    const row = db
-      .prepare("SELECT id FROM agent_traces WHERE session_id = ? AND status = 'running' ORDER BY started_at DESC LIMIT 1")
-      .get(sessionId) as { id: string } | undefined;
+    const row = db.prepare(OPEN_SESSION_TRACE_SQL).get(sessionId) as { id: string } | undefined;
     if (!row) return { action, dialect, traceId: null, note: 'no open trace to finalize' };
     updateTrace(db, row.id, { status: 'completed', ended_at: isoNow() });
     return { action, dialect, traceId: row.id, note: 'trace finalized' };
