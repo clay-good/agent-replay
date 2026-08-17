@@ -175,7 +175,17 @@ describe('otel serve (end-to-end)', () => {
         { hostname: u.hostname, port: u.port, path: u.pathname, method: 'POST', headers: { 'content-type': 'application/json' } },
         (res) => { responded = true; res.resume(); resolve(res.statusCode ?? 0); },
       );
-      req.on('error', (e) => { if (!responded) reject(e); }); // ignore a write error after the response arrives
+      // A write error can surface BEFORE the response callback runs: the server
+      // answers and closes while the 33 MB body is still uploading, so the
+      // socket error and the response race. Give the response a moment to land
+      // before treating the error as a failure — otherwise this test flakes
+      // under parallel load and reads as a real regression in the receiver.
+      req.on('error', (e) => {
+        if (responded) return;
+        setTimeout(() => {
+          if (!responded) reject(e);
+        }, 1000).unref();
+      });
       req.end(big);
     });
     expect(status).toBe(413);
