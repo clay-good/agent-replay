@@ -109,6 +109,10 @@ trace schema is unchanged.
 
 ### Fixed
 
+- A log-derived `llm_call` step now records its model in the `model` column,
+  not only in the step name — an `otel serve` capture of Gemini CLI or Claude
+  Code previously had no model recorded anywhere, while the span path set it.
+
 - `show --json` now carries a `step_window` object when `--from-step`/`--to-step`
   narrowed the result. The human output already printed what it omitted; the
   JSON did not, so a consumer received a complete-looking trace — trace-level

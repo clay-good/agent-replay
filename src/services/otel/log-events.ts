@@ -166,6 +166,10 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
           step_type: 'llm_call',
           name: str(a['gen_ai.request.model']) ?? str(a.model) ?? 'api_error',
           started_at: at,
+          // The model was only ever put in `name`, leaving the `model` column
+          // null on every log-derived step — so a capture of these CLIs had no
+          // model recorded anywhere, while the span path sets it.
+          model: str(a['gen_ai.request.model']) ?? str(a.model),
           error:
             str(a.error) ??
             str(a.error_message) ??

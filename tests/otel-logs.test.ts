@@ -267,6 +267,17 @@ describe('mapOtlpLogs — data fidelity', () => {
     expect(traces[0].total_tokens).toBe(120);
   });
 
+  it('records the model on a failed model call, not only in its name', () => {
+    // The model was put in `name` alone, leaving the `model` column null on
+    // every log-derived step — so a capture of these CLIs had no model recorded
+    // anywhere, while the span path sets it.
+    const [t] = mapOtlpLogs(otlpLogs([
+      logRecord('gemini_cli.api_error', { 'session.id': 's-m', 'gen_ai.request.model': 'gemini-2.5-flash', error: 'boom' }, MS),
+    ]));
+    expect(t.steps![0].model).toBe('gemini-2.5-flash');
+    expect(t.steps![0].error).toBe('boom');
+  });
+
   it('does not fuse session-less records from unrelated sources', () => {
     // Regression: every record without session.id joined one '__nosession__'
     // bucket, so unrelated services in one batch became a single trace with
