@@ -108,10 +108,11 @@ program
   .option('--no-input', 'Drop prompt text and tool inputs before storing')
   .option('--enforce', 'Evaluate pre-tool events against policies and block denied calls (guardrail, not a boundary)')
   .option('--dialect <name>', 'Force the harness dialect for --enforce replies: claude-code, codex, gemini, other')
+  .option('--allow-empty', 'Let --enforce run against a store with no enabled policies (default: block, since such a gate can never fire)')
   .option('--dir <path>', 'Custom data directory')
   .action(async (event, opts) => {
     const { runHook } = await import('./commands/hook.js');
-    await runHook(event, { noInput: opts.input === false, enforce: opts.enforce === true, dialect: opts.dialect, dir: opts.dir });
+    await runHook(event, { noInput: opts.input === false, enforce: opts.enforce === true, allowEmpty: opts.allowEmpty === true, dialect: opts.dialect, dir: opts.dir });
   });
 
 // --- list ---

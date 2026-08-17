@@ -182,6 +182,18 @@ between them, and nothing else.
   scales linearly. This is the same class of defect the schema v4 expression
   index exists to fix, on the path that builds golden datasets and backups.
 
+- **Security (fail-open):** `hook --enforce` allowed every tool call, silently,
+  when it ran against a store holding no policies. A previous fix stopped an
+  enforcing event from *creating* the store, but that only closes the hole if
+  every registered hook line carries `--enforce` — which is not the documented
+  setup: plain capture hooks on `UserPromptSubmit`/`PostToolUse`/`Stop`, and
+  `--enforce` on `PreToolUse` alone. Capture mode creates the store and fires
+  first, so a session started from any directory other than the project root met
+  a brand-new, empty policy set and ran completely unguarded while the
+  configuration still looked correct. An enforcing gate that cannot fire now
+  blocks with the reason, like the other gates, and `--allow-empty` is there for
+  the case where an empty policy set is deliberate.
+
 - A root span arriving in a later OTLP batch was dropped entirely. The first
   root span becomes the trace, so it is deliberately not among the batch's
   steps — right for the batch that opens the trace, wrong for every later one.

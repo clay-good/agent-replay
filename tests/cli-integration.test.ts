@@ -202,6 +202,58 @@ describe('CLI integration', () => {
     expect(run(['guard', 'check'], '{"step_type":"tool_call","name":"safe"}').code).toBe(0);
   });
 
+  it('will not enforce against a store with no enabled policies', () => {
+    // The store-missing guard closes the fail-open only if EVERY registered hook
+    // line carries --enforce. The documented setup does not: plain capture hooks
+    // on UserPromptSubmit/PostToolUse/Stop, --enforce on PreToolUse alone. Capture
+    // mode creates the store and fires first, so from any directory that isn't
+    // the project root the tool call met a brand-new EMPTY policy set and was
+    // allowed silently — the same fail-open, with the file now present.
+    const fresh = mkdtempSync(join(tmpdir(), 'ar-hook-empty-'));
+    const hook = (args: string[], input: string) => {
+      try {
+        const stdout = execFileSync(process.execPath, [CLI, ...args, '--dir', fresh], {
+          encoding: 'utf8', input, stdio: ['pipe', 'pipe', 'pipe'], timeout: 20000,
+        });
+        return { stdout, code: 0 };
+      } catch (e) {
+        const err = e as { stdout?: string; status?: number };
+        return { stdout: err.stdout ?? '', code: err.status ?? 1 };
+      }
+    };
+    const call = JSON.stringify({
+      hook_event_name: 'PreToolUse', session_id: 'e1',
+      tool_name: 'Bash', tool_input: { command: 'rm -rf /' },
+    });
+
+    // A capture hook creates the store, exactly as the documented config does.
+    hook(['hook', 'UserPromptSubmit'], JSON.stringify({
+      hook_event_name: 'UserPromptSubmit', session_id: 'e1', prompt: 'go',
+    }));
+    expect(existsSync(join(fresh, 'traces.db'))).toBe(true);
+
+    // The gate cannot fire, so it refuses rather than allowing.
+    const blocked = hook(['hook', 'PreToolUse', '--enforce'], call);
+    expect(blocked.stdout).toMatch(/"permissionDecision":"deny"/);
+    expect(blocked.stdout).toMatch(/no enabled guardrail policies/);
+
+    // ...with an opt-out for the case where emptiness is deliberate.
+    const allowed = hook(['hook', 'PreToolUse', '--enforce', '--allow-empty'], call);
+    expect(allowed.stdout).not.toMatch(/"permissionDecision":"deny"/);
+
+    // And once a policy exists, enforcement behaves normally in both directions.
+    execFileSync(process.execPath, [CLI, 'guard', 'add', '--name', 'nodrop',
+      '--action', 'deny', '--pattern', '{"input_contains":"drop table"}', '--dir', fresh], { encoding: 'utf8' });
+    expect(hook(['hook', 'PreToolUse', '--enforce'], JSON.stringify({
+      hook_event_name: 'PreToolUse', session_id: 'e1', tool_name: 'Bash', tool_input: { command: 'ls' },
+    })).stdout).not.toMatch(/"permissionDecision":"deny"/);
+    expect(hook(['hook', 'PreToolUse', '--enforce'], JSON.stringify({
+      hook_event_name: 'PreToolUse', session_id: 'e1', tool_name: 'Bash', tool_input: { command: 'drop table users' },
+    })).stdout).toMatch(/"permissionDecision":"deny"/);
+
+    rmSync(fresh, { recursive: true, force: true });
+  });
+
   it('warns that a blocking output_contains policy cannot block live', () => {
     // Live enforcement evaluates a PROPOSED tool call — before it runs, so it
     // has no output — and every match key must match. A deny keyed on

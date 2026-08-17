@@ -3,12 +3,15 @@ import { existsSync } from 'node:fs';
 import { ensureDatabase } from '../db/index.js';
 import { applyHookPayload, formatEnforcementResponse, resolveHookRouting } from '../services/hook-adapter.js';
 import type { HookDialect } from '../services/hook-adapter.js';
+import { listPolicies } from '../services/guard-service.js';
 import { errorMessage } from '../utils/json.js';
 import { resolveDataDir, storeExists } from '../utils/paths.js';
 
 export interface HookOptions {
   noInput?: boolean;
   enforce?: boolean;
+  /** Allow `--enforce` to run against a store with no enabled policies. */
+  allowEmpty?: boolean;
   dialect?: string;
   dir?: string;
 }
@@ -156,6 +159,27 @@ export async function runHook(eventArg: string | undefined, opts: HookOptions = 
       return;
     }
     const db = ensureDatabase(dbPath);
+
+    // A store that EXISTS but holds no enabled policy is the same failure with
+    // the file present: an enforcing gate that cannot fire. The check above only
+    // closes the hole when every registered hook line carries --enforce, which
+    // is NOT the documented setup — the README registers plain capture hooks on
+    // UserPromptSubmit/PostToolUse/Stop and puts --enforce on PreToolUse alone.
+    // Capture mode creates the store and fires first, so from a directory that
+    // isn't the project root the tool call still met an empty policy set and was
+    // allowed silently, exactly as before.
+    //
+    // Same rule the other gates follow: a gate that cannot do its job fails
+    // rather than passing green, and the refusal gets an opt-out for the case
+    // where emptiness is deliberate (`--allow-empty`, as on `check`).
+    if (opts.enforce && !opts.allowEmpty && resolveHookRouting(payload, eventArg).action === 'pre_tool') {
+      const enabled = listPolicies(db).filter((p) => p.enabled).length;
+      if (enabled === 0) {
+        throw new Error(
+          `no enabled guardrail policies in ${dbPath} — add one with "agent-replay guard add", point the hook at the right store with --dir, or pass --allow-empty to run unguarded`,
+        );
+      }
+    }
     const result = applyHookPayload(db, payload, { noInput: opts.noInput, enforce: opts.enforce, eventArg });
     // Progress goes to stderr only (stdout is reserved for hook decisions).
     console.error(`agent-replay hook: ${result.action} [${result.dialect}] — ${result.note}`);
