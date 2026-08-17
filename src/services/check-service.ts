@@ -224,14 +224,18 @@ function diffAgainstGolden(trace: TraceWithDetails, golden: GoldenEntry, fields:
       // unknown — skip it rather than reading absence as success, which would
       // report a false regression for every failing step in an old baseline.
       if (gSteps[i].failed === undefined) continue;
-      const goldenFailed = gSteps[i].failed === true;
-      const candidateFailed = cSteps[i].error != null;
-      if (goldenFailed !== candidateFailed) {
+      // ONE-DIRECTIONAL: a step that starts failing is a regression; a step that
+      // STOPS failing never is. A symmetric comparison sounds more principled and
+      // is worse in practice — a baseline captured from a run that contained one
+      // flaky timeout would then report REGRESSED on every subsequent green run
+      // until someone re-exported it, reporting a FIX as a failure. That is the
+      // false-positive class this whole format exists to avoid.
+      if (gSteps[i].failed !== true && cSteps[i].error != null) {
         divergences.push({
           field: 'step_errors',
           step_number: cSteps[i].step_number,
-          golden: goldenFailed ? 'failed' : 'ok',
-          candidate: candidateFailed ? 'failed' : 'ok',
+          golden: 'ok',
+          candidate: 'failed',
         });
         break;
       }

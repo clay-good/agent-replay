@@ -11,7 +11,7 @@ import {
   runCustomRubric,
   fenceTraceContent,
 } from '../src/services/eval-service.js';
-import { summarizeTrace, summarizeDiffForLlm } from '../src/services/trace-summarizer.js';
+import { summarizeTrace, summarizeDiffForLlm, summarizeTraceForLlm } from '../src/services/trace-summarizer.js';
 import { diffTraces } from '../src/services/diff-service.js';
 import { estimateCost, COST_TABLE, LlmError } from '../src/services/llm-client.js';
 import { aiEvalPanel } from '../src/ui/boxen-panels.js';
@@ -918,5 +918,60 @@ describe('AI preset thresholds are declared, not hardcoded', () => {
     expect(result.details.threshold).toBe(AI_PRESETS['ai-root-cause'].threshold);
     // 0.5 >= 0.5 — the verdict follows the declared threshold.
     expect(result.passed).toBe(true);
+  });
+});
+
+describe('summarizeTrace — what the judge is actually shown', () => {
+  // Enough steps, with payloads the size real tool calls carry, that the DEFAULT
+  // 3000-token budget genuinely overflows.
+  const STEPS = 60;
+  const longTrace = (n: number) => ({
+    id: 't1', agent_name: 'bot', agent_version: null, trigger: 'manual' as const, status: 'failed' as const,
+    input: { q: 'go' }, output: null, started_at: '2026-08-17T10:00:00Z', ended_at: '2026-08-17T10:01:00Z',
+    total_duration_ms: 60000, total_tokens: 100, total_cost_usd: null,
+    // The normal hook-capture shape: the trace itself carries no error text, the
+    // failure detail lives on the step.
+    error: null,
+    tags: [], metadata: {}, parent_trace_id: null, forked_from_step: null, session_id: null,
+    created_at: '2026-08-17T10:00:00Z',
+    evals: [],
+    steps: Array.from({ length: n }, (_, i) => ({
+      id: '', trace_id: 't1', step_number: i + 1,
+      step_type: (i === n - 1 ? 'error' : 'tool_call') as 'error' | 'tool_call',
+      name: i === n - 1 ? 'THE_FAILING_STEP' : `step${i + 1}`,
+      // Payloads the size real tool calls carry, so the default budget genuinely
+      // overflows — with short synthetic steps everything fits and the bug hides.
+      input: { path: `/some/reasonably/long/path/number/${i}/${'x'.repeat(200)}` }, output: { ok: true },
+      started_at: '', ended_at: null, duration_ms: 10, tokens_used: 5, model: 'm',
+      error: i === n - 1 ? 'boom the real cause' : null,
+      metadata: {}, parent_step_number: null, caused_by_step_number: null,
+    })),
+  });
+
+  it('keeps the failing step at the DEFAULT budget on a long trace', () => {
+    // The prioritization existed but ran only under a TIGHT budget; the default
+    // path walked steps in order and stopped when the budget ran out, so the
+    // failing step — almost always last — was the first thing lost. The judge
+    // then scored a failure it had never been shown.
+    const summary = summarizeTrace(longTrace(STEPS) as never, 3000);
+    expect(summary.text).toContain('THE_FAILING_STEP');
+    expect(summary.text).toContain('boom the real cause');
+  });
+
+  it('says how many steps it dropped, on every path that drops any', () => {
+    // The marker was emitted only on the budget-break path, so the prioritizing
+    // branch could discard 40 of 41 steps silently and leave an evaluator
+    // reasoning about step counts over a trace that looked like it had one.
+    for (const budget of [3000, 700, 300]) {
+      const summary = summarizeTrace(longTrace(STEPS) as never, budget);
+      const shown = (summary.text.match(/^\d+\. \[/gm) ?? []).length;
+      if (shown < STEPS) {
+        const marker = summary.text.match(/\.\.\. \((\d+) more steps omitted/);
+        expect(marker, `budget ${budget} dropped ${STEPS - shown} steps with no marker`).not.toBeNull();
+        expect(Number(marker![1])).toBe(STEPS - shown);
+      }
+      // Whatever the budget, the failure survives.
+      expect(summary.text).toContain('THE_FAILING_STEP');
+    }
   });
 });

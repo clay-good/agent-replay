@@ -3,7 +3,8 @@ import boxen from 'boxen';
 import Table from 'cli-table3';
 import type { Trace, TraceDiffResult, StepDiff } from '../models/types.js';
 import type { TraceStatus } from '../models/enums.js';
-import { statusBadge, colors, heading, separator, label } from './theme.js';
+import { windowedAround } from '../utils/json.js';
+import { statusBadge, colors, heading, separator, label, safeText } from './theme.js';
 
 /**
  * Render a side-by-side trace diff with prominent divergence indicator.
@@ -25,8 +26,8 @@ export function renderDiff(
 
   // Header panel with both traces
   const headerContent = [
-    `${colors.primary('LEFT')}   ${chalk.dim(diff.left_trace_id.slice(0, 12))}  ${chalk.white(leftTrace.agent_name)}  ${statusBadge(leftTrace.status as TraceStatus)}  ${chalk.dim(`${diff.left_step_count} steps`)}`,
-    `${colors.secondary('RIGHT')}  ${chalk.dim(diff.right_trace_id.slice(0, 12))}  ${chalk.white(rightTrace.agent_name)}  ${statusBadge(rightTrace.status as TraceStatus)}  ${chalk.dim(`${diff.right_step_count} steps`)}`,
+    `${colors.primary('LEFT')}   ${chalk.dim(diff.left_trace_id.slice(0, 12))}  ${chalk.white(safeText(leftTrace.agent_name))}  ${statusBadge(leftTrace.status as TraceStatus)}  ${chalk.dim(`${diff.left_step_count} steps`)}`,
+    `${colors.secondary('RIGHT')}  ${chalk.dim(diff.right_trace_id.slice(0, 12))}  ${chalk.white(safeText(rightTrace.agent_name))}  ${statusBadge(rightTrace.status as TraceStatus)}  ${chalk.dim(`${diff.right_step_count} steps`)}`,
   ].join('\n');
 
   lines.push(
@@ -127,12 +128,15 @@ function formatDiffValue(val: unknown, field: string, other?: unknown): string {
   // "(none)" by the null guard above; this branch handles the side that has the
   // value, so show it (green) rather than blanking it too.
   if (field === 'missing_right' || field === 'missing_left') {
-    return chalk.green(truncate(String(val), 34));
+    return chalk.green(safeText(truncate(String(val), 34)));
   }
 
+  // Escaped like every other render path: a step name or error reaches this
+  // panel as a bare string (an object is JSON-stringified, which escapes its
+  // own controls), and boxen computes its border width from what it is given.
   const text = typeof val === 'object' ? JSON.stringify(val) : String(val);
   const otherText = other == null ? '' : typeof other === 'object' ? JSON.stringify(other) : String(other);
-  return chalk.white(windowed(text, otherText, 34));
+  return chalk.white(safeText(windowedAround(text, otherText, 34)));
 }
 
 /**
@@ -145,20 +149,6 @@ function formatDiffValue(val: unknown, field: string, other?: unknown): string {
  * found" — the user could only find out what changed by rerunning with --json,
  * with nothing suggesting they should.
  */
-function windowed(text: string, other: string, max: number): string {
-  if (text.length <= max) return text;
-  let i = 0;
-  while (i < text.length && i < other.length && text[i] === other[i]) i++;
-  // Keep some leading context, and never scroll past what fits.
-  const lead = 8;
-  // The leading "..." costs three of the budget, so the furthest useful start is
-  // `length - (max - 3)`; clamping to `length - max` instead left the differing
-  // tail cut off again, defeating the point of windowing.
-  const start = safeCut(text, Math.min(Math.max(0, i - lead), Math.max(0, text.length - (max - 3))));
-  if (start === 0) return truncate(text, max);
-  const body = text.slice(start);
-  return `...${truncate(body, max - 3)}`;
-}
 
 /**
  * Move a cut index off the low half of a surrogate pair. Slicing between the

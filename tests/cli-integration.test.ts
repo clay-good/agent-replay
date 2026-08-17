@@ -1142,6 +1142,67 @@ describe('CLI integration', () => {
     expect(r.stderr + r.stdout).toMatch(/Known fields/);
   });
 
+  it('reports two runs that made opposite decisions as different', () => {
+    // The step comparison covered type/name/input/output/model/error but never
+    // the DECISION record — the one field this whole tool exists to explain. Two
+    // runs that took opposite actions at the same step reported "Traces are
+    // identical." (exit 0) while `decisions` and `why` correctly showed one
+    // choosing rm_rf and the other safe_path.
+    const trace = (agent: string, chosen: string) => JSON.stringify({
+      agent_name: agent, trigger: 'manual', status: 'completed', input: { q: 'x' },
+      steps: [
+        { step_number: 1, step_type: 'decision', name: 'pick', decision: { chosen, rationale: 'because', decided_by: 'agent' } },
+        { step_number: 2, step_type: 'output', name: 'done' },
+      ],
+    });
+    // `ingest` assigns its own ids, so resolve them by the agent name.
+    writeFileSync(join(dir, 'da.json'), trace('decider-a', 'rm_rf'));
+    writeFileSync(join(dir, 'db.json'), trace('decider-b', 'safe_path'));
+    run(['ingest', join(dir, 'da.json')]);
+    run(['ingest', join(dir, 'db.json')]);
+    const idOf = (agent: string) => JSON.parse(run(['list', '--json', '--agent', agent]).stdout).items[0].id as string;
+    const a = idOf('decider-a');
+    const b = idOf('decider-b');
+
+    const report = JSON.parse(run(['diff', a, b, '--json']).stdout);
+    expect(report.divergence_step).toBe(1);
+    const decision = report.diffs.find((d: { field: string }) => d.field === 'decision');
+    expect(decision.left_value.chosen).toBe('rm_rf');
+    expect(decision.right_value.chosen).toBe('safe_path');
+    expect(run(['diff', a, b]).stdout).not.toMatch(/identical/);
+
+    // And it is selectable on its own.
+    expect(run(['diff', a, b, '--fields', 'decision']).code).toBe(0);
+    expect(JSON.parse(run(['diff', a, b, '--fields', 'decision', '--json']).stdout).diffs).toHaveLength(1);
+
+    // A list that names no field at all is a usage error, not a silent filter
+    // that under-reports real differences.
+    const empty = run(['diff', a, b, '--fields', ',']);
+    expect(empty.code).toBe(2);
+    expect(empty.stderr + empty.stdout).toMatch(/no field names/);
+  });
+
+  it('decisions escapes control sequences so it cannot display a different choice than it stored', () => {
+    // A lone CR in `chosen` overwrites the line on a real terminal, so the one
+    // command whose job is reporting the choice could show the wrong option —
+    // and contradict `why` about the same record.
+    writeFileSync(join(dir, 'dc.json'), JSON.stringify({
+      agent_name: 'decider-esc', trigger: 'manual', status: 'completed', input: {},
+      steps: [{
+        step_number: 1, step_type: 'decision', name: 'pick',
+        decision: { chosen: 'delete_prod_db\r      Chose: noop', rationale: 'x', decided_by: 'agent' },
+      }],
+    }));
+    run(['ingest', join(dir, 'dc.json')]);
+    const escId = JSON.parse(run(['list', '--json', '--agent', 'decider-esc']).stdout).items[0].id as string;
+
+    const out = run(['decisions', escId]).stdout;
+    expect(out).toContain('delete_prod_db');
+    // The raw CR never reaches the terminal, so the real choice cannot be hidden.
+    expect(out).not.toContain('\r      Chose: noop');
+    expect(out).toMatch(/\\x0d/);
+  });
+
   it('demo --reset deletes the store files, not a working tree that merely looks like one', () => {
     // The name check is a naming heuristic, not proof of a store: a source
     // checkout called `agent-replay-project` passes it, and --reset then rm -r'd

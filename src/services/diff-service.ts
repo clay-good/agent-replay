@@ -4,7 +4,7 @@ import type { LlmClientOptions } from './llm-client.js';
 import { callLlm } from './llm-client.js';
 import { getTrace } from './trace-service.js';
 import { summarizeDiffForLlm } from './trace-summarizer.js';
-import { extractJson } from './eval-service.js';
+import { extractJson, fenceTraceContent, INJECTION_GUARD } from './eval-service.js';
 import { stableStringify } from './check-service.js';
 import { safeParseJson } from '../utils/json.js';
 
@@ -15,6 +15,30 @@ import { safeParseJson } from '../utils/json.js';
  * Adapted from proxilion-managed-main/crates/agent-replay/src/services.rs
  * compute_diff (lines 192-300).
  */
+/**
+ * Every step's decision record for one trace, keyed by step_number.
+ *
+ * The table keys on step_id, so this joins through the steps; read once per
+ * trace rather than per step. Confidence and the option list are deliberately
+ * excluded from the comparable shape — they are the model's self-report and vary
+ * run to run without the agent having acted differently, which is the
+ * false-positive class this comparison has to avoid.
+ */
+function decisionsByStep(
+  db: Database.Database,
+  traceId: string,
+): Map<number, { chosen: string; rationale: string | null; decided_by: string }> {
+  const rows = db
+    .prepare(
+      `SELECT s.step_number, d.chosen, d.rationale, d.decided_by
+         FROM agent_trace_decisions d
+         JOIN agent_trace_steps s ON s.id = d.step_id
+        WHERE s.trace_id = ?`,
+    )
+    .all(traceId) as Array<{ step_number: number; chosen: string; rationale: string | null; decided_by: string }>;
+  return new Map(rows.map((r) => [r.step_number, { chosen: r.chosen, rationale: r.rationale, decided_by: r.decided_by }]));
+}
+
 export function diffTraces(
   db: Database.Database,
   leftTraceId: string,
@@ -31,6 +55,9 @@ export function diffTraces(
       'SELECT * FROM agent_trace_steps WHERE trace_id = ? ORDER BY step_number',
     )
     .all(rightTraceId) as Record<string, unknown>[];
+
+  const leftDecisions = decisionsByStep(db, leftTraceId);
+  const rightDecisions = decisionsByStep(db, rightTraceId);
 
   const diffs: StepDiff[] = [];
   let divergence_step: number | null = null;
@@ -132,6 +159,24 @@ export function diffTraces(
           field: 'error',
           left_value: leftErr,
           right_value: rightErr,
+        });
+      }
+
+      // The decision record — the single field this whole tool exists to
+      // explain. Without it, two runs that took OPPOSITE actions at the same
+      // step reported "Traces are identical." (exit 0) whenever every other
+      // field matched, while `decisions` and `why` on the same pair correctly
+      // showed one choosing `rm_rf` and the other `safe_path`. `diff --ai` was
+      // handed a summary with no differences at all and asked why they diverged.
+      const leftDecision = leftDecisions.get(stepNum) ?? null;
+      const rightDecision = rightDecisions.get(stepNum) ?? null;
+      if (stableStringify(leftDecision) !== stableStringify(rightDecision)) {
+        if (divergence_step === null) divergence_step = stepNum;
+        diffs.push({
+          step_number: stepNum,
+          field: 'decision',
+          left_value: leftDecision,
+          right_value: rightDecision,
         });
       }
 
@@ -240,7 +285,7 @@ export interface AiDiffAnalysis {
   cost: { tokens_used: number; cost_usd: number };
 }
 
-const DIFF_SYSTEM_PROMPT = `You are comparing two AI agent execution traces. Analyze the differences and explain:
+const DIFF_SYSTEM_PROMPT_BODY = `You are comparing two AI agent execution traces. Analyze the differences and explain:
 1. WHY the traces diverged (not just what is different, but the likely cause)
 2. Which trace produced a better outcome and why
 3. Key takeaways for improving the agent
@@ -252,6 +297,8 @@ Respond in this exact JSON format (no other text):
   "reasoning": "why one is better",
   "key_differences": ["diff1", "diff2", "diff3"]
 }`;
+
+const DIFF_SYSTEM_PROMPT = DIFF_SYSTEM_PROMPT_BODY + INJECTION_GUARD;
 
 export async function aiDiffAnalysis(
   db: Database.Database,
@@ -269,7 +316,11 @@ export async function aiDiffAnalysis(
 
   const response = await callLlm(llmOpts, {
     system: DIFF_SYSTEM_PROMPT,
-    prompt: `Analyze this trace comparison:\n\n${summary.text}`,
+    // Fenced and injection-guarded exactly like the eval path: this summary is
+    // built from agent prompts, tool inputs and TOOL OUTPUTS, so a tool result
+    // reading "ignore previous instructions…" otherwise landed in instruction
+    // position, and its answer was printed as this tool's verdict.
+    prompt: `Analyze this trace comparison:\n\n${fenceTraceContent(summary.text)}`,
     max_tokens: 1024,
   });
 

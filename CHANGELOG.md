@@ -156,6 +156,50 @@ between them, and nothing else.
 
 ### Fixed
 
+- `diff` never compared the DECISION record, the one field this tool exists to
+  explain. Two runs that took opposite actions at the same step — one choosing
+  `rm_rf`, the other `safe_path` — reported "Traces are identical." and exit 0
+  whenever every other field matched, while `decisions` and `why` on the same
+  pair correctly showed the divergence, and `diff --ai` was handed a summary with
+  no differences in it and asked why the traces diverged. The chosen option, its
+  rationale and who decided are now compared, and `decision` is selectable via
+  `--fields`. Confidence and the option list are deliberately excluded: they are
+  the model's self-report and vary without the agent having acted differently.
+
+- The AI trace summary dropped the failing step at the DEFAULT budget. Step
+  prioritization existed but ran only under a tight budget; the normal path
+  walked steps in order and stopped when the budget ran out, so on a long trace
+  the LAST steps went first — and the failing step is almost always last. Every
+  `eval --ai` preset on a trace over roughly thirty steps therefore judged a
+  failure it had never been shown, since the trace-level `error` is null on the
+  normal hook-capture shape where the failure detail lives on the step. The
+  summary also now says how many steps it dropped on every path that drops any;
+  the marker was previously emitted only when the budget ran out mid-loop, so the
+  prioritizing path could silently discard forty of forty-one steps.
+
+- `diff --ai`'s evidence could show no difference at all. Values were truncated
+  from position 0, so two payloads sharing a long prefix — a system prompt, a
+  message array, the ordinary shape of an agent payload — arrived at the model as
+  byte-identical text under a heading announcing a divergence. The terminal view
+  already windowed around the first difference; both now share one implementation.
+
+- `diff --ai` sent trace content to the model with no fence, while `eval --ai`
+  wrapped the same summarizer's output in an untrusted-content fence and an
+  injection guard for exactly this reason. The summary is built from agent
+  prompts, tool inputs and tool outputs, so a tool result reading "ignore previous
+  instructions…" landed in instruction position and its answer was printed as the
+  tool's verdict.
+
+- `decisions` rendered the chosen option, the option list and both rationales
+  unescaped, so a carriage return in a decision could overwrite the line and make
+  the one command whose job is reporting the choice DISPLAY a different option
+  than the one stored — contradicting `why` about the same record.
+
+- `diff --fields ,` (or a script interpolating an empty variable) filtered out
+  every field comparison while passing the unknown-field guard vacuously, so a
+  pair with seven real differences reported three, with no scope label. It is now
+  a usage error.
+
 - `check` passed green when NO candidate matched the baseline. An unmatched
   candidate compares exactly as much as no candidate at all — nothing — yet it
   was a pass by default while zero candidates was already refused with exit 2. So

@@ -681,6 +681,12 @@ describe('runCheck refuses when no candidate matched the baseline', () => {
       expect(human.code).toBe(2);
       expect(human.err).toMatch(/No candidate matched/);
 
+      // --strict and --trace already have DEFINED verdicts for an unmatched
+      // candidate (a regression at exit 1, and a documented unmatched report at
+      // exit 0). Preempting either with exit 2 would break the same
+      // regression-vs-broken-gate split this refusal exists to serve.
+      expect(runCheckCapturing({ golden: goldenPath, dir, strict: true }).code).toBe(1);
+
       const asJson = runCheckCapturing({ golden: goldenPath, dir, json: true });
       expect(asJson.code).toBe(2);
       expect(JSON.parse(asJson.out).ok).toBe(false);
@@ -740,13 +746,16 @@ describe('a step that now fails is a regression', () => {
     expect(report.results[0].divergences.map((d) => d.field)).toContain('step_errors');
   });
 
-  it('catches the reverse — a step the baseline recorded as failing that now succeeds', () => {
+  it('does NOT flag a step that stopped failing — a fix is not a regression', () => {
+    // A symmetric comparison sounds more principled and is worse in practice: a
+    // baseline captured from a run containing one flaky timeout would report
+    // REGRESSED on every subsequent green run until someone re-exported it,
+    // reporting a FIX as a failure — the false-positive class this format avoids.
     ingestTrace(db, withTool('permission denied'));
     const golden = JSON.parse(exportTraces(db, { agent_name: 'errbot' }, 'golden')) as GoldenEntry[];
     expect(golden[0].steps_summary[0].failed).toBe(true);
 
-    const report = checkGolden(golden, [candidate(withTool())]);
-    expect(report.ok).toBe(false);
+    expect(checkGolden(golden, [candidate(withTool())]).ok).toBe(true);
   });
 
   it('passes an identical failing step', () => {

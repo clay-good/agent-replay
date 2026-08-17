@@ -1,6 +1,6 @@
 import type { TraceWithDetails, TraceStep, TraceDiffResult } from '../models/types.js';
 import { formatDuration, effectiveDurationMs } from '../utils/time.js';
-import { truncate, truncateJson, hasRenderableContent } from '../utils/json.js';
+import { truncate, truncateJson, hasRenderableContent, windowedAround } from '../utils/json.js';
 import { effectiveTokens } from '../utils/totals.js';
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -118,8 +118,13 @@ export function summarizeDiffForLlm(
       // a legitimate `null` value on a step that exists on both sides, so
       // labeling that `(missing)` would falsely tell the analysis the step is
       // gone; those render `null` (via truncateJson) instead.
-      const leftVal = d.field === 'missing_left' ? '(missing)' : truncateJson(d.left_value, 80);
-      const rightVal = d.field === 'missing_right' ? '(missing)' : truncateJson(d.right_value, 80);
+      // Windowed around the first difference, like the terminal renderer. Cutting
+      // from position 0 made two values sharing a long prefix — a system prompt, a
+      // message array, the normal shape of an agent payload — truncate to
+      // BYTE-IDENTICAL text, so the model was asked why the traces diverged over
+      // evidence showing they did not.
+      const leftVal = d.field === 'missing_left' ? '(missing)' : windowedJson(d.left_value, d.right_value, 80);
+      const rightVal = d.field === 'missing_right' ? '(missing)' : windowedJson(d.right_value, d.left_value, 80);
       const where = d.step_number === null ? 'Trace' : `Step ${d.step_number}`;
       lines.push(`- ${where}, ${d.field}: LEFT=${leftVal} | RIGHT=${rightVal}`);
     }
@@ -139,73 +144,119 @@ export function summarizeDiffForLlm(
   };
 }
 
+/** `truncateJson`'s windowing form: serialize, then cut around the first difference. */
+function windowedJson(value: unknown, other: unknown, max: number): string {
+  const text = typeof value === 'string' ? value : JSON.stringify(value) ?? String(value);
+  const otherText = typeof other === 'string' ? other : JSON.stringify(other) ?? '';
+  return windowedAround(text, otherText, max);
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 function summarizeSteps(steps: TraceStep[], charBudget: number): string[] {
-  const lines: string[] = [];
-  let totalChars = 0;
   const outputLimit = charBudget > 2000 ? 200 : 100;
 
-  // If very tight budget, only show error/decision/output steps
-  const showAll = charBudget > steps.length * 80;
+  // Render every step first, then decide what fits. The previous version walked
+  // the steps in order and broke when the budget ran out, so on a long trace the
+  // LAST steps were the first thing lost — and the failing step is almost always
+  // last. An AI evaluator was then handed a summary of a FAILED trace with no
+  // failing step in it (the trace-level `error` is null on the normal
+  // hook-capture shape, where the failure detail lives on the step) and scored a
+  // failure it had never been shown. Prioritization existed but only ran under a
+  // TIGHT budget, so the default 3000-token budget took the positional path.
+  const rendered = steps.map((step) => ({
+    step,
+    line: renderStepSummary(step, outputLimit),
+    important: isImportantStep(step),
+  }));
 
-  for (const step of steps) {
-    // A decision record can be attached to a step of any type via the live
-    // recorder (see listDecisions), so key off the record's presence, not just
-    // step_type === 'decision' — otherwise a tight token budget drops the
-    // agent's actual choice/rationale from the AI summary on large traces.
-    const isImportant = step.error || step.step_type === 'error' || step.step_type === 'output' || step.step_type === 'decision' || step.decision != null;
+  const cost = (line: string) => line.length + 1;
+  const total = rendered.reduce((n, r) => n + cost(r.line), 0);
 
-    if (!showAll && !isImportant) continue;
-
-    let line = `${step.step_number}. [${step.step_type}] ${step.name}`;
-
-    // Duration + tokens
-    const parts: string[] = [];
-    if (step.duration_ms != null) parts.push(formatDuration(step.duration_ms));
-    if (step.tokens_used != null) parts.push(`${step.tokens_used}tok`);
-    if (step.model) parts.push(`model=${step.model}`);
-    if (parts.length > 0) line += ` (${parts.join(', ')})`;
-
-    if (step.error) line += ' ERROR';
-
-    // Output summary — same guard, same reason as the trace output above.
-    if (hasRenderableContent(step.output)) {
-      const outStr = truncObj(step.output, outputLimit);
-      line += `\n   -> ${outStr}`;
+  const keep = new Set<number>();
+  if (total <= charBudget) {
+    rendered.forEach((_, i) => keep.add(i));
+  } else {
+    // Important steps first — the error, the output, the decision — then fill
+    // what's left with the rest. Both passes run in step order, and the lines are
+    // emitted in step order below either way.
+    let used = 0;
+    for (const pass of [true, false]) {
+      rendered.forEach((r, i) => {
+        if (keep.has(i) || r.important !== pass) return;
+        if (used + cost(r.line) > charBudget) return;
+        keep.add(i);
+        used += cost(r.line);
+      });
     }
-
-    // Input for tool_call steps (often contains critical info like file paths)
-    if (step.step_type === 'tool_call' && hasRenderableContent(step.input)) {
-      const inStr = truncObj(step.input, outputLimit);
-      line += `\n   input: ${inStr}`;
-    }
-
-    // Decision record — the chosen option and why, so an AI evaluator can reason
-    // about the agent's choices (root-cause / quality analysis).
-    if (step.decision) {
-      const d = step.decision;
-      const conf = d.confidence != null ? ` (confidence ${d.confidence})` : '';
-      const by = d.decided_by ? ` by ${d.decided_by}` : '';
-      line += `\n   chose: ${d.chosen}${conf}${by}`;
-      if (d.rationale) line += `\n   rationale: ${truncate(d.rationale, 150)}`;
-    }
-
-    // Error detail
-    if (step.error) {
-      line += `\n   error: ${truncate(step.error, 150)}`;
-    }
-
-    if (totalChars + line.length > charBudget) {
-      lines.push(`... (${steps.length - lines.length} more steps omitted for brevity)`);
-      break;
-    }
-
-    lines.push(line);
-    totalChars += line.length + 1;
   }
 
+  const lines = rendered.filter((_, i) => keep.has(i)).map((r) => r.line);
+  const omitted = steps.length - lines.length;
+  // Say so WHENEVER anything was dropped. The marker used to be emitted only on
+  // the budget-break path, so the prioritizing branch could silently discard 40
+  // of 41 steps and leave an evaluator reasoning about step counts and
+  // efficiency over a trace that looked like it had one step.
+  if (omitted > 0) lines.push(`... (${omitted} more steps omitted for brevity)`);
+
   return lines;
+}
+
+/**
+ * Steps that must survive a budget cut: the failure, the answer, and the choice.
+ *
+ * A decision record can be attached to a step of any type via the live recorder
+ * (see listDecisions), so key off the record's presence, not just
+ * `step_type === 'decision'`.
+ */
+function isImportantStep(step: TraceStep): boolean {
+  return Boolean(
+    step.error ||
+      step.step_type === 'error' ||
+      step.step_type === 'output' ||
+      step.step_type === 'decision' ||
+      step.decision != null,
+  );
+}
+
+function renderStepSummary(step: TraceStep, outputLimit: number): string {
+  let line = `${step.step_number}. [${step.step_type}] ${step.name}`;
+
+  // Duration + tokens
+  const parts: string[] = [];
+  if (step.duration_ms != null) parts.push(formatDuration(step.duration_ms));
+  if (step.tokens_used != null) parts.push(`${step.tokens_used}tok`);
+  if (step.model) parts.push(`model=${step.model}`);
+  if (parts.length > 0) line += ` (${parts.join(', ')})`;
+
+  if (step.error) line += ' ERROR';
+
+  // Output summary — same guard, same reason as the trace output above.
+  if (hasRenderableContent(step.output)) {
+    line += `\n   -> ${truncObj(step.output, outputLimit)}`;
+  }
+
+  // Input for tool_call steps (often contains critical info like file paths)
+  if (step.step_type === 'tool_call' && hasRenderableContent(step.input)) {
+    line += `\n   input: ${truncObj(step.input, outputLimit)}`;
+  }
+
+  // Decision record — the chosen option and why, so an AI evaluator can reason
+  // about the agent's choices (root-cause / quality analysis).
+  if (step.decision) {
+    const d = step.decision;
+    const conf = d.confidence != null ? ` (confidence ${d.confidence})` : '';
+    const by = d.decided_by ? ` by ${d.decided_by}` : '';
+    line += `\n   chose: ${d.chosen}${conf}${by}`;
+    if (d.rationale) line += `\n   rationale: ${truncate(d.rationale, 150)}`;
+  }
+
+  // Error detail
+  if (step.error) {
+    line += `\n   error: ${truncate(step.error, 150)}`;
+  }
+
+  return line;
 }
 
 /**

@@ -209,3 +209,35 @@ export function hasRenderableContent(value: unknown): boolean {
   if (typeof value === 'object') return Object.keys(value as object).length > 0;
   return true; // a scalar — including 0, false and '' — is real content
 }
+
+/**
+ * Truncate `text` to `max` characters, but centered on where it first differs
+ * from `other` rather than always cutting from position 0.
+ *
+ * Two values that share a long prefix — a system prompt, a message array, a long
+ * file path, the normal shape of an agent payload — otherwise truncate to
+ * BYTE-IDENTICAL strings, so a report of a real difference shows two cells that
+ * look the same. The terminal renderer solved this; the LLM diff summary did not,
+ * and it was asking a paid model to explain a divergence over evidence showing
+ * none.
+ */
+export function windowedAround(text: string, other: string, max: number): string {
+  if (text.length <= max) return text;
+  let i = 0;
+  while (i < text.length && i < other.length && text[i] === other[i]) i++;
+  // Keep some leading context, and never scroll past what fits.
+  const lead = 8;
+  // The leading "..." costs three of the budget, so the furthest useful start is
+  // `length - (max - 3)`; clamping to `length - max` instead left the differing
+  // tail cut off again, defeating the point of windowing.
+  const start = safeSplitIndex(text, Math.min(Math.max(0, i - lead), Math.max(0, text.length - (max - 3))));
+  if (start === 0) return truncate(text, max);
+  return `...${truncate(text.slice(start), max - 3)}`;
+}
+
+/** A cut index that never splits a surrogate pair (which would render as a lone "\uFFFD"). */
+export function safeSplitIndex(s: string, index: number): number {
+  if (index <= 0 || index >= s.length) return Math.max(0, Math.min(index, s.length));
+  const code = s.charCodeAt(index);
+  return code >= 0xdc00 && code <= 0xdfff ? index - 1 : index;
+}

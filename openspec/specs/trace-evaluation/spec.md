@@ -42,7 +42,7 @@ The system SHALL persist every evaluation as an eval record (evaluator type `rub
 
 ### Requirement: Golden regression check
 
-The system SHALL compare traces against a golden dataset via `agent-replay check --golden <file>`, matching candidate traces to golden traces by agent name and input hash, diffing on a structural field allowlist (step count, step types, step names, tool-call inputs, final status) rather than raw output text, and exiting non-zero with a divergence report when any matched trace regresses. `--fields` SHALL override the allowlist and `--json` SHALL emit the report as structured data.
+The system SHALL compare traces against a golden dataset via `agent-replay check --golden <file>`, matching candidate traces to golden traces by agent name and input hash, diffing on a structural field allowlist (step count, step types, step names, tool-call inputs, per-step failure, final status) rather than raw output text, and exiting non-zero with a divergence report when any matched trace regresses. `--fields` SHALL override the allowlist and `--json` SHALL emit the report as structured data.
 
 #### Scenario: Regression detected in CI
 
@@ -58,4 +58,15 @@ The system SHALL compare traces against a golden dataset via `agent-replay check
 
 - **WHEN** a candidate trace has no golden counterpart by agent name and input hash
 - **THEN** it is reported as unmatched (not failed) unless `--strict` is passed
+
+#### Scenario: Nothing could be compared at all
+
+- **WHEN** candidates were fetched but NONE of them matched a golden entry, and neither `--strict` nor `--trace` was passed
+- **THEN** the command refuses with exit 2 rather than reporting a vacuous pass, since a run that compared nothing cannot detect a regression, and `--allow-empty` opts out
+
+#### Scenario: A step begins failing
+
+- **WHEN** a matched candidate records an error on a step its golden counterpart completed cleanly
+- **THEN** the command reports a `step_errors` divergence and exits non-zero, even when every other structural field matches
+- **AND** a step that stops failing is NOT reported, since a fix is not a regression
 

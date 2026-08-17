@@ -189,7 +189,19 @@ export function runCheck(opts: CheckOptions = {}): void {
   // renaming an agent; editing an input template) left the gate green forever,
   // on runs it had stopped comparing. Refuse it as the same class of failure,
   // with the same opt-out.
-  if (candidates.length > 0 && report.passed + report.failed === 0 && !opts.allowEmpty) {
+  //
+  // NOT under --strict or --trace, which already have defined verdicts for an
+  // unmatched candidate: --strict is the user declaring unmatched a REGRESSION
+  // (exit 1), and --trace names one specific trace whose unmatched report is the
+  // documented answer (exit 0). Preempting either with exit 2 would break the
+  // regression-vs-broken-gate split this refusal exists to serve.
+  if (
+    candidates.length > 0 &&
+    report.passed + report.failed === 0 &&
+    !opts.allowEmpty &&
+    !opts.strict &&
+    !opts.trace
+  ) {
     fail(
       2,
       `No candidate matched the baseline — ${candidates.length} trace(s) checked, none compared.`,

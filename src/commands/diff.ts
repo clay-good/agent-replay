@@ -53,10 +53,20 @@ export async function runDiff(
   let appliedFields: string[] | undefined;
   if (opts.fields) {
     const allowedFields = opts.fields.split(',').map((f) => f.trim()).filter(Boolean);
+    // A list that filters down to NOTHING (`--fields ,` or a script
+    // interpolating an empty variable) passed the unknown-name guard vacuously
+    // and then removed every field diff, so a pair with seven real differences
+    // reported three — with no scope label, since the honest "in <fields>" note
+    // keys off a non-empty list. That defeats the guard's whole purpose.
+    if (allowedFields.length === 0) {
+      console.error(chalk.red(`  --fields listed no field names: ${JSON.stringify(opts.fields)}`));
+      process.exitCode = 2;
+      return;
+    }
     appliedFields = allowedFields;
     // Reject unknown field names so a typo doesn't silently hide real diffs and
     // imply the traces are more similar than they are.
-    const comparable = ['step_type', 'name', 'input', 'output', 'model', 'error', 'status', 'trace_input', 'trace_error', 'trace_output'];
+    const comparable = ['step_type', 'name', 'input', 'output', 'model', 'error', 'decision', 'status', 'trace_input', 'trace_error', 'trace_output'];
     const unknown = allowedFields.filter((f) => !comparable.includes(f));
     if (unknown.length > 0) {
       console.error(chalk.red(`  Unknown --fields value(s): ${unknown.join(', ')}. Comparable fields: ${comparable.join(', ')}`));

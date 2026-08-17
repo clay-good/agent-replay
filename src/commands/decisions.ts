@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import chalk from 'chalk';
 import { listDecisions } from '../services/decision-service.js';
 import { ensureDatabase } from '../db/index.js';
-import { heading, label } from '../ui/theme.js';
+import { heading, label, safeText } from '../ui/theme.js';
 import { resolveDataDir } from '../utils/paths.js';
 
 export interface DecisionsOptions {
@@ -59,7 +59,7 @@ export function runDecisions(traceId: string, opts: DecisionsOptions = {}): void
 
   for (const { step, decision } of decisions) {
     console.log(
-      `  ${chalk.whiteBright('◆')} ${chalk.dim(`#${step.step_number}`)} ${chalk.white.bold(`"${step.name}"`)}`,
+      `  ${chalk.whiteBright('◆')} ${chalk.dim(`#${step.step_number}`)} ${chalk.white.bold(`"${safeText(step.name)}"`)}`,
     );
 
     if (!decision) {
@@ -70,7 +70,11 @@ export function runDecisions(traceId: string, opts: DecisionsOptions = {}): void
 
     const conf = decision.confidence != null ? chalk.dim(`  confidence ${decision.confidence}`) : '';
     const by = chalk.dim(`  by ${decision.decided_by}`);
-    console.log(`      ${label('Chose:')} ${chalk.greenBright(decision.chosen)}${conf}${by}`);
+    // Escaped, like every sibling view. A lone carriage return in `chosen`
+    // overwrites the line on a real terminal, so this command — whose entire job
+    // is reporting the choice — could DISPLAY a different option than the one
+    // stored, contradicting `why` about the same record.
+    console.log(`      ${label('Chose:')} ${chalk.greenBright(safeText(decision.chosen))}${conf}${by}`);
 
     if (decision.options.length > 0) {
       console.log(`      ${label('Options:')}`);
@@ -78,13 +82,14 @@ export function runDecisions(traceId: string, opts: DecisionsOptions = {}): void
         const chosen = opt.option === decision.chosen;
         const bullet = chosen ? chalk.greenBright('✔') : chalk.dim('•');
         const score = opt.score != null ? chalk.dim(` [${opt.score}]`) : '';
-        const rationale = opt.rationale ? chalk.dim(` — ${opt.rationale}`) : '';
-        console.log(`        ${bullet} ${chosen ? chalk.white(opt.option) : chalk.dim(opt.option)}${score}${rationale}`);
+        const rationale = opt.rationale ? chalk.dim(` — ${safeText(opt.rationale)}`) : '';
+        const optionText = safeText(opt.option);
+        console.log(`        ${bullet} ${chosen ? chalk.white(optionText) : chalk.dim(optionText)}${score}${rationale}`);
       }
     }
 
     if (decision.rationale) {
-      console.log(`      ${label('Rationale:')} ${chalk.white(decision.rationale)}`);
+      console.log(`      ${label('Rationale:')} ${chalk.white(safeText(decision.rationale))}`);
     }
     console.log('');
   }
