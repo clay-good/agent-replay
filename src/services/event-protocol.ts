@@ -1,6 +1,6 @@
 import type { IngestDecisionInput, IngestSnapshotInput } from '../models/types.js';
 import { STEP_TYPES } from '../models/enums.js';
-import { decisionOptionProblem } from '../utils/validators.js';
+import { decisionOptionProblem, isValidConfidence } from '../utils/validators.js';
 
 /**
  * Versioned JSONL event protocol for incremental trace capture.
@@ -241,6 +241,15 @@ export function validateEvent(obj: unknown): ParseResult {
   const opts = type === 'decision' ? e.options
     : type === 'step' && e.decision != null ? optionsOf(e.decision)
     : undefined;
+  // `confidence` is held to ingest's rule too — same shared-function treatment
+  // as `options`, for the same reason: the live path stored any number while
+  // ingest refuses anything outside [0, 1], so `record` wrote traces that could
+  // not be restored from their own export.
+  const decisionOf = type === 'decision' ? e : (e.decision as Record<string, unknown> | null | undefined);
+  const confidence = decisionOf?.confidence;
+  if (confidence != null && !isValidConfidence(confidence)) {
+    return { event: null, warning: `skipped: ${type} decision confidence must be a number between 0 and 1` };
+  }
   if (opts != null) {
     if (!Array.isArray(opts)) {
       return { event: null, warning: `skipped: ${type} decision options must be an array` };

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { traceTable, evalTable, policyTable } from '../src/ui/table.js';
 import { traceHeaderPanel, summaryPanel } from '../src/ui/boxen-panels.js';
-import { formatScorePct, formatCostUsd } from '../src/ui/theme.js';
+import { formatScorePct, formatCostUsd, safeText } from '../src/ui/theme.js';
 import { formatDuration } from '../src/utils/time.js';
 import { renderTimeline, renderTree } from '../src/ui/timeline.js';
 import { renderDiff } from '../src/ui/diff-renderer.js';
@@ -486,6 +486,23 @@ describe('the trace table escapes the id it renders', () => {
     const rows = traceTable([{ ...trace(), id: 't\u001b]0;AB\u0007' }] as never);
     expect(rows).not.toContain('\u001b]0;');
     expect(rows).not.toContain('\u0007');
+  });
+});
+
+describe('safeText covers C1, not only C0', () => {
+  it('escapes U+009B, which terminals decode as CSI', () => {
+    // The write guard already refused U+007F-U+009F; the renderer stopped at
+    // U+007F, so the two disagreed about what a control character is and the
+    // class stayed open through a second alphabet on any un-guarded stored
+    // string (an agent name, a step name). xterm, VTE and iTerm2 read U+009B
+    // as CSI.
+    const out = safeText('AA\u009b31mRED\u001b[32mG');
+    expect(out).not.toContain('\u009b');
+    expect(out).not.toContain('\u001b');
+    expect(out).toContain('\\x9b');
+    // Text either side survives, and normal characters are untouched.
+    expect(out).toContain('RED');
+    expect(safeText('plain café 😀')).toBe('plain café 😀');
   });
 });
 

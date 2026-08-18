@@ -101,7 +101,12 @@ export function formatCostUsd(cost: number): string {
 export function safeText(text: string): string {
   const normalized = text.replace(/\r\n/g, '\n');
   // eslint-disable-next-line no-control-regex
-  return normalized.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
+  // C1 (U+0080-U+009F) as well as C0 and DEL. A terminal that decodes UTF-8 C1
+  // as controls — xterm's default, VTE, iTerm2 — reads U+009B as CSI, so leaving
+  // it raw kept the class open through a second alphabet. This is also the range
+  // the WRITE guard (`CONTROL_CHARS`) already refuses, and the two must agree on
+  // what a control character is.
+  return normalized.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
 }
 
 export function scoreBadge(score: number): string {

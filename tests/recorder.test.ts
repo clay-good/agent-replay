@@ -671,6 +671,28 @@ describe('a producer-chosen trace id cannot carry control characters', () => {
     }).event).not.toBeNull();
   });
 
+  it('holds decision confidence to ingest\'s range, like options', () => {
+    // The same drift the options rule was unified to prevent, one field over:
+    // the live path stored any number while ingest refuses anything outside
+    // [0, 1], so `record` wrote traces that failed their own re-ingest.
+    const mk = (confidence: unknown) => ({
+      v: 1, type: 'step', trace_id: 'trc_conf', step_number: 1,
+      step_type: 'decision', name: 'p',
+      decision: { chosen: 'A', options: [{ option: 'A' }], confidence },
+    });
+    for (const bad of [-1, 1.5, 5, Number.NaN, 'high']) {
+      expect(validateEvent(mk(bad)).event, String(bad)).toBeNull();
+    }
+    for (const ok of [0, 0.5, 1]) {
+      expect(validateEvent(mk(ok)).event, String(ok)).not.toBeNull();
+    }
+    // Absent is fine, and both paths agree on every one of the above.
+    expect(validateEvent({
+      v: 1, type: 'step', trace_id: 'trc_conf', step_number: 2,
+      step_type: 'decision', name: 'p', decision: { chosen: 'A' },
+    }).event).not.toBeNull();
+  });
+
   it('accepts and rejects exactly the same option shapes as ingest does', () => {
     // Asserts AGREEMENT rather than specific verdicts: the defect this guards is
     // the two paths drifting, which is what happened when the live check was

@@ -2161,6 +2161,18 @@ between them, and nothing else.
 
 ### Security
 
+- A decision's `confidence` was stored by live capture at any value while
+  `ingest` refuses anything outside [0, 1], so `record` wrote traces that failed
+  their own re-ingest — the same drift the option-shape rule was unified to
+  prevent, one field over. Both paths now share one exported check.
+
+- `safeText` escaped C0 and DEL but not C1 (U+0080-U+009F), while the write
+  guard already refused that range — so the renderer and the writer disagreed
+  about what a control character is. A terminal that decodes UTF-8 C1 as
+  controls (xterm's default, VTE, iTerm2) reads U+009B as CSI, which kept the
+  class open through a second alphabet on any string the write guard does not
+  cover, such as an agent or step name.
+
 - A tool result arriving after the turn ended was discarded, and left a phantom
   live run behind. Every hook fires as its own process, and a closing event
   (`PostToolUse`, `PostToolUseFailure`, `SubagentStop`) went through the same

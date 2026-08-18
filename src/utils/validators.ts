@@ -269,6 +269,18 @@ export function validateStepInput(input: unknown, index?: number): ValidationRes
 // ── Decision record validation ───────────────────────────────────────────────
 
 /**
+ * A decision's confidence, if present, is a number in [0, 1].
+ *
+ * Exported for the same reason `decisionOptionProblem` is: the live capture path
+ * stored anything numeric while `ingest` refused a value outside the range, so a
+ * trace `record` wrote could not be restored from its own export — the exact
+ * drift the options rule was unified to prevent, one field over.
+ */
+export function isValidConfidence(v: unknown): boolean {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1;
+}
+
+/**
  * Why one option is not a valid decision option, or null if it is.
  *
  * Exported so the LIVE capture path (`event-protocol`) applies the identical
@@ -307,10 +319,8 @@ function validateDecision(input: unknown, prefix: string): ValidationError[] {
     errors.push({ field: `${field}.chosen`, message: 'decision.chosen is required and must be a string' });
   }
 
-  if (d.confidence != null) {
-    if (typeof d.confidence !== 'number' || !Number.isFinite(d.confidence) || d.confidence < 0 || d.confidence > 1) {
-      errors.push({ field: `${field}.confidence`, message: 'decision.confidence must be a number between 0 and 1' });
-    }
+  if (d.confidence != null && !isValidConfidence(d.confidence)) {
+    errors.push({ field: `${field}.confidence`, message: 'decision.confidence must be a number between 0 and 1' });
   }
 
   if (d.decided_by != null) {
