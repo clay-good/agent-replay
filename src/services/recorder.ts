@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import type { CaptureEvent } from './event-protocol.js';
 import { EVENT_PROTOCOL_VERSION, validateEvent } from './event-protocol.js';
+import { TRACE_STATUSES } from '../models/enums.js';
 import {
   startTrace,
   appendStep,
@@ -283,6 +284,15 @@ export class TraceRecorder {
   }
 
   endTrace(patch: EndTraceInput = {}): void {
+    // The SDK is our own code, so a status it cannot use is a CALLER error and
+    // is reported. The stream path deliberately repairs the same value instead
+    // (an unusable field must not cost a producer its output and tokens) — but
+    // a programmatic caller writing `endTrace({status: 'Failed'})` wants to hear
+    // that the case did not match, not to discover later that the run was
+    // silently recorded as failed.
+    if (patch.status != null && !(TRACE_STATUSES as readonly string[]).includes(patch.status)) {
+      throw new Error(`Invalid trace status "${patch.status}". Valid: ${TRACE_STATUSES.join(', ')}`);
+    }
     this.emit({ v: EVENT_PROTOCOL_VERSION, type: 'trace_end', trace_id: this.requireTrace(), ...patch });
   }
 }

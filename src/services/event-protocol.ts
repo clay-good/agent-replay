@@ -186,6 +186,8 @@ export function validateEvent(obj: unknown): ParseResult {
   }
 
   const type = e.type as EventType;
+  /** Set when a trace_end carried a status we repaired; reported at the end. */
+  let unusableStatus: string | null = null;
 
   // trace_start needs an agent_name; every other event needs a trace_id and,
   // for step-scoped events, a step_number.
@@ -226,10 +228,16 @@ export function validateEvent(obj: unknown): ParseResult {
   // path applied it with zero warnings. `ingest` rejects the identical value.
   if (type === 'trace_end' && e.status != null) {
     if (typeof e.status !== 'string' || !(TRACE_STATUSES as readonly string[]).includes(e.status)) {
-      return {
-        event: null,
-        warning: `skipped: trace_end has invalid status "${String(e.status)}" (must be one of: ${TRACE_STATUSES.join(', ')})`,
-      };
+      // Repaired, not dropped — one unusable FIELD must not cost the event.
+      // Rejecting the whole `trace_end` threw away the run's output, tokens and
+      // ended_at, and left the trace to be finalized as a timeout: trading a
+      // fail-open for data loss. The precedent in this function is the numeric
+      // drop below, which warns and keeps.
+      //
+      // `failed`, not `completed`: an unreadable terminal status is not evidence
+      // the run succeeded, and the evaluators read this field.
+      unusableStatus = String(e.status);
+      e.status = 'failed';
     }
   }
 
@@ -324,6 +332,12 @@ export function validateEvent(obj: unknown): ParseResult {
     };
   }
 
+  if (unusableStatus != null) {
+    return {
+      event: obj as CaptureEvent,
+      warning: `trace_end status "${unusableStatus}" is not one of ${TRACE_STATUSES.join(', ')} — recorded as failed`,
+    };
+  }
   return { event: obj as CaptureEvent, warning: null };
 }
 

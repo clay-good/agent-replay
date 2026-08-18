@@ -193,10 +193,13 @@ between them, and nothing else.
   and `aborted`, `cancelled` or `Timeout` all became success, and the
   deterministic evaluators read `status`, so a run the caller explicitly
   declared failed scored 1.0 PASS and exited 0. An unreadable terminal status
-  now coerces to `failed`, and `trace_end.status` is validated at the door both
-  the JSONL stream and the SDK pass through. A *missing* status still defaults
-  to completed — that is a clean stream ending normally, not a value that could
-  not be read.
+  now coerces to `failed`. The two capture paths answer differently on purpose:
+  a stream **repairs** the field and keeps the rest of the finalization (an
+  unusable field must not cost a producer its output, tokens and ended_at) with
+  a warning naming the value, while the SDK **throws**, because a caller writing
+  `endTrace({status: 'Failed'})` wants to hear that the case did not match. A
+  *missing* status still defaults to completed — that is a clean stream ending
+  normally, not a value that could not be read.
 - `runCustomRubric`, a public export, had no lower bound on a criterion weight,
   so a caller passing `weight: -1` alongside a positive one drove the score
   above 1 — a rubric stored and displayed as **200% PASSED**. Weights are

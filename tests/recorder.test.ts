@@ -776,3 +776,45 @@ describe('the SDK is held to the same rules as the JSONL stream', () => {
     ).not.toThrow();
   });
 });
+
+describe('a terminal status the schema does not know', () => {
+  // Two paths, two deliberately different answers for the same value.
+  //
+  // The STREAM repairs it: an unusable field must not cost a producer its
+  // output, tokens and ended_at. Rejecting the whole `trace_end` traded a
+  // fail-open for data loss, and left the trace to be finalized as a timeout.
+  it('is repaired on the stream, keeping the rest of the finalization', () => {
+    const { event, warning } = validateEvent({
+      v: 1,
+      type: 'trace_end',
+      trace_id: 't1',
+      status: 'success',
+      output: { text: 'the answer' },
+      total_tokens: 500,
+    });
+    expect(event).not.toBeNull();
+    expect(warning).toMatch(/recorded as failed/);
+    // Fails CLOSED — an unreadable terminal status is not evidence of success,
+    // and the deterministic evaluators read this field.
+    expect((event as { status?: string }).status).toBe('failed');
+    expect((event as { output?: unknown }).output).toEqual({ text: 'the answer' });
+    expect((event as { total_tokens?: number }).total_tokens).toBe(500);
+  });
+
+  it('leaves a recognized status alone', () => {
+    const { event, warning } = validateEvent({ v: 1, type: 'trace_end', trace_id: 't1', status: 'timeout' });
+    expect(warning).toBeNull();
+    expect((event as { status?: string }).status).toBe('timeout');
+  });
+
+  // The SDK is our own code, so the same value is a CALLER error there: a
+  // programmatic caller writing `endTrace({status: 'Failed'})` wants to hear
+  // that the case did not match, not to find the run recorded as failed later.
+  it('is an error from the SDK', () => {
+    const rec = new TraceRecorder(db);
+    rec.startTrace({ agent_name: 'a' });
+    expect(() => rec.endTrace({ status: 'Failed' as never })).toThrow(/Invalid trace status "Failed"/);
+    // A valid one still works.
+    expect(() => rec.endTrace({ status: 'failed' })).not.toThrow();
+  });
+});
