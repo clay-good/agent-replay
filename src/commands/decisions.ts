@@ -94,7 +94,17 @@ export function runDecisions(traceId: string, opts: DecisionsOptions = {}): void
         // Defensive for records stored before options were validated at the
         // boundary: a bare string element made this a TypeError that aborted the
         // command and lost every later decision point in the trace.
-        const optionText = safeText(typeof opt?.option === 'string' ? opt.option : String(opt ?? ''));
+        // `String(obj)` yields "[object Object]" for an option that is an object
+      // without an `option` key — a shape only a hand-written or legacy store
+      // has, but rendering it as that string tells the reader nothing about
+      // what is actually stored. Fall back to the JSON.
+      const optionText = safeText(
+        typeof opt?.option === 'string'
+          ? opt.option
+          : opt !== null && typeof opt === 'object'
+            ? JSON.stringify(opt)
+            : String(opt ?? ''),
+      );
         console.log(`        ${bullet} ${chosen ? chalk.white(optionText) : chalk.dim(optionText)}${score}${rationale}`);
       }
     }

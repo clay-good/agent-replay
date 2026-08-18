@@ -2,7 +2,7 @@ import blessed from 'blessed';
 import type Database from 'better-sqlite3';
 import type { Trace, EvalResult } from '../models/types.js';
 import type { TraceStatus } from '../models/enums.js';
-import { formatDuration, formatRelativeTime } from '../utils/time.js';
+import { formatDuration, formatRelativeTime, parseInstant } from '../utils/time.js';
 import { truncate } from '../utils/json.js';
 import { formatCostUsd, safeText } from './theme.js';
 import { dashboardStats, statusCounts, recentTraces, recentEvalScores } from './dashboard-data.js';
@@ -163,7 +163,9 @@ export class DashboardView {
     } catch (err) {
       // Log to activity log instead of crashing
       try {
-        const msg = err instanceof Error ? err.message : String(err);
+        // Same widget class, same markup rule — an error message can carry a
+        // producer's text (a tool name, a trace id) straight into the log.
+        const msg = blessed.escape(safeText(err instanceof Error ? err.message : String(err)));
         this.activityLog?.log(`Refresh error: ${msg}`);
         this.screen.render();
       } catch {
@@ -203,9 +205,15 @@ export class DashboardView {
     const rows = recentTraces(this.db);
 
     const headers = ['ID', 'Agent', 'Status', 'Started'];
+    // `blessed.escape` on top of `safeText`: this widget is created with
+    // `tags: true`, so blessed CONSUMES `{...}` markup in cell text. An agent
+    // name containing `{red-fg}` therefore displayed as something other than
+    // what is stored — wrong output, and a producer setting colours in the TUI.
+    // safeText handles control characters; only blessed knows its own markup.
+    const cell = (v: string): string => blessed.escape(safeText(v));
     const data = rows.map((r) => [
-      safeText(r.id.slice(0, 12)),
-      safeText(truncate(r.agent_name, 18)),
+      cell(r.id.slice(0, 12)),
+      cell(truncate(r.agent_name, 18)),
       r.status,
       formatRelativeTime(r.started_at),
     ]);
@@ -226,10 +234,17 @@ export class DashboardView {
     const rows = recentEvalScores(this.db);
     // recentEvalScores already returns oldest-first, so time reads left→right.
     const points = rows.map((r) => {
-      const d = new Date(r.evaluated_at);
+      // Read the way the SQL side reads it — see parseInstant. A zone-less
+      // stored timestamp is UTC there and local here, which shifted these
+      // sparkline labels by the machine's offset.
+      const d = new Date(parseInstant(r.evaluated_at));
       return {
         label: `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`,
-        value: Math.round(r.score * 100),
+        // NOT rounded: `formatScorePct` exists so a sub-threshold score never
+        // reads as the threshold, and rounding here reintroduced exactly that —
+        // 0.695 showed as 69.5% in `show`/`eval` and 70% on this panel, for the
+        // same stored value.
+        value: r.score * 100,
       };
     });
     this.lineChart.setContent(

@@ -506,3 +506,34 @@ describe('safeText covers C1, not only C0', () => {
   });
 });
 
+
+describe('step payloads cannot address the terminal', () => {
+  // JSON.stringify escapes C0 controls but NOT C1 (U+0080-U+009F), and
+  // xterm/VTE/iTerm2 decode U+009B as CSI — so a tool result or model output
+  // carrying one re-coloured or addressed the operator's terminal from `show`,
+  // `show --tree` and `replay`. Step payloads are producer-controlled and,
+  // unlike a trace id, are not constrained at the write, so escaping at render
+  // is the only place this can be handled. It is applied in the shared
+  // stringify helper rather than at each call site — the rule this codebase
+  // arrived at after patching individual render sites four times and still
+  // missing one.
+  const C1 = '\u009b';
+
+  it('escapes C1 in a step input and output, without dropping the text', () => {
+    const s = step({
+      step_type: 'tool_call',
+      name: 'tool',
+      input: { prompt: `A${C1}31mINJECT` },
+      output: { text: `out${C1}5m` },
+    });
+    const out = renderTimeline([s], { showInput: true, showOutput: true });
+    expect(out).not.toContain(C1);
+    expect(out).toContain('INJECT');
+    expect(out).toContain('out');
+  });
+
+  it('escapes it in the tree view too', () => {
+    const s = step({ step_type: 'tool_call', name: 'tool', output: { text: `x${C1}31m` } });
+    expect(renderTree([s])).not.toContain(C1);
+  });
+});

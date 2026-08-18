@@ -87,12 +87,22 @@ export function renderScoreSparkline(
     })
     .join('');
 
+  /** A percentage already in 0-100, trimmed like formatScorePct. */
+  const pct = (v: number): string => {
+    const rounded = Math.round(v * 10) / 10;
+    return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)}%`;
+  };
   const first = shown[0].label;
   const last = shown[shown.length - 1].label;
   return [
     `{cyan-fg}${line}{/cyan-fg}`,
     '',
     `{gray-fg}${first} → ${last}{/gray-fg}`,
-    `{cyan-fg}min{/cyan-fg} ${min}%   {cyan-fg}max{/cyan-fg} ${max}%   {cyan-fg}last{/cyan-fg} ${values[values.length - 1]}%`,
+    // Formatted the same way `formatScorePct` formats a score everywhere else,
+    // so this panel cannot disagree with `show`/`eval` about the same stored
+    // value. The caller now passes the score UNROUNDED (rounding it made 69.5%
+    // read as 70% here, exactly what formatScorePct exists to prevent), so the
+    // one-decimal trim has to happen at the label.
+    `{cyan-fg}min{/cyan-fg} ${pct(min)}   {cyan-fg}max{/cyan-fg} ${pct(max)}   {cyan-fg}last{/cyan-fg} ${pct(values[values.length - 1])}`,
   ].join('\n');
 }

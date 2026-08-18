@@ -119,7 +119,9 @@ export function policyTable(policies: GuardrailPolicy[]): string {
       guardActionBadge(p.action),
       chalk.white(String(p.priority)),
       p.enabled ? chalk.green('Yes') : chalk.red('No'),
-      chalk.dim(truncate(JSON.stringify(p.match_pattern), 40)),
+      // The only unescaped cell in this table: a policy's match pattern is
+      // author-supplied JSON, and JSON.stringify leaves C1 controls intact.
+      chalk.dim(safeText(truncate(JSON.stringify(p.match_pattern), 40))),
     ]);
   }
 
@@ -138,7 +140,10 @@ function stepCountStr(trace: Trace): string {
   // listTraces computes step_count; fall back to metadata, then a dash.
   if (trace.step_count != null) return String(trace.step_count);
   const meta = trace.metadata as Record<string, unknown>;
-  if (meta?.step_count != null) return String(meta.step_count);
+  // Producer JSON: unreachable today because listTraces always supplies
+  // step_count, but the fallback exists for a reason and would otherwise put an
+  // unescaped producer value in a table cell.
+  if (meta?.step_count != null) return safeText(String(meta.step_count));
   return chalk.dim('-');
 }
 

@@ -212,6 +212,18 @@ export function renderTree(steps: TraceStep[], options: TimelineOptions = {}): s
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
+/**
+ * A step's payload, rendered safely.
+ *
+ * `safeText` is applied HERE, at the shared helper, rather than at each call
+ * site — the rule this codebase arrived at after patching individual render
+ * sites four times and still missing one. `JSON.stringify` escapes C0 controls
+ * but NOT C1 (U+0080-U+009F), and xterm/VTE/iTerm2 decode U+009B as CSI — so a
+ * tool result or model output containing one re-coloured or addressed the
+ * operator's terminal from `show`, `show --tree` and `replay`. Step payloads
+ * are producer-controlled and, unlike a trace id, are not constrained at the
+ * write, so escaping at render is the only place this can be handled.
+ */
 function truncateJson(obj: unknown, maxLen: number): string {
   let str: string;
   try {
@@ -219,6 +231,7 @@ function truncateJson(obj: unknown, maxLen: number): string {
   } catch {
     str = String(obj);
   }
+  str = safeText(str);
   if (str.length <= maxLen) return str;
   return str.slice(0, maxLen - 3) + '...';
 }

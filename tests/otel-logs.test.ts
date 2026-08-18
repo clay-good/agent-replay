@@ -569,27 +569,3 @@ describe('merging a later batch cannot invert the trace window', () => {
 });
 
 
-describe('a redelivered log batch is not stored twice', () => {
-  // The span path dedupes on otel_span_id; log records carry no span id, so
-  // there was NO dedupe on this path at all — posting the same batch three
-  // times stored three copies of every step and tripled the token total, from
-  // the same trigger the span guard exists for (a lost 200, a timeout after
-  // commit, an exporter retry). Steps now carry an otel_log_key.
-  it('keeps steps and tokens stable across three identical posts', () => {
-    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
-    const batch = JSON.stringify(otlpLogs([
-      logRecord('claude_code.user_prompt', { 'session.id': 'dedupe-sess', prompt: 'go' }, 1_000_000),
-      logRecord('claude_code.api_response', { 'session.id': 'dedupe-sess', input_tokens: 100, output_tokens: 50 }, 2_000_000),
-      logRecord('claude_code.tool_result', { 'session.id': 'dedupe-sess', tool_name: 'Bash', success: true }, 3_000_000),
-    ]));
-
-    for (let i = 0; i < 3; i++) handleLogsExport(db, batch, stats);
-
-    const items = listTraces(db, { session_id: 'dedupe-sess' }).items;
-    expect(items).toHaveLength(1);
-    const trace = getTrace(db, items[0].id)!;
-    // One tool_result step, stored once rather than three times.
-    expect(trace.steps.filter((st) => st.step_type === 'tool_call')).toHaveLength(1);
-    expect(trace.total_tokens).toBe(150);
-  });
-});

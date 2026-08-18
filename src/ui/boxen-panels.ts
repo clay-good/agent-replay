@@ -211,16 +211,25 @@ export function aiEvalPanel(evalResult: { evaluator_name: string; score: number;
       lines.push(chalk.white(safeText(String(d.summary))));
     }
   } else {
-    lines.push(chalk.dim(JSON.stringify(d, null, 2).slice(0, 500)));
+    // The whole details blob is producer-controlled — this is the fallback for
+    // a shape the branches above don't recognize, so it is exactly where an
+    // unmapped field reaches the terminal.
+    lines.push(chalk.dim(safeText(JSON.stringify(d, null, 2).slice(0, 500))));
   }
 
   // Cost footer
   if (d.cost_usd != null) {
     lines.push('');
-    lines.push(chalk.dim(`Cost: ${d.input_tokens ?? '?'} in + ${d.output_tokens ?? '?'} out tokens = $${Number(d.cost_usd).toFixed(6)} (${safeText(String(d.llm_provider ?? '?'))}/${safeText(String(d.llm_model ?? '?'))})`));
+    // The token counts are escaped too. They sit on the same line as two values
+    // that already were, and they are only NUMBERS when the model sent numbers
+    // — this object is whatever the provider replied with.
+    lines.push(chalk.dim(`Cost: ${safeText(String(d.input_tokens ?? '?'))} in + ${safeText(String(d.output_tokens ?? '?'))} out tokens = $${Number(d.cost_usd).toFixed(6)} (${safeText(String(d.llm_provider ?? '?'))}/${safeText(String(d.llm_model ?? '?'))})`));
   }
 
-  const title = evalResult.evaluator_name.replace('ai-', 'AI ').replace(/-/g, ' ')
+  // The title is derived from a stored evaluator name, and boxen measures the
+  // string to draw the border — so an escape sequence in it both reached the
+  // terminal and made the box misalign by its byte length.
+  const title = safeText(evalResult.evaluator_name).replace('ai-', 'AI ').replace(/-/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase());
 
   return boxen(lines.join('\n'), {

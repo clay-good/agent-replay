@@ -55,7 +55,10 @@ export function runWatch(traceId: string | undefined, opts: WatchOptions = {}): 
   const id = resolved.id;
 
   console.log('');
-  console.log(heading(`  Watching ${id} — ${safeText(resolved.agent_name)}`));
+  // The id is escaped here too. It is constrained at the `record` door, but
+  // this was the one render site that omitted the escape, and the rule is to
+  // escape unless THIS tool generated the value.
+  console.log(heading(`  Watching ${safeText(id)} — ${safeText(resolved.agent_name)}`));
   console.log(chalk.dim(`  Polling every ${pollMs}ms. Press Ctrl-C to stop.`));
   console.log('');
 

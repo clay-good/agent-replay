@@ -396,10 +396,19 @@ export function runEval(
     totalWeight += criterion.weight;
   }
 
-  // Bounded on both sides. The clamp above already prevents the >1 case, but
-  // the ratio is the number that gets stored, displayed and gated on, so it is
-  // pinned here too rather than relying on every future weight path.
-  const overallScore = totalWeight > 0 ? Math.min(1, Math.max(0, weightedSum / totalWeight)) : 0;
+  // Defensive only: a preset's criteria are static constants with positive
+  // weights, so this cannot fire. It exists so the division below can never be
+  // by zero, matching the same guard in `runCustomRubric`, where the weights do
+  // come from a caller.
+  if (totalWeight <= 0) {
+    throw new Error(`Preset "${presetName}" has no criterion with a weight greater than 0`);
+  }
+  // Bounded on both sides. Preset weights are static positive constants, so
+  // neither bound can fire today — this is a floor under the number that gets
+  // stored, displayed and gated on, not a claim that something upstream
+  // already clamped. (`runCustomRubric` below DOES clamp, because its weights
+  // come from a caller.)
+  const overallScore = Math.min(1, Math.max(0, weightedSum / totalWeight));
   // Derive `passed` from the same rounded score that is stored and displayed,
   // not the raw value. Otherwise a boundary score can read as a contradiction:
   // a raw 0.6997 fails a 0.700 threshold but rounds to 0.700 for display, so the
@@ -527,10 +536,19 @@ export function runCustomRubric(
     totalWeight += weight;
   }
 
+  // A rubric that can score nothing is a usage error, not a score of zero.
+  // With every weight at 0 this returned 0 — so the run reported "0% FAIL" at
+  // exit 1 directly beside "All criteria passed", a false CI regression whose
+  // own report contradicted it. `parseRubric` rejects this for the CLI; the
+  // check belongs here too, since this function is public API and that CLI-only
+  // guard is exactly the drift the negative-weight fix above was about.
+  if (totalWeight <= 0) {
+    throw new Error('Rubric must have at least one criterion with a weight greater than 0');
+  }
   // Bounded on both sides. The clamp above already prevents the >1 case, but
   // the ratio is the number that gets stored, displayed and gated on, so it is
   // pinned here too rather than relying on every future weight path.
-  const overallScore = totalWeight > 0 ? Math.min(1, Math.max(0, weightedSum / totalWeight)) : 0;
+  const overallScore = Math.min(1, Math.max(0, weightedSum / totalWeight));
   // Derive `passed` from the same rounded score that is stored and displayed
   // (see runEval), so a boundary score can't read as a self-contradiction.
   const score = Math.round(overallScore * 1000) / 1000;

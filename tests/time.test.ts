@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { parseDurationString, parseSinceToIso, formatDuration, effectiveDurationMs, formatRelativeTime, formatTimestamp } from '../src/utils/time.js';
+import { parseDurationString, parseSinceToIso, formatDuration, effectiveDurationMs, formatRelativeTime, formatTimestamp,
+  parseInstant } from '../src/utils/time.js';
 import { traceTable } from '../src/ui/table.js';
 
 describe('parseDurationString', () => {
@@ -147,3 +148,39 @@ describe('list and dashboard format the same timestamp identically', () => {
   });
 });
 
+
+describe('a zone-less timestamp is read the way SQLite reads it', () => {
+  // `julianday()` treats a timestamp with no designator as UTC; JavaScript's
+  // `Date` treats it as LOCAL. Both forms occur in real stores, so the two
+  // engines disagreed by the machine's offset on exactly those rows: one trace
+  // showed "2h" in `show`/`list` under a positive offset while `stats` said
+  // 5.0s for the same row, and "-" under a negative one (the end appearing to
+  // precede the start). The relative time printed "in the future" for a past run.
+  const zoneless = { started_at: '2026-08-18 10:00:00', ended_at: '2026-08-18T10:00:05Z' };
+
+  it('gives the same duration whatever TZ the process runs in', () => {
+    const prev = process.env.TZ;
+    try {
+      const seen = new Set<number | null>();
+      for (const tz of ['UTC', 'Europe/Berlin', 'America/Los_Angeles', 'Asia/Kolkata']) {
+        process.env.TZ = tz;
+        seen.add(effectiveDurationMs(zoneless));
+      }
+      expect([...seen]).toEqual([5000]);
+    } finally {
+      if (prev === undefined) delete process.env.TZ;
+      else process.env.TZ = prev;
+    }
+  });
+
+  it('parses both forms to the same instant', () => {
+    expect(parseInstant('2026-08-18 10:00:00')).toBe(parseInstant('2026-08-18T10:00:00Z'));
+    // An explicit offset is respected, not overwritten.
+    expect(parseInstant('2026-08-18T12:00:00+02:00')).toBe(parseInstant('2026-08-18T10:00:00Z'));
+  });
+
+  it('does not report a past zone-less timestamp as being in the future', () => {
+    const past = new Date(Date.now() - 3_600_000).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+    expect(formatRelativeTime(past)).not.toBe('in the future');
+  });
+});

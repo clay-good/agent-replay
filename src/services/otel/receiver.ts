@@ -261,25 +261,30 @@ function upsertOtelTrace(db: Database.Database, input: MappedOtelTrace, stats: O
     const incoming = input.steps ?? [];
     let newSteps = incoming;
     if (incoming.length > 0) {
-      // Two identities, one rule: a span carries `otel_span_id`, a log record
-      // gets an `otel_log_key` stamped by the log mapper. The log path had no
-      // dedupe at all, so posting the same log batch twice stored every step
-      // again and doubled the token total — the same trigger, the same store,
-      // and a receiver-wide claim that was only true of spans.
+      // Dedupe keys off `otel_span_id`, which only the SPAN path produces.
+      //
+      // A log-record equivalent was tried and reverted: a key built from
+      // (timestamp, step type, name, batch-local ordinal) collided ACROSS
+      // batches — the ordinal resets per batch, and a `tool_result` carries no
+      // other distinguishing field — so a genuinely different failing call at
+      // the same timestamp was silently dropped as a duplicate. Trading
+      // duplicate rows for lost rows is the wrong direction, and the token
+      // carriers on that path (`api_response`) produce no step at all, so the
+      // shape that actually inflates was never covered. Log redelivery
+      // therefore still duplicates; that is a known limitation, documented in
+      // the README, and strictly safer than dropping real data.
       const seen = new Set(
         (db
           .prepare(
-            `SELECT json_extract(metadata, '$.otel_span_id') AS span_id,
-                    json_extract(metadata, '$.otel_log_key') AS log_key
+            `SELECT json_extract(metadata, '$.otel_span_id') AS span_id
                FROM agent_trace_steps WHERE trace_id = ?`,
           )
-          .all(target) as Array<{ span_id: unknown; log_key: unknown }>)
-          .flatMap((r) => [r.span_id, r.log_key])
+          .all(target) as Array<{ span_id: unknown }>)
+          .map((r) => r.span_id)
           .filter((id): id is string => typeof id === 'string'),
       );
       newSteps = incoming.filter((st) => {
-        const meta = st.metadata as { otel_span_id?: unknown; otel_log_key?: unknown } | undefined;
-        const id = meta?.otel_span_id ?? meta?.otel_log_key;
+        const id = (st.metadata as { otel_span_id?: unknown } | undefined)?.otel_span_id;
         return !(typeof id === 'string' && seen.has(id));
       });
     }
@@ -301,12 +306,17 @@ function upsertOtelTrace(db: Database.Database, input: MappedOtelTrace, stats: O
     // inflating both. Deduping the steps and not the numbers fixed half the
     // defect and left the half nobody looks at.
     //
-    // ONLY when something was dropped: this same merge serves the /v1/logs
-    // path, whose steps carry no per-span cost (the log mapper reads spend from
-    // the record, not the step), so recomputing unconditionally would zero a
-    // cost that path had correctly summed. Nothing is deduped there, so nothing
-    // needs recomputing.
-    const deduped = newSteps.length < incoming.length || (candidate != null && alreadyPresent);
+    // ONLY when something was dropped, AND only when the retained steps actually
+    // carry per-step attribution. This same merge serves the /v1/logs path,
+    // whose steps have no `tokens_used` and no `otel_cost_usd` (that mapper
+    // reads spend from the record, not the step) — so a recompute there sums to
+    // zero and ERASES the batch's real contribution. Requiring attribution
+    // makes the recompute apply to the span path, which has it, and never to a
+    // path that does not.
+    const hasAttribution = steps.some(
+      (st) => st.tokens_used != null || (st.metadata as { otel_cost_usd?: unknown } | undefined)?.otel_cost_usd != null,
+    );
+    const deduped = hasAttribution && (newSteps.length < incoming.length || (candidate != null && alreadyPresent));
     const totals = deduped
       ? {
           total_tokens:

@@ -183,14 +183,16 @@ function renderSnapshots(
     if (snapshot.environment && Object.keys(snapshot.environment).length > 0) {
       console.log(
         chalk.dim('    environment: ') +
-          chalk.dim(truncate(JSON.stringify(snapshot.environment), 200)),
+          // Escaped like the context_window above it. Snapshot KEYS are
+          // producer-controlled here too, not just values.
+          chalk.dim(safeText(truncate(JSON.stringify(snapshot.environment), 200))),
       );
     }
 
     if (snapshot.tool_state && Object.keys(snapshot.tool_state).length > 0) {
       console.log(
         chalk.dim('    tool_state: ') +
-          chalk.dim(truncate(JSON.stringify(snapshot.tool_state), 200)),
+          chalk.dim(safeText(truncate(JSON.stringify(snapshot.tool_state), 200))),
       );
     }
 

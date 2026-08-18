@@ -4,6 +4,10 @@ import { runMigrations } from '../src/db/migrations.js';
 import { getTrace } from '../src/services/trace-service.js';
 import { runWrapped } from '../src/services/harness-service.js';
 import { resolveDataDir } from '../src/utils/paths.js';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { ensureDatabase, resetConnection } from '../src/db/index.js';
 
 let db: Database.Database;
 
@@ -346,4 +350,58 @@ process.exit(3);
     expect(res.status).toBe('failed');
     expect(res.exitCode).toBe(4);
   }, 15000);
+});
+
+describe('a child whose terminal status we cannot read', () => {
+  // The protocol validator REPAIRS an unusable terminal status to `failed`,
+  // which is right for a bare stream. This wrapper holds something the stream
+  // does not — the child's exit code — so counting the repaired value as "the
+  // child declared its outcome" suppressed the exit-code finalization: a child
+  // that emitted `status: "success"` and then exited 0 was stored as a FAILURE
+  // with no error text. The wrapper's fact overrides the stream's guess.
+  it('lets the exit code decide, and keeps what the child did report', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ar-run-repair-'));
+    try {
+      const child = join(dir, 'child.mjs');
+      writeFileSync(
+        child,
+        [
+          "import { appendFileSync } from 'node:fs';",
+          "appendFileSync(process.env.AGENT_REPLAY_EVENTS, JSON.stringify({ v: 1, type: 'trace_end', trace_id: 'x', status: 'success', total_tokens: 42 }) + '\\n');",
+          'process.exit(0);',
+        ].join('\n'),
+      );
+
+      const res = await runWrapped(db, { command: process.execPath, args: [child], agentName: 'repairbot' });
+      const trace = getTrace(db, res.traceId)!;
+      expect(res.exitCode).toBe(0);
+      expect(trace.status).toBe('completed');
+      // The rest of the finalization the child did send is still there.
+      expect(trace.total_tokens).toBe(42);
+    } finally {
+      resetConnection();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20000);
+
+  it('still records a failure when the child actually fails', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ar-run-repair2-'));
+    try {
+      const child = join(dir, 'child.mjs');
+      writeFileSync(
+        child,
+        [
+          "import { appendFileSync } from 'node:fs';",
+          "appendFileSync(process.env.AGENT_REPLAY_EVENTS, JSON.stringify({ v: 1, type: 'trace_end', trace_id: 'x', status: 'success' }) + '\\n');",
+          'process.exit(3);',
+        ].join('\n'),
+      );
+      const res = await runWrapped(db, { command: process.execPath, args: [child], agentName: 'repairbot2' });
+      expect(res.exitCode).toBe(3);
+      expect(getTrace(db, res.traceId)!.status).toBe('failed');
+    } finally {
+      resetConnection();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20000);
 });

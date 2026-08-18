@@ -195,7 +195,10 @@ async function replayStep(step: TraceStep, speed: number): Promise<void> {
   if (hasRenderableContent(step.output)) {
     let outputStr: string;
     try {
-      outputStr = truncate(JSON.stringify(step.output), 100);
+      // safeText AFTER stringification: JSON.stringify escapes C0 but not C1
+      // (U+0080-U+009F), and terminals decode U+009B as CSI. Same reason as the
+      // timeline helper.
+      outputStr = safeText(truncate(JSON.stringify(step.output), 100));
     } catch {
       outputStr = '[complex object]';
     }

@@ -75,9 +75,11 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
   // across two reads (a poll boundary landing mid-character, or the child
   // flushing a partial write) recombines instead of each half becoming U+FFFD.
   let decoder = new StringDecoder('utf8');
+  /** Whether a trace_end's terminal status had to be repaired (see below). */
+  let statusRepaired = false;
 
   const applyLine = (line: string): void => {
-    const { event, warning } = parseEventLine(line);
+    const { event, warning, repaired } = parseEventLine(line);
     if (warning) process.stderr.write(`agent-replay run: ${warning}\n`);
     if (!event) return;
     // The wrapper owns the trace; ignore the child's trace_start and stamp our
@@ -102,13 +104,22 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
       // suppress that finalization.
       // Only a TERMINAL status the store can actually record counts as the child
       // owning the outcome. `TraceEndEvent.status` is a free string, and
-      // `updateTrace` coerces anything unrecognized to `completed` — so a child
-      // ending with `status: "error"` was laundered into a clean-looking trace
-      // AND suppressed the exit-code finalization, leaving no error text on a run
-      // that exited non-zero: a golden baseline recorded `completed` then matched
-      // it. `status: "running"` was worse — it survives coercion, so the trace
-      // stayed open forever and bare `watch` live-tailed a dead process.
+      // `updateTrace` coerces anything unrecognized to `failed` — so a child
+      // ending with `status: "error"` would otherwise both be recorded that way
+      // AND suppress the exit-code finalization, leaving no error text on the
+      // run. `status: "running"` is worse — it survives coercion, so the trace
+      // stays open forever and bare `watch` live-tails a dead process.
+      //
+      // A REPAIRED status is not a declaration. The protocol validator rewrites
+      // an unusable terminal status to `failed`, which is the right answer for a
+      // bare stream — but this wrapper holds ground truth the stream does not,
+      // namely the child's exit code. Counting the repaired value as "the child
+      // declared failed" meant a child that emitted `status: "success"` and then
+      // exited 0 was stored as a FAILURE with no error text, because the
+      // exit-code finalization below was skipped. Let the exit code decide.
+      if (repaired === 'status' && event.type === 'trace_end') statusRepaired = true;
       if (
+        repaired !== 'status' &&
         event.type === 'trace_end' &&
         (event.status === 'completed' || event.status === 'failed' || event.status === 'timeout')
       ) {
@@ -371,7 +382,13 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
     // and a statusless trace_end defaults to `completed` — so a non-zero exit
     // without an explicit child status must override that default to `failed`,
     // per the spec (exit 0 → completed, non-zero → failed with the code recorded).
-    if (current && !childDeclaredStatus && (current.status === 'running' || exitCode !== 0)) {
+    // `statusRepaired` joins the condition because the repaired `trace_end` has
+    // ALREADY written `failed` to the row — so `current.status === 'running'` is
+    // false and, on a clean exit, so is `exitCode !== 0`. Without it the
+    // finalization never ran and a child that exited 0 stayed recorded as a
+    // failure with no error text. The stream's guess is overwritten by the
+    // wrapper's fact.
+    if (current && !childDeclaredStatus && (current.status === 'running' || exitCode !== 0 || statusRepaired)) {
       updateTrace(db, trace.id, {
         status: exitCode === 0 ? 'completed' : 'failed',
         ended_at: new Date(startMs + durationMs).toISOString(),

@@ -180,6 +180,36 @@ between them, and nothing else.
 
 ### Fixed
 
+- **A tool result or model output could address the operator's terminal.**
+  `JSON.stringify` escapes C0 controls but not C1 (U+0080-U+009F), and
+  xterm/VTE/iTerm2 decode U+009B as CSI — so a step's `input`/`output` re-coloured
+  the terminal from `show`, `show --tree` and `replay`, as did `show
+  --snapshots`' environment and tool_state (keys as well as values), the AI eval
+  panel's token counts, its JSON fallback and its box title, `watch`'s trace id,
+  a policy's match pattern in `guard list`, and a malformed option in
+  `decisions`. Escaping is applied at the shared stringify helper rather than
+  per call site. Verified by writing a hostile trace straight into SQLite and
+  scanning the output of every display command byte-wise: zero raw C1 sequences.
+- The dashboard rendered a *different* agent name than is stored: its widgets
+  run with blessed markup enabled, so `{red-fg}` in a name was consumed as
+  formatting. Cells are escaped for blessed as well as for the terminal.
+- `show`/`list` and `stats` disagreed about the same trace's duration — 2h
+  against 5.0s — because SQLite reads a timestamp with no timezone as UTC while
+  JavaScript reads it as local. Both forms occur in real stores. One shared
+  parser now reads them the way the SQL side does; the same split made `list`
+  print "in the future" for a past run.
+- The dashboard's score sparkline rounded, so 0.695 read as 70% there and 69.5%
+  in `show`/`eval` for the same stored value — exactly what the shared score
+  formatter exists to prevent.
+- A run that exited 0 could be recorded as **failed with no error text**: the
+  wrapper treated a terminal status the protocol had REPAIRED as the child
+  declaring its own outcome, which suppressed the exit-code finalization. A
+  repaired value is now distinguished from a declared one, so the wrapper's exit
+  code decides.
+- `runCustomRubric` still divided by zero for an all-zero-weight rubric,
+  reporting "0% FAIL" beside "All criteria passed" — the guard had been added to
+  the CLI only, which was the very drift the entry above it describes.
+
 - **A failure could be recorded against the tool call that succeeded.** The
   hook adapter closed the most recently opened tool step, but harnesses dispatch
   tools in parallel batches whose results return in call order — so with two
@@ -219,8 +249,13 @@ between them, and nothing else.
 - The OTLP redelivery guard deduped steps but not the numbers: the merge still
   received the batch-wide totals, so a retry re-added the tokens and cost of
   spans it had just dropped, and a root-only retry (the common final flush)
-  skipped the guard entirely. `/v1/logs` had no dedupe at all — three identical
-  posts stored three copies of every step and tripled the token total.
+  skipped the guard entirely. On the log path a record carries no span id, so
+  there is no equivalent identity: a key built from timestamp, step type, name
+  and a batch-local ordinal was tried and reverted — the ordinal resets per
+  batch, so a genuinely different failing call at the same timestamp was
+  silently dropped as a duplicate, and that path's token carriers produce no
+  step at all. Redelivered log batches can still duplicate; the limitation is
+  documented rather than traded for lost data.
 
 - The programmatic API answered for its own arguments in SQLite's voice: an
   invalid trace `status` or step `step_type` reached the database raw, so a

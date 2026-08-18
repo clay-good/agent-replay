@@ -462,13 +462,15 @@ export function applyHookPayload(
       }
 
       // A denied call never executes, so no PostToolUse will ever close its
-      // step. Left open it stays the newest unclosed step for that tool name,
-      // and findOpenToolStep (ORDER BY step_number DESC) then hands it the
-      // NEXT PostToolUse for that name — which belongs to a different, allowed
-      // call that ran concurrently (harnesses dispatch tools in parallel
-      // batches). The audit trail then shows the blocked command completing
-      // successfully with another call's output, while the call that really ran
-      // stays open forever. Close it here with the block recorded instead.
+      // step. Left open it stays in the queue of unclosed steps for that tool
+      // name, and findOpenToolStep then hands it the next PostToolUse for that
+      // name — which belongs to a different, allowed call that ran concurrently
+      // (harnesses dispatch tools in parallel batches). The audit trail then
+      // shows the blocked command completing successfully with another call's
+      // output, while the call that really ran stays open forever. It is the
+      // OLDEST open step now rather than the newest, which makes a denied call
+      // absorb a result sooner rather than later — the reason to close it here
+      // with the block recorded is unchanged either way.
       //
       // Only `deny` is closed: `require_review` maps to `ask`, which the user
       // can approve, so that call may still run and legitimately close later.
@@ -525,7 +527,7 @@ export function applyHookPayload(
       // its own process, so a harness that dispatches a batch of tools in
       // parallel fires the matching PostToolUse hooks near-simultaneously; with
       // the find and the update as separate autocommit statements they all read
-      // the SAME newest open step and all wrote it. Last writer won: the other
+      // the SAME open step and all wrote it. Last writer won: the other
       // results were discarded and their steps stayed open forever — silently,
       // because updateStep matches on (trace_id, step_number) and always reports
       // one row changed. Serializing the claim gives each process a different

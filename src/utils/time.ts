@@ -88,6 +88,28 @@ export function formatDuration(ms: number): string {
  * that carries timestamps but no total_duration_ms). Display-only — it never
  * changes stored data. Returns null when nothing usable is available.
  */
+/**
+ * A stored timestamp as an instant, read the way SQLite reads it.
+ *
+ * `julianday()` treats a timestamp with no timezone designator as UTC;
+ * JavaScript's `Date` treats it as LOCAL. Both forms occur in real stores (see
+ * SINCE_PREDICATE above — nothing constrains what a producer writes), so the
+ * two engines disagreed by the machine's UTC offset on exactly those rows:
+ * one trace with `started_at = "2026-08-18 10:00:00"` and `ended_at =
+ * "2026-08-18T10:00:05Z"` showed a duration of "2h" in `show` and `list` under
+ * TZ=Europe/Berlin while `stats` reported 5.0s for the same row, and "-" under
+ * a negative offset (where the end appears to precede the start). The relative
+ * time went the same way, printing "in the future" for a past run.
+ *
+ * So: append `Z` when no designator is present, matching the SQL side. A
+ * timestamp that already carries `Z` or an offset is untouched.
+ */
+export function parseInstant(value: string): number {
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value.trim());
+  const normalized = hasZone ? value.trim() : `${value.trim().replace(' ', 'T')}Z`;
+  return new Date(normalized).getTime();
+}
+
 export function effectiveDurationMs(t: {
   total_duration_ms?: number | null;
   started_at?: string | null;
@@ -95,8 +117,8 @@ export function effectiveDurationMs(t: {
 }): number | null {
   if (t.total_duration_ms != null) return t.total_duration_ms;
   if (t.started_at && t.ended_at) {
-    const start = new Date(t.started_at).getTime();
-    const end = new Date(t.ended_at).getTime();
+    const start = parseInstant(t.started_at);
+    const end = parseInstant(t.ended_at);
     if (!Number.isNaN(start) && !Number.isNaN(end) && end >= start) return end - start;
   }
   return null;
@@ -107,7 +129,7 @@ export function effectiveDurationMs(t: {
  * Examples: "just now", "3m ago", "2h ago", "5d ago"
  */
 export function formatRelativeTime(iso: string): string {
-  const ts = new Date(iso).getTime();
+  const ts = parseInstant(iso);
   if (isNaN(ts)) return '-';
   const diff = Date.now() - ts;
   if (diff < 0) return 'in the future';

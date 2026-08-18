@@ -153,6 +153,17 @@ export interface ParseResult {
   event: CaptureEvent | null;
   /** Non-fatal reason the line was skipped, for a stderr warning. */
   warning: string | null;
+  /**
+   * A field this validator REPAIRED rather than took at face value.
+   *
+   * `status` here means the producer's terminal status was unusable and was
+   * rewritten to `failed`. That distinction matters to `run`, which holds
+   * ground truth the stream does not: a repaired value must not count as the
+   * child DECLARING its outcome, or a child that emits an unrecognized status
+   * and then exits 0 suppresses the exit-code finalization and is stored as a
+   * failure with no error text.
+   */
+  repaired?: 'status';
 }
 
 /** Parse and validate a single JSONL line into a capture event. */
@@ -328,7 +339,16 @@ export function validateEvent(obj: unknown): ParseResult {
   if (dropped.length > 0) {
     return {
       event: obj as CaptureEvent,
-      warning: `ignored ${dropped.join(', ')}: must be a non-negative finite number`,
+      // Joined with a status repair when both happened: an early return here
+      // swallowed the status warning entirely, so the value was rewritten with
+      // no mention of it at all.
+      warning: [
+        unusableStatus != null
+          ? `trace_end status "${unusableStatus}" is not one of ${TRACE_STATUSES.join(', ')} — recorded as failed`
+          : null,
+        `ignored ${dropped.join(', ')}: must be a non-negative finite number`,
+      ].filter(Boolean).join('; '),
+      ...(unusableStatus != null ? { repaired: 'status' as const } : {}),
     };
   }
 
@@ -336,6 +356,7 @@ export function validateEvent(obj: unknown): ParseResult {
     return {
       event: obj as CaptureEvent,
       warning: `trace_end status "${unusableStatus}" is not one of ${TRACE_STATUSES.join(', ')} — recorded as failed`,
+      repaired: 'status',
     };
   }
   return { event: obj as CaptureEvent, warning: null };
