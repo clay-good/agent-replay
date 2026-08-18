@@ -537,3 +537,39 @@ describe('step payloads cannot address the terminal', () => {
     expect(renderTree([s])).not.toContain(C1);
   });
 });
+
+describe('a deeply nested tree still renders', () => {
+  // The tree walk recursed one JS frame per level of nesting, so a trace whose
+  // steps form a long parent chain blew the stack — measured, fine at depth
+  // 4,000 and "Maximum call stack size exceeded" before 8,000. That is
+  // reachable: a step's parent is the step before it in any run that threads
+  // causality linearly, and `--tree` is exactly the view someone opens to
+  // understand a long session. It failed with a one-line error and no tree.
+  //
+  // The indent was a second, quadratic limit: it grows three characters per
+  // level, so a 20,000-deep chain summed to ~600 MB of leading whitespace and
+  // threw "Invalid string length" while building the output.
+  function chain(depth: number): TraceStep[] {
+    return Array.from({ length: depth }, (_, i) => step({
+      step_number: i + 1,
+      step_type: 'thought',
+      name: 's' + (i + 1),
+      parent_step_number: i === 0 ? null : i,
+    }));
+  }
+
+  it.each([1000, 8000, 20000])('renders a %i-deep chain without throwing', (depth) => {
+    const out = renderTree(chain(depth));
+    // Every step appears, exactly once.
+    expect(out.split('\n')).toHaveLength(depth);
+    expect(out).toContain('s1');
+    expect(out).toContain('s' + depth);
+  });
+
+  it('keeps the output linear in step count by capping the indent', () => {
+    // Quadratic indent growth would make this ratio blow up; capped, it is flat.
+    const small = renderTree(chain(2000)).length / 2000;
+    const large = renderTree(chain(20000)).length / 20000;
+    expect(large).toBeLessThan(small * 2);
+  });
+});

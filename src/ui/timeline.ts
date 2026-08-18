@@ -130,6 +130,14 @@ export function renderTimeline(
  * followed by the steps it caused) still renders here so `--tree` actually shows
  * its `⟵ caused by #N` annotations instead of a plain timeline that omits them.
  */
+/**
+ * How many levels of nesting the tree still indents for. Beyond this the indent
+ * is held constant: it grows three characters per level, so an unbounded indent
+ * makes the rendered output quadratic in depth, and past a few dozen levels it
+ * is wider than any terminal and conveys nothing.
+ */
+const MAX_TREE_INDENT = 40;
+
 export function renderTree(steps: TraceStep[], options: TimelineOptions = {}): string {
   if (steps.length === 0) {
     return chalk.dim('  No steps recorded.');
@@ -185,15 +193,41 @@ export function renderTree(steps: TraceStep[], options: TimelineOptions = {}): s
     }
   };
 
-  // The visited set guards against parent cycles / self-parents (possible if a
-  // producer bypassed validation): a step is rendered at most once and can't
-  // recurse forever.
+  // ITERATIVE, with an explicit stack — not recursion.
+  //
+  // The natural recursive walk went one JS frame deep per level of nesting, so a
+  // trace whose steps form a long parent chain blew the stack: measured, it
+  // succeeds at depth 4,000 and throws "Maximum call stack size exceeded"
+  // between there and 8,000. That is reachable — a step's parent is the step
+  // before it in any run that threads causality linearly, and `--tree` is
+  // exactly the view someone opens to understand a long session. The command
+  // failed with a one-line error and no tree at all.
+  //
+  // The stack holds children in reverse so they pop in their original order,
+  // which keeps the output byte-identical to the recursive version. The visited
+  // set still guards against parent cycles and self-parents (possible if a
+  // producer bypassed validation): a step is rendered at most once.
   const walk = (parentKey: number | null, indent: string): void => {
-    for (const step of childrenOf.get(parentKey) ?? []) {
+    const stack: Array<{ step: TraceStep; indent: string }> = [];
+    // The indent stops growing past MAX_TREE_INDENT levels. It grows three
+    // characters per level, so the total output is QUADRATIC in depth: a
+    // 20,000-deep chain sums to roughly 600 MB of leading whitespace and threw
+    // "Invalid string length" while building it. Past a few dozen levels the
+    // indent conveys nothing a terminal can show anyway — it is already wider
+    // than the window — so capping it makes the output linear in step count and
+    // keeps a deep tree renderable at all.
+    const deepen = (ind: string): string => (ind.length >= MAX_TREE_INDENT * 3 ? ind : ind + '   ');
+    const push = (key: number | null, ind: string): void => {
+      const children = childrenOf.get(key) ?? [];
+      for (let i = children.length - 1; i >= 0; i--) stack.push({ step: children[i], indent: ind });
+    };
+    push(parentKey, indent);
+    while (stack.length > 0) {
+      const { step, indent: ind } = stack.pop()!;
       if (visited.has(step.step_number)) continue;
       visited.add(step.step_number);
-      emit(step, indent);
-      walk(step.step_number, indent + '   ');
+      emit(step, ind);
+      push(step.step_number, deepen(ind));
     }
   };
 

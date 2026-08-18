@@ -191,6 +191,19 @@ between them, and nothing else.
 
 ### Fixed
 
+- `show --tree` could not render a deeply nested trace. The walk recursed one
+  frame per level of nesting, so a long parent chain blew the stack — measured,
+  fine at depth 4,000 and "Maximum call stack size exceeded" before 8,000 — and
+  the command printed a one-line error with no tree at all. That depth is
+  reachable: a step's parent is the step before it in any run that threads
+  causality linearly, and the tree is the view someone opens to understand a long
+  session. The traversal is iterative now, and the indent stops growing past 40
+  levels: it grew three characters per level, so a 20,000-deep chain summed to
+  roughly 600 MB of leading whitespace and failed with "Invalid string length"
+  while building the output. A 100,000-step chain now renders in 14.6 MB. Output
+  for ordinary trees is byte-identical, verified against the recursive version on
+  a mixed tree with branches, a self-parent and a cycle.
+
 - **A guardrail policy could be evaded by a name that reads the same.**
   Matching compared raw code points after case folding, so
   `name_contains: "delete"` did not match the fullwidth `ｄｅｌｅｔｅ_user`, nor
