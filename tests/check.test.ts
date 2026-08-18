@@ -1080,3 +1080,47 @@ describe('a golden entry with no metadata.status is a damaged baseline', () => {
     }
   });
 });
+
+describe('an empty input is not an identity', () => {
+  // Every capture with no recorded input hashed to the SAME golden key, so
+  // unrelated runs matched each other. Two `record --format codex-exec`
+  // captures of completely different sessions (that translator records no
+  // input) compared as the same scenario — producing a fabricated tool_inputs
+  // regression between them — and a `--strict` run reported `uncovered: 0` at
+  // exit 0 while a baseline it never exercised sat unused, which is the exact
+  // hole `uncovered` exists to report.
+  it('does not match two different runs that both lack an input', () => {
+    const a: IngestTraceInput = {
+      agent_name: 'codex', status: 'completed', input: {},
+      steps: [{ step_number: 1, step_type: 'tool_call', name: 'search', input: { q: 'tokyo' } }],
+    };
+    const b: IngestTraceInput = {
+      agent_name: 'codex', status: 'completed', input: {},
+      steps: [{ step_number: 1, step_type: 'tool_call', name: 'deploy', input: { cmd: 'rm -rf /tmp/x' } }],
+    };
+    ingestTrace(db, a);
+    ingestTrace(db, b);
+    const golden = JSON.parse(exportTraces(db, {}, 'golden')) as GoldenEntry[];
+    expect(golden).toHaveLength(2);
+
+    // Re-running only scenario A must NOT report a clean, fully-covered gate.
+    const report = checkGolden(golden, [candidate(a)], { strict: true });
+    expect(report.passed).toBe(0);
+    expect(report.unmatched).toBe(1);
+    // Neither baseline was exercised — both are reported, not quietly excluded.
+    expect(report.uncovered).toBe(2);
+    expect(report.ok).toBe(false);
+  });
+
+  it('still matches normally when the input is present', () => {
+    const withInput: IngestTraceInput = {
+      agent_name: 'codex', status: 'completed', input: { prompt: 'book a flight' },
+      steps: [{ step_number: 1, step_type: 'output', name: 'done' }],
+    };
+    ingestTrace(db, withInput);
+    const golden = JSON.parse(exportTraces(db, { agent_name: 'codex' }, 'golden')) as GoldenEntry[];
+    const report = checkGolden(golden, [candidate(withInput)], { strict: true });
+    expect(report.passed).toBe(1);
+    expect(report.ok).toBe(true);
+  });
+});

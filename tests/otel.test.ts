@@ -992,3 +992,55 @@ describe('span attributes the log path already reads', () => {
     expect(spanTrace([]).total_cost_usd ?? null).toBeNull();
   });
 });
+
+describe('a failed tool is a step error, not a failed run', () => {
+  // These two receivers were the ONLY capture paths that promoted a child
+  // span's failure to the trace's status. The other eight store `completed`
+  // for a run containing a failed tool call, the telemetry-ingest spec says a
+  // span error becomes a STEP error, and eval's design deliberately does not
+  // hard-fail a preset for a recovered step error — so the identical session
+  // scored the same and PASSED via `ingest` while FAILING at exit 1 here, and
+  // `check --golden` reported a status regression between two captures of one
+  // session.
+  function traceFrom(rootErrored: boolean, childErrored: boolean): ReturnType<typeof mapOtlpTraces>[number] {
+    const err = (on: boolean): unknown[] => (on
+      ? [{ key: 'error.type', value: { stringValue: 'boom' } }]
+      : []);
+    return mapOtlpTraces({
+      resourceSpans: [{
+        resource: { attributes: [{ key: 'service.name', value: { stringValue: 'svc' } }] },
+        scopeSpans: [{
+          spans: [
+            {
+              traceId: 'ff', spanId: 'r1', name: 'invoke_agent',
+              startTimeUnixNano: '1700000000000000000', endTimeUnixNano: '1700000002000000000',
+              ...(rootErrored ? { status: { code: 2 } } : {}),
+              attributes: [{ key: 'gen_ai.operation.name', value: { stringValue: 'invoke_agent' } }, ...err(rootErrored)],
+            },
+            {
+              traceId: 'ff', spanId: 't1', parentSpanId: 'r1', name: 'execute_tool',
+              startTimeUnixNano: '1700000000000000000', endTimeUnixNano: '1700000001000000000',
+              ...(childErrored ? { status: { code: 2 } } : {}),
+              attributes: [{ key: 'gen_ai.operation.name', value: { stringValue: 'execute_tool' } }, ...err(childErrored)],
+            },
+          ],
+        }],
+      }],
+    })[0];
+  }
+
+  it('keeps the run completed when only a tool span failed', () => {
+    const t = traceFrom(false, true);
+    expect(t.status).toBe('completed');
+    // The failure is still visible where it belongs.
+    expect(t.steps!.some((s) => s.error != null)).toBe(true);
+  });
+
+  it('fails the run when the ROOT span failed, and says why', () => {
+    const t = traceFrom(true, false);
+    expect(t.status).toBe('failed');
+    // A failed trace must carry a reason — it was stored with error: null, so
+    // `show` rendered "✘ FAILED" with nothing to explain it.
+    expect(t.error).toBeTruthy();
+  });
+});

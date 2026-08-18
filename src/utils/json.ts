@@ -258,14 +258,14 @@ function truncateSurrogateSafe(s: string, max: number): string {
 /**
  * Escape every control character in a string bound for a terminal or a log.
  *
- * ONE definition, shared by the UI's `safeText` and by the service-layer
- * warnings that echo a producer's own bytes back (an unknown event type, a bad
- * step_type, an unparsable line, a hook's tool name). Those two had drifted:
- * the renderer covered C0, DEL and C1 while the protocol's line preview stopped
- * at DEL — so a message that quotes a producer value could still emit a raw
- * ESC or U+009B into the supervisor's terminal and CI log, which is the whole
- * thing the escaping exists to stop. Newline and tab are preserved; a message
- * that wants them formatted keeps its own layout.
+ * The LENIENT escaper, for multi-line blocks: it covers C0, DEL and C1 but
+ * preserves newline and tab, because a rendered error or panel keeps its own
+ * shape. `safeText` is this function.
+ *
+ * Anything printed as a SINGLE LINE wants {@link escapeForMessage} instead — a
+ * preserved newline there lets a producer forge a line that reads like this
+ * tool's own output. The two differ only in that pair of characters, and each
+ * says which surface it is for.
  */
 export function escapeControlChars(text: string): string {
   const normalized = text.replace(/\r\n/g, '\n');

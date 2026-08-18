@@ -83,6 +83,8 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
     let totalTokens = 0;
     let totalCost = 0;
     const steps: IngestStepInput[] = [];
+    /** Whether the SESSION failed (a failed model call), not merely a tool. */
+    let sessionFailed = false;
     let stepNumber = 1;
     let startedAt: string | undefined;
     let endedAtNanos = 0;
@@ -186,6 +188,10 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
       // and still answered 200. Recorded as the llm_call it is, with the failure
       // on `error` — the same shape every other capture path uses for a failure.
       if (evt.endsWith('.api_error')) {
+        // A model call that failed outright is a SESSION-level failure — unlike
+        // a tool that returned an error, which the agent can and usually does
+        // recover from. See the status derivation below.
+        sessionFailed = true;
         steps.push({
           step_number: stepNumber++,
           step_type: 'llm_call',
@@ -229,11 +235,17 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
     traces.push({
       agent_name: isGemini ? 'gemini' : 'claude-code',
       trigger: 'user_message',
-      // Derived, not hardcoded. `completed` was unconditional, so a session
-      // whose tool calls or model calls all failed was still reported as a
-      // clean run — the failure was invisible to `list`, `check --golden`, and
-      // eval's error criteria alike.
-      status: steps.some((st) => st.error != null) ? 'failed' : 'completed',
+      // Derived, not hardcoded — but from a SESSION-level failure only.
+      //
+      // `steps.some(st => st.error != null)` promoted a failed TOOL CALL to a
+      // failed run, which made the two OTel receivers the only capture paths
+      // that do: the other eight store `completed` for a session containing a
+      // failed tool, the telemetry-ingest spec says a failure becomes a STEP
+      // error, and eval's design says a recovered step error must not hard-fail
+      // a preset. The identical session scored the same and PASSED via `ingest`
+      // while FAILING at exit 1 here. A failed model call (`.api_error`) is a
+      // different thing — the turn did not happen — and still fails the run.
+      status: sessionFailed ? 'failed' : 'completed',
       // Must match the placeholder actually used above. It still tested the OLD
       // sentinel, so the synthetic key was PERSISTED as the session id — and
       // since the receiver merges log batches on (session_id, source_format),

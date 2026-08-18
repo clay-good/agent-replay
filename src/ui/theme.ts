@@ -100,9 +100,9 @@ export function formatCostUsd(cost: number): string {
  * printed. Everything else in C0, plus DEL, is rendered visibly as `\xNN`.
  */
 export function safeText(text: string): string {
-  // Delegates, so the renderer and the service-layer warnings cannot disagree
-  // about what a control character is — they had, with the protocol's line
-  // preview stopping at DEL while this covered C1 too.
+  // Delegates to the lenient escaper: the same control-character class the
+  // message escaper uses, minus tab and newline, which a rendered block keeps.
+  // A single-line row should use `escapeForMessage` instead — see json.ts.
   return escapeControlChars(text);
 }
 

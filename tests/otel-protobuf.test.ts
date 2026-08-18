@@ -111,9 +111,14 @@ describe('decodeTracesData → mapOtlpTraces', () => {
     expect(trace.agent_name).toBe('planner');
     expect(trace.session_id).toBe('conv-9');
     expect(trace.total_tokens).toBe(100);
-    expect(trace.status).toBe('failed'); // execute_tool span had ERROR status
+    // The failed execute_tool span is a STEP error, not a run outcome — the
+    // trace status now comes from the ROOT span, matching the other eight
+    // capture paths and the telemetry-ingest spec. The failure is asserted
+    // where it belongs, on the step, below.
+    expect(trace.status).toBe('completed');
     expect(trace.steps!.map((s) => s.step_type)).toEqual(['llm_call', 'tool_call']);
     expect(trace.steps![0].model).toBe('gpt-4');
+    expect(trace.steps!.some((st) => st.error != null)).toBe(true);
     expect(trace.steps![1].error).toBe('boom');
   });
 

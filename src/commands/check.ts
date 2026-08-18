@@ -11,6 +11,7 @@ import { parseSinceToIso } from '../utils/time.js';
 import { errorMessage } from '../utils/json.js';
 import { resolveDataDir } from '../utils/paths.js';
 import { makeRefuse } from '../utils/refuse.js';
+import { escapeForMessage } from '../utils/json.js';
 
 export interface CheckOptions {
   golden?: string;
@@ -311,13 +312,13 @@ export function runCheck(opts: CheckOptions = {}): void {
 
   for (const r of report.results) {
     if (!r.matched) {
-      console.log(`  ${chalk.dim('○')} ${chalk.dim(safeText(r.trace_id.slice(0, 12)))} ${safeText(r.agent_name)} — ${chalk.yellow('unmatched')}${opts.strict ? chalk.red(' (strict: fail)') : ''}`);
+      console.log(`  ${chalk.dim('○')} ${chalk.dim(escapeForMessage(r.trace_id.slice(0, 12)))} ${escapeForMessage(r.agent_name)} — ${chalk.yellow('unmatched')}${opts.strict ? chalk.red(' (strict: fail)') : ''}`);
       continue;
     }
     if (r.passed) {
-      console.log(`  ${chalk.green('✔')} ${chalk.dim(safeText(r.trace_id.slice(0, 12)))} ${safeText(r.agent_name)} — ${chalk.green('pass')}`);
+      console.log(`  ${chalk.green('✔')} ${chalk.dim(escapeForMessage(r.trace_id.slice(0, 12)))} ${escapeForMessage(r.agent_name)} — ${chalk.green('pass')}`);
     } else {
-      console.log(`  ${chalk.redBright('✘')} ${chalk.dim(safeText(r.trace_id.slice(0, 12)))} ${safeText(r.agent_name)} — ${chalk.redBright('REGRESSED')}`);
+      console.log(`  ${chalk.redBright('✘')} ${chalk.dim(escapeForMessage(r.trace_id.slice(0, 12)))} ${escapeForMessage(r.agent_name)} — ${chalk.redBright('REGRESSED')}`);
       for (const d of r.divergences) {
         const at = d.step_number != null ? chalk.dim(` @step ${d.step_number}`) : '';
         console.log(`      ${chalk.white(d.field)}${at}: golden ${chalk.green(short(d.golden))} → got ${chalk.redBright(short(d.candidate))}`);
@@ -343,8 +344,17 @@ export function runCheck(opts: CheckOptions = {}): void {
  * producer string. A lone carriage return in one of them could overwrite the
  * `REGRESSED` line above it and make this gate misreport its own verdict.
  */
+/**
+ * A divergence value, trimmed for a ONE-LINE gate row.
+ *
+ * `escapeForMessage`, not `safeText`: the renderer's escaper deliberately keeps
+ * newline and tab, which is right for a multi-line block and wrong here. These
+ * rows are what a human scans a CI log for, so a value carrying a newline —
+ * and this value comes from agent data or a downloaded golden file — could
+ * forge an extra `✔ … — pass` line into the verdict.
+ */
 function short(v: unknown): string {
   const s = typeof v === 'string' ? v : JSON.stringify(v);
   const out = s != null && s.length > 60 ? `${s.slice(0, 57)}...` : String(s);
-  return safeText(out);
+  return escapeForMessage(out);
 }

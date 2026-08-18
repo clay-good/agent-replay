@@ -10,6 +10,7 @@ import { summaryPanel } from '../ui/boxen-panels.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage } from '../utils/json.js';
 import { resolveDataDir } from '../utils/paths.js';
+import { escapeForMessage } from '../utils/json.js';
 
 export interface IngestOptions {
   format?: 'json' | 'jsonl';
@@ -180,7 +181,7 @@ export function runIngest(filePath: string, opts: IngestOptions = {}): void {
       totalSteps += input.steps?.length ?? 0;
     } catch (err) {
       failedIds.push(input.agent_name ?? '?');
-      console.error(chalk.red(`  Error inserting trace "${input.agent_name}": ${errorMessage(err)}`));
+      console.error(chalk.red(`  Error inserting trace "${escapeForMessage(String(input.agent_name))}": ${errorMessage(err)}`));
     }
   }
 

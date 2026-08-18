@@ -84,7 +84,12 @@ describe('CodexExecTranslator', () => {
     expect(trace.total_tokens).toBe(120);
     expect(trace.steps.map((s) => s.step_type)).toEqual(['thought', 'tool_call', 'retrieval', 'output']);
     const cmd = trace.steps[1];
-    expect(cmd.name).toBe('command_execution');
+    // The COMMAND, not the item type. Naming every tool step
+    // `command_execution` made `check --golden --fields step_names` inert for
+    // this format (two unrelated sessions produced byte-identical step names)
+    // and disagreed with the codex-rollout importer, which names the same steps
+    // after the tool.
+    expect(cmd.name).toBe('ls');
     expect(cmd.input).toEqual({ command: 'ls' });
   });
 

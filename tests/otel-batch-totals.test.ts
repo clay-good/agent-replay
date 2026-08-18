@@ -40,18 +40,22 @@ const CHAT = () => span('c1', 'chat', 'r1', 120);
 const TOOL = () => span('t1', 'execute_tool', 'r1');
 
 describe('receiver batch matrix — expected totals', () => {
+  // Asserted as a TUPLE. An earlier version checked only the token total and
+  // computed `steps`/`synthetic` for the failure message alone — so every row
+  // still passed with the synthetic-trace upgrade disabled outright, which is
+  // precisely the harm the round-7 fix was about. A number that happens to be
+  // right is not evidence the trace is right.
   it.each([
-    ['root+chat, then identical redelivery', [[ROOT(), CHAT()], [ROOT(), CHAT()]], 170],
-    ['root+chat, then root only (retry)', [[ROOT(), CHAT()], [ROOT()]], 170],
-    ['root+chat, then chat+tool', [[ROOT(), CHAT()], [CHAT(), TOOL()]], 170],
-    ['chat, then root+chat (synthetic upgrade)', [[CHAT()], [ROOT(), CHAT()]], 170],
-    ['chat, then root only', [[CHAT()], [ROOT()]], 170],
-    ['chat, then tool (no root at all)', [[CHAT()], [TOOL()]], 120],
-    ['root+chat, then a NEW chat span', [[ROOT(), CHAT()], [span('c2', 'chat', 'r1', 7)]], 177],
-    ['three identical deliveries', [[ROOT(), CHAT()], [ROOT(), CHAT()], [ROOT(), CHAT()]], 170],
-  ])('%s', (_label, batches, expected) => {
+    ['root+chat, then identical redelivery', [[ROOT(), CHAT()], [ROOT(), CHAT()]], 170, 1, false],
+    ['root+chat, then root only (retry)', [[ROOT(), CHAT()], [ROOT()]], 170, 1, false],
+    ['root+chat, then chat+tool', [[ROOT(), CHAT()], [CHAT(), TOOL()]], 170, 2, false],
+    ['chat, then root+chat (synthetic upgrade)', [[CHAT()], [ROOT(), CHAT()]], 170, 1, false],
+    ['chat, then root only', [[CHAT()], [ROOT()]], 170, 1, false],
+    ['chat, then tool (no root at all)', [[CHAT()], [TOOL()]], 120, 2, true],
+    ['root+chat, then a NEW chat span', [[ROOT(), CHAT()], [span('c2', 'chat', 'r1', 7)]], 177, 2, false],
+    ['three identical deliveries', [[ROOT(), CHAT()], [ROOT(), CHAT()], [ROOT(), CHAT()]], 170, 1, false],
+  ])('%s', (_label, batches, tokens, steps, synthetic) => {
     for (const b of batches as unknown[][]) handleTracesExport(db, B(b), stats);
-    const s = state();
-    expect(s.tokens, `tokens (steps=${s.steps} synthetic=${s.synthetic})`).toBe(expected);
+    expect(state()).toEqual({ tokens, steps, synthetic });
   });
 });

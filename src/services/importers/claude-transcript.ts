@@ -197,6 +197,17 @@ export function importClaudeTranscript(
   let stepNumber = 1;
 
   const startedAt = (records.find((r) => typeof r.timestamp === 'string')?.timestamp as string) ?? undefined;
+  // ...and the LAST one as the end. Without it an imported trace had no
+  // `ended_at`, so `list` and `stats` reported "-" for its duration forever
+  // even though every record carries a timestamp — while the OTel log path,
+  // reading the same kind of session, reports a real span.
+  const endedAt = ((): string | undefined => {
+    for (let i = records.length - 1; i >= 0; i--) {
+      const ts = records[i].timestamp;
+      if (typeof ts === 'string' && ts) return ts;
+    }
+    return undefined;
+  })();
 
   for (const rec of records) {
     const type = rec.type as string | undefined;
@@ -406,6 +417,7 @@ export function importClaudeTranscript(
     input: input ?? {},
     output: lastAssistantText ? { text: lastAssistantText } : null,
     started_at: startedAt,
+    ended_at: endedAt ?? null,
     total_tokens: totalTokens || null,
     tags: opts.tags,
     metadata: {

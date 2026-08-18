@@ -75,6 +75,26 @@ function goldenKey(agentName: string, input: Record<string, unknown>): string {
 }
 
 /**
+ * Whether a trace carries enough input to be MATCHED at all.
+ *
+ * An empty input is not an identity — it is the absence of one. Every capture
+ * with no recorded input hashed to the same key, so unrelated runs matched each
+ * other: two `record --format codex-exec` captures of completely different
+ * sessions (the translators record no input at all) compared as the same
+ * scenario, producing a fabricated `tool_inputs` regression between them, and a
+ * `--strict` run reported `uncovered: 0` at exit 0 while a baseline it never
+ * exercised sat unused — the exact hole `uncovered` exists to report.
+ *
+ * Treating it as unmatchable routes it to the `unmatched` branch, which the
+ * "no candidate matched the baseline" refusal already handles loudly (exit 2)
+ * — and which the code there already anticipated for the sibling case of
+ * `hook --no-input` blanking every input.
+ */
+function isMatchable(input: Record<string, unknown> | undefined): boolean {
+  return input != null && Object.keys(input).length > 0;
+}
+
+/**
  * Compare candidate traces against golden entries.
  * @param strict when true, an unmatched candidate counts as a failure.
  */
@@ -97,6 +117,7 @@ export function checkGolden(
   // "regress".
   const index = new Map<string, GoldenEntry[]>();
   for (const g of golden) {
+    if (!isMatchable(g.input)) continue;
     const key = goldenKey(g.agent_name, g.input);
     const bucket = index.get(key);
     if (bucket) bucket.push(g);
@@ -120,8 +141,8 @@ export function checkGolden(
   // was in the same batch. Same false green, one level down each time.
   const matchedFor: GoldenEntry[][] = [];
   for (const trace of candidates) {
-    const key = goldenKey(trace.agent_name, trace.input);
-    const bucket = index.get(key);
+    const key = isMatchable(trace.input) ? goldenKey(trace.agent_name, trace.input) : null;
+    const bucket = key != null ? index.get(key) : undefined;
     if (!bucket || bucket.length === 0) {
       unmatched++;
       results.push({ trace_id: trace.id, agent_name: trace.agent_name, matched: false, passed: !opts.strict, divergences: [] });
@@ -146,7 +167,7 @@ export function checkGolden(
     }
 
     matchedFor.push(usedEntries);
-    covered.add(key);
+    if (key != null) covered.add(key);
     const ok = divergences.length === 0;
     if (ok) passed++;
     else failed++;
@@ -158,6 +179,10 @@ export function checkGolden(
   // untouched entries under-states the hole the message is there to name.
   let uncovered = 0;
   for (const [key, bucket] of index) if (!covered.has(key)) uncovered += bucket.length;
+  // A baseline with no input can never be matched, so it is never exercised —
+  // counting it keeps `uncovered` honest rather than quietly excluding the
+  // entries that are hardest to reproduce.
+  uncovered += golden.filter((g) => !isMatchable(g.input)).length;
 
   // Whether a requested field could be exercised is a property of the BASELINE,
   // not of the run being checked. Deriving it from comparisons actually

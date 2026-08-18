@@ -258,7 +258,10 @@ describe('handleLogsExport (/v1/logs ingest)', () => {
         logRecord('claude_code.tool_result', { 'session.id': 'pyf', name: 'Bash', success: value, error: 'permission denied' }, 1_000_000),
       ]));
       expect(t.steps![0].error).toBe('permission denied');
-      expect(t.status).toBe('failed');
+      // The point of this test is that the stringified false is READ as a
+      // failure at all — the STEP carries it. The run itself stays completed:
+      // a failed tool is not a failed run on any other capture path.
+      expect(t.status).toBe('completed');
     }
   });
 });
@@ -274,7 +277,16 @@ describe('handleLogsExport (/v1/logs ingest)', () => {
  * error criteria alike.
  */
 describe('mapOtlpLogs — failure mapping', () => {
-  it('records a failed Gemini tool call as a step error and fails the trace', () => {
+  // A failed TOOL is a step error, not a run outcome. Asserting the trace
+  // `failed` here made these two receivers the only capture paths that promote
+  // one: the other eight store `completed` for a session containing a failed
+  // tool, the telemetry-ingest spec says a failure becomes a STEP error, and
+  // eval's design deliberately does not hard-fail a preset for a recovered step
+  // error. The identical session scored the same and PASSED via `ingest` while
+  // FAILING at exit 1 here. The failure must stay VISIBLE on the step — that is
+  // what these tests are really protecting — and a failed model call
+  // (`.api_error`) still fails the run.
+  it('records a failed Gemini tool call as a step error, leaving the run completed', () => {
     const traces = mapOtlpLogs(otlpLogs([
       logRecord('gemini_cli.user_prompt', { 'session.id': 'f1', prompt: 'do it' }),
       logRecord('gemini_cli.tool_call', {
@@ -284,7 +296,7 @@ describe('mapOtlpLogs — failure mapping', () => {
     ]) as never);
 
     expect(traces).toHaveLength(1);
-    expect(traces[0].status).toBe('failed');
+    expect(traces[0].status).toBe('completed');
     expect(traces[0].steps![0].error).toBe('disk full');
   });
 
@@ -295,7 +307,7 @@ describe('mapOtlpLogs — failure mapping', () => {
       }),
     ]) as never);
 
-    expect(traces[0].status).toBe('failed');
+    expect(traces[0].status).toBe('completed');
     expect(traces[0].steps![0].error).toBe('exit 1');
     expect(traces[0].steps![0].duration_ms).toBe(12);
   });
@@ -443,7 +455,26 @@ describe('log-event mapper robustness', () => {
       logRecord('gemini_cli.tool_call', { function_name: 'rm', success: 'false', error: 'nope' }, 1_000_000),
     ]));
     expect(trace.steps![0].error).toBe('nope');
-    expect(trace.status).toBe('failed');
+    // Step-level, as above — the run is not failed by a failed tool.
+    expect(trace.status).toBe('completed');
+  });
+
+  // A failed MODEL CALL is different: the turn did not happen, so it is a
+  // session-level failure and still fails the run.
+  it('fails the run for an api_error, not for a failed tool', () => {
+    const [failed] = mapOtlpLogs(otlpLogs([
+      logRecord('claude_code.user_prompt', { 'session.id': 'ae1', prompt: 'go' }, 1_000_000),
+      logRecord('claude_code.api_error', { 'session.id': 'ae1', error: 'overloaded', status_code: 529 }, 2_000_000),
+    ]));
+    expect(failed.status).toBe('failed');
+
+    const [ok] = mapOtlpLogs(otlpLogs([
+      logRecord('claude_code.user_prompt', { 'session.id': 'ae2', prompt: 'go' }, 1_000_000),
+      logRecord('claude_code.tool_result', { 'session.id': 'ae2', tool_name: 'Bash', success: false, error: 'exit 1' }, 2_000_000),
+    ]));
+    expect(ok.status).toBe('completed');
+    // The prompt becomes the trace input, not a step, so the tool is first.
+    expect(ok.steps![0].error).toBe('exit 1');
   });
 
   it('drops an out-of-range timestamp instead of throwing away the whole batch', () => {

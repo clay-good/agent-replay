@@ -180,6 +180,40 @@ between them, and nothing else.
 
 ### Fixed
 
+- **`otel serve` was the only capture path that failed a run because a tool
+  call failed.** The other eight store `completed` for a session containing a
+  failed tool, the telemetry-ingest spec says a span error becomes a *step*
+  error, and the eval design deliberately does not hard-fail a preset for a
+  recovered step error — so the identical session scored 0.700 and PASSED via
+  `ingest` while FAILING at exit 1 via OTel, and `check --golden` reported a
+  status regression between two captures of one run. A trace's status now comes
+  from its root span (or, on the log path, from a failed model call — the turn
+  did not happen), and a failed trace always carries a reason: it was stored
+  `failed` with `error: null`, so `show` rendered "✘ FAILED" with nothing to
+  explain it.
+- **A golden gate could match two unrelated runs.** An empty trace input hashed
+  to the same key for every capture that records none, so two
+  `record --format codex-exec` captures of different sessions compared as the
+  same scenario — inventing a `tool_inputs` regression between them — and a
+  `--strict` run reported `uncovered: 0` at exit 0 while a baseline it never
+  exercised sat unused. An empty input is now unmatchable, which routes it to
+  the loud "no candidate matched" refusal, and unmatchable baselines count as
+  uncovered rather than being quietly excluded.
+- `record --format codex-exec` named every tool step after the item *type*, so
+  two unrelated sessions produced byte-identical step names and
+  `check --golden --fields step_names` was inert for that format. It now prefers
+  the tool or command name, as the codex-rollout importer already did.
+- Neither stream translator carried the agent's final message into the trace
+  output, so a capture stored `output: null` and its golden export carried
+  `expected_output: null` while an import of the same session carried the text.
+- Neither transcript importer set `ended_at`, so every imported session showed
+  no duration forever despite each record carrying a timestamp.
+- Values interpolated into single-line rows — the `check` gate's pass/regress
+  lines and its divergence values, `watch`'s header, `ingest`'s insert error —
+  used the renderer's escaper, which preserves newline by design. A newline
+  there lets a producer (or a downloaded golden file) forge an extra `✔ … pass`
+  row into a CI verdict. Those sites use the one-line escaper now.
+
 - The terminal-status synonym table was a plain object literal, so a lookup
   resolved *inherited* keys: `status: "constructor"` returned Object's
   constructor — a function assigned to a field typed as a string, its
@@ -198,9 +232,12 @@ between them, and nothing else.
 - An OTLP batch carrying a first-time root was **skipped entirely** when all its
   child spans were duplicates, so a rootless synthetic trace was never upgraded
   and the root's own tokens were lost — the redelivery guard swallowing a
-  genuine first delivery. Token totals across batches are now pinned by tests
-  covering all three shapes (redelivery, synthetic upgrade, mixed batch), each
-  of which has been wrong in one direction or the other.
+  genuine first delivery. Token totals across batches are now pinned by a test
+  matrix over every combination of (root present/absent) x (already stored/new)
+  x (synthetic target/real) x (new child spans/all duplicates), asserting the
+  trace's step count and synthetic flag alongside the total — an earlier version
+  checked only the total and so still passed with the synthetic upgrade
+  disabled outright.
 
 - **A child that declared failure and exited 0 was stored as a success.**
   Repairing every unrecognized terminal status to `failed` and then letting the

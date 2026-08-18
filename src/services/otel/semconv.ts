@@ -415,7 +415,23 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): MappedOtelTrace[] 
     // reported `total_tokens: null` despite carrying 150 tokens.
     let totalTokens = root ? spanTokens(root.attrs) : 0;
     let totalCost = root ? costUsd(root.attrs) : 0;
-    const anyError = group.some((s) => s.errorMessage);
+    // The TRACE's outcome is the ROOT span's outcome, not "did any span fail".
+    //
+    // Deriving it from any child made this the only capture path that promotes
+    // a step failure to a run failure: the other eight all store `completed`
+    // for a run containing a failed tool call, `openspec/specs/telemetry-ingest`
+    // says a span error becomes a STEP error and nothing more, and the eval
+    // design says so explicitly — `no_error_steps` is deliberately not critical
+    // for a recovered error, "every imported session containing a single failed
+    // shell command would otherwise fail it outright". Promoting it reintroduced
+    // that through the back door: the identical run scored 0.700 and PASSED via
+    // `ingest` while FAILING at exit 1 via OTel, and `check --golden` reported a
+    // status regression between two captures of the same session.
+    //
+    // A trace with no root at all (a rootless synthetic group) has no outcome of
+    // its own to read, so there it still falls back to the child spans.
+    const rootError = root ? root.errorMessage : undefined;
+    const anyError = root ? rootError != null : group.some((s) => s.errorMessage);
 
     const steps: IngestStepInput[] = stepSpans.map((s, i) => {
       totalTokens += spanTokens(s.attrs);
@@ -457,6 +473,9 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): MappedOtelTrace[] 
       agent_name: agentName,
       trigger: 'api',
       status: anyError ? 'failed' : 'completed',
+      // A failed trace must say why. It was stored `failed` with `error: null`,
+      // so `show` rendered "✘ FAILED" with no reason anywhere on the page.
+      error: anyError ? (rootError ?? group.map((s) => s.errorMessage).find(Boolean) ?? 'error') : null,
       // gen_ai.conversation.id is never synthesized when absent.
       session_id: anyConversation ?? null,
       input: rootInput,

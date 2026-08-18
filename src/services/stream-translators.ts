@@ -19,6 +19,8 @@ abstract class BaseTranslator implements StreamTranslator {
   protected traceId: string | null = null;
   protected step = 0;
   protected totalTokens = 0;
+  /** The agent's last message, carried into `trace_end.output`. */
+  protected finalOutput = '';
   protected failed = false;
   protected errorText: string | null = null;
   protected ended = false;
@@ -70,10 +72,33 @@ abstract class BaseTranslator implements StreamTranslator {
         trace_id: this.traceId,
         status: this.failed ? 'failed' : 'completed',
         error: this.errorText,
+        // The agent's final message. Both translators already see it (a codex
+        // `agent_message` item, a gemini `message`) and neither passed it on,
+        // so a run captured this way stored `output: null` — and its golden
+        // export therefore carried `expected_output: null` while an import of
+        // the same session carried the text. `diff` between the two reported a
+        // `trace_output` divergence for one identical run.
+        output: this.finalOutput ? { text: this.finalOutput } : null,
         total_tokens: this.totalTokens || null,
       },
     ];
   }
+}
+
+/** The first whitespace-separated token of a command, as a step name. */
+function firstToken(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined;
+  const t = v.trim().split(/\s+/)[0];
+  return t || undefined;
+}
+
+/** Text from a string, or from a content array of `{text}` parts. */
+function asTextValue(v: unknown): string {
+  if (typeof v === 'string') return v;
+  if (Array.isArray(v)) {
+    return v.map((c) => (typeof c === 'string' ? c : (c as { text?: string })?.text ?? '')).filter(Boolean).join('\n');
+  }
+  return '';
 }
 
 // ── Codex `codex exec --json` ───────────────────────────────────────────────
@@ -140,6 +165,10 @@ export class CodexExecTranslator extends BaseTranslator {
       // regress against). Only unambiguous, shape-generic signals are read, and
       // the whole item is preserved as `output` either way.
       const itemError = codexItemError(item);
+      if (stepType === 'output') {
+        const text = asTextValue(item.text ?? item.message ?? item.content ?? item.output);
+        if (text) this.finalOutput = text;
+      }
       return [
         ...pre,
         {
@@ -148,7 +177,15 @@ export class CodexExecTranslator extends BaseTranslator {
           trace_id: this.traceId!,
           step_number: this.nextStep(),
           step_type: stepType,
-          name: itemType,
+          // A specific name when the item carries one. Naming every step after
+          // the item TYPE made `command_execution` the name of every tool call,
+          // so `check --golden --fields step_names` was permanently inert for
+          // this format — two completely unrelated codex sessions produced
+          // byte-identical step names — and it disagreed with the
+          // codex-rollout importer, which names the same steps `search_flights`
+          // / `book_flight`. Falls back to the type, which is all some items
+          // have.
+          name: str(item.name) ?? str(item.tool) ?? firstToken(item.command) ?? itemType,
           input: item.command != null ? { command: item.command } : {},
           output: item as Record<string, unknown>,
           error: itemError,
@@ -290,6 +327,8 @@ export class GeminiStreamTranslator extends BaseTranslator {
     if (type === 'message') {
       const pre = this.ensureStart();
       const content = obj.content ?? obj.text;
+      const text = asTextValue(content);
+      if (text) this.finalOutput = text;
       return [
         ...pre,
         {

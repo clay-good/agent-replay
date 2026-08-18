@@ -417,11 +417,12 @@ function preview(s: string): string {
   // written straight to the supervisor's terminal and CI log. A child emitting
   // ESC sequences could move the cursor, recolor, or issue OSC commands in the
   // log of the tool watching it.
-  // The SHARED definition, so this and the renderer cannot disagree about what
-  // a control character is. This stopped at DEL while `safeText` had been
-  // widened to C1 — and a terminal that decodes UTF-8 C1 reads U+009B as CSI,
-  // so the class stayed open through the very messages that quote a producer's
-  // own bytes back at the operator.
+  // The MESSAGE escaper: C0, DEL and C1, plus tab and newline. This stopped at
+  // DEL while the renderer had been widened to C1 — and a terminal that decodes
+  // UTF-8 C1 reads U+009B as CSI, so the class stayed open through the very
+  // messages that quote a producer's own bytes back at the operator. Newline is
+  // escaped here and NOT in the renderer, deliberately: a preview is one line,
+  // and a raw newline in it forges a second.
   const safe = escapeForMessage(s);
   return safe.length > 60 ? `${safe.slice(0, 57)}...` : safe;
 }

@@ -126,6 +126,9 @@ export function importCodexRollout(
   const userTurns: string[] = [];
   let lastAssistantText = '';
   let startedAt: string | undefined;
+  // The last timestamp seen anywhere in the rollout, so an imported session has
+  // a real duration rather than "-" forever. Every record carries one.
+  let endedAt: string | undefined;
   let totalTokens: number | undefined;
   let imported = 0;
   const metadata: Record<string, unknown> = {
@@ -141,6 +144,8 @@ export function importCodexRollout(
   for (const rec of records) {
     const type = recordType(rec);
     const it = itemOf(rec);
+    const stamp = str(rec.timestamp) ?? str(it.timestamp);
+    if (stamp) endedAt = stamp;
     let contributed = false;
 
     switch (type) {
@@ -285,6 +290,7 @@ export function importCodexRollout(
     input: input ?? {},
     output: lastAssistantText ? { text: lastAssistantText } : null,
     started_at: startedAt,
+    ended_at: endedAt ?? null,
     total_tokens: totalTokens ?? null,
     tags: opts.tags,
     metadata,
