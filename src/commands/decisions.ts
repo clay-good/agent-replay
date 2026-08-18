@@ -5,6 +5,7 @@ import { ensureDatabase } from '../db/index.js';
 import { heading, label, safeText } from '../ui/theme.js';
 import { resolveDataDir } from '../utils/paths.js';
 import { makeRefuse } from '../utils/refuse.js';
+import { errorMessage } from '../utils/json.js';
 
 export interface DecisionsOptions {
   json?: boolean;
@@ -20,7 +21,13 @@ export function runDecisions(traceId: string, opts: DecisionsOptions = {}): void
   const db = ensureDatabase(dbPath);
 
   const refuse = makeRefuse(opts.json);
-  const result = listDecisions(db, traceId);
+  let result;
+  try {
+    result = listDecisions(db, traceId);
+  } catch (err) {
+    refuse(2, errorMessage(err));
+    return;
+  }
   if (!result) {
     refuse(1, `Trace not found: ${traceId}`, ['Use "agent-replay list" to see available traces.']);
     return;

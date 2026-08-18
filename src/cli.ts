@@ -467,5 +467,11 @@ rejectExcessArguments(program);
 program.parseAsync(process.argv).catch((err: unknown) => {
   const message = err instanceof Error ? err.message : String(err);
   process.stderr.write(`\n  ${message}\n\n`);
-  process.exitCode = 1;
+  // An ambiguous trace id is the caller naming something imprecisely — a usage
+  // error, like an unknown flag — not a runtime failure. Reporting it as 1 put
+  // it in the same bucket a CI script reads as "the check regressed".
+  // Matched by NAME, not `instanceof`: every command module in this file is
+  // imported lazily, so a static import of the error class here would pull the
+  // whole service layer into startup for every invocation.
+  process.exitCode = (err as { name?: string } | null)?.name === 'AmbiguousTraceIdError' ? 2 : 1;
 });

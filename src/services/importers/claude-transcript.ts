@@ -411,7 +411,13 @@ export function importClaudeTranscript(
     metadata: {
       source_format: SOURCE_FORMAT,
       source_version: SOURCE_VERSION,
+      // The file this trace came from, by BASENAME so moving the directory
+      // does not make the same session look new. Part of the import identity:
+      // a Claude Code subagent sidecar carries the SAME sessionId as its parent
+      // transcript, so session id alone made the two collide.
+      source_file: basename(filePath),
       ...(selected.followUps.length > 0 ? { follow_up_prompts: selected.followUps } : {}),
+      ...(selected.preamble.length > 0 ? { preamble_prompts: selected.preamble } : {}),
     },
     steps,
   };

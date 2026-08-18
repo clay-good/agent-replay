@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { readFileSync } from 'node:fs';
+import { basename } from 'node:path';
 import { ingestTrace } from '../trace-service.js';
 import { selectPrompt } from './user-turns.js';
 import type { IngestTraceInput, IngestStepInput, Trace } from '../../models/types.js';
@@ -127,7 +128,13 @@ export function importCodexRollout(
   let startedAt: string | undefined;
   let totalTokens: number | undefined;
   let imported = 0;
-  const metadata: Record<string, unknown> = { source_format: SOURCE_FORMAT, source_version: SOURCE_VERSION };
+  const metadata: Record<string, unknown> = {
+    source_format: SOURCE_FORMAT,
+    source_version: SOURCE_VERSION,
+    // See the claude-transcript importer: part of the import identity, by
+    // basename so moving the directory does not make the same session look new.
+    source_file: basename(filePath),
+  };
   const steps: IngestStepInput[] = [];
   let stepNumber = 1;
 
@@ -264,6 +271,7 @@ export function importCodexRollout(
   const selected = selectPrompt(userTurns);
   input = selected.input;
   if (selected.followUps.length > 0) metadata.follow_up_prompts = selected.followUps;
+  if (selected.preamble.length > 0) metadata.preamble_prompts = selected.preamble;
 
   if (steps.length === 0 && !hasPrompt(input)) {
     return { trace: null as Trace | null, imported, skipped, steps: 0 };
@@ -303,21 +311,59 @@ function num(v: unknown): number | undefined {
  * Read GENEROUSLY, in the same direction the hook path reads `is_error`: for a
  * failure FLAG, missing a signal is the expensive mistake (a failed call stored
  * clean is a false-green gate), while over-reading one only makes a failure
- * more visible. So an explicit `success: false`, a non-zero `exit_code`, or an
- * `error` field all count. An exit code that does not parse is NOT read as a
- * failure — fabricating one is the mistake that costs more in that direction.
+ * more visible.
+ *
+ * The shapes here are what real rollouts actually contain. Measured across 60
+ * recent sessions on this machine: 636 outputs are ARRAYS of
+ * `{type, text}` parts and 109 are STRINGS — and **none is a plain object**. An
+ * earlier version of this function tested for an object first and returned
+ * early, so it never fired on a single real tool call. So: flatten to text
+ * first, then apply the structured rules to that text when it parses as JSON.
+ *
+ * What is deliberately NOT read: an `exit_code` appearing anywhere inside the
+ * output TEXT. The freeform exec tool prints the output of whatever the script
+ * ran, so a run whose first line is "Script completed" routinely embeds an
+ * inner command's `"exit_code": 1` (a `git` invocation that legitimately
+ * returns 1, say). Scraping it would FABRICATE a failed tool call — and for an
+ * exit code that is the expensive direction, the opposite of the flag above.
+ * Only a code on the output's own top-level object counts.
  */
 function toolFailure(result: unknown): string | undefined {
-  if (result == null || typeof result !== 'object' || Array.isArray(result)) return undefined;
-  const r = result as Record<string, unknown>;
-  const meta = (r.metadata && typeof r.metadata === 'object' ? r.metadata : {}) as Record<string, unknown>;
-  const code = num(meta.exit_code ?? r.exit_code);
+  if (result == null) return undefined;
+
+  // Flatten to the text the tool actually returned.
+  const text = typeof result === 'string' ? result : Array.isArray(result) ? asText(result) : '';
+
+  // The freeform exec tool leads with its own status line. This is the signal
+  // that fires on real data; the structured cases below cover the tools that
+  // return JSON.
+  const firstLine = text.split('\n', 1)[0].trim();
+  if (/^Script (failed|error)\b/i.test(firstLine) || /^Script error:/i.test(firstLine)) {
+    return text.slice(0, 500).trim() || 'tool failed';
+  }
+
+  // A JSON object — either the output itself, or text that parses as one.
+  let obj: Record<string, unknown> | undefined;
+  if (typeof result === 'object' && !Array.isArray(result)) {
+    obj = result as Record<string, unknown>;
+  } else if (text.trimStart().startsWith('{')) {
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) obj = parsed as Record<string, unknown>;
+    } catch {
+      // Not JSON after all — no structured signal to read.
+    }
+  }
+  if (!obj) return undefined;
+
+  const meta = (obj.metadata && typeof obj.metadata === 'object' ? obj.metadata : {}) as Record<string, unknown>;
+  const code = num(meta.exit_code ?? obj.exit_code);
   if (code != null && code !== 0) return `exited with code ${code}`;
-  if (r.success === false || r.success === 'false') return asText(r.output) || 'tool reported failure';
-  const err = r.error ?? meta.error;
+  if (obj.success === false || obj.success === 'false') return asText(obj.output) || 'tool reported failure';
+  const err = obj.error ?? meta.error;
   if (err != null) {
-    const text = typeof err === 'string' ? err : asText(err) || JSON.stringify(err);
-    return text || 'error';
+    const errText = typeof err === 'string' ? err : asText(err) || JSON.stringify(err);
+    return errText || 'error';
   }
   return undefined;
 }

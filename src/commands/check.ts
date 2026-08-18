@@ -160,7 +160,13 @@ export function runCheck(opts: CheckOptions = {}): void {
   // a zero-candidate refusal can say which of the two things happened.
   let excluded = 0;
   if (opts.trace) {
-    const t = getTrace(db, opts.trace);
+    let t;
+    try {
+      t = getTrace(db, opts.trace);
+    } catch (err) {
+      fail(2, errorMessage(err));
+      return;
+    }
     if (!t) {
       fail(2, `Trace not found: ${opts.trace}`);
       return;

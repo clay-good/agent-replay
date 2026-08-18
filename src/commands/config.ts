@@ -209,6 +209,12 @@ export async function runConfigTestAi(opts: ConfigOptions = {}): Promise<void> {
     return;
   }
 
+  // This is the AI diagnostic command, so a key the loader had to drop is
+  // exactly what the user is here to find out about — a typo'd `ai.provider`
+  // otherwise produced "No AI provider configured" with no hint that the
+  // configured value was the problem.
+  reportConfigProblems(opts.dir);
+
   const resolved = resolveProvider(config);
   if (!resolved) {
     console.error(chalk.red('  No AI provider configured.'));

@@ -370,3 +370,72 @@ describe('GeminiStreamTranslator', () => {
     expect(getTrace(db, id)!.status).toBe('completed');
   });
 });
+
+describe('gemini-stream: a result that cannot be matched by id', () => {
+  // A `tool_result` was DISCARDED whenever its id was missing, unknown, or
+  // arrived before its `tool_use` — and the branch accepts a `tool_use` with no
+  // id in the first place, so a wholly id-less stream lost every result. The
+  // step stayed open with no output and, worse, no `error`: a run whose every
+  // tool call failed was stored clean. That is the exact fail-open the error
+  // path beneath it was written to close, reached by skipping the code entirely.
+  it('pairs an id-less result with the open tool step, error and all', () => {
+    const t = makeTranslator('gemini-stream')!;
+    const id = run(t, [
+      { type: 'init', session_id: 's-noid' },
+      { type: 'tool_use', name: 'bash', input: { cmd: 'ls' } },
+      { type: 'tool_result', is_error: true, error: 'boom' },
+      { type: 'result', exit_code: 0 },
+    ]);
+    const step = getTrace(db, id)!.steps[0];
+    expect(step.error).toBe('boom');
+    expect(step.ended_at).not.toBeNull();
+  });
+
+  it('pairs a result that arrives before its call is known', () => {
+    const t = makeTranslator('gemini-stream')!;
+    const id = run(t, [
+      { type: 'init', session_id: 's-unknown' },
+      { type: 'tool_use', id: 't1', name: 'bash', input: {} },
+      // An id we never registered — an exporter that renumbers, or a truncated id.
+      { type: 'tool_result', id: 'other', is_error: true, error: 'nope' },
+      { type: 'result', exit_code: 0 },
+    ]);
+    expect(getTrace(db, id)!.steps[0].error).toBe('nope');
+  });
+
+  // With several open, the name picks the right one — the same rule
+  // `hook-adapter`'s findOpenToolStep uses, rather than a second invention.
+  it('prefers a name match when several tools are open', () => {
+    const t = makeTranslator('gemini-stream')!;
+    const id = run(t, [
+      { type: 'init', session_id: 's-multi' },
+      { type: 'tool_use', name: 'read', input: {} },
+      { type: 'tool_use', name: 'bash', input: {} },
+      { type: 'tool_result', name: 'read', is_error: true, error: 'read failed' },
+      { type: 'result', exit_code: 0 },
+    ]);
+    const steps = getTrace(db, id)!.steps;
+    expect(steps.find((s) => s.name === 'read')!.error).toBe('read failed');
+    expect(steps.find((s) => s.name === 'bash')!.error).toBeNull();
+  });
+
+  // Tokens were read for codex-exec and ignored here, so every gemini capture
+  // reported "-" while the identical field worked for the sibling format.
+  it('records token usage from the terminal result', () => {
+    const t = makeTranslator('gemini-stream')!;
+    const id = run(t, [
+      { type: 'init', session_id: 's-tok' },
+      { type: 'result', exit_code: 0, usage: { input_tokens: 100, output_tokens: 50 } },
+    ]);
+    expect(getTrace(db, id)!.total_tokens).toBe(150);
+  });
+
+  it('prefers an explicit total over the input/output pair, without double counting', () => {
+    const t = makeTranslator('gemini-stream')!;
+    const id = run(t, [
+      { type: 'init', session_id: 's-tok2' },
+      { type: 'result', exit_code: 0, usage: { input_tokens: 100, output_tokens: 50, total_tokens: 150 } },
+    ]);
+    expect(getTrace(db, id)!.total_tokens).toBe(150);
+  });
+});

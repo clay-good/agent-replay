@@ -246,6 +246,42 @@ describe('codex-rollout: the freeform tool family', () => {
   // hallucination-check's no_error_steps criterion, completeness-check, and
   // `check --golden`'s step_errors baseline — a fail-open on exactly the traces
   // this tool exists to audit. The claude-transcript importer already did this.
+  // The shapes REAL rollouts use. Measured across 60 recent sessions on this
+  // machine: 636 outputs are arrays of {type,text} parts and 109 are strings —
+  // and NOT ONE is a plain object. The first version of this check tested for
+  // an object and returned early, so it never fired on a single real tool call
+  // while these tests (written against the tidier object shape) passed.
+  it('records a failure from the array-of-parts shape real rollouts emit', () => {
+    const path = fixture([
+      { type: 'session_meta', payload: { id: 'roll-realfail' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: 'run it' } },
+      { type: 'response_item', payload: { type: 'custom_tool_call', name: 'exec', input: '{}', call_id: 'r1' } },
+      { type: 'response_item', payload: { type: 'custom_tool_call_output', call_id: 'r1', output: [{ type: 'input_text', text: 'Script failed\nWall time 0.1 seconds\nOutput:\n' }, { type: 'input_text', text: 'Script error:\nboom' }] } },
+      { type: 'response_item', payload: { type: 'custom_tool_call', name: 'ok', input: '{}', call_id: 'r2' } },
+      { type: 'response_item', payload: { type: 'custom_tool_call_output', call_id: 'r2', output: [{ type: 'input_text', text: 'Script completed\nWall time 0.2 seconds\nOutput:\nfine' }] } },
+    ]);
+    const trace = getTrace(db, importCodexRollout(db, path).trace!.id)!;
+    const byName = Object.fromEntries(trace.steps.filter((s) => s.step_type === 'tool_call').map((s) => [s.name, s]));
+    expect(byName.exec.error).toMatch(/Script failed/);
+    expect(byName.ok.error).toBeNull();
+  });
+
+  // A "Script completed" run routinely PRINTS an inner command's non-zero exit
+  // code in its output (a `git` call that legitimately returns 1). Scraping a
+  // code out of the output text would fabricate a failed tool call — and for an
+  // exit code, inventing a failure is the expensive direction, the opposite
+  // default from the failure flag above.
+  it('does not invent a failure from an exit code printed inside the output', () => {
+    const path = fixture([
+      { type: 'session_meta', payload: { id: 'roll-innercode' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: 'go' } },
+      { type: 'response_item', payload: { type: 'custom_tool_call', name: 'exec', input: '{}', call_id: 'i1' } },
+      { type: 'response_item', payload: { type: 'custom_tool_call_output', call_id: 'i1', output: [{ type: 'input_text', text: 'Script completed\nWall time 0.3 seconds\nOutput:\n\n{\n  "repo": {\n    "exit_code": 1\n  }\n}' }] } },
+    ]);
+    const trace = getTrace(db, importCodexRollout(db, path).trace!.id)!;
+    expect(trace.steps.find((s) => s.step_type === 'tool_call')!.error).toBeNull();
+  });
+
   it('records a failed tool call as failed', () => {
     const path = fixture([
       { type: 'session_meta', payload: { id: 'roll-fail' } },

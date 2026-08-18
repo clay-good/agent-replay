@@ -180,7 +180,7 @@ agent-replay import ~/.codex/sessions/2026/07/02/rollout-abc.jsonl      --format
 
 For Claude Code, `tool_use`/`tool_result` blocks become paired `tool_call` steps (a result flagged `is_error` records its message on the step's error field, so a failed tool call stays distinguishable from a successful one), `thinking` blocks become `thought` steps, and `usage` counts aggregate into token totals — including the two cache fields, which is where most of a real session's consumption lives. For Codex, `session_meta` supplies identity and git metadata, both tool families (`function_call`/`function_call_output` and the freeform `custom_tool_call`/`custom_tool_call_output`, each paired by `call_id`) become `tool_call` steps with a non-zero exit code or an explicit failure recorded on the step's error field, `reasoning` becomes `thought` steps, and `token_count` supplies the session token total.
 
-A session's **first** user turn becomes the trace input; the rest are kept in order in `metadata.follow_up_prompts`. Real transcripts often open with a harness envelope (a slash-command block, injected instructions, an environment preamble), so the prompt is the first turn that isn't one of those — an envelope prompt is still used if that is all the session has.
+A session's user turns are all kept: one becomes the trace input, later ones go to `metadata.follow_up_prompts`, and any harness preamble ahead of the prompt goes to `metadata.preamble_prompts`. Real transcripts usually open with an envelope (a slash-command block, injected instructions, an environment or plugin preamble, a system reminder), so the prompt is the first turn that isn't one — detected by shape, since a person's question essentially never opens with `<`. An envelope prompt is still used if that is all the session has.
 
 Importing the same session twice does **not** create a second trace:
 
@@ -189,7 +189,7 @@ agent-replay import <same-file>              # "Session already imported as trc_
 agent-replay import <same-file> --replace    # re-import it (use this when the transcript has grown)
 ```
 
-Sessions are identified by session id plus source format, so a file that carries no session id is imported each time it is named.
+Sessions are identified by session id, source format **and** source filename — a Claude Code subagent sidecar (`<session>/subagents/agent-*.jsonl`) carries the same session id as its parent transcript, so the file has to be part of the identity. A file that carries no session id is imported each time it is named, and a trace imported before this identity existed is never replaced.
 
 #### Enforcement (block dangerous tool calls live)
 

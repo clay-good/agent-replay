@@ -293,11 +293,21 @@ function spanToStep(
     // `tool.name` is OpenInference's spelling, alongside GenAI's
     // `gen_ai.tool.name` and OpenLLMetry's `traceloop.entity.name`; without
     // it an OpenInference tool span fell back to the raw span name.
+    // A step name is REQUIRED and must be non-empty: `ingest` refuses an empty
+    // one (validators.ts) and so does the native `record` path, but this mapper
+    // stored `String(s.name ?? '')` — so a span with no `name` (legal OTLP;
+    // exporters that carry the operation only in attributes emit it) produced a
+    // step named "" that this tool's own `export --format json` could not feed
+    // back through `ingest`. That is the record/ingest drift class this file has
+    // already been bitten by twice. Fall through to the operation name, then a
+    // generic label, so the value is always something a reader can act on.
     name:
       str(s.attrs['gen_ai.tool.name']) ??
       str(s.attrs['tool.name']) ??
       str(s.attrs['traceloop.entity.name']) ??
-      s.name,
+      str(s.name) ??
+      str(s.attrs['gen_ai.operation.name']) ??
+      'span',
     input: messageContent(s.attrs, 'input'),
     output,
     started_at: isoFromNanos(s.start),

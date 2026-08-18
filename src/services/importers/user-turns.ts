@@ -25,39 +25,60 @@
 
 /**
  * Whether a user turn is a harness envelope rather than something a person
- * typed. Deliberately narrow: it matches only text that BEGINS with a known
- * wrapper, so an ordinary question that happens to mention one of these words
- * is never mistaken for boilerplate. Missing an envelope costs a slightly worse
- * prompt; misreading a real question as one loses it from the field every
- * reader treats as the ask.
+ * typed.
+ *
+ * Tested by INVERSION rather than by a list of known wrappers. An earlier
+ * version enumerated `<command-name>`, `<environment_context>` and friends, and
+ * measuring it against the transcripts on this machine showed the list missing
+ * the most common cases outright — `<recommended_plugins>`, `<system-reminder>`
+ * and `<openlore-untrusted-data-…>` (a per-session random suffix, so no literal
+ * could ever have matched it). Every harness envelope observed is either a
+ * tag-like wrapper or one of a few injected notices; a person's question
+ * essentially never opens with `<`. So the rule is the shape, not the name.
+ *
+ * Getting this wrong in either direction is cheap and recoverable: a missed
+ * envelope costs a slightly worse prompt, and a question misread as an envelope
+ * is still kept (the fallbacks below never discard a turn).
  */
 export function isEnvelopeTurn(text: string): boolean {
   const t = text.trimStart();
+  if (t.startsWith('<')) return true;
   return (
-    t.startsWith('<command-name>') ||
-    t.startsWith('<command-message>') ||
-    t.startsWith('<local-command-stdout>') ||
-    t.startsWith('<environment_context>') ||
-    t.startsWith('<user_instructions>') ||
-    t.startsWith('<INSTRUCTIONS>') ||
     t.startsWith('# AGENTS.md instructions') ||
-    t.startsWith('<system-reminder>')
+    t.startsWith('A session-scoped Stop hook is now active') ||
+    t.startsWith('[SYSTEM NOTIFICATION')
   );
 }
 
 export interface SelectedPrompt {
   input: Record<string, unknown> | undefined;
+  /** Turns AFTER the chosen prompt, in order. */
   followUps: string[];
+  /** Envelope turns that preceded the chosen prompt, in order. */
+  preamble: string[];
 }
 
-/** Split ordered user turns into the trace prompt and its follow-ups. */
+/**
+ * Split ordered user turns into the trace prompt, its follow-ups and the
+ * preamble that came before it.
+ *
+ * `follow_up_prompts` means "later turns" everywhere else in this codebase (the
+ * batch merge and the OTLP mapper both use it that way), so the envelope turns
+ * that PRECEDE the chosen prompt must not be dumped into it — that would make
+ * one field mean two different things depending on which path wrote it. They go
+ * to `preamble_prompts` instead: still nothing is discarded, and both fields say
+ * exactly what they hold.
+ */
 export function selectPrompt(turns: string[]): SelectedPrompt {
   const real = turns.filter((t) => t.trim().length > 0);
-  if (real.length === 0) return { input: undefined, followUps: [] };
+  if (real.length === 0) return { input: undefined, followUps: [], preamble: [] };
   let idx = real.findIndex((t) => !isEnvelopeTurn(t));
+  // Every turn is an envelope: use the first anyway. An envelope prompt beats
+  // no prompt at all, and that was the behavior before any of this existed.
   if (idx === -1) idx = 0;
   return {
     input: { prompt: real[idx] },
-    followUps: real.filter((_, i) => i !== idx),
+    followUps: real.slice(idx + 1),
+    preamble: real.slice(0, idx),
   };
 }

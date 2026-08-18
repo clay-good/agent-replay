@@ -1039,6 +1039,22 @@ export function attachSnapshot(
 
 // ── 3. getTrace ───────────────────────────────────────────────────────────
 
+/**
+ * A trace-id prefix that matches more than one trace.
+ *
+ * Its own type so callers can tell "you named this ambiguously" (a USAGE error,
+ * exit 2) from "something broke" (exit 1) — the same split `check` documents
+ * between a regression and a gate that could not run. Commands that support
+ * `--json` catch it and answer in that shape; the CLI's top-level handler maps
+ * it to exit 2 for the rest.
+ */
+export class AmbiguousTraceIdError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AmbiguousTraceIdError';
+  }
+}
+
 export function getTrace(
   db: Database.Database,
   traceId: string,
@@ -1086,7 +1102,7 @@ export function getTrace(
       .prepare("SELECT * FROM agent_traces WHERE id LIKE ? ESCAPE '\\' ORDER BY id ASC LIMIT 2")
       .all(`${escaped}%`) as Record<string, unknown>[];
     if (matches.length > 1) {
-      throw new Error(
+      throw new AmbiguousTraceIdError(
         `Ambiguous trace id "${traceId}" — it matches at least ${matches.map((m) => m.id as string).join(' and ')}. ` +
           'Use more characters of the id.',
       );

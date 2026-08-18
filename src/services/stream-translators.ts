@@ -160,6 +160,39 @@ export class GeminiStreamTranslator extends BaseTranslator {
   // means the run was interrupted, so it should be timed out, not completed.
   protected expectsTerminalEvent = true;
   private openTools = new Map<string, number>();
+  /**
+   * Every still-open tool step in the order it started, so a result that cannot
+   * be matched by id can still be paired. A `tool_result` used to be DISCARDED
+   * outright whenever the id was missing, unknown, or arrived before its
+   * `tool_use` — and the branch accepts a `tool_use` with no id in the first
+   * place, so an entirely id-less stream lost every result. The step was left
+   * open forever with no output and, worse, no `error`: a run whose every tool
+   * call failed was stored clean, which is the same fail-open the error path
+   * below was written to close. Falls back the way `hook-adapter`'s
+   * `findOpenToolStep` does — most recent open step, preferring a name match —
+   * rather than inventing a second rule for the same question.
+   */
+  private openOrder: Array<{ num: number; name: string }> = [];
+
+  /** Resolve a result to the step it closes, by id when possible. */
+  private resolveToolStep(id: string | undefined, name: string | undefined): number | undefined {
+    if (id != null) {
+      const byId = this.openTools.get(id);
+      if (byId != null) return byId;
+    }
+    if (name != null) {
+      for (let i = this.openOrder.length - 1; i >= 0; i--) {
+        if (this.openOrder[i].name === name) return this.openOrder[i].num;
+      }
+    }
+    return this.openOrder.length > 0 ? this.openOrder[this.openOrder.length - 1].num : undefined;
+  }
+
+  /** Forget a step once its result has closed it. */
+  private closeToolStep(num: number): void {
+    for (const [key, value] of this.openTools) if (value === num) this.openTools.delete(key);
+    this.openOrder = this.openOrder.filter((o) => o.num !== num);
+  }
 
   translate(obj: Record<string, unknown>): CaptureEvent[] {
     const type = String(obj.type ?? '');
@@ -173,7 +206,9 @@ export class GeminiStreamTranslator extends BaseTranslator {
       const pre = this.ensureStart();
       const num = this.nextStep();
       const id = str(obj.id) ?? str(obj.tool_use_id);
+      const toolName = str(obj.name) ?? 'tool';
       if (id) this.openTools.set(id, num);
+      this.openOrder.push({ num, name: toolName });
       return [
         ...pre,
         {
@@ -182,7 +217,7 @@ export class GeminiStreamTranslator extends BaseTranslator {
           trace_id: this.traceId!,
           step_number: num,
           step_type: 'tool_call',
-          name: str(obj.name) ?? 'tool',
+          name: toolName,
           input: (obj.input as Record<string, unknown>) ?? {},
           metadata: { source: 'gemini-stream' },
         } as CaptureEvent,
@@ -191,9 +226,9 @@ export class GeminiStreamTranslator extends BaseTranslator {
 
     if (type === 'tool_result') {
       const id = str(obj.id) ?? str(obj.tool_use_id);
-      const num = id ? this.openTools.get(id) : undefined;
+      const num = this.resolveToolStep(id, str(obj.name));
       if (num == null) return [];
-      this.openTools.delete(id!);
+      this.closeToolStep(num);
       // Wrap a bare-string result in an object (like the `message` handler
       // below). A raw string is stored verbatim as TEXT and then fails to
       // JSON.parse on read, so the tool output would silently come back null.
@@ -265,6 +300,22 @@ export class GeminiStreamTranslator extends BaseTranslator {
       // the `?? obj.code` fallback, an object) FABRICATED a trace-level failure
       // and reported its reason as the literal "exited with code NaN". A code we
       // cannot read is not evidence the run failed.
+      // Token usage, read the same way the codex translator reads its own —
+      // this branch ignored it entirely, so EVERY gemini-stream capture stored
+      // "-" tokens while the identical field worked for codex-exec, leaving
+      // `stats`, `list --sort tokens` and every budget-shaped reading inert for
+      // one of the two supported formats. Coerced with toNum for the same
+      // reason: a producer sending "5"/"7" would otherwise concatenate.
+      const usage = (obj.usage as Record<string, unknown> | undefined)
+        ?? ((obj.stats as Record<string, unknown> | undefined)?.tokens as Record<string, unknown> | undefined);
+      if (usage) {
+        // Prefer an explicit total; fall back to the input/output pair. A
+        // producer sends one shape or the other, and adding both would double
+        // count a stream that sends a total ALONGSIDE its components.
+        const total = toNum(usage.total_tokens) || toNum(usage.total);
+        this.totalTokens += total || toNum(usage.input_tokens) + toNum(usage.output_tokens);
+      }
+
       const raw = obj.exit_code ?? obj.code ?? 0;
       const code = typeof raw === 'number' ? raw
         : typeof raw === 'string' && raw.trim() !== '' ? Number(raw)

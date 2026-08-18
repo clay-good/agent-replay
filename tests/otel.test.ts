@@ -906,3 +906,39 @@ describe('mapOtlpTraces — hostile attribute keys and counters', () => {
     expect(() => ingestTrace(db, trace)).not.toThrow();
   });
 });
+
+describe('a span with no name still round-trips', () => {
+  // `name` was `String(s.name ?? '')`, so a span carrying its operation only in
+  // attributes (legal OTLP) produced a step named "" — which this tool's own
+  // `ingest` refuses, and which the native `record` path refuses too. An
+  // OTel-captured trace could not be restored from its own export: the exact
+  // record/ingest drift class this mapper has been bitten by twice already.
+  it('falls back to the operation name rather than storing an empty one', () => {
+    const traces = mapOtlpTraces({
+      resourceSpans: [{
+        resource: { attributes: [{ key: 'service.name', value: { stringValue: 'svc' } }] },
+        scopeSpans: [{
+          spans: [
+            {
+              traceId: 'aa', spanId: '01', name: 'invoke_agent',
+              startTimeUnixNano: '1700000000000000000', endTimeUnixNano: '1700000001000000000',
+              attributes: [{ key: 'gen_ai.operation.name', value: { stringValue: 'invoke_agent' } }],
+            },
+            {
+              traceId: 'aa', spanId: '02', parentSpanId: '01',
+              startTimeUnixNano: '1700000000000000000', endTimeUnixNano: '1700000001000000000',
+              attributes: [{ key: 'gen_ai.operation.name', value: { stringValue: 'execute_tool' } }],
+            },
+          ],
+        }],
+      }],
+    });
+    const steps = traces[0].steps ?? [];
+    expect(steps.length).toBeGreaterThan(0);
+    for (const s of steps) {
+      expect(typeof s.name).toBe('string');
+      expect(s.name).not.toBe('');
+    }
+    expect(steps.some((s) => s.name === 'execute_tool')).toBe(true);
+  });
+});

@@ -12,6 +12,7 @@ import { evalTable } from '../ui/table.js';
 import { heading, separator, safeText } from '../ui/theme.js';
 import { resolveDataDir } from '../utils/paths.js';
 import { makeRefuse } from '../utils/refuse.js';
+import { errorMessage } from '../utils/json.js';
 
 export interface ShowOptions {
   json?: boolean;
@@ -33,7 +34,16 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
-  const trace = getTrace(db, traceId);
+  // An ambiguous prefix is a usage error answered in the requested shape — it
+  // must not escape as a bare stack line, which would break the --json contract
+  // and report exit 1 (a runtime failure) for what the caller can simply retype.
+  let trace;
+  try {
+    trace = getTrace(db, traceId);
+  } catch (err) {
+    refuse(2, errorMessage(err));
+    return;
+  }
   if (!trace) {
     refuse(1, `Trace not found: ${traceId}`, ['Use "agent-replay list" to see available traces.']);
     return;

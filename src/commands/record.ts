@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import chalk from 'chalk';
 import { ensureDatabase } from '../db/index.js';
-import { parseEventLine } from '../services/event-protocol.js';
+import { parseEventLine, validateEvent } from '../services/event-protocol.js';
 import type { CaptureEvent } from '../services/event-protocol.js';
 import { applyEvent } from '../services/recorder.js';
 import { makeTranslator } from '../services/stream-translators.js';
@@ -79,6 +79,25 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
     }
   };
 
+  /**
+   * Apply an event a translator produced, after the same validation the native
+   * protocol path performs.
+   *
+   * A warning here means the vendor's payload carried a field we could not use,
+   * not that our translator is broken — so, exactly as on the native path, an
+   * event that survives validation with a field dropped is still applied rather
+   * than losing the whole step over one bad value.
+   */
+  const applyTranslated = (event: CaptureEvent): void => {
+    const { event: checked, warning } = validateEvent(event);
+    if (warning) {
+      warnings++;
+      console.error(chalk.yellow(`  ⚠ ${warning}`));
+    }
+    if (!checked) return;
+    apply(checked);
+  };
+
   const translator = makeTranslator(format);
   const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
 
@@ -102,7 +121,14 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
         console.error(chalk.yellow(`  ⚠ skipped: invalid JSON in ${format} stream`));
         continue;
       }
-      for (const ev of translator.translate(obj)) apply(ev);
+      // Translated events go through the SAME validation gate as native ones.
+      // They bypassed it entirely, which made the translators the one live
+      // capture entry point with no check between a vendor's payload and the
+      // store — a bare-string `item`, a numeric or array `content`, or a tool
+      // name carrying control characters was written verbatim. The translators
+      // are our code, but their INPUT is the producer's, and every other route
+      // to a write (the JSONL protocol, the SDK's emit()) is already gated.
+      for (const ev of translator.translate(obj)) applyTranslated(ev);
       continue;
     }
 
@@ -121,7 +147,7 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
 
   // Flush any trailing events the translator holds until EOF.
   if (translator) {
-    for (const ev of translator.finalize()) apply(ev);
+    for (const ev of translator.finalize()) applyTranslated(ev);
   }
 
   // Finalize any trace still running when the stream ended, so it cannot dangle

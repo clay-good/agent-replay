@@ -76,7 +76,13 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
   const db = ensureDatabase(dbPath);
 
   // Resolve trace
-  const trace = getTrace(db, traceId);
+  let trace;
+  try {
+    trace = getTrace(db, traceId);
+  } catch (err) {
+    refuse(2, errorMessage(err));
+    return;
+  }
   if (!trace) {
     refuse(1, `Trace not found: ${traceId}`);
     return;

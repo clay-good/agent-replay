@@ -95,6 +95,35 @@ describe('the budget gate fails closed', () => {
     return code;
   }
 
+  // The guard in isolation: force a non-finite estimate directly, so this fails
+  // if the `Number.isFinite` check is removed even when the config sanitizer is
+  // intact. (Written after review pointed out that the config-path test below
+  // passes with EITHER fix in place, so neither was pinned on its own.)
+  it('refuses a non-finite estimate even when the config is clean', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ar-eval-nan2-'));
+    try {
+      const db = ensureDatabase(resolve(dir, 'traces.db'));
+      const trace = ingestTrace(db, failedTrace);
+      vi.stubEnv('ANTHROPIC_API_KEY', 'test-key');
+      const fetchSpy = vi.fn().mockResolvedValue(expensiveResponse());
+      vi.stubGlobal('fetch', fetchSpy);
+
+      const evalService = await import('../src/services/eval-service.js');
+      const spy = vi
+        .spyOn(evalService, 'estimateAiEvalCost')
+        .mockReturnValue({ total_estimated_usd: NaN } as ReturnType<typeof evalService.estimateAiEvalCost>);
+      try {
+        const code = await evalQuietly(trace.id, { ai: true, maxCost: '5', dir });
+        expect(code).toBe(2);
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        spy.mockRestore();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   // A cost that cannot be computed used to sail straight past the cap, because
   // `NaN > maxCost` is false — so `--max-cost 0`, the strictest possible
   // budget, ran the whole evaluation and billed for it. A config file holding a

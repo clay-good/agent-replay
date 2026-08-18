@@ -937,6 +937,24 @@ describe('a requested field the baseline cannot exercise is a broken gate, not a
     }
   });
 
+  // The refusal must never preempt a REAL regression. `uncompared` was derived
+  // from comparisons actually performed, and the comparison loops run over
+  // min(golden steps, candidate steps) — so a candidate that CRASHED to zero
+  // steps marked every per-step field "uncompared", and the gate answered
+  // "nothing to compare" (exit 2, gate broken) for the most severe regression it
+  // could possibly see. The worse the regression, the more reliably it was
+  // swallowed. Exercisability is a property of the BASELINE alone.
+  it('reports the regression when the candidate produced no steps at all', () => {
+    const golden = makeGolden();
+    const crashed = candidate({ ...baseline, steps: [] });
+    const report = checkGolden(golden, [crashed], { fields: ['step_count', 'tool_inputs'] });
+
+    expect(report.uncompared).toEqual([]);
+    expect(report.failed).toBe(1);
+    expect(report.results[0].divergences.map((d) => d.field)).toContain('step_count');
+    expect(report.ok).toBe(false);
+  });
+
   it('still compares a field the baseline DOES carry', () => {
     const golden = makeGolden();
     golden[0].steps_summary[1].model = 'claude-sonnet-4';

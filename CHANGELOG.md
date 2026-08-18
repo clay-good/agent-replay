@@ -179,6 +179,48 @@ between them, and nothing else.
 
 ### Fixed
 
+- Codex tool-failure detection never fired on a real rollout. It tested for a
+  plain-object output and returned early — but measured across 60 recent
+  sessions, 636 outputs are arrays of `{type, text}` parts and 109 are strings,
+  and **none** is an object. It now flattens to text first and reads the exec
+  tool's own leading status line, with the structured rules applied to text that
+  parses as JSON. An `exit_code` printed *inside* the output is deliberately not
+  read: a "Script completed" run routinely embeds an inner command's non-zero
+  code, and inventing a failed tool call is the expensive direction there.
+  Verified on a real 382-call session: exactly its 4 genuine failures, no false
+  positives.
+- **`import --replace` could delete the wrong trace.** Import identity was the
+  session id plus format, and a Claude Code subagent sidecar carries the *same*
+  session id as its parent transcript — so importing a sidecar reported "already
+  imported" and dropped it, and `--replace` deleted the parent session's trace,
+  steps and evals included. The source filename is now part of the identity.
+- The `--fields` "nothing to compare" refusal could hide a real regression. It
+  was derived from comparisons actually performed, and those loops run over
+  min(golden steps, candidate steps) — so a candidate that crashed to zero steps
+  marked every per-step field uncompared, and the gate reported "gate broken"
+  (exit 2) for the most severe regression it could see. Exercisability is now
+  read from the baseline alone, and a run with any failure always reports the
+  failure.
+- A `gemini-stream` `tool_result` was discarded whenever its id was missing,
+  unknown, or arrived before its `tool_use` — and that branch accepts a
+  `tool_use` with no id, so an id-less stream lost every result. The step stayed
+  open with no output and no `error`, storing a run whose every tool call failed
+  as clean. Unmatched results now pair with the open tool step the way the hook
+  adapter's lookup does.
+- `gemini-stream` ignored token usage entirely, so every capture in that format
+  reported no tokens while the identical field worked for `codex-exec`.
+- An OTel span with no `name` was stored as a step named `""`, which this tool's
+  own `ingest` refuses — so an OTel-captured trace could not be restored from
+  its own export. It now falls back to the operation name.
+- Events produced by the stream translators bypassed the validation every other
+  live-capture route performs, making them the one entry point with nothing
+  between a vendor's payload and the store.
+- An ambiguous trace id now exits 2 (a usage error, like an unknown flag) rather
+  than 1, and is answered as JSON under `--json` instead of escaping as a bare
+  stderr line — it was breaking the very contract the same release documents.
+- `config test-ai` now reports a dropped config key, which the previous entry
+  claimed it already did.
+
 - `--json` refusals from `list`, `stats`, `show`, `why`, `decisions` and `diff`
   wrote a bare line to stderr and left stdout empty, so a `| jq` pipeline got a
   parse error exactly where it expected a verdict it could read. All six now

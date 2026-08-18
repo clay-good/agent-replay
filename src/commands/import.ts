@@ -63,13 +63,27 @@ export function runImport(filePath: string, opts: ImportOptions = {}): void {
     return;
   }
 
-  // Identity is the session id plus the source format: two different tools can
-  // number their sessions however they like, and the same id from a different
-  // format is a different session. A file with NO session id cannot be
-  // identified at all, so it is imported as before — noted in the docs rather
-  // than guessed at from a file path, which moves.
+  // Identity is the session id, the source format AND the source file.
+  //
+  // Session id alone is NOT an identity: a Claude Code subagent sidecar
+  // (`<session>/subagents/agent-*.jsonl`) carries the same `sessionId` as its
+  // parent transcript, so keying on it collapsed two different files with
+  // different content — importing a sidecar reported "already imported" and
+  // dropped it, and `--replace` DELETED the parent session's trace (steps,
+  // evals and all) in favour of the much smaller sidecar. The source format is
+  // in the key too because two tools can number their sessions however they
+  // like. The file is matched by BASENAME so moving the directory does not make
+  // the same session look new.
+  //
+  // A trace imported before this field existed carries no `source_file`, and is
+  // deliberately NOT matched: re-importing such a file produces one duplicate,
+  // which the user can see and delete, whereas matching on the older, weaker key
+  // risks replacing a trace that merely shares a session id. A file with no
+  // session id at all cannot be identified either, and is imported as before.
   const sessionId = report.trace.session_id;
-  const sourceFormat = (report.trace.metadata as { source_format?: unknown } | null)?.source_format;
+  const meta = report.trace.metadata as { source_format?: unknown; source_file?: unknown } | null;
+  const sourceFormat = meta?.source_format;
+  const sourceFile = meta?.source_file;
   const priors = sessionId
     ? (db
         .prepare(
@@ -77,9 +91,10 @@ export function runImport(filePath: string, opts: ImportOptions = {}): void {
             WHERE session_id = ?
               AND id != ?
               AND json_extract(metadata, '$.source_format') IS ?
+              AND json_extract(metadata, '$.source_file') IS ?
             ORDER BY started_at ASC`,
         )
-        .all(sessionId, report.trace.id, sourceFormat ?? null) as Array<{ id: string }>)
+        .all(sessionId, report.trace.id, sourceFormat ?? null, sourceFile ?? null) as Array<{ id: string }>)
     : [];
 
   if (priors.length > 0) {

@@ -7,6 +7,7 @@ import { stepIcon, stepLabel, heading, label, safeText } from '../ui/theme.js';
 import type { StepType } from '../models/enums.js';
 import { resolveDataDir } from '../utils/paths.js';
 import { makeRefuse } from '../utils/refuse.js';
+import { errorMessage } from '../utils/json.js';
 
 export interface WhyOptions {
   step?: string;
@@ -40,7 +41,13 @@ export function runWhy(traceId: string, opts: WhyOptions = {}): void {
     return;
   }
 
-  const result = causalWalk(db, traceId, stepNumber);
+  let result;
+  try {
+    result = causalWalk(db, traceId, stepNumber);
+  } catch (err) {
+    refuse(2, errorMessage(err));
+    return;
+  }
   if (!result) {
     refuse(1, `Trace not found: ${traceId}`, ['Use "agent-replay list" to see available traces.']);
     return;

@@ -606,8 +606,11 @@ describe('the stored prompt is what the person asked', () => {
     ]);
     const trace = getTrace(db, importClaudeTranscript(db, path).trace!.id)!;
     expect(trace.input).toEqual({ prompt: 'why did the deploy fail?' });
-    // The envelope is preserved, not silently dropped.
-    expect(trace.metadata.follow_up_prompts).toEqual(['<command-name>/goal</command-name>\n<command-message>goal</command-message>']);
+    // The envelope is preserved, not silently dropped — but in `preamble_prompts`,
+    // not `follow_up_prompts`: that field means "later turns" in the batch merge
+    // and the OTLP mapper, and a turn that came BEFORE the prompt is not one.
+    expect(trace.metadata.preamble_prompts).toEqual(['<command-name>/goal</command-name>\n<command-message>goal</command-message>']);
+    expect(trace.metadata.follow_up_prompts).toBeUndefined();
   });
 
   // An envelope prompt beats no prompt at all: a session that is ALL envelope
@@ -626,6 +629,8 @@ describe('the stored prompt is what the person asked', () => {
   // question. Missing an envelope costs a slightly worse prompt; misreading a
   // real question as one loses it from the field every reader treats as the ask.
   it('does not mistake an ordinary question for an envelope', () => {
+    // The test is the SHAPE — does the turn open with a wrapper — so a question
+    // that merely mentions one mid-sentence is still a question.
     const path = fixture([
       { type: 'user', sessionId: 'env3', message: { content: 'what does <command-name> mean in the transcript format?' } },
       { type: 'assistant', sessionId: 'env3', message: { content: [{ type: 'text', text: 'it is...' }] } },
@@ -712,5 +717,76 @@ describe('importing the same session twice', () => {
       { type: 'assistant', sessionId: 'dupe-2', message: { content: [{ type: 'text', text: 'ok' }] } },
     ]));
     expect(traces()).toHaveLength(2);
+  });
+});
+
+describe('a subagent sidecar is not the same import as its parent session', () => {
+  // Claude Code writes subagent transcripts to `<session>/subagents/agent-*.jsonl`
+  // carrying the SAME sessionId as the parent. Keying the import identity on the
+  // session id alone therefore collapsed two different files: importing a
+  // sidecar reported "already imported" and dropped it, and `--replace` DELETED
+  // the parent session's trace — steps, evals and all — in favour of the much
+  // smaller sidecar. Verified on a real 180-step session before the fix.
+  let storeDir: string;
+
+  beforeEach(() => {
+    storeDir = mkdtempSync(join(tmpdir(), 'ar-import-sub-'));
+  });
+  afterEach(() => {
+    resetConnection();
+    rmSync(storeDir, { recursive: true, force: true });
+  });
+
+  function importQuietly(path: string, opts: { replace?: boolean } = {}): void {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      runImport(path, { dir: storeDir, ...opts });
+    } finally {
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+    }
+  }
+
+  it('keeps both, and --replace does not delete the parent', () => {
+    const parent = fixture([
+      { type: 'user', sessionId: 'shared-sess', message: { content: 'parent question' } },
+      { type: 'assistant', sessionId: 'shared-sess', message: { content: [{ type: 'text', text: 'a' }] } },
+      { type: 'assistant', sessionId: 'shared-sess', message: { content: [{ type: 'text', text: 'b' }] } },
+    ]);
+    // A separate file, same session id — what a sidecar looks like to the importer.
+    const sidecar = join(dir, 'agent-a1.jsonl');
+    writeFileSync(
+      sidecar,
+      [
+        { type: 'user', sessionId: 'shared-sess', message: { content: 'subagent task' } },
+        { type: 'assistant', sessionId: 'shared-sess', message: { content: [{ type: 'text', text: 'sub' }] } },
+      ].map((l) => JSON.stringify(l)).join('\n'),
+    );
+
+    importQuietly(parent);
+    importQuietly(sidecar, { replace: true });
+
+    const sdb = ensureDatabase(resolve(storeDir, 'traces.db'));
+    const rows = sdb.prepare('SELECT id FROM agent_traces').all() as Array<{ id: string }>;
+    expect(rows).toHaveLength(2);
+
+    // The parent's steps are intact — the regression this guards is its deletion.
+    const counts = rows
+      .map((r) => (sdb.prepare('SELECT COUNT(*) as c FROM agent_trace_steps WHERE trace_id = ?').get(r.id) as { c: number }).c)
+      .sort((a, b) => a - b);
+    expect(counts).toEqual([1, 2]);
+  });
+
+  // The same file is still deduplicated — the point of the identity key.
+  it('still refuses a second import of the same file', () => {
+    const path = fixture([
+      { type: 'user', sessionId: 'same-file', message: { content: 'go' } },
+      { type: 'assistant', sessionId: 'same-file', message: { content: [{ type: 'text', text: 'ok' }] } },
+    ]);
+    importQuietly(path);
+    importQuietly(path);
+    const sdb = ensureDatabase(resolve(storeDir, 'traces.db'));
+    expect((sdb.prepare('SELECT COUNT(*) as c FROM agent_traces').get() as { c: number }).c).toBe(1);
   });
 });

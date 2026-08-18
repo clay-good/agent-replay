@@ -34,17 +34,27 @@ export async function runDiff(
   const db = ensureDatabase(dbPath);
 
   // Resolve both traces (supports prefix-matching)
-  const traceA = getTrace(db, traceIdA);
-  if (!traceA) {
-    refuse(1, `Left trace not found: ${traceIdA}`);
-    return;
-  }
-
-  const traceB = getTrace(db, traceIdB);
-  if (!traceB) {
-    refuse(1, `Right trace not found: ${traceIdB}`);
-    return;
-  }
+  // Resolved one at a time, each with its own guard, so the LEFT id's problem
+  // is still reported first — as it was before. An ambiguous prefix is a usage
+  // error answered in the requested shape rather than escaping as a bare stack
+  // line at exit 1.
+  const resolve1 = (id: string, side: string): ReturnType<typeof getTrace> | undefined => {
+    try {
+      const t = getTrace(db, id);
+      if (!t) {
+        refuse(1, `${side} trace not found: ${id}`);
+        return undefined;
+      }
+      return t;
+    } catch (err) {
+      refuse(2, errorMessage(err));
+      return undefined;
+    }
+  };
+  const traceA = resolve1(traceIdA, 'Left');
+  if (!traceA) return;
+  const traceB = resolve1(traceIdB, 'Right');
+  if (!traceB) return;
 
   // Compute diff using resolved IDs
   const diff = diffTraces(db, traceA.id, traceB.id);
