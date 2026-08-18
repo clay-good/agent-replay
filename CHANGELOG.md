@@ -177,6 +177,129 @@ between them, and nothing else.
 
 ### Fixed
 
+- A decision's `confidence` was stored by live capture at any value while
+  `ingest` refuses anything outside [0, 1], so `record` wrote traces that failed
+  their own re-ingest — the same drift the option-shape rule was unified to
+  prevent, one field over. Both paths now share one exported check.
+- `eval --preset ai-root-cause` reported a clean 100% pass for a run that never
+  finished. Its applicability test read the trace error and the steps but not
+  the trace **status**, and `record` finalizes an abandoned stream as `timeout`
+  with no error text and no failing step — so the preset was "not applicable",
+  which stores score 1.0 and passed, without ever calling the provider. The
+  deterministic criteria already read status; this was the last reader that did
+  not. The cost estimator now sees status too, so it and the run agree about
+  which presets will actually run.
+- A wrong-typed score from the model was read as full marks: `Number(["10"])` is
+  10 and `Number(true)` is 1, so a mis-shaped reply passed. Anything that is not
+  a finite number now scores 0.
+- `eval --ai` under-reported spend when a request timed out and was retried. A
+  provider that finishes generating and answers after the deadline still bills
+  for it, so the retry is a second charge, but the reported cost came from the
+  final attempt alone — and that number feeds the running total and the
+  `--max-cost` gate. Timed-out attempts are now counted; a 429 or 5xx is not,
+  since nothing was generated to bill for.
+- The `--max-cost` estimate allowed a flat ~200 tokens for everything around the
+  trace summary, which predated the injection guard now appended to every AI
+  prompt. Measured, the prompts ran up to 44% over that on a small trace.
+- The SDK could store what `ingest` refuses. `TraceRecorder` built events and
+  called `applyEvent` directly, so `validateEvent` — where the live path's rules
+  live — never saw a programmatic event: an out-of-range decision confidence,
+  bare-string options, an empty `chosen`, an empty step name and non-string tags
+  all round-tripped into a trace that failed its own re-ingest. Every SDK
+  emission is validated now, and a rejection throws rather than warning, because
+  an SDK call is this process's own code rather than a foreign producer.
+- `stats` and the dashboard counted forks. A fork is a never-executed copy of a
+  step prefix, tokens and all, so one `fork` of a 2-step 3,000-token trace
+  doubled the store's `steps` and `totalTokens` — reporting spend that never
+  happened. Every other fork-aware surface already filtered on lineage.
+- `ingest` now says when it drops fork lineage. `export` writes
+  `parent_trace_id`, `ingest` has nowhere to put it, and a restored fork becomes
+  an ordinary trace — which the golden gate and `watch` then treat as a real run.
+  Rebuilding the link needs an in-file id remap and is left alone; going quiet
+  about it is not.
+- Arrow-key navigation in the dashboard's trace list survives a refresh again.
+  The list widget resets its selection on every `setData`, unlike the one it
+  replaced, so the cursor jumped back to the top row on each auto-refresh.
+- An AI score sent as a JSON-quoted number (`"9"`) scored 0 and failed. Guarding
+  against `["9"]` and `true` had also rejected the single most common way a model
+  mis-sends a number, silently failing a good reply.
+- A tool result arriving after the turn ended was discarded, and left a phantom
+  live run behind. Every hook fires as its own process, and a closing event
+  (`PostToolUse`, `PostToolUseFailure`, `SubagentStop`) went through the same
+  find-or-create path as an opening one — so when the turn-ending `Stop`
+  committed first, the closing event found no *open* trace and created one. The
+  tool's output, `ended_at` and duration were dropped permanently, the real step
+  stayed open forever, and the store gained an empty `running` trace that
+  `list`, `watch` and the dashboard all render as a live run. It happens
+  deterministically whenever the harness dispatches `Stop` before the result
+  arrives, and in 47% of simultaneous spawns (measured, 14 of 30), rising
+  further while an `otel serve` holds the write lock. Closing events now resolve
+  the session's trace whatever its status and never create one, so the result is
+  recorded on the finalized trace rather than lost — `updateStep` never required
+  a running trace; only `appendStep` does, and a closing event never appends.
+  Measured again after the fix: 0 of 30.
+- A decision whose `options` were not option objects crashed `decisions`. The
+  `chosen` field was validated and the options array was not, so a plain array of
+  strings — the most obvious wrong guess at this schema — was accepted by
+  `record` and then aborted the command with a bare `TypeError`, losing every
+  LATER decision point in the trace and naming neither the field nor the step.
+  Options are validated at the boundary now — by the same exported function
+  `ingest` uses, not a second copy of the rule, so `record` cannot store an
+  options array `ingest` refuses and leave a trace unrestorable from its own
+  export. A record stored before that renders instead of aborting.
+- A trace id of `''` was stored rather than replaced. An empty string is not
+  nullish, so it slipped past `?? generateId`, and because every later event
+  requires a non-empty `trace_id` that trace was unreachable forever — finalized
+  `timeout`, counted by `list` and by `check`'s candidate scan, openable by
+  nothing. The id is now required to be an identifier, not merely free of
+  control characters.
+- A Gemini stream's unreadable exit code fabricated a run failure. `Number()` of
+  an unparseable value is `NaN`, which is `!== 0`, so a non-numeric code — a
+  Node-style `code: "ENOENT"`, or an object — marked the whole run failed and
+  reported the reason as the literal "exited with code NaN". A code that cannot
+  be read is not evidence the run failed. The Codex path was already guarded this
+  way; the two had drifted apart again.
+- `check`'s new refusal advised naming a trace with `--trace` — but `--trace`
+  compares whatever it names, so following that advice pointed the gate at the
+  very fork or in-flight run the refusal had just excluded, turning it red on a
+  run that never executed.
+- A capture stream's `error: NaN` produced a failing step whose reported reason
+  was the word "null" (`JSON.stringify(NaN)`), and a numeric `is_error: 1` — what
+  an exporter that coerces booleans to ints sends — was not read as a failure at
+  all. The flag is now read generously, since missing a failure signal is the
+  fail-open direction, while a non-finite number is never an error code.
+- `record --format codex-exec` recorded a failed item with the wrong reason —
+  including its own SUCCESS status. Detection triggered on any of three signals
+  but picked its message from an unrelated fallback chain, so an item failing by
+  exit code was stored with the error text `completed`, which is what `show`,
+  `watch`, `why` and the AI root-cause prompt then displayed as the failure; an
+  item flagged only by `is_error` produced the literal `exited with code
+  undefined`. A stringified exit code and a capitalized `Failed` now count too,
+  matching the tolerance already applied to `is_error`.
+- An `error` field holding an empty array or object still fabricated a failing
+  step — the same class as `error: ""` and `error: false`, via a different empty
+  value that a producer with a structured error field plausibly sends.
+- `check` reported "No traces matched" when traces DID match and were then
+  excluded as forks or still-running, sending the reader to widen `--agent` and
+  `--since` — advice that cannot help. The two cases now read differently.
+- A fork turned `check --golden` permanently red. A fork is a never-executed copy
+  — same agent name and input, a truncated step prefix, status `running` — so it
+  matched its own baseline and diverged on step count and status, reported as
+  REGRESSED at exit 1, the code reserved for a real regression. One `fork` on a
+  shared store failed every later gate run, indistinguishably from a genuine
+  failure. Candidates now exclude forks by lineage, as the hook, OTel and `watch`
+  lookups already did, and also exclude `running` traces, whose partial shape is
+  not a regression.
+- `watch` announced a failed run without saying why. The earlier fix covered a
+  failure a STEP recorded, but the two most common failure paths write a
+  trace-level error and no step error at all — `run` finalizing a non-zero child
+  exit, and a `trace_end` event carrying `error` — so the one view open when a run
+  died showed only "FAILED" while `show` printed the reason.
+- `list` had its own copy of the relative-time formatter, drifted from the shared
+  one: no month bucket ("45d ago" where the dashboard said "1mo ago") and no
+  future guard, so a skewed future timestamp read as "just now" while sorting to
+  the top.
+
 - Exporting a whole store was quadratic. `getTrace` resolves an id prefix with
   `id = ? OR id LIKE ?`, and that disjunction cannot use the primary key index,
   so every lookup was a full scan of `agent_traces` plus a temp B-tree for the
@@ -2161,26 +2284,12 @@ between them, and nothing else.
 
 ### Security
 
-- A decision's `confidence` was stored by live capture at any value while
-  `ingest` refuses anything outside [0, 1], so `record` wrote traces that failed
-  their own re-ingest — the same drift the option-shape rule was unified to
-  prevent, one field over. Both paths now share one exported check.
-
 - `safeText` escaped C0 and DEL but not C1 (U+0080-U+009F), while the write
   guard already refused that range — so the renderer and the writer disagreed
   about what a control character is. A terminal that decodes UTF-8 C1 as
   controls (xterm's default, VTE, iTerm2) reads U+009B as CSI, which kept the
   class open through a second alphabet on any string the write guard does not
   cover, such as an agent or step name.
-
-- `eval --preset ai-root-cause` reported a clean 100% pass for a run that never
-  finished. Its applicability test read the trace error and the steps but not
-  the trace **status**, and `record` finalizes an abandoned stream as `timeout`
-  with no error text and no failing step — so the preset was "not applicable",
-  which stores score 1.0 and passed, without ever calling the provider. The
-  deterministic criteria already read status; this was the last reader that did
-  not. The cost estimator now sees status too, so it and the run agree about
-  which presets will actually run.
 
 - An AI verdict could be taken from the trace instead of from the model. The
   fenced-code path was fixed to read the model's LAST block, but the fallback
@@ -2194,21 +2303,6 @@ between them, and nothing else.
   a non-breaking space, or the words without the arrows all passed through
   intact — and a model reads any of those as the end marker just as readily. The
   neutralizer is now at least as generous as the reader.
-
-- A wrong-typed score from the model was read as full marks: `Number(["10"])` is
-  10 and `Number(true)` is 1, so a mis-shaped reply passed. Anything that is not
-  a finite number now scores 0.
-
-- `eval --ai` under-reported spend when a request timed out and was retried. A
-  provider that finishes generating and answers after the deadline still bills
-  for it, so the retry is a second charge, but the reported cost came from the
-  final attempt alone — and that number feeds the running total and the
-  `--max-cost` gate. Timed-out attempts are now counted; a 429 or 5xx is not,
-  since nothing was generated to bill for.
-
-- The `--max-cost` estimate allowed a flat ~200 tokens for everything around the
-  trace summary, which predated the injection guard now appended to every AI
-  prompt. Measured, the prompts ran up to 44% over that on a small trace.
 
 - **Security (fail-open):** an unrecognized `hook_event_name` in the payload
   overrode the event registered on the command line, so a harness whose pre-tool
@@ -2236,33 +2330,6 @@ between them, and nothing else.
   to `''` and answered allow, silently disabling every name-keyed policy. Every
   other unusable field in that command denies.
 
-- The SDK could store what `ingest` refuses. `TraceRecorder` built events and
-  called `applyEvent` directly, so `validateEvent` — where the live path's rules
-  live — never saw a programmatic event: an out-of-range decision confidence,
-  bare-string options, an empty `chosen`, an empty step name and non-string tags
-  all round-tripped into a trace that failed its own re-ingest. Every SDK
-  emission is validated now, and a rejection throws rather than warning, because
-  an SDK call is this process's own code rather than a foreign producer.
-
-- `stats` and the dashboard counted forks. A fork is a never-executed copy of a
-  step prefix, tokens and all, so one `fork` of a 2-step 3,000-token trace
-  doubled the store's `steps` and `totalTokens` — reporting spend that never
-  happened. Every other fork-aware surface already filtered on lineage.
-
-- `ingest` now says when it drops fork lineage. `export` writes
-  `parent_trace_id`, `ingest` has nowhere to put it, and a restored fork becomes
-  an ordinary trace — which the golden gate and `watch` then treat as a real run.
-  Rebuilding the link needs an in-file id remap and is left alone; going quiet
-  about it is not.
-
-- Arrow-key navigation in the dashboard's trace list survives a refresh again.
-  The list widget resets its selection on every `setData`, unlike the one it
-  replaced, so the cursor jumped back to the top row on each auto-refresh.
-
-- An AI score sent as a JSON-quoted number (`"9"`) scored 0 and failed. Guarding
-  against `["9"]` and `true` had also rejected the single most common way a model
-  mis-sends a number, silently failing a good reply.
-
 - A policy name is escaped wherever it is shown, and a closing hook event
   resolves to the trace holding a matching open step rather than merely the
   session's newest — `session_id` is not exclusive to the hook path, so another
@@ -2288,39 +2355,6 @@ between them, and nothing else.
   time — the charts have unit tests, and a smoke test builds and refreshes the
   whole view against a real store.
 
-- A tool result arriving after the turn ended was discarded, and left a phantom
-  live run behind. Every hook fires as its own process, and a closing event
-  (`PostToolUse`, `PostToolUseFailure`, `SubagentStop`) went through the same
-  find-or-create path as an opening one — so when the turn-ending `Stop`
-  committed first, the closing event found no *open* trace and created one. The
-  tool's output, `ended_at` and duration were dropped permanently, the real step
-  stayed open forever, and the store gained an empty `running` trace that
-  `list`, `watch` and the dashboard all render as a live run. It happens
-  deterministically whenever the harness dispatches `Stop` before the result
-  arrives, and in 47% of simultaneous spawns (measured, 14 of 30), rising
-  further while an `otel serve` holds the write lock. Closing events now resolve
-  the session's trace whatever its status and never create one, so the result is
-  recorded on the finalized trace rather than lost — `updateStep` never required
-  a running trace; only `appendStep` does, and a closing event never appends.
-  Measured again after the fix: 0 of 30.
-
-- A decision whose `options` were not option objects crashed `decisions`. The
-  `chosen` field was validated and the options array was not, so a plain array of
-  strings — the most obvious wrong guess at this schema — was accepted by
-  `record` and then aborted the command with a bare `TypeError`, losing every
-  LATER decision point in the trace and naming neither the field nor the step.
-  Options are validated at the boundary now — by the same exported function
-  `ingest` uses, not a second copy of the rule, so `record` cannot store an
-  options array `ingest` refuses and leave a trace unrestorable from its own
-  export. A record stored before that renders instead of aborting.
-
-- A trace id of `''` was stored rather than replaced. An empty string is not
-  nullish, so it slipped past `?? generateId`, and because every later event
-  requires a non-empty `trace_id` that trace was unreachable forever — finalized
-  `timeout`, counted by `list` and by `check`'s candidate scan, openable by
-  nothing. The id is now required to be an identifier, not merely free of
-  control characters.
-
 - A trace id chosen by a producer can no longer carry control characters.
   `record`'s native protocol lets the producer set `trace_start.trace_id`, and
   that id is then rendered by `show`, `list`, `watch`, `why`, `decisions`,
@@ -2337,50 +2371,15 @@ between them, and nothing else.
   escaped as well — all seventeen of them, enumerated rather than taken from
   the last report — so a store that already holds such an id is safe to inspect.
 
-- A Gemini stream's unreadable exit code fabricated a run failure. `Number()` of
-  an unparseable value is `NaN`, which is `!== 0`, so a non-numeric code — a
-  Node-style `code: "ENOENT"`, or an object — marked the whole run failed and
-  reported the reason as the literal "exited with code NaN". A code that cannot
-  be read is not evidence the run failed. The Codex path was already guarded this
-  way; the two had drifted apart again.
-
 - `show` and `replay` echoed the trace **id** raw. `record`'s native protocol
   lets the producer choose it, so it is no more trustworthy than the fields
   beside it.
-
-- `check`'s new refusal advised naming a trace with `--trace` — but `--trace`
-  compares whatever it names, so following that advice pointed the gate at the
-  very fork or in-flight run the refusal had just excluded, turning it red on a
-  run that never executed.
-
-- A capture stream's `error: NaN` produced a failing step whose reported reason
-  was the word "null" (`JSON.stringify(NaN)`), and a numeric `is_error: 1` — what
-  an exporter that coerces booleans to ints sends — was not read as a failure at
-  all. The flag is now read generously, since missing a failure signal is the
-  fail-open direction, while a non-finite number is never an error code.
 
 - The summary panel shared by `import`, `record`, `ingest`, `fork`, `diff` and
   `stats` echoed its values raw. The keys are literals at every call site, but
   the values are not — `import` puts the transcript file's own `session_id`
   there, and a transcript is producer output like any other. Values are escaped
   at the panel, so every current and future caller is covered.
-
-- `record --format codex-exec` recorded a failed item with the wrong reason —
-  including its own SUCCESS status. Detection triggered on any of three signals
-  but picked its message from an unrelated fallback chain, so an item failing by
-  exit code was stored with the error text `completed`, which is what `show`,
-  `watch`, `why` and the AI root-cause prompt then displayed as the failure; an
-  item flagged only by `is_error` produced the literal `exited with code
-  undefined`. A stringified exit code and a capitalized `Failed` now count too,
-  matching the tolerance already applied to `is_error`.
-
-- An `error` field holding an empty array or object still fabricated a failing
-  step — the same class as `error: ""` and `error: false`, via a different empty
-  value that a producer with a structured error field plausibly sends.
-
-- `check` reported "No traces matched" when traces DID match and were then
-  excluded as forks or still-running, sending the reader to widen `--agent` and
-  `--since` — advice that cannot help. The two cases now read differently.
 
 - `show` and `replay` echoed five producer-authored header fields raw —
   `agent_version`, `tags`, `session_id`, `started_at` and `ended_at` — beside `agent_name` and `error`,
@@ -2391,30 +2390,10 @@ between them, and nothing else.
   The model-authored fields in the `diff --ai` and `eval --ai` panels are escaped
   now too.
 
-- A fork turned `check --golden` permanently red. A fork is a never-executed copy
-  — same agent name and input, a truncated step prefix, status `running` — so it
-  matched its own baseline and diverged on step count and status, reported as
-  REGRESSED at exit 1, the code reserved for a real regression. One `fork` on a
-  shared store failed every later gate run, indistinguishably from a genuine
-  failure. Candidates now exclude forks by lineage, as the hook, OTel and `watch`
-  lookups already did, and also exclude `running` traces, whose partial shape is
-  not a regression.
-
 - `export --format golden` baked forks into the baseline, which then let a real
   run that crashed part way reproduce the fork's shorter shape and pass. A golden
   dataset is a set of known-good runs; a `json`/`jsonl` export is a backup and
   still carries them.
-
-- `watch` announced a failed run without saying why. The earlier fix covered a
-  failure a STEP recorded, but the two most common failure paths write a
-  trace-level error and no step error at all — `run` finalizing a non-zero child
-  exit, and a `trace_end` event carrying `error` — so the one view open when a run
-  died showed only "FAILED" while `show` printed the reason.
-
-- `list` had its own copy of the relative-time formatter, drifted from the shared
-  one: no month bucket ("45d ago" where the dashboard said "1mo ago") and no
-  future guard, so a skewed future timestamp read as "just now" while sorting to
-  the top.
 
 - `guard check` answered `allow` at exit 0 against a store holding no enabled
   policies — the same fail-open as `hook --enforce`, in the command documented
@@ -2478,10 +2457,6 @@ between them, and nothing else.
   both far above any real OTLP batch — and answers `413` (not retryable) instead
   of crashing. Legitimate exporters are unaffected.
 
-- Pinned transitive dependencies (`lodash`, `xml2js`, `esbuild`) to patched
-  versions via a package `overrides` block, clearing 5 advisories that
-  `blessed-contrib`'s latest release still pulls in transitively. `npm audit`
-  now reports 0 vulnerabilities.
 - Cleared a newly-disclosed high-severity `nanoid` advisory
   (GHSA-28wg-ghj8-5hjv / GHSA-2v37-7h3g-55p8 — a non-secure generator can loop
   indefinitely on a negative or zero size). Bumped the direct dependency to

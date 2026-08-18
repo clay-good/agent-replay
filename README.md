@@ -39,7 +39,9 @@ A CLI tool that stores agent execution traces in a local SQLite database and giv
 npm install -g agent-replay
 
 agent-replay init                  # creates .agent-replay/ with SQLite database
+                                   #   (--force overwrites an existing config)
 agent-replay demo                  # loads 5 sample traces + 3 guardrail policies
+                                   #   (--reset clears the store first)
 agent-replay list                  # see everything
 agent-replay show <trace-id>       # inspect a trace step-by-step
 agent-replay replay <trace-id>     # animated terminal replay
@@ -70,6 +72,8 @@ agent-replay ingest trace.json --dry-run
 #### Live capture
 
 `ingest` loads a complete trace after the fact. To capture a run **as it happens**, stream newline-delimited capture events into `record` — the trace grows step by step and stays `running` until a `trace_end` event arrives.
+
+A capture event is rejected — with a warning, keeping the rest of the stream — when it carries something `ingest` would refuse, so a trace can always be restored from its own export: a `trace_id` that is not an identifier (empty, or carrying control characters), a step with no name, non-string tags, a decision `confidence` outside 0–1, and decision `options` that are not `{option, …}` objects. Usage and timing fields that are not non-negative finite numbers are dropped the same way.
 
 ```bash
 # Pipe a JSONL event stream into the recorder
@@ -206,8 +210,8 @@ reporting `deny` with a "review required (no TTY — failed closed)" reason.
 ### Browse
 
 ```bash
-# List the most recent traces (25 per page by default; the header
-# reports the full count, and --limit / --offset page through it)
+# List the most recent traces (25 at a time by default; the header
+# reports the full count, and --limit raises the page size)
 agent-replay list
 
 # Filter by status, agent, tag, or time
@@ -300,6 +304,9 @@ agent-replay replay <trace-id> --speed 0
 
 # Replay only steps 3 through 7
 agent-replay replay <trace-id> --from-step 3 --to-step 7
+
+# Stop at a step and wait for a keypress before continuing
+agent-replay replay <trace-id> --pause 5
 ```
 
 ### Compare
@@ -379,6 +386,8 @@ agent-replay check --golden golden.json --fields model
 ```
 
 Comparable fields: `step_count`, `step_types`, `step_names`, `tool_inputs`, `step_errors`, `status` (the default set), plus opt-in `model`. `step_errors` compares whether each step FAILED — a step that starts erroring is a regression the other fields cannot see, since a hook-captured session finalizes `completed` from its Stop event however many tool calls failed inside it. It is one-directional: a step that *stops* failing is a fix, not a regression. Only the flag is compared, never the message, and a baseline exported before this field is skipped step by step. An unrecognized `--fields` value is rejected rather than silently comparing nothing — as a usage error (exit `2`) named for the bad field, checked before the store is opened, so a typo can't surface as "no traces matched" instead.
+
+Candidates gathered in bulk are the runs that could actually regress: **forks and still-`running` traces are excluded**. A fork is a never-executed copy of a step prefix, so it matches its own baseline and then "diverges" on step count and status — one `fork` would otherwise turn the gate permanently red on a shared store. A running trace is mid-flight, so its partial shape is not a regression either. A trace named explicitly with `--trace` is always compared, whatever its lineage or status. For the same reason, `export --format golden` leaves forks out of a baseline, while `json` and `jsonl` exports are backups and keep them.
 
 Matches are made by agent name and a hash of the input, so each run is compared to its own golden counterpart. A divergence report names the trace, the step, and the differing field. The summary also reports baseline entries **no candidate exercised** — a scenario whose run crashed or never happened at all, which otherwise leaves a gate green with nothing to say about it. Those count as failures under `--strict`, alongside unmatched runs.
 
@@ -491,6 +500,9 @@ agent-replay export --format jsonl --status completed --output good.jsonl
 
 # Build a golden dataset for regression testing
 agent-replay export --format golden --tag production --output golden.json
+
+# Include stored evals and per-step context snapshots
+agent-replay export --format json --with-evals --with-snapshots --output full.json
 ```
 
 A trace id and the filter flags (`--status`, `--agent`, `--tag`, `--since`) are
