@@ -192,6 +192,14 @@ between them, and nothing else.
 
 ### Fixed
 
+- `import` no longer hangs forever on an input that is not JSONL. A source with
+  no newlines had nothing bounding it, so a binary file passed by mistake
+  buffered its whole self and a character device such as `/dev/zero` never ended
+  at all — measured, still running after 25 seconds under a 512 MB heap cap, and
+  the previous whole-file reader hung there too. A single line over 64 MB (far
+  beyond any real JSONL record) now fails in about a second with a message
+  naming the limit; legitimate large transcripts are unaffected.
+
 - `import` could not read a non-seekable source, and failed silently on one. The
   new streaming reader read at explicit byte offsets and trusted the file's
   reported size: reading at an offset throws `ESPIPE: invalid seek` on a pipe, so

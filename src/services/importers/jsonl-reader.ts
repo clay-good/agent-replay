@@ -22,6 +22,19 @@ import { closeSync, openSync, readSync } from 'node:fs';
  * Blank lines are skipped and each line is trimmed, matching the previous
  * `split/trim/filter` behavior exactly — callers count records, not lines.
  */
+/**
+ * The largest a single line may be before the reader gives up on it.
+ *
+ * A JSONL record is one line, and 64 MB is far beyond any real one (the largest
+ * step payload in a transcript is a few MB). Without a bound, an input with no
+ * newlines grows the carry buffer without limit — a binary file passed by
+ * mistake buffers its whole self, and a character device like `/dev/zero` never
+ * ends at all: both the previous whole-file reader and the first version of this
+ * one hung there indefinitely. Failing with a message that names the limit is
+ * more useful than either.
+ */
+const MAX_LINE_BYTES = 64 * 1024 * 1024;
+
 export function* readJsonlLines(filePath: string, chunkSize = 1 << 20): Generator<string> {
   const fd = openSync(filePath, 'r');
   try {
@@ -53,6 +66,11 @@ export function* readJsonlLines(filePath: string, chunkSize = 1 << 20): Generato
         nl = chunk.indexOf(0x0a, start);
       }
       carry = start < chunk.length ? chunk.subarray(start) : Buffer.alloc(0);
+      if (carry.length > MAX_LINE_BYTES) {
+        throw new Error(
+          `${filePath}: a single line exceeds ${MAX_LINE_BYTES / (1024 * 1024)} MB with no newline — this does not look like JSONL.`,
+        );
+      }
       // Drop the reference so a large concatenated chunk can be collected while
       // the next read is in flight.
       chunk = Buffer.alloc(0);

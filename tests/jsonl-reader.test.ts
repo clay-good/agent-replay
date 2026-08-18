@@ -98,3 +98,25 @@ describe('sources that are not seekable regular files', () => {
     expect([...readJsonlLines(p, 4)]).toEqual(['one', 'two']);
   });
 });
+
+describe('an input that is not JSONL at all', () => {
+  // Without a bound, an input with no newlines grows the carry buffer without
+  // limit: a binary file passed by mistake buffers its whole self, and a
+  // character device like /dev/zero never ends — both the previous whole-file
+  // reader and the first version of this one hung there indefinitely (measured:
+  // still running after 25s under a 512 MB heap cap). A message naming the limit
+  // is more useful than either.
+  it('gives up on a line with no newline past the limit, naming the limit', () => {
+    const p = join(dir, 'binary.bin');
+    // 65 MB with no newline, just over the 64 MB bound.
+    writeFileSync(p, Buffer.alloc(65 * 1024 * 1024, 0x78));
+    expect(() => [...readJsonlLines(p)]).toThrow(/exceeds 64 MB with no newline/);
+  });
+
+  it('still reads a long line that is under the limit', () => {
+    const p = join(dir, 'long.jsonl');
+    const line = 'z'.repeat(2 * 1024 * 1024);
+    writeFileSync(p, line + '\n');
+    expect([...readJsonlLines(p)]).toEqual([line]);
+  });
+});
