@@ -180,6 +180,16 @@ between them, and nothing else.
 
 ### Fixed
 
+- **A guardrail policy could be evaded by a name that reads the same.**
+  Matching compared raw code points after case folding, so
+  `name_contains: "delete"` did not match the fullwidth `ｄｅｌｅｔｅ_user`, nor
+  `delete_user` with a zero-width space or soft hyphen inside it — a policy an
+  operator had written to block a tool silently allowed it. Both the needle and
+  the step name are now Unicode-folded (NFKC, with zero-width and soft-hyphen
+  characters removed), and a `name_regex` is tested against the raw and folded
+  name alike. Folding can only make a policy match more, which is the safe
+  direction for a guard.
+
 - **`otel serve` was the only capture path that failed a run because a tool
   call failed.** The other eight store `completed` for a session containing a
   failed tool, the telemetry-ingest spec says a span error becomes a *step*

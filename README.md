@@ -803,6 +803,8 @@ Every field is optional individually, but a pattern must include at least one of
 them — an empty pattern (or one with only unrecognized keys) is rejected, since it
 would match nothing. When multiple fields are specified, all must match (AND logic). `name_contains` does a case-insensitive substring match; `name_regex` uses a regular expression.
 
+Both sides of a match are **Unicode-folded** first (NFKC, with zero-width and soft-hyphen characters removed), so a policy matches the name an operator meant: `name_contains: "delete"` blocks `DELETE_USER`, the fullwidth `ｄｅｌｅｔｅ_user`, and `delete_user` with a zero-width space inside it. Folding can only make a policy match more — for a guard that is the safe direction, since an over-match is a blocked call you can see and amend, while an under-match runs the call you meant to stop. A `name_regex` is tested against the raw name and the folded one.
+
 ### Actions
 
 | Action | Description |

@@ -461,3 +461,54 @@ describe('guard enable/disable', () => {
     }
   });
 });
+
+describe('a policy matches the name an operator meant', () => {
+  // A guard compares a policy's needle against a producer-supplied name, and
+  // comparing raw code points let a name evade a policy while still reading as
+  // the same word: `name_contains: "delete"` did not match the fullwidth
+  // `\uff44\uff45\uff4c\uff45\uff54\uff45_user`, nor `delete_user` with a zero-width space in
+  // it. Case folding alone was not enough. Both sides are folded now (NFKC plus
+  // removal of zero-width and soft-hyphen characters), which can only make a
+  // policy match MORE — the safe direction for a guard, since over-matching
+  // blocks a call the operator can see and amend while under-matching runs the
+  // one they meant to stop.
+  beforeEach(() => {
+    addPolicy(db, { name: 'nodelete', action: 'deny', match_pattern: { name_contains: 'delete' } });
+  });
+
+  it.each([
+    ['fullwidth homoglyphs', '\uff44\uff45\uff4c\uff45\uff54\uff45_user'],
+    ['zero-width space', 'de\u200blete_user'],
+    ['zero-width non-joiner', 'de\u200clete_user'],
+    ['soft hyphen', 'de\u00adlete_user'],
+    ['BOM', 'de\ufefflete_user'],
+    ['upper case', 'DELETE_USER'],
+  ])('denies a name using %s', (_label, name) => {
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name })));
+    expect(v.action).toBe('deny');
+  });
+
+  it.each([['an unrelated tool', 'dropdatabase'], ['a benign tool', 'read_file']])(
+    'still allows %s',
+    (_label, name) => {
+      const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name })));
+      expect(v.action).toBe('allow');
+    },
+  );
+
+  // A regex policy is tested against the raw name AND the folded one, so a
+  // homoglyph cannot slip past that matcher either.
+  it('applies the same folding to a name_regex policy', () => {
+    addPolicy(db, { name: 'rxdel', action: 'deny', match_pattern: { name_regex: '^delete' } });
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: '\uff44\uff45\uff4c\uff45\uff54\uff45_x' })));
+    expect(v.action).toBe('deny');
+  });
+
+  // An operator who writes the needle in a compatibility form must match a
+  // plain name too — the folding is symmetric.
+  it('folds the policy needle as well as the step name', () => {
+    addPolicy(db, { name: 'wide', action: 'deny', match_pattern: { name_contains: '\uff52\uff4d' } });
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'rm_rf' })));
+    expect(v.action).toBe('deny');
+  });
+});

@@ -351,9 +351,36 @@ function searchableText(value: unknown): string {
  * never fire. Those return null so a blocking policy fails closed, matching how
  * `step_type` and `name_regex` already behave.
  */
+/**
+ * Fold a string so a policy matches what an operator MEANT.
+ *
+ * A guard compares a policy's needle against a producer-supplied haystack, and
+ * comparing raw code points let a name evade a policy while still reading as
+ * the same word to a human: `name_contains: "delete"` did not match the
+ * fullwidth `ｄｅｌｅｔｅ_user`, nor `delete_user` with a zero-width space
+ * inside it. Case folding alone was not enough.
+ *
+ * NFKC maps compatibility forms (fullwidth, ligatures, circled letters) onto
+ * their plain equivalents, and the zero-width and soft-hyphen characters are
+ * removed outright — none of them carries meaning in a tool name, and all of
+ * them break a substring match invisibly. Applied to BOTH sides, so an operator
+ * who writes a fullwidth needle also matches a plain name.
+ *
+ * This can only make a policy match MORE, which is the safe direction for a
+ * guard: the cost of over-matching is a blocked call the operator can see and
+ * amend, and the cost of under-matching is the call they meant to block.
+ */
+export function foldForMatch(text: string): string {
+  return text
+    .normalize('NFKC')
+    // Zero-width space/non-joiner/joiner, BOM, and soft hyphen.
+    .replace(/[\u200b-\u200d\ufeff\u00ad]/g, '')
+    .toLowerCase();
+}
+
 function containsNeedle(value: unknown): string | null {
   if (typeof value === 'object') return null;
-  return String(value).toLowerCase();
+  return foldForMatch(String(value));
 }
 
 function matchesPolicy(step: TraceStep, policy: GuardrailPolicy): string | null {
@@ -398,7 +425,7 @@ function matchesPolicy(step: TraceStep, policy: GuardrailPolicy): string | null 
     if (needle == null) {
       if (!failsClosed) return null;
       reasons.push(`name_contains '${String(pattern.name_contains)}' is unusable — failing closed`);
-    } else if (!step.name.toLowerCase().includes(needle)) {
+    } else if (!foldForMatch(step.name).includes(needle)) {
       return null;
     } else {
       reasons.push(`name contains '${pattern.name_contains}'`);
@@ -412,7 +439,7 @@ function matchesPolicy(step: TraceStep, policy: GuardrailPolicy): string | null 
       // Unusable pattern: fail closed for a blocking policy, skip otherwise.
       if (!failsClosed) return null;
       reasons.push(`name_regex '${pattern.name_regex}' is unusable — failing closed`);
-    } else if (!regex.test(step.name)) {
+    } else if (!regex.test(step.name) && !regex.test(foldForMatch(step.name))) {
       return null;
     } else {
       reasons.push(`name matches /${pattern.name_regex}/`);
@@ -425,7 +452,7 @@ function matchesPolicy(step: TraceStep, policy: GuardrailPolicy): string | null 
     if (needle == null) {
       if (!failsClosed) return null;
       reasons.push(`input_contains '${String(pattern.input_contains)}' is unusable — failing closed`);
-    } else if (!searchableText(step.input).includes(needle)) {
+    } else if (!foldForMatch(searchableText(step.input)).includes(needle)) {
       return null;
     } else {
       reasons.push(`input contains '${pattern.input_contains}'`);
@@ -438,7 +465,7 @@ function matchesPolicy(step: TraceStep, policy: GuardrailPolicy): string | null 
     if (needle == null) {
       if (!failsClosed) return null;
       reasons.push(`output_contains '${String(pattern.output_contains)}' is unusable — failing closed`);
-    } else if (!searchableText(step.output ?? '').includes(needle)) {
+    } else if (!foldForMatch(searchableText(step.output ?? '')).includes(needle)) {
       return null;
     } else {
       reasons.push(`output contains '${pattern.output_contains}'`);
