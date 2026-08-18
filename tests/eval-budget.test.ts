@@ -169,3 +169,55 @@ describe('the budget gate fails closed', () => {
     }
   });
 });
+
+describe('when no evaluator produces a result', () => {
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); resetConnection(); });
+
+  // `[]` was the previous answer, described in the code as "a readable nothing
+  // ran". It is not readable as that — it is indistinguishable from a run that
+  // succeeded and produced no evaluators, which is how a pipeline reads it
+  // (`jq length` -> 0, `jq '.[]|select(.passed==false)'` -> nothing). With an
+  // invalid API key, `eval --ai --json` emitted `[]` while EVERY evaluator had
+  // failed to run. Zero results is only reachable when evaluators threw, so it
+  // is unambiguously a failure and gets the same {ok:false,error} shape as every
+  // other refusal here.
+  it('says so, with the causes, instead of emitting an empty array', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ar-eval-none-'));
+    try {
+      const db = ensureDatabase(resolve(dir, 'traces.db'));
+      const trace = ingestTrace(db, failedTrace);
+      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-secret-should-not-appear');
+      // Every attempt fails auth, which is not retried.
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        status: 401,
+        headers: { get: () => null },
+        json: async () => ({ error: { message: 'API key is invalid.' } }),
+      } as unknown as Response));
+
+      const out: string[] = [];
+      const logSpy = vi.spyOn(console, 'log').mockImplementation((m?: unknown) => { out.push(String(m)); });
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const prev = process.exitCode;
+      process.exitCode = 0;
+      try {
+        await runEvalCommand(trace.id, { ai: true, json: true, dir });
+      } finally {
+        logSpy.mockRestore();
+        errSpy.mockRestore();
+      }
+      const code = Number(process.exitCode ?? 0);
+      process.exitCode = prev;
+
+      const doc = JSON.parse(out.join('\n'));
+      expect(code).toBe(1);
+      expect(doc.ok).toBe(false);
+      expect(doc.error).toMatch(/every one failed to run/i);
+      // The causes are named, so the operator knows it was auth and not content.
+      expect(doc.hints.join(' ')).toMatch(/Authentication failed/);
+      // ...and the key itself never appears, whatever the provider echoed.
+      expect(JSON.stringify(doc)).not.toContain('sk-secret');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30000);
+});

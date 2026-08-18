@@ -199,6 +199,14 @@ between them, and nothing else.
 
 ### Fixed
 
+- `eval --json` emitted `[]` when every evaluator failed to run — an empty array
+  that reads to a pipeline exactly like a clean run with no evaluators
+  (`jq length` gives 0, `jq '.[]|select(.passed==false)'` gives nothing). With an
+  invalid API key, `eval --ai --json` produced that while all six AI evaluators
+  had failed on authentication. Zero results is only reachable when evaluators
+  threw, so it now uses the same `{"ok": false, "error": ...}` shape as every
+  other refusal, with each evaluator's cause listed in `hints`.
+
 - `import` no longer hangs forever on an input that is not JSONL. A source with
   no newlines had nothing bounding it, so a binary file passed by mistake
   buffered its whole self and a character device such as `/dev/zero` never ended

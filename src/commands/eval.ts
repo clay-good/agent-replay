@@ -91,6 +91,8 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
   }
 
   const results: EvalResult[] = [];
+  /** Why each evaluator failed, for the "nothing ran" refusal below. */
+  const failures: string[] = [];
 
   // Custom rubric file
   if (opts.rubric) {
@@ -145,6 +147,7 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
         successSpinner(spinner, `${preset}: ${icon} ${formatScorePct(result.score)}`);
       } catch (err) {
         failSpinner(spinner, `${preset}: ${errorMessage(err)}`);
+        failures.push(`${preset}: ${errorMessage(err)}`);
         // A preset that throws is a run failure, not a pass — set a non-zero
         // exit (and it never reached `results`, so the pass/fail gate below
         // can't account for it otherwise).
@@ -267,6 +270,7 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
         }
       } catch (err) {
         failSpinner(spinner, `${presetName}: ${errorMessage(err)}`);
+        failures.push(`${presetName}: ${errorMessage(err)}`);
         // An AI preset that throws (provider/network error) is a run failure,
         // not a pass; it also never reached `results`, so the pass/fail gate
         // below can't account for it — set a non-zero exit here.
@@ -293,6 +297,7 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
         successSpinner(spinner, `${preset}: ${icon} ${formatScorePct(result.score)}`);
       } catch (err) {
         failSpinner(spinner, `${preset}: ${errorMessage(err)}`);
+        failures.push(`${preset}: ${errorMessage(err)}`);
         // A preset that throws is a run failure, not a pass — set a non-zero
         // exit (and it never reached `results`, so the pass/fail gate below
         // can't account for it otherwise).
@@ -302,10 +307,18 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
   }
 
   if (results.length === 0) {
-    // Still answer in the requested shape: every evaluator throwing (a provider
-    // outage, say) printed NOTHING on stdout while exiting 1, so a --json
-    // consumer got an empty document rather than a readable "nothing ran".
-    if (opts.json) console.log(JSON.stringify([], null, 2));
+    // Answer in the requested shape, and say that nothing RAN — not `[]`.
+    //
+    // An empty array was the previous answer, described as "a readable nothing
+    // ran". It is not readable as that: it is indistinguishable from a run that
+    // succeeded and produced no evaluators, which is exactly how a pipeline
+    // reads it (`jq length` -> 0, `jq '.[]|select(.passed==false)'` -> nothing).
+    // With an invalid API key, `eval --ai --json` emitted `[]` while every
+    // evaluator had failed to run. Zero results is only ever reachable when
+    // evaluators threw — a run with no flags at all still executes the built-in
+    // presets — so this is unambiguously a failure and gets the same
+    // `{ok:false,error}` shape every other refusal here uses, naming the causes.
+    refuse(1, 'No evaluator produced a result — every one failed to run.', failures);
     return;
   }
 
