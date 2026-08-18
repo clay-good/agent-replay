@@ -199,6 +199,34 @@ const OPEN_SESSION_TRACE_SQL =
   // written in different timestamp forms.
   ' ORDER BY julianday(started_at) DESC, started_at DESC LIMIT 1';
 
+/**
+ * The trace a CLOSING event belongs to: the session's newest non-fork trace,
+ * whatever its status.
+ *
+ * A closing event (`post_tool`, `post_tool_fail`, `subagent_stop`) has nothing
+ * to open — it finishes work an earlier event started — but it used to go
+ * through `ensureTrace` like everything else. Every hook fires as its own
+ * process, so when the turn-ending `Stop` committed first (deterministically,
+ * when the harness dispatches it before the tool result arrives; and in 15% of
+ * simultaneous spawns, rising past 50% while an `otel serve` holds the write
+ * lock), the closing event found no OPEN trace and CREATED one: the tool's
+ * output, `ended_at` and duration were discarded, the real step stayed open
+ * forever, and the store gained an empty `running` trace that `list`, `watch`
+ * and the dashboard all render as a live run.
+ *
+ * Dropping the `status = 'running'` filter fixes both halves at once: the
+ * closing event finds the trace it belongs to even though it has been
+ * finalized, so the result is recorded rather than lost, and no phantom trace
+ * is created. `updateStep` does not require a running trace — only `appendStep`
+ * does, and a closing event never appends.
+ */
+const SESSION_TRACE_SQL =
+  'SELECT id FROM agent_traces WHERE session_id = ? AND parent_trace_id IS NULL' +
+  ' ORDER BY julianday(started_at) DESC, started_at DESC LIMIT 1';
+
+/** Actions that finish earlier work and must never create a trace. */
+const CLOSING_ACTIONS: ReadonlySet<string> = new Set(['post_tool', 'post_tool_fail', 'subagent_stop']);
+
 /** Find (or create) the open trace for a session. */
 function ensureTrace(
   db: Database.Database,
@@ -301,7 +329,14 @@ export function applyHookPayload(
     return { action, dialect, traceId: row.id, note: 'trace finalized' };
   }
 
-  const traceId = ensureTrace(db, sessionId, dialect, payload);
+  let traceId: string;
+  if (CLOSING_ACTIONS.has(action)) {
+    const row = db.prepare(SESSION_TRACE_SQL).get(sessionId) as { id: string } | undefined;
+    if (!row) return { action, dialect, traceId: null, note: 'no trace for this session to close against' };
+    traceId = row.id;
+  } else {
+    traceId = ensureTrace(db, sessionId, dialect, payload);
+  }
   const agentId = str(payload.agent_id);
 
   switch (action) {

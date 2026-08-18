@@ -435,3 +435,46 @@ describe('runHook with no payload', () => {
     expect(process.exitCode).toBe(0);
   });
 });
+
+describe('a closing hook event that arrives after the turn ended', () => {
+  it('records the result on the finalized trace instead of opening a phantom one', () => {
+    // Every hook fires as its own process. When the turn-ending Stop commits
+    // first — deterministically when the harness dispatches it before the tool
+    // result arrives, and in ~47% of simultaneous spawns (measured, 14/30) —
+    // PostToolUse used to find no OPEN trace and CREATE one: the tool's output,
+    // ended_at and duration were discarded, the real step stayed open forever,
+    // and the store gained an empty `running` trace that `list`, `watch` and the
+    // dashboard all render as a live run.
+    apply({ hook_event_name: 'SessionStart', session_id: 's1', permission_mode: 'default' });
+    apply({ hook_event_name: 'PreToolUse', session_id: 's1', tool_name: 'Bash', tool_input: { command: 'ls' } });
+    apply({ hook_event_name: 'Stop', session_id: 's1' });
+    const res = apply({
+      hook_event_name: 'PostToolUse', session_id: 's1',
+      tool_name: 'Bash', tool_output: { stdout: 'a.txt' },
+    });
+
+    // Exactly one trace — no phantom.
+    const traces = listTraces(db, {}).items;
+    expect(traces).toHaveLength(1);
+    expect(traces[0].status).toBe('completed');
+
+    // ...and the result is kept, not dropped: the step is closed, with output.
+    const trace = getTrace(db, traces[0].id)!;
+    const tool = trace.steps.find((s) => s.step_type === 'tool_call')!;
+    expect(tool.output).toEqual({ stdout: 'a.txt' });
+    expect(tool.ended_at).not.toBeNull();
+    expect(res.traceId).toBe(traces[0].id);
+  });
+
+  it('is a clean no-op when the session has no trace at all', () => {
+    // A closing event must never create a trace, including when nothing opened
+    // one — a stray PostToolUse should record nothing, not a 0-step run.
+    const res = apply({
+      hook_event_name: 'PostToolUse', session_id: 'never-seen',
+      tool_name: 'Bash', tool_output: { stdout: 'x' },
+    });
+    expect(res.traceId).toBeNull();
+    expect(listTraces(db, {}).total).toBe(0);
+  });
+});
+

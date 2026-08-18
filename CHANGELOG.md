@@ -2161,6 +2161,22 @@ between them, and nothing else.
 
 ### Security
 
+- A tool result arriving after the turn ended was discarded, and left a phantom
+  live run behind. Every hook fires as its own process, and a closing event
+  (`PostToolUse`, `PostToolUseFailure`, `SubagentStop`) went through the same
+  find-or-create path as an opening one — so when the turn-ending `Stop`
+  committed first, the closing event found no *open* trace and created one. The
+  tool's output, `ended_at` and duration were dropped permanently, the real step
+  stayed open forever, and the store gained an empty `running` trace that
+  `list`, `watch` and the dashboard all render as a live run. It happens
+  deterministically whenever the harness dispatches `Stop` before the result
+  arrives, and in 47% of simultaneous spawns (measured, 14 of 30), rising
+  further while an `otel serve` holds the write lock. Closing events now resolve
+  the session's trace whatever its status and never create one, so the result is
+  recorded on the finalized trace rather than lost — `updateStep` never required
+  a running trace; only `appendStep` does, and a closing event never appends.
+  Measured again after the fix: 0 of 30.
+
 - A decision whose `options` were not option objects crashed `decisions`. The
   `chosen` field was validated and the options array was not, so a plain array of
   strings — the most obvious wrong guess at this schema — was accepted by
