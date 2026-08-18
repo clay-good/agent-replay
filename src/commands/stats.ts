@@ -7,6 +7,7 @@ import { heading, label, formatCostUsd, safeText } from '../ui/theme.js';
 import { formatDuration, parseSinceToIso } from '../utils/time.js';
 import { errorMessage } from '../utils/json.js';
 import { resolveDataDir } from '../utils/paths.js';
+import { makeRefuse } from '../utils/refuse.js';
 
 export interface StatsOptions {
   json?: boolean;
@@ -20,6 +21,7 @@ export interface StatsOptions {
  * consumable as `--json` in CI, where the full-screen dashboard can't run).
  */
 export function runStats(opts: StatsOptions = {}): void {
+  const refuse = makeRefuse(opts.json);
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
@@ -30,8 +32,7 @@ export function runStats(opts: StatsOptions = {}): void {
     try {
       filter = { since: parseSinceToIso(opts.since) };
     } catch (err) {
-      console.error(chalk.red(`  Invalid --since: ${errorMessage(err)}`));
-      process.exitCode = 2;
+      refuse(2, `Invalid --since: ${errorMessage(err)}`);
       return;
     }
   }

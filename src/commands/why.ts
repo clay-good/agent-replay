@@ -6,6 +6,7 @@ import { ensureDatabase } from '../db/index.js';
 import { stepIcon, stepLabel, heading, label, safeText } from '../ui/theme.js';
 import type { StepType } from '../models/enums.js';
 import { resolveDataDir } from '../utils/paths.js';
+import { makeRefuse } from '../utils/refuse.js';
 
 export interface WhyOptions {
   step?: string;
@@ -32,18 +33,16 @@ export function runWhy(traceId: string, opts: WhyOptions = {}): void {
   // error), not a silently-truncated 1 that explains the wrong step. Matches
   // show/replay/fork's step-number flags. A missing flag is NaN → the required
   // error below; a non-integer or < 1 is a usage error.
+  const refuse = makeRefuse(opts.json);
   const stepNumber = Number(opts.step);
   if (!Number.isInteger(stepNumber) || stepNumber < 1) {
-    console.error(chalk.red('  --step <N> is required and must be a positive integer.'));
-    process.exitCode = 2;
+    refuse(2, '--step <N> is required and must be a positive integer.');
     return;
   }
 
   const result = causalWalk(db, traceId, stepNumber);
   if (!result) {
-    console.error(chalk.red(`  Trace not found: ${traceId}`));
-    console.error(chalk.dim('  Use "agent-replay list" to see available traces.'));
-    process.exitCode = 1;
+    refuse(1, `Trace not found: ${traceId}`, ['Use "agent-replay list" to see available traces.']);
     return;
   }
 
@@ -53,9 +52,9 @@ export function runWhy(traceId: string, opts: WhyOptions = {}): void {
   // means the requested step number doesn't exist. Treat it like trace-not-found
   // above (stderr + exit 1) rather than printing to stdout and succeeding.
   if (chain.length === 0) {
-    console.error(chalk.red(`  Step ${stepNumber} not found in trace ${safeText(trace.id)}.`));
-    console.error(chalk.dim(`  This trace has ${trace.steps.length} step(s).`));
-    process.exitCode = 1;
+    refuse(1, `Step ${stepNumber} not found in trace ${safeText(trace.id)}.`, [
+      `This trace has ${trace.steps.length} step(s).`,
+    ]);
     return;
   }
 

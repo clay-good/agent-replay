@@ -10,6 +10,7 @@ import { safeText } from '../ui/theme.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage } from '../utils/json.js';
 import { resolveDataDir } from '../utils/paths.js';
+import { makeRefuse } from '../utils/refuse.js';
 
 export interface DiffOptions {
   compact?: boolean;
@@ -28,21 +29,20 @@ export async function runDiff(
   traceIdB: string,
   opts: DiffOptions = {},
 ): Promise<void> {
+  const refuse = makeRefuse(opts.json);
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   // Resolve both traces (supports prefix-matching)
   const traceA = getTrace(db, traceIdA);
   if (!traceA) {
-    console.error(chalk.red(`  Left trace not found: ${traceIdA}`));
-    process.exitCode = 1;
+    refuse(1, `Left trace not found: ${traceIdA}`);
     return;
   }
 
   const traceB = getTrace(db, traceIdB);
   if (!traceB) {
-    console.error(chalk.red(`  Right trace not found: ${traceIdB}`));
-    process.exitCode = 1;
+    refuse(1, `Right trace not found: ${traceIdB}`);
     return;
   }
 
@@ -62,8 +62,7 @@ export async function runDiff(
     // reported three — with no scope label, since the honest "in <fields>" note
     // keys off a non-empty list. That defeats the guard's whole purpose.
     if (allowedFields.length === 0) {
-      console.error(chalk.red(`  --fields listed no field names: ${JSON.stringify(opts.fields)}`));
-      process.exitCode = 2;
+      refuse(2, `--fields listed no field names: ${JSON.stringify(opts.fields)}`);
       return;
     }
     appliedFields = allowedFields;
@@ -72,8 +71,7 @@ export async function runDiff(
     const comparable = ['step_type', 'name', 'input', 'output', 'model', 'error', 'decision', 'status', 'trace_input', 'trace_error', 'trace_output'];
     const unknown = allowedFields.filter((f) => !comparable.includes(f));
     if (unknown.length > 0) {
-      console.error(chalk.red(`  Unknown --fields value(s): ${unknown.join(', ')}. Comparable fields: ${comparable.join(', ')}`));
-      process.exitCode = 2;
+      refuse(2, `Unknown --fields value(s): ${unknown.join(', ')}.`, [`Comparable fields: ${comparable.join(', ')}`]);
       return;
     }
     diff.diffs = diff.diffs.filter(
@@ -95,9 +93,45 @@ export async function runDiff(
     diff.divergence_step = stepNumbers.length ? Math.min(...stepNumbers) : null;
   }
 
+  // AI analysis, when asked for. Resolved BEFORE the --json early return below:
+  // that return came first, so `--ai --json` dropped the flag entirely — no
+  // analysis in the payload, nothing on stderr, exit 0. A pipeline reading
+  // `diff a b --ai --json | jq .ai_analysis` got null forever, and the
+  // "no provider configured" misconfiguration that exits 1 interactively exited
+  // 0 in automation. `eval --ai --json` already answered both ways; this is the
+  // same contract.
+  let aiAnalysis: Awaited<ReturnType<typeof aiDiffAnalysis>> | undefined;
+  const analyzeWithAi = async (): Promise<boolean> => {
+    const config = loadConfig(opts.dir);
+    const resolved = resolveProvider(config);
+    if (!resolved) {
+      refuse(1, 'No AI provider configured for --ai flag.', [
+        'Set an API key: agent-replay config set ai.api_keys.anthropic <key>',
+      ]);
+      return false;
+    }
+    // The spinner writes to stderr, so it never pollutes a --json stdout.
+    const spinner = startSpinner(`Analyzing diff with ${resolved.provider} (${resolved.model})...`);
+    try {
+      aiAnalysis = await aiDiffAnalysis(db, traceA.id, traceB.id, {
+        provider: resolved.provider,
+        api_key: resolved.apiKey,
+        model: resolved.model,
+      });
+      successSpinner(spinner, 'AI analysis complete');
+      return true;
+    } catch (err) {
+      failSpinner(spinner, `AI analysis failed: ${errorMessage(err)}`);
+      if (opts.json) refuse(1, `AI analysis failed: ${errorMessage(err)}`);
+      else process.exitCode = 1;
+      return false;
+    }
+  };
+
   // Raw JSON output
   if (opts.json) {
-    console.log(JSON.stringify(diff, null, 2));
+    if (opts.ai && !(await analyzeWithAi())) return;
+    console.log(JSON.stringify(opts.ai ? { ...diff, ai_analysis: aiAnalysis } : diff, null, 2));
     return;
   }
 
@@ -126,32 +160,12 @@ export async function runDiff(
     console.log('');
   }
 
-  // AI-powered diff analysis
-  if (opts.ai) {
-    const config = loadConfig(opts.dir);
-    const resolved = resolveProvider(config);
-    if (!resolved) {
-      console.error(chalk.red('  No AI provider configured for --ai flag.'));
-      console.error(chalk.dim('  Set an API key: agent-replay config set ai.api_keys.anthropic <key>'));
-      process.exitCode = 1;
-      return;
-    }
-
-    const spinner = startSpinner(`Analyzing diff with ${resolved.provider} (${resolved.model})...`);
-    try {
-      const analysis = await aiDiffAnalysis(db, traceA.id, traceB.id, {
-        provider: resolved.provider,
-        api_key: resolved.apiKey,
-        model: resolved.model,
-      });
-      successSpinner(spinner, 'AI analysis complete');
-      console.log('');
-      console.log(aiDiffPanel(analysis));
-      console.log('');
-    } catch (err) {
-      failSpinner(spinner, `AI analysis failed: ${errorMessage(err)}`);
-      process.exitCode = 1;
-    }
+  // AI-powered diff analysis. Human mode runs it AFTER the diff view, so the
+  // rendered comparison appears before the spinner, as it always has.
+  if (opts.ai && (await analyzeWithAi()) && aiAnalysis) {
+    console.log('');
+    console.log(aiDiffPanel(aiAnalysis));
+    console.log('');
   }
 }
 

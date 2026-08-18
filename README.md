@@ -591,6 +591,8 @@ Every command exits non-zero on failure, so it drops cleanly into scripts and CI
 
 Two commands instead propagate a child's own status: `run` exits with the wrapped command's exit code, and `hook` (capture mode) always exits `0` so it can never interfere with the host agent.
 
+Under `--json`, a failure is still answered **as JSON on stdout** — `{"ok": false, "error": "...", "hints": [...]}` — so a `| jq` pipeline gets a document it can read on every outcome rather than a parse error. The exit code is unchanged by the output shape.
+
 ## Evaluation Presets
 
 ### Deterministic Presets

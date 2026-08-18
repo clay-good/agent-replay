@@ -179,6 +179,17 @@ between them, and nothing else.
 
 ### Fixed
 
+- `--json` refusals from `list`, `stats`, `show`, `why`, `decisions` and `diff`
+  wrote a bare line to stderr and left stdout empty, so a `| jq` pipeline got a
+  parse error exactly where it expected a verdict it could read. All six now
+  answer `{"ok": false, "error": ...}` on stdout, like `eval` and `check`
+  already did — from one shared helper rather than an eighth copy.
+- `diff --ai --json` silently dropped `--ai`: the JSON output returned before
+  the AI block ran, so there was no analysis in the payload, nothing on stderr,
+  and exit 0 — while the same misconfiguration exits 1 interactively. A pipeline
+  reading `.ai_analysis` got `null` forever. The analysis now runs first and is
+  merged into the payload.
+
 - **The only spend cap on paid AI evaluation failed open.** `config set`
   validates every key and nothing validated them on read, so a hand-edited or
   copied config could hold a non-numeric or negative `ai.max_tokens`. That value

@@ -1474,4 +1474,39 @@ describe('CLI integration', () => {
     // A longer, unambiguous prefix still works.
     expect(run(['show', 'amb_aaa', '--json']).code).toBe(0);
   });
+
+  it('answers every --json refusal with a document a pipeline can parse', () => {
+    // `--json` is a contract: a caller piping into jq expects a document it can
+    // read a verdict from on EVERY outcome. Six commands wrote a bare red line
+    // to stderr and left stdout empty, so `show nosuchtrace --json | jq .` died
+    // on a parse error rather than reporting a missing trace. Exit codes were
+    // already right; the shape was not.
+    run(['record'], [
+      '{"v":1,"type":"trace_start","trace_id":"jsonc1","agent_name":"jsonc"}',
+      '{"v":1,"type":"step","trace_id":"jsonc1","step_number":1,"step_type":"thought","name":"a"}',
+      '{"v":1,"type":"trace_end","trace_id":"jsonc1","status":"completed"}',
+    ].join('\n'));
+    const traceId = 'jsonc1';
+    const cases: string[][] = [
+      ['list', '--status', 'bogus', '--json'],
+      ['list', '--limit', '-1', '--json'],
+      ['stats', '--since', 'bogus', '--json'],
+      ['show', 'nosuchtrace', '--json'],
+      ['show', traceId, '--from-step', '0', '--json'],
+      ['why', 'nosuchtrace', '--step', '1', '--json'],
+      ['why', traceId, '--step', '999', '--json'],
+      ['decisions', 'nosuchtrace', '--json'],
+      ['diff', traceId, 'nosuch', '--json'],
+      ['diff', traceId, traceId, '--fields', 'bogus', '--json'],
+      ['check', '--golden', 'nosuch.json', '--json'],
+      ['eval', 'nosuchtrace', '--json'],
+    ];
+    for (const args of cases) {
+      const r = run(args);
+      expect(r.code, `${args.join(' ')} should fail`).not.toBe(0);
+      const parsed = JSON.parse(r.stdout);
+      expect(parsed.ok, `${args.join(' ')} should report ok:false`).toBe(false);
+      expect(typeof parsed.error, `${args.join(' ')} should name the error`).toBe('string');
+    }
+  });
 });

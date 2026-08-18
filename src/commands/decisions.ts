@@ -4,6 +4,7 @@ import { listDecisions } from '../services/decision-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { heading, label, safeText } from '../ui/theme.js';
 import { resolveDataDir } from '../utils/paths.js';
+import { makeRefuse } from '../utils/refuse.js';
 
 export interface DecisionsOptions {
   json?: boolean;
@@ -18,11 +19,10 @@ export function runDecisions(traceId: string, opts: DecisionsOptions = {}): void
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
+  const refuse = makeRefuse(opts.json);
   const result = listDecisions(db, traceId);
   if (!result) {
-    console.error(chalk.red(`  Trace not found: ${traceId}`));
-    console.error(chalk.dim('  Use "agent-replay list" to see available traces.'));
-    process.exitCode = 1;
+    refuse(1, `Trace not found: ${traceId}`, ['Use "agent-replay list" to see available traces.']);
     return;
   }
 

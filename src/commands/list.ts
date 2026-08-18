@@ -8,6 +8,7 @@ import { heading } from '../ui/theme.js';
 import { parseSinceToIso } from '../utils/time.js';
 import { errorMessage } from '../utils/json.js';
 import { resolveDataDir } from '../utils/paths.js';
+import { makeRefuse } from '../utils/refuse.js';
 
 export interface ListOptions {
   status?: string;
@@ -25,6 +26,7 @@ export interface ListOptions {
  * `agent-replay list` — query traces with filters and display a formatted table.
  */
 export function runList(opts: ListOptions = {}): void {
+  const refuse = makeRefuse(opts.json);
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
@@ -45,8 +47,7 @@ export function runList(opts: ListOptions = {}): void {
   if (opts.limit != null) {
     const n = Number(opts.limit);
     if (!Number.isInteger(n) || n < 1) {
-      console.error(chalk.red(`  Invalid --limit: ${opts.limit} (must be a positive integer).`));
-      process.exitCode = 2;
+      refuse(2, `Invalid --limit: ${opts.limit} (must be a positive integer).`);
       return;
     }
     // Consume the value we validated. A second parse (parseInt) would disagree
@@ -62,8 +63,7 @@ export function runList(opts: ListOptions = {}): void {
     if (opts.since) filter.since = parseSinceToIso(opts.since);
     ({ items: traces, total } = listTraces(db, filter));
   } catch (err) {
-    console.error(chalk.red(`  ${errorMessage(err)}`));
-    process.exitCode = 2;
+    refuse(2, errorMessage(err));
     return;
   }
 

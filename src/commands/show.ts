@@ -11,6 +11,7 @@ import { renderTimeline, renderTree } from '../ui/timeline.js';
 import { evalTable } from '../ui/table.js';
 import { heading, separator, safeText } from '../ui/theme.js';
 import { resolveDataDir } from '../utils/paths.js';
+import { makeRefuse } from '../utils/refuse.js';
 
 export interface ShowOptions {
   json?: boolean;
@@ -28,14 +29,13 @@ export interface ShowOptions {
  * with header panel, step timeline, evaluations, and optional snapshots.
  */
 export function runShow(traceId: string, opts: ShowOptions = {}): void {
+  const refuse = makeRefuse(opts.json);
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
   const trace = getTrace(db, traceId);
   if (!trace) {
-    console.error(chalk.red(`  Trace not found: ${traceId}`));
-    console.error(chalk.dim('  Use "agent-replay list" to see available traces.'));
-    process.exitCode = 1;
+    refuse(1, `Trace not found: ${traceId}`, ['Use "agent-replay list" to see available traces.']);
     return;
   }
 
@@ -51,8 +51,7 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
   if (opts.fromStep != null) {
     const n = Number(opts.fromStep);
     if (!Number.isInteger(n) || n < 1) {
-      console.error(chalk.red(`  Invalid --from-step: ${opts.fromStep} (must be a positive integer).`));
-      process.exitCode = 2;
+      refuse(2, `Invalid --from-step: ${opts.fromStep} (must be a positive integer).`);
       return;
     }
     fromStep = n;
@@ -61,15 +60,13 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
   if (opts.toStep != null) {
     const n = Number(opts.toStep);
     if (!Number.isInteger(n) || n < 1) {
-      console.error(chalk.red(`  Invalid --to-step: ${opts.toStep} (must be a positive integer).`));
-      process.exitCode = 2;
+      refuse(2, `Invalid --to-step: ${opts.toStep} (must be a positive integer).`);
       return;
     }
     toStep = n;
   }
   if (fromStep != null && toStep != null && fromStep > toStep) {
-    console.error(chalk.red(`  --from-step (${fromStep}) cannot be greater than --to-step (${toStep}).`));
-    process.exitCode = 2;
+    refuse(2, `--from-step (${fromStep}) cannot be greater than --to-step (${toStep}).`);
     return;
   }
   const windowed = fromStep == null && toStep == null
