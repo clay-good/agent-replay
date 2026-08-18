@@ -1,13 +1,15 @@
 /**
- * Token totals across OTLP export batches.
+ * Token totals across OTLP export batches, as a MATRIX.
  *
- * Every one of these three shapes has been wrong at some point in the same
- * week, in both directions: a redelivered batch re-added the tokens of spans it
- * had just dropped (over-count), and then the fix for that dropped the root's
- * own usage when a rootless synthetic trace was upgraded (under-count), because
- * the redelivery guard treated "no new child steps" as "nothing new" even when
- * the batch carried a first-time root. They are asserted together so a fix to
- * one cannot silently break another.
+ * This one expression has been wrong twice in a week, in opposite directions: a
+ * redelivered batch re-added the tokens of spans it had just dropped
+ * (over-count), and the fix for that then dropped a first-time root's own usage
+ * when it upgraded a rootless synthetic trace (under-count) — because the
+ * redelivery guard read "no new child steps" as "nothing new". Three ad-hoc
+ * cases were not enough to catch the second one, so every combination of
+ * (root present / absent) x (already stored / new) x (synthetic target / real)
+ * x (new child spans / all duplicates) is enumerated here and asserted
+ * together. A fix to one row cannot silently break another.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
@@ -19,35 +21,37 @@ let db: Database.Database;
 beforeEach(() => { db = new Database(':memory:'); db.pragma('foreign_keys = ON'); runMigrations(db); });
 afterEach(() => db.close());
 
-function span(id: string, name: string, op: string, parent?: string, tok?: number) {
+function span(id: string, op: string, parent?: string, tok?: number) {
   const attrs: unknown[] = [{ key: 'gen_ai.operation.name', value: { stringValue: op } }];
   if (tok != null) attrs.push({ key: 'gen_ai.usage.input_tokens', value: { intValue: String(tok) } });
-  return { traceId: 'zz', spanId: id, ...(parent ? { parentSpanId: parent } : {}), name,
+  return { traceId: 'zz', spanId: id, ...(parent ? { parentSpanId: parent } : {}), name: op,
     startTimeUnixNano: '1700000000000000000', endTimeUnixNano: '1700000001000000000', attributes: attrs };
 }
-function batch(spans: unknown[]) {
-  return JSON.stringify({ resourceSpans: [{ resource: { attributes: [{ key: 'service.name', value: { stringValue: 's' } }] }, scopeSpans: [{ spans }] }] });
-}
-function tokens(): number | null {
-  const items = listTraces(db, {}).items;
-  return getTrace(db, items[0].id)!.total_tokens;
+const B = (spans: unknown[]) => JSON.stringify({ resourceSpans: [{ resource: { attributes: [{ key: 'service.name', value: { stringValue: 's' } }] }, scopeSpans: [{ spans }] }] });
+const stats = { acceptedSpans: 0, acceptedTraces: 0 };
+function state() {
+  const t = listTraces(db, {}).items[0];
+  const full = getTrace(db, t.id)!;
+  return { tokens: full.total_tokens, steps: full.steps.length, synthetic: !!(full.metadata as Record<string, unknown>).synthetic_trace };
 }
 
-describe('otel token totals across batches', () => {
-  const stats = { acceptedSpans: 0, acceptedTraces: 0 };
-  it('child then root+child (synthetic upgrade + redelivery) = 170', () => {
-    handleTracesExport(db, batch([span('c1', 'chat', 'chat', 'r1', 120)]), stats);
-    handleTracesExport(db, batch([span('r1', 'invoke_agent', 'invoke_agent', undefined, 50), span('c1', 'chat', 'chat', 'r1', 120)]), stats);
-    expect(tokens()).toBe(170);
-  });
-  it('child then root alone = 170', () => {
-    handleTracesExport(db, batch([span('c1', 'chat', 'chat', 'r1', 120)]), stats);
-    handleTracesExport(db, batch([span('r1', 'invoke_agent', 'invoke_agent', undefined, 50)]), stats);
-    expect(tokens()).toBe(170);
-  });
-  it('root+child then child+tool (mixed redelivery) = 120', () => {
-    handleTracesExport(db, batch([span('r1', 'invoke_agent', 'invoke_agent'), span('c1', 'chat', 'chat', 'r1', 120)]), stats);
-    handleTracesExport(db, batch([span('c1', 'chat', 'chat', 'r1', 120), span('t1', 'execute_tool', 'execute_tool', 'r1')]), stats);
-    expect(tokens()).toBe(120);
+const ROOT = () => span('r1', 'invoke_agent', undefined, 50);
+const CHAT = () => span('c1', 'chat', 'r1', 120);
+const TOOL = () => span('t1', 'execute_tool', 'r1');
+
+describe('receiver batch matrix — expected totals', () => {
+  it.each([
+    ['root+chat, then identical redelivery', [[ROOT(), CHAT()], [ROOT(), CHAT()]], 170],
+    ['root+chat, then root only (retry)', [[ROOT(), CHAT()], [ROOT()]], 170],
+    ['root+chat, then chat+tool', [[ROOT(), CHAT()], [CHAT(), TOOL()]], 170],
+    ['chat, then root+chat (synthetic upgrade)', [[CHAT()], [ROOT(), CHAT()]], 170],
+    ['chat, then root only', [[CHAT()], [ROOT()]], 170],
+    ['chat, then tool (no root at all)', [[CHAT()], [TOOL()]], 120],
+    ['root+chat, then a NEW chat span', [[ROOT(), CHAT()], [span('c2', 'chat', 'r1', 7)]], 177],
+    ['three identical deliveries', [[ROOT(), CHAT()], [ROOT(), CHAT()], [ROOT(), CHAT()]], 170],
+  ])('%s', (_label, batches, expected) => {
+    for (const b of batches as unknown[][]) handleTracesExport(db, B(b), stats);
+    const s = state();
+    expect(s.tokens, `tokens (steps=${s.steps} synthetic=${s.synthetic})`).toBe(expected);
   });
 });
