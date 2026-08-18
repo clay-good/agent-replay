@@ -6,6 +6,7 @@ import {
   setConfigValue,
   resolveProvider,
   configPath,
+  configProblems,
 } from '../services/config-service.js';
 import type { AgentReplayConfig } from '../services/config-service.js';
 import { callLlm } from '../services/llm-client.js';
@@ -17,6 +18,37 @@ export interface ConfigOptions {
 }
 
 // ── config list ──────────────────────────────────────────────────────────
+
+/** Every settable key, in one place: `config set` validates against it, `config
+ *  get` accepts it, and both messages are built from it. */
+const VALID_KEYS = [
+  'ai.provider',
+  'ai.model',
+  'ai.max_tokens',
+  'ai.api_keys.anthropic',
+  'ai.api_keys.google',
+  'ai.api_keys.openai',
+] as const;
+
+/**
+ * Keys `config get` will answer for. Broader than the settable list: reading a
+ * CONTAINER (`config get ai`) prints the masked subtree, and the file's own
+ * bookkeeping fields are readable even though they are not settable.
+ */
+function isKnownConfigKey(key: string): boolean {
+  return (
+    (VALID_KEYS as readonly string[]).includes(key) ||
+    ['ai', 'ai.api_keys', 'version', 'database', 'created_at'].includes(key)
+  );
+}
+
+/** Print any key the loader had to drop, so a silently ignored value is visible. */
+function reportConfigProblems(dir?: string): void {
+  const problems = configProblems(dir);
+  if (problems.length === 0) return;
+  for (const p of problems) console.error(chalk.yellow(`  ${p.message}`));
+  console.error('');
+}
 
 export function runConfigList(opts: ConfigOptions = {}): void {
   const config = loadConfig(opts.dir);
@@ -44,6 +76,12 @@ export function runConfigList(opts: ConfigOptions = {}): void {
   console.log(JSON.stringify(display, null, 2));
   console.log('');
 
+  // A key the loader had to drop is in the file but NOT in effect. `config set`
+  // validates every key and nothing validated them on read, so a hand-edited or
+  // copied config could hold a value that is silently ignored — printing the
+  // file without saying so is how it stays invisible.
+  reportConfigProblems(opts.dir);
+
   // Show env var status
   const envVars = ['ANTHROPIC_API_KEY', 'GOOGLE_API_KEY', 'OPENAI_API_KEY'];
   const activeEnv = envVars.filter((v) => process.env[v]);
@@ -66,9 +104,23 @@ export function runConfigGet(key: string, opts: ConfigOptions = {}): void {
     return;
   }
 
+  // Reject an unknown key rather than answering "(not set)" for it. `config
+  // set` already refuses the same key at exit 2, so a typo was undetectable
+  // here — identical output and exit code to a real but unset key.
+  if (!isKnownConfigKey(key)) {
+    console.error(chalk.red(`  Unknown key: ${key}`));
+    console.error(chalk.dim(`  Valid keys: ${VALID_KEYS.join(', ')}`));
+    process.exitCode = 2;
+    return;
+  }
+
   const value = getConfigValue(config, key);
   if (value === undefined) {
-    console.log(chalk.dim(`  ${key}: (not set)`));
+    // stderr, not stdout: stdout is the VALUE channel here, and
+    // `KEY=$(agent-replay config get ai.api_keys.anthropic)` captured a 34-char
+    // human sentence instead of the empty string, so a `[ -n "$KEY" ]` guard
+    // passed and the sentence was sent onward as if it were a key.
+    console.error(chalk.dim(`  ${key}: (not set)`));
   } else if (typeof value === 'object') {
     // Mask any API keys before printing — `config get ai` or `config get
     // ai.api_keys` returns an object, and dumping it raw would leak secrets in
@@ -91,13 +143,12 @@ export function runConfigSet(key: string, value: string, opts: ConfigOptions = {
     return;
   }
 
-  // Validate known keys
-  const validKeys = ['ai.provider', 'ai.model', 'ai.max_tokens', 'ai.api_keys.anthropic', 'ai.api_keys.google', 'ai.api_keys.openai'];
-  const isKnown = validKeys.includes(key);
-
-  if (!isKnown) {
+  // One list, shared with `config get` and with the message below — the message
+  // used to repeat the array as a literal string, which is a copy that can go
+  // stale the moment a key is added.
+  if (!(VALID_KEYS as readonly string[]).includes(key)) {
     console.error(chalk.yellow(`  Unknown key: ${key}`));
-    console.error(chalk.dim('  Valid keys: ai.provider, ai.model, ai.max_tokens, ai.api_keys.anthropic, ai.api_keys.google, ai.api_keys.openai'));
+    console.error(chalk.dim(`  Valid keys: ${VALID_KEYS.join(', ')}`));
     process.exitCode = 2;
     return;
   }

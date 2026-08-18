@@ -7,8 +7,24 @@ import { SCHEMA_VERSION, getSchemaVersion, applySchemaV1, applySchemaV2, applySc
  * upgrade are both atomic. Returns the version after migration.
  */
 export function runMigrations(db: Database.Database): number {
+  const found = getSchemaVersion(db);
+
+  // A store written by a NEWER build is refused rather than used. Upgrades are
+  // one-way with no down-migration, so an older binary opening a newer store was
+  // reading columns it does not know about and writing rows that do not satisfy
+  // the newer shape — silently, at exit 0, with the version left untouched.
+  // Downgrading (an old binary on a PATH, a pinned CI image) is exactly when
+  // that happens, and it is the case that most needs to stop rather than
+  // half-work.
+  if (found > SCHEMA_VERSION) {
+    throw new Error(
+      `This store's schema is v${found}, newer than this build supports (v${SCHEMA_VERSION}). ` +
+        'Upgrade agent-replay to open it — schema upgrades are one-way, so an older build cannot safely read or write it.',
+    );
+  }
+
   // Fast path: already current — avoid taking a write lock on every open.
-  if (getSchemaVersion(db) >= SCHEMA_VERSION) {
+  if (found >= SCHEMA_VERSION) {
     return SCHEMA_VERSION;
   }
 

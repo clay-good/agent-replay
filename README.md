@@ -268,7 +268,7 @@ agent-replay show <trace-id> --from-step 100 --to-step 150
 
 A windowed `show --json` carries a `step_window` object (`from`, `to`, `shown`, `omitted`) so a consumer can tell a subset from a whole trace; an unwindowed one has no such field.
 
-Trace IDs support prefix matching — just type the first few characters.
+Trace IDs support prefix matching — just type the first few characters. A prefix that matches more than one trace is an error naming the candidates, not a silent pick, so a command never answers about (or, in `fork`'s case, writes from) a trace you did not name.
 
 ### Watch a live run
 

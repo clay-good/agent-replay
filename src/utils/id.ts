@@ -13,6 +13,12 @@ export function generateId(prefix?: string): string {
  * Return the first 8 characters of an ID for compact display.
  * Strips the standard prefix (e.g. "trc_") before slicing.
  * Only strips the first `prefix_` segment.
+ *
+ * NOTE: the result is NOT a resolvable id. Every command resolves a trace by
+ * prefix from the START of the id, so a prefix-stripped token matches nothing.
+ * To print an id a user can paste, slice the id itself (`id.slice(0, 12)`, as
+ * `list`, `fork` and `run` do). Kept because it is part of the package's public
+ * exports.
  */
 export function shortId(fullId: string): string {
   const idx = fullId.indexOf('_');

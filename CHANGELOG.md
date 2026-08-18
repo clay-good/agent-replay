@@ -179,6 +179,49 @@ between them, and nothing else.
 
 ### Fixed
 
+- **The only spend cap on paid AI evaluation failed open.** `config set`
+  validates every key and nothing validated them on read, so a hand-edited or
+  copied config could hold a non-numeric or negative `ai.max_tokens`. That value
+  reached the cost estimate, making it `NaN` — and `NaN > maxCost` is false, so
+  `eval --ai --max-cost 0`, the strictest possible budget, ran the whole
+  evaluation and billed for it. The value was forwarded to the provider as
+  `max_tokens` besides. Unusable `ai` values are now dropped on read (the field
+  falls back to its default, as a missing key already does), the gate refuses a
+  non-finite estimate rather than passing it, and `config list` / `config
+  test-ai` name every dropped key so an ignored value is not silent.
+- `eval --max-cost` was validated only on a run that reached the provider, so a
+  CI job whose budget flag was a typo'd or empty shell variable passed silently
+  until the first run that happened to enable `--ai` — the run where the cap was
+  already load-bearing. It is now a usage error on every run.
+- A typo in `ai.provider` reported "No AI provider configured" and advised
+  setting the very environment variable that was already set and would have
+  worked. An unrecognized provider now falls back to auto-detection.
+- **An ambiguous trace-id prefix silently resolved to whichever id sorted
+  first.** `show`, `why`, `decisions`, `replay` and `watch` answered about a
+  trace the user had not named, and `fork` — which writes — derived a new trace
+  from one: `fork trc_ --from-step 1` was enough to fork an arbitrary trace out
+  of a whole store at exit 0. Deterministic ordering made that stable, not
+  correct. An ambiguous prefix is now an error naming the candidates; an exact
+  id still wins over a longer id it prefixes.
+- `run` printed a trace id no other command could resolve. It used the
+  prefix-stripping short form, while every consumer matches a prefix from the
+  start of the id — so the wrapper's only pointer to the run it had just
+  recorded matched nothing, on the one command with no other way to learn the id
+  at the moment it finishes. It now prints the same 12 characters `list` and
+  `fork` do.
+- Opening a store written by a NEWER build silently read and wrote it. Schema
+  upgrades are one-way with no down-migration, so an older binary — an old
+  install on a PATH, a pinned CI image — was reading columns it does not know
+  about and writing rows that do not satisfy the newer shape, at exit 0. It is
+  now refused with both versions named.
+- `config get` wrote its "(not set)" message to **stdout**, the value channel,
+  so `KEY=$(agent-replay config get ai.api_keys.anthropic)` captured a 34-character
+  human sentence instead of the empty string — a `[ -n "$KEY" ]` guard passed
+  and the sentence was sent onward as if it were a key. It also answered
+  "(not set)" at exit 0 for a key that does not exist, making a typo
+  undetectable, while `config set` refuses the same key at exit 2. The message
+  now goes to stderr and an unknown key is refused, from one shared key list.
+
 - **The Codex importer dropped roughly nine tenths of what the agent did.** It
   handled only `function_call`, while the current Codex CLI emits most tool
   invocations as the freeform `custom_tool_call` — measured across 40 recent

@@ -365,3 +365,28 @@ describe('hook step numbering', () => {
     expect(new Set(nums).size).toBe(3); // all distinct, none lost
   });
 });
+
+describe('a store from a newer build is refused, not half-read', () => {
+  // Upgrades are one-way with no down-migration, so an older binary opening a
+  // newer store was reading columns it does not know about and writing rows
+  // that do not satisfy the newer shape — silently, at exit 0, with the version
+  // left untouched. A downgrade (an old binary on a PATH, a pinned CI image) is
+  // exactly when that happens.
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = new BetterSqlite3(':memory:');
+    runMigrations(db);
+  });
+  afterEach(() => db.close());
+
+  it('throws a message naming both versions', () => {
+    db.prepare('INSERT INTO schema_version (version) VALUES (99)').run();
+    expect(() => runMigrations(db)).toThrow(/v99/);
+    expect(() => runMigrations(db)).toThrow(/newer than this build/);
+  });
+
+  it('still opens a store at the current version', () => {
+    expect(() => runMigrations(db)).not.toThrow();
+  });
+});

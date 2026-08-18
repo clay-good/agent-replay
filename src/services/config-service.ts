@@ -55,9 +55,76 @@ export function loadConfig(dir?: string): AgentReplayConfig | null {
   if (!existsSync(path)) return null;
   try {
     const raw = readFileSync(path, 'utf-8');
-    return JSON.parse(raw) as AgentReplayConfig;
+    return sanitizeConfig(JSON.parse(raw) as AgentReplayConfig);
   } catch {
     return null;
+  }
+}
+
+/**
+ * Drop values a hand-edited config file can hold that the writers reject.
+ *
+ * `config set` validates every key, and then nothing validated them on READ —
+ * so the validation was bypassed by editing the file, which is exactly how a
+ * config gets copied between machines. A non-numeric or negative
+ * `ai.max_tokens` was the expensive one: it flowed into the AI cost estimate,
+ * making it `NaN`, and `NaN > maxCost` is FALSE, so `--max-cost 0` — the only
+ * spend guard on paid evals — passed everything through. It was forwarded to
+ * the provider as `max_tokens` besides.
+ *
+ * An unusable value is dropped rather than rejected, so one bad key never makes
+ * the whole config unreadable: the field falls back to its default, which is
+ * what a missing key already does.
+ */
+function sanitizeConfig(config: AgentReplayConfig | null): AgentReplayConfig | null {
+  if (!config || typeof config !== 'object') return null;
+  const ai = config.ai;
+  if (ai && typeof ai === 'object') {
+    for (const problem of aiConfigProblems(ai)) delete ai[problem.key];
+  }
+  return config;
+}
+
+export interface ConfigProblem {
+  key: 'max_tokens' | 'provider';
+  message: string;
+}
+
+/**
+ * Unusable `ai` values, named. Dropping them keeps the tool working, but a
+ * silently ignored key is a typo the user never hears about — `config list` and
+ * `config test-ai` report these so the diagnostic commands stay honest about
+ * what is actually in effect.
+ */
+export function aiConfigProblems(ai: AiConfig | undefined): ConfigProblem[] {
+  if (!ai || typeof ai !== 'object') return [];
+  const problems: ConfigProblem[] = [];
+  const t = ai.max_tokens;
+  if (t != null && !(typeof t === 'number' && Number.isInteger(t) && t > 0)) {
+    problems.push({
+      key: 'max_tokens',
+      message: `ai.max_tokens must be a positive integer (found ${JSON.stringify(t)}) — ignoring it.`,
+    });
+  }
+  const valid = ['anthropic', 'google', 'openai', 'auto'];
+  if (ai.provider != null && !valid.includes(ai.provider)) {
+    problems.push({
+      key: 'provider',
+      message: `ai.provider ${JSON.stringify(ai.provider)} is not one of ${valid.join(', ')} — auto-detecting instead.`,
+    });
+  }
+  return problems;
+}
+
+/** The problems in the config file on disk, before sanitizing drops them. */
+export function configProblems(dir?: string): ConfigProblem[] {
+  const path = configPath(dir);
+  if (!existsSync(path)) return [];
+  try {
+    const raw = JSON.parse(readFileSync(path, 'utf-8')) as AgentReplayConfig;
+    return aiConfigProblems(raw?.ai);
+  } catch {
+    return [];
   }
 }
 

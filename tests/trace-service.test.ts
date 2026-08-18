@@ -271,10 +271,18 @@ describe('getTrace', () => {
     expect(found!.agent_name).toBe('exact');
   });
 
-  it('resolves a prefix collision deterministically (lowest id)', () => {
+  it('refuses an ambiguous prefix instead of picking one', () => {
+    // It used to resolve to whichever id sorted first, silently — so the read
+    // commands answered about a trace the user did not name, and `fork`, which
+    // WRITES, derived a new trace from one. Deterministic ordering made that
+    // stable, not correct.
     startTrace(db, { agent_name: 'x', status: 'completed' }, { id: 'trc_pfx_bbb' });
     startTrace(db, { agent_name: 'y', status: 'completed' }, { id: 'trc_pfx_aaa' });
-    expect(getTrace(db, 'trc_pfx_')!.id).toBe('trc_pfx_aaa');
+    expect(() => getTrace(db, 'trc_pfx_')).toThrow(/Ambiguous trace id/);
+    // The message names candidates, so the user can lengthen the prefix.
+    expect(() => getTrace(db, 'trc_pfx_')).toThrow(/trc_pfx_aaa/);
+    // An unambiguous prefix still resolves.
+    expect(getTrace(db, 'trc_pfx_a')!.id).toBe('trc_pfx_aaa');
   });
 
   it('treats LIKE metacharacters in a partial id as literal (no wildcard match)', () => {

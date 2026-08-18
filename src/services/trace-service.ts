@@ -1071,13 +1071,28 @@ export function getTrace(
   // what the ORDER BY below would have chosen, so this changes no result — a
   // prefix that is itself a full id resolves to that id either way.
   const escaped = traceId.replace(/[\\%_]/g, '\\$&');
-  const traceRow = (db
-    .prepare('SELECT * FROM agent_traces WHERE id = ?')
-    .get(traceId) ?? db
-    .prepare(
-      "SELECT * FROM agent_traces WHERE id LIKE ? ESCAPE '\\' ORDER BY id ASC LIMIT 1",
-    )
-    .get(`${escaped}%`)) as Record<string, unknown> | undefined;
+  let traceRow = db.prepare('SELECT * FROM agent_traces WHERE id = ?').get(traceId) as
+    | Record<string, unknown>
+    | undefined;
+
+  if (!traceRow) {
+    // LIMIT 2, not 1: an AMBIGUOUS prefix used to resolve to whichever id sorted
+    // first, silently and with no warning — so `why`/`decisions`/`show` answered
+    // about a trace the user did not name, and `fork`, which WRITES, derived a
+    // new trace from one. `fork trc_ --from-step 1` was enough to fork an
+    // arbitrary trace out of a whole store at exit 0. Deterministic ordering
+    // made that stable, not correct.
+    const matches = db
+      .prepare("SELECT * FROM agent_traces WHERE id LIKE ? ESCAPE '\\' ORDER BY id ASC LIMIT 2")
+      .all(`${escaped}%`) as Record<string, unknown>[];
+    if (matches.length > 1) {
+      throw new Error(
+        `Ambiguous trace id "${traceId}" — it matches at least ${matches.map((m) => m.id as string).join(' and ')}. ` +
+          'Use more characters of the id.',
+      );
+    }
+    traceRow = matches[0];
+  }
 
   if (!traceRow) return null;
 

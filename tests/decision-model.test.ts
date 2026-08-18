@@ -495,11 +495,15 @@ describe('getTrace resolves a canonical id from the primary key index', () => {
       ).run(id);
     mk('trc_abc');
     mk('trc_abcdef');
+    // An EXACT id wins even though a longer id starts with it — this is the
+    // reason the exact-match branch runs first, and it must keep working now
+    // that an ambiguous prefix is refused.
     expect(getTrace(db, 'trc_abc')!.id).toBe('trc_abc');
     // A prefix matching only the longer id still resolves to it.
     expect(getTrace(db, 'trc_abcd')!.id).toBe('trc_abcdef');
-    // A prefix matching both resolves deterministically to the shortest (id ASC).
-    expect(getTrace(db, 'trc_ab')!.id).toBe('trc_abc');
+    // A prefix matching BOTH is ambiguous: it used to resolve silently to the
+    // shortest, answering about a trace the caller did not name.
+    expect(() => getTrace(db, 'trc_ab')).toThrow(/Ambiguous trace id/);
     expect(getTrace(db, 'trc_zzz')).toBeNull();
   });
 });

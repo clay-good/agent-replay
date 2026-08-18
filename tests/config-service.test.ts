@@ -9,6 +9,7 @@ import {
   setConfigValue,
   resolveApiKey,
   resolveProvider,
+  configProblems,
 } from '../src/services/config-service.js';
 import type { AgentReplayConfig } from '../src/services/config-service.js';
 
@@ -259,5 +260,82 @@ describe('an explicit ai.provider with a model from another family', () => {
       ai: { provider: 'anthropic', model: 'claude-haiku-4-5-20251001', api_keys: { anthropic: 'sk-a' } },
     } as unknown as Parameters<typeof resolveProvider>[0]);
     expect(resolved?.model).toBe('claude-haiku-4-5-20251001');
+  });
+});
+
+describe('a hand-edited config cannot disable the spend cap', () => {
+  // `config set` validates every key; nothing validated them on READ, so the
+  // validation was bypassed by editing the file — which is exactly how a config
+  // travels between machines. `ai.max_tokens` was the expensive one: it flows
+  // into the AI cost estimate, and a non-numeric value makes that estimate NaN.
+  // `NaN > maxCost` is FALSE, so `--max-cost 0` — the only spend guard on paid
+  // evals — passed everything through. It was forwarded to the provider as
+  // `max_tokens` besides.
+  // `--dir` IS the store directory, not its parent, so config.json lives
+  // directly inside it.
+  const dir = join(tmpdir(), `ar-config-bad-${Date.now()}`);
+
+  beforeEach(() => {
+    mkdirSync(dir, { recursive: true });
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  function write(ai: unknown): void {
+    writeFileSync(
+      join(dir, 'config.json'),
+      JSON.stringify({ version: '0.1.0', database: 'x', created_at: 'now', ai }),
+    );
+  }
+
+  it('reads the file this suite writes (guards the assertions below)', () => {
+    // Without this, every "the bad value is dropped" case passes vacuously when
+    // the path is wrong: no file found → null config → undefined field.
+    write({ provider: 'anthropic', max_tokens: 4096 });
+    expect(loadConfig(dir)).not.toBeNull();
+  });
+
+  it.each([
+    ['a string', 'abc'],
+    ['a negative number', -100000],
+    ['zero', 0],
+    ['a float', 12.5],
+    ['null-ish text', ''],
+  ])('drops ai.max_tokens when it is %s', (_label, value) => {
+    write({ provider: 'anthropic', max_tokens: value });
+    expect(loadConfig(dir)?.ai?.max_tokens).toBeUndefined();
+  });
+
+  it('keeps a usable ai.max_tokens', () => {
+    write({ provider: 'anthropic', max_tokens: 4096 });
+    expect(loadConfig(dir)?.ai?.max_tokens).toBe(4096);
+  });
+
+  // A typo'd provider used to produce "No AI provider configured" — advising the
+  // very env var that was already set and would have worked.
+  it('falls back to auto-detection for an unknown provider, and still resolves', () => {
+    write({ provider: 'claude' });
+    const config = loadConfig(dir);
+    expect(config?.ai?.provider).toBeUndefined();
+    const prev = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = 'sk-test';
+    try {
+      expect(resolveProvider(config)?.provider).toBe('anthropic');
+    } finally {
+      if (prev === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = prev;
+    }
+  });
+
+  // Dropping a key keeps the tool working, but a silently ignored value is a
+  // typo the user never hears about — the diagnostic commands report it.
+  it('names every dropped key so the drop is not silent', () => {
+    write({ provider: 'claude', max_tokens: 'abc' });
+    expect(configProblems(dir).map((p) => p.key).sort()).toEqual(['max_tokens', 'provider']);
+    expect(configProblems(dir).find((p) => p.key === 'provider')!.message).toMatch(/auto-detecting/);
+  });
+
+  it('reports nothing for a clean config', () => {
+    write({ provider: 'anthropic', max_tokens: 1024 });
+    expect(configProblems(dir)).toEqual([]);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
-import { execFileSync, execFile } from 'node:child_process';
+import { execFileSync, execFile, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1433,5 +1433,45 @@ describe('CLI integration', () => {
     expect(traces).toHaveLength(1);
     // And no step was lost to the uniqueness retry while they raced.
     expect(traces[0].step_count).toBe(6);
+  });
+
+  it('prints a trace id that other commands can actually resolve', () => {
+    // `run` printed shortId(), which STRIPS the `trc_` prefix — while every
+    // consumer resolves an id by prefix from the START of the id. So the only
+    // pointer the wrapper gives to the run it just recorded matched nothing,
+    // on the one command with no other way to learn the id at the moment it
+    // finishes.
+    // spawnSync, not the shared `run` helper: the wrapper's summary line goes to
+    // stderr, which that helper only captures on a non-zero exit.
+    const proc = spawnSync(
+      process.execPath,
+      [CLI, 'run', '--dir', dir, '--agent-name', 'idcheck', '--', process.execPath, '-e', 'process.exit(0)'],
+      { encoding: 'utf8', timeout: 20000 },
+    );
+    expect(proc.status).toBe(0);
+    const printed = /trace (\S+) /.exec(proc.stderr)?.[1];
+    expect(printed).toBeDefined();
+
+    const shown = run(['show', printed!, '--json']);
+    expect(shown.code).toBe(0);
+    expect(JSON.parse(shown.stdout).agent_name).toBe('idcheck');
+  });
+
+  it('refuses an ambiguous trace-id prefix rather than picking one', () => {
+    // `fork trc_ --from-step 1` used to fork an arbitrary trace out of a whole
+    // store at exit 0 — a WRITE derived from a trace the user never named.
+    for (const id of ['amb_aaa1', 'amb_bbb2']) {
+      run(['record'], [
+        `{"v":1,"type":"trace_start","trace_id":"${id}","agent_name":"amb"}`,
+        `{"v":1,"type":"step","trace_id":"${id}","step_number":1,"step_type":"thought","name":"a"}`,
+        `{"v":1,"type":"trace_end","trace_id":"${id}","status":"completed"}`,
+      ].join('\n'));
+    }
+    const r = run(['show', 'amb_']);
+    expect(r.code).not.toBe(0);
+    expect(r.stderr + r.stdout).toMatch(/Ambiguous trace id/);
+
+    // A longer, unambiguous prefix still works.
+    expect(run(['show', 'amb_aaa', '--json']).code).toBe(0);
   });
 });

@@ -49,6 +49,29 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
     process.exitCode = code;
   };
 
+  // --max-cost is the spend cap for paid AI calls, so a malformed value must
+  // fail loudly rather than fall back to Infinity (an unlimited budget). A typo
+  // like "0.O5" would otherwise silently disable the cap.
+  //
+  // Validated for EVERY run, not only one that reaches the provider: it sat
+  // inside the `--ai` branch, so a CI job whose --max-cost is a typo'd or empty
+  // shell variable passed silently until the first run that happened to enable
+  // AI — the run where the cap was already load-bearing. A usage error belongs
+  // at the point of use, not at the point of consequence.
+  let maxCost = Infinity;
+  if (opts.maxCost != null) {
+    const c = Number(opts.maxCost);
+    if (!Number.isFinite(c) || c < 0) {
+      refuse(2, `Invalid --max-cost: ${opts.maxCost} (must be a non-negative number in USD).`);
+      return;
+    }
+    // Consume the value we just validated. Re-parsing with safeParseFloat later
+    // would disagree with Number() on inputs like "" (Number → 0, parseFloat →
+    // NaN → the Infinity fallback) or "0x10", silently restoring the unlimited
+    // budget this check exists to prevent.
+    maxCost = c;
+  }
+
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
 
@@ -150,24 +173,6 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
 
   // AI-powered evaluation
   if (opts.ai || isAiPreset) {
-    // --max-cost is the spend cap for paid AI calls, so a malformed value must
-    // fail loudly rather than fall back to Infinity (an unlimited budget). A
-    // typo like "0.O5" would otherwise silently disable the cap. Validate before
-    // touching the provider so the message is about the actual mistake.
-    let maxCost = Infinity;
-    if (opts.maxCost != null) {
-      const c = Number(opts.maxCost);
-      if (!Number.isFinite(c) || c < 0) {
-        refuse(2, `Invalid --max-cost: ${opts.maxCost} (must be a non-negative number in USD).`);
-        return;
-      }
-      // Consume the value we just validated. Re-parsing with safeParseFloat below
-      // would disagree with Number() on inputs like "" (Number → 0, parseFloat →
-      // NaN → the Infinity fallback) or "0x10", silently restoring the unlimited
-      // budget this check exists to prevent.
-      maxCost = c;
-    }
-
     const config = loadConfig(opts.dir);
     const resolved = resolveProvider(config);
     if (!resolved) {
@@ -207,6 +212,14 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
       console.log('');
     }
 
+    // Fail CLOSED on an unusable estimate. `NaN > maxCost` is false, so a cost
+    // that could not be computed sailed past the only spend guard on paid calls
+    // — `--max-cost 0` ran the whole evaluation. The estimate is now required to
+    // be a finite number before it can clear a budget.
+    if (!Number.isFinite(estimate.total_estimated_usd)) {
+      refuse(2, `Could not estimate the cost of this run (got ${estimate.total_estimated_usd}), so --max-cost cannot be honored.`);
+      return;
+    }
     if (estimate.total_estimated_usd > maxCost) {
       refuse(1, `Estimated cost $${estimate.total_estimated_usd.toFixed(4)} exceeds budget $${maxCost.toFixed(4)}`);
       return;
