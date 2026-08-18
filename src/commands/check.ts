@@ -62,6 +62,18 @@ export function runCheck(opts: CheckOptions = {}): void {
     return;
   }
 
+  // An EMPTY value is a usage error, not "no filter". `--agent-exact "$AGENT"`
+  // with an unset shell variable would otherwise silently widen a gate from one
+  // agent to every agent and report green — the same silent scope-widening this
+  // command already refuses for an empty `--fields` list, and for the same
+  // reason: a narrowing flag that quietly stops narrowing hides the mistake.
+  for (const [flag, value] of [['--agent', opts.agent], ['--agent-exact', opts.agentExact]] as const) {
+    if (value != null && value.trim() === '') {
+      fail(2, `${flag} was given an empty value.`, 'Pass an agent name, or omit the flag to check every agent.');
+      return;
+    }
+  }
+
   // Validate --fields BEFORE reading the baseline or touching the store. It was
   // checked inside checkGolden, after every candidate had been fetched, so a
   // plain typo was reported as whatever the data layer complained about first

@@ -199,6 +199,13 @@ between them, and nothing else.
 
 ### Fixed
 
+- `check --agent ""` and `check --agent-exact ""` silently checked every agent
+  instead of the one intended. A CI script writing `--agent-exact "$AGENT"` with
+  an unset shell variable therefore widened its gate from one agent to all of
+  them and reported green. An empty value is now a usage error, matching what
+  this command already does for an empty `--fields` list — a narrowing flag that
+  quietly stops narrowing hides the mistake.
+
 - `eval --json` emitted `[]` when every evaluator failed to run — an empty array
   that reads to a pipeline exactly like a clean run with no evaluators
   (`jq length` gives 0, `jq '.[]|select(.passed==false)'` gives nothing). With an

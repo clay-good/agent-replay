@@ -1606,4 +1606,22 @@ describe('CLI integration', () => {
     expect(parsed.ok).toBe(false);
     expect(parsed.error).toMatch(/mutually exclusive/);
   });
+
+  it.each([['--agent'], ['--agent-exact']])('rejects an empty %s value rather than widening the gate', (flag) => {
+    // `--agent-exact "$AGENT"` with an unset shell variable would otherwise
+    // silently widen a gate from one agent to EVERY agent and report green —
+    // the same silent scope-widening this command already refuses for an empty
+    // `--fields` list, and for the same reason: a narrowing flag that quietly
+    // stops narrowing hides the mistake.
+    const golden = join(dir, 'g-empty.json');
+    writeFileSync(golden, JSON.stringify([{
+      id: 'g1', agent_name: 'a', input: { t: 1 }, expected_output: null,
+      steps_summary: [], eval_criteria: [], metadata: { status: 'completed' },
+    }]));
+    const r = run(['check', '--golden', golden, flag, '', '--json']);
+    expect(r.code).toBe(2);
+    const parsed = JSON.parse(r.stdout);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error).toMatch(/empty value/);
+  });
 });
