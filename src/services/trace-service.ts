@@ -16,7 +16,8 @@ import type {
   CreateEvalInput,
   ListTracesFilter,
 } from '../models/types.js';
-import { DECIDED_BY, TRACE_STATUSES, TRIGGER_TYPES } from '../models/enums.js';
+import { DECIDED_BY, STEP_TYPES, TRACE_STATUSES, TRIGGER_TYPES } from '../models/enums.js';
+import { isValidConfidence } from '../utils/validators.js';
 import { SINCE_PREDICATE, sinceParams, DURATION_MS_EXPR } from '../utils/time.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -252,6 +253,15 @@ function insertDecision(
   const decidedBy = (DECIDED_BY as readonly string[]).includes(decision.decided_by ?? '')
     ? decision.decided_by
     : 'agent';
+  // Same treatment for `confidence`, which had none: both `ingest` and `record`
+  // refuse anything outside [0, 1] (isValidConfidence, shared by those two
+  // paths), but a programmatic caller reached this insert directly and a value
+  // like 99 was stored — so `show` and `why` rendered a confidence outside its
+  // documented range, and the trace failed its own re-ingest. Dropped to null
+  // rather than rejected, matching how decided_by is handled one line above:
+  // this is the persistence layer, and one unusable field should not cost the
+  // whole decision.
+  const confidence = isValidConfidence(decision.confidence) ? (decision.confidence as number) : null;
   db.prepare(
     `INSERT INTO agent_trace_decisions
       (id, step_id, options, chosen, rationale, confidence, decided_by)
@@ -262,7 +272,7 @@ function insertDecision(
     JSON.stringify(decision.options ?? []),
     decision.chosen,
     textOrNull(decision.rationale),
-    numOrNull(decision.confidence),
+    confidence,
     decidedBy,
   );
 }
@@ -308,6 +318,14 @@ function insertTraceRow(
   status: string,
   timestamp: string,
 ): void {
+  // A status the schema does not allow is a CALLER error, not a producer's
+  // vocabulary — so unlike `trigger` below it is reported, not coerced. It
+  // reached SQLite raw, and the CHECK constraint's message ("CHECK constraint
+  // failed: status IN (...)") names a constraint rather than the argument the
+  // caller passed. `ingestTrace`/`startTrace` are documented public API.
+  if (!(TRACE_STATUSES as readonly string[]).includes(status)) {
+    throw new Error(`Invalid trace status "${status}". Valid: ${TRACE_STATUSES.join(', ')}`);
+  }
   db.prepare(
     `INSERT INTO agent_traces
       (id, agent_name, agent_version, trigger, status, input, output,
@@ -840,6 +858,12 @@ export function appendStep(
 
   if (!trace) {
     throw new Error(`Trace ${traceId} not found`);
+  }
+  // Reported rather than left to the CHECK constraint, for the same reason as
+  // the trace status above: `appendStep` is documented public API, and the raw
+  // message named a constraint instead of the value passed.
+  if (!(STEP_TYPES as readonly string[]).includes(input.step_type as string)) {
+    throw new Error(`Invalid step_type "${String(input.step_type)}". Valid: ${STEP_TYPES.join(', ')}`);
   }
   if (trace.status !== 'running') {
     throw new Error(

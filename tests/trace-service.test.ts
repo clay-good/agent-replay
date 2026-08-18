@@ -964,3 +964,58 @@ describe('token totals fall back to the steps that carry them', () => {
     expect(byTokens[0].total_tokens).toBeNull();
   });
 });
+
+describe('the programmatic API answers for its own arguments', () => {
+  // These are documented public API, and bad input reached SQLite raw: the
+  // CHECK constraint's message names a constraint ("CHECK constraint failed:
+  // status IN (...)") rather than the argument the caller passed, with no field
+  // or step context. The CLI rejects the same values with precise field paths;
+  // an SDK caller got the database's voice instead.
+  it('names an invalid trace status instead of quoting the constraint', () => {
+    expect(() => ingestTrace(db, { agent_name: 'a', status: 'cancelled' as never, input: {} }))
+      .toThrow(/Invalid trace status "cancelled"/);
+    expect(() => startTrace(db, { agent_name: 'a', status: 'cancelled' as never }))
+      .toThrow(/Invalid trace status/);
+  });
+
+  it('names an invalid step_type', () => {
+    const t = startTrace(db, { agent_name: 'a', status: 'running' });
+    expect(() => appendStep(db, t.id, { step_number: 1, step_type: 'custom' as never, name: 'n' }))
+      .toThrow(/Invalid step_type "custom"/);
+  });
+
+  it('still accepts every valid value', () => {
+    const t = startTrace(db, { agent_name: 'a', status: 'running' });
+    expect(() => appendStep(db, t.id, { step_number: 1, step_type: 'thought', name: 'n' })).not.toThrow();
+  });
+
+  // `ingest` and `record` both refuse a confidence outside [0, 1] through one
+  // shared rule, but a programmatic caller reached the insert directly and 99
+  // was stored — so `show`/`why` rendered a value outside its documented range
+  // and the trace failed its own re-ingest. Dropped rather than rejected, the
+  // way an out-of-range `decided_by` already is: one unusable field should not
+  // cost the whole decision.
+  it('drops an out-of-range decision confidence instead of storing it', () => {
+    const t = startTrace(db, { agent_name: 'a', status: 'running' });
+    appendStep(db, t.id, {
+      step_number: 1,
+      step_type: 'thought',
+      name: 'n',
+      decision: { chosen: 'x', decided_by: 'agent', confidence: 99 },
+    });
+    const step = getTrace(db, t.id)!.steps[0];
+    expect(step.decision).toBeTruthy();
+    expect(step.decision!.confidence).toBeNull();
+  });
+
+  it('keeps a confidence inside the documented range', () => {
+    const t = startTrace(db, { agent_name: 'a', status: 'running' });
+    appendStep(db, t.id, {
+      step_number: 1,
+      step_type: 'thought',
+      name: 'n',
+      decision: { chosen: 'x', decided_by: 'agent', confidence: 0.75 },
+    });
+    expect(getTrace(db, t.id)!.steps[0].decision!.confidence).toBe(0.75);
+  });
+});

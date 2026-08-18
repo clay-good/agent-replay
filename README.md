@@ -869,6 +869,8 @@ rec.endStep(1, { output: results, tokens_used: 120 });
 rec.endTrace({ status: 'completed', output: answer, total_tokens: 120 });
 ```
 
+These functions validate their own arguments: an invalid `status` or `step_type` throws an error naming the value and the valid set, rather than surfacing a database constraint. A decision `confidence` outside `[0, 1]` is dropped (like an unrecognized `decided_by`), so a trace written through the SDK can always be re-ingested from its own export.
+
 ## Development
 
 ```bash

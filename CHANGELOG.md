@@ -180,6 +180,17 @@ between them, and nothing else.
 
 ### Fixed
 
+- The programmatic API answered for its own arguments in SQLite's voice: an
+  invalid trace `status` or step `step_type` reached the database raw, so a
+  caller got "CHECK constraint failed: status IN (...)" — a constraint name
+  rather than the value they passed, with no field or step context — while the
+  CLI rejects the same values with precise field paths. Both are now named
+  errors. A decision `confidence` outside [0, 1] was likewise stored verbatim
+  from an SDK call, though `ingest` and `record` share one rule refusing it, so
+  `show`/`why` rendered a value outside its documented range and the trace
+  failed its own re-ingest; it is now dropped, as an out-of-range `decided_by`
+  already was.
+
 - The `--fields` "nothing to compare" guard scanned every entry in the golden
   file rather than the entries a candidate actually matched, so an unrelated
   agent's baseline could make a field look exercisable and restore the false
