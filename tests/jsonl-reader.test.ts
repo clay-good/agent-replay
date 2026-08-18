@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readJsonlLines } from '../src/services/importers/jsonl-reader.js';
@@ -67,5 +68,33 @@ describe('readJsonlLines', () => {
     const content = 'a\n\n  {"x":1}  \n日本\r\nlast';
     const expected = content.split('\n').map((l) => l.trim()).filter(Boolean);
     expect([...readJsonlLines(write(content), 4)]).toEqual(expected);
+  });
+});
+
+describe('sources that are not seekable regular files', () => {
+  // The first version read at an explicit byte offset and trusted
+  // `fstat().size`. Both assumptions are false for a pipe: an offset read throws
+  // `ESPIPE: invalid seek` (so `import /dev/stdin`, which the previous
+  // readFileSync handled, broke), and a FIFO reports size 0 — which was worse,
+  // because the loop simply never ran and the import reported "nothing
+  // importable found" for a file that had content. Silent loss, not an error.
+  it('reads a FIFO, which reports a size of 0', () => {
+    const fifo = join(dir, 'fifo');
+    execFileSync('mkfifo', [fifo]);
+    // Write from a separate process so the open() does not deadlock.
+    const writer = spawn('sh', ['-c', `printf 'a\\nb\\nc\\n' > ${fifo}`], { stdio: 'ignore' });
+    try {
+      expect([...readJsonlLines(fifo)]).toEqual(['a', 'b', 'c']);
+    } finally {
+      writer.kill();
+    }
+  });
+
+  it('reads a growing file to its current end', () => {
+    // A sequential read stops at the first zero-length read, which is the only
+    // end-of-input signal true for a regular file, a pipe and a FIFO alike.
+    const p = join(dir, 'grow.jsonl');
+    writeFileSync(p, 'one\ntwo\n');
+    expect([...readJsonlLines(p, 4)]).toEqual(['one', 'two']);
   });
 });

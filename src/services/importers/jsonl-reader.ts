@@ -1,4 +1,4 @@
-import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
+import { closeSync, openSync, readSync } from 'node:fs';
 
 /**
  * Read a JSONL file line by line without ever materializing the whole file as a
@@ -25,17 +25,23 @@ import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
 export function* readJsonlLines(filePath: string, chunkSize = 1 << 20): Generator<string> {
   const fd = openSync(filePath, 'r');
   try {
-    const size = fstatSync(fd).size;
     const buf = Buffer.allocUnsafe(chunkSize);
     // Bytes of an incomplete final line (or a split multi-byte character)
     // carried into the next chunk.
     let carry = Buffer.alloc(0);
-    let position = 0;
 
-    while (position < size) {
-      const bytesRead = readSync(fd, buf, 0, Math.min(chunkSize, size - position), position);
+    // SEQUENTIAL reads (position `null`), and no reliance on the file's reported
+    // size. Reading at an explicit offset threw `ESPIPE: invalid seek` on a pipe
+    // — `import /dev/stdin`, which the previous readFileSync handled — and
+    // trusting `fstat().size` was worse on a FIFO, where it reports 0: the loop
+    // never ran and the import reported "nothing importable found" for a file
+    // that had content, which is silent data loss rather than an error. A
+    // sequential read works for a regular file, a pipe and a FIFO alike, and
+    // stopping at `bytesRead <= 0` is the only end-of-input signal that is true
+    // for all three.
+    for (;;) {
+      const bytesRead = readSync(fd, buf, 0, chunkSize, null);
       if (bytesRead <= 0) break;
-      position += bytesRead;
 
       let chunk = carry.length > 0 ? Buffer.concat([carry, buf.subarray(0, bytesRead)]) : Buffer.from(buf.subarray(0, bytesRead));
       let start = 0;

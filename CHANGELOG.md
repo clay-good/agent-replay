@@ -192,6 +192,15 @@ between them, and nothing else.
 
 ### Fixed
 
+- `import` could not read a non-seekable source, and failed silently on one. The
+  new streaming reader read at explicit byte offsets and trusted the file's
+  reported size: reading at an offset throws `ESPIPE: invalid seek` on a pipe, so
+  `import /dev/stdin` broke, and a FIFO reports a size of 0, so the read loop
+  never ran and the import announced "nothing importable found" for a source that
+  had content — silent loss rather than an error. Reads are sequential now, with
+  end-of-input taken from a zero-length read, which is the only signal true for a
+  regular file, a pipe and a FIFO alike.
+
 - A guardrail pattern made only of zero-width or soft-hyphen characters matched
   **every** step. Folding strips those, so the needle became the empty string,
   which is a substring of everything — a deny policy blocked `read_file` and all
