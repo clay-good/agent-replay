@@ -566,6 +566,21 @@ describe('a deeply nested tree still renders', () => {
     expect(out).toContain('s' + depth);
   });
 
+  // Past the cap the indent no longer distinguishes levels — a step at depth 60
+  // draws the same 122 spaces as one at depth 41 — so the depth is stated
+  // instead. Capping without this would trade a crash for a quietly wrong
+  // picture of the nesting.
+  it('names the depth once the indent stops growing', () => {
+    const out = renderTree(chain(60));
+    const lines = out.split('\n');
+    // Shallow levels are drawn, not annotated.
+    expect(lines[0]).not.toContain('[depth');
+    expect(lines[30]).not.toContain('[depth');
+    // Deep ones say where they are.
+    expect(lines[44]).toContain('[depth 45]');
+    expect(lines[59]).toContain('[depth 60]');
+  });
+
   it('keeps the output linear in step count by capping the indent', () => {
     // Quadratic indent growth would make this ratio blow up; capped, it is flat.
     const small = renderTree(chain(2000)).length / 2000;

@@ -169,7 +169,7 @@ export function renderTree(steps: TraceStep[], options: TimelineOptions = {}): s
   const lines: string[] = [];
   const visited = new Set<number>();
 
-  const emit = (step: TraceStep, indent: string): void => {
+  const emit = (step: TraceStep, indent: string, cappedDepth?: number): void => {
     const icon = stepIcon(step.step_type as StepType);
     const typeLabel = stepLabel(step.step_type as StepType);
     const name = chalk.white.bold(`"${safeText(step.name)}"`);
@@ -179,7 +179,10 @@ export function renderTree(steps: TraceStep[], options: TimelineOptions = {}): s
         : '';
     const dur = step.duration_ms != null ? chalk.dim(`  ${formatDuration(step.duration_ms)}`) : '';
     const branch = indent ? chalk.dim('└─ ') : '';
-    lines.push(`  ${indent}${branch}${chalk.dim(`#${step.step_number}`)} ${icon} ${typeLabel}  ${name}${causal}${dur}`);
+    // Past the indent cap the indent no longer distinguishes levels, so the
+    // depth is stated rather than drawn.
+    const depthNote = cappedDepth != null ? chalk.dim(`  [depth ${cappedDepth}]`) : '';
+    lines.push(`  ${indent}${branch}${chalk.dim(`#${step.step_number}`)} ${icon} ${typeLabel}  ${name}${causal}${dur}${depthNote}`);
     if (step.decision) {
       lines.push(`  ${indent}   ${label('chose')} ${chalk.greenBright(safeText(step.decision.chosen))}`);
     }
@@ -208,7 +211,7 @@ export function renderTree(steps: TraceStep[], options: TimelineOptions = {}): s
   // set still guards against parent cycles and self-parents (possible if a
   // producer bypassed validation): a step is rendered at most once.
   const walk = (parentKey: number | null, indent: string): void => {
-    const stack: Array<{ step: TraceStep; indent: string }> = [];
+    const stack: Array<{ step: TraceStep; indent: string; depth: number }> = [];
     // The indent stops growing past MAX_TREE_INDENT levels. It grows three
     // characters per level, so the total output is QUADRATIC in depth: a
     // 20,000-deep chain sums to roughly 600 MB of leading whitespace and threw
@@ -217,17 +220,22 @@ export function renderTree(steps: TraceStep[], options: TimelineOptions = {}): s
     // than the window — so capping it makes the output linear in step count and
     // keeps a deep tree renderable at all.
     const deepen = (ind: string): string => (ind.length >= MAX_TREE_INDENT * 3 ? ind : ind + '   ');
-    const push = (key: number | null, ind: string): void => {
+    const push = (key: number | null, ind: string, depth: number): void => {
       const children = childrenOf.get(key) ?? [];
-      for (let i = children.length - 1; i >= 0; i--) stack.push({ step: children[i], indent: ind });
+      for (let i = children.length - 1; i >= 0; i--) stack.push({ step: children[i], indent: ind, depth });
     };
-    push(parentKey, indent);
+    push(parentKey, indent, 1);
     while (stack.length > 0) {
-      const { step, indent: ind } = stack.pop()!;
+      const { step, indent: ind, depth } = stack.pop()!;
       if (visited.has(step.step_number)) continue;
       visited.add(step.step_number);
-      emit(step, ind);
-      push(step.step_number, deepen(ind));
+      // Once the indent stops growing, say the depth instead. Otherwise every
+      // level past the cap renders with the same 122 spaces and a step at depth
+      // 60 is indistinguishable from one at depth 41 — the indent is the only
+      // thing conveying nesting, so capping it without this trades a crash for a
+      // quietly wrong picture.
+      emit(step, ind, depth > MAX_TREE_INDENT ? depth : undefined);
+      push(step.step_number, deepen(ind), depth + 1);
     }
   };
 

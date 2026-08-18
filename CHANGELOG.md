@@ -139,8 +139,9 @@ between them, and nothing else.
   peak RSS for a real 52 MB session, and a JavaScript string cannot exceed
   ~512 MB, so a larger session failed outright with "Cannot create a string
   longer than 0x1fffffe8 characters" and produced no partial import. Long agent
-  sessions do reach that size. The same 52 MB session now peaks at 268 MB, a
-  647 MB one imports its 672,000 steps, and the resulting trace is byte-identical
+  sessions do reach that size. The same 52 MB session now peaks around 270-290 MB
+  (it varies run to run), a 647 MB one imports its 672,000 steps where it
+  previously could not be read at all, and the resulting trace is byte-identical
   to what the previous reader produced (tallies, steps, tokens and per-step
   errors all compared on a real transcript).
 
@@ -190,6 +191,11 @@ between them, and nothing else.
   trace in. An explicit `--dir` still wins.
 
 ### Fixed
+
+- `show --tree` now states a step's depth once the indent stops growing. The
+  indent is capped so a deep tree renders at all, but past the cap every level
+  draws the same 122 spaces — a step at depth 60 was indistinguishable from one
+  at depth 41, which traded a crash for a quietly wrong picture of the nesting.
 
 - Two concurrent `guard add` calls for the same policy name could still surface
   the raw `UNIQUE constraint failed: guardrail_policies.name` — the message the
