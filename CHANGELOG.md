@@ -199,6 +199,13 @@ between them, and nothing else.
 
 ### Fixed
 
+- An AI provider's 4xx was reported as "Server error". A malformed request, an
+  unknown model name or a wrong endpoint therefore read as a provider outage, so
+  the natural next step was to wait and retry when the fix is local. Those are
+  now "Request rejected (HTTP 400): ...". Retry behavior is unchanged — retries
+  already keyed off a status of 500 or above, so a 4xx was never retried; only
+  the message pointed at the wrong party.
+
 - `check --agent ""` and `check --agent-exact ""` silently checked every agent
   instead of the one intended. A CI script writing `--agent-exact "$AGENT"` with
   an unset shell variable therefore widened its gate from one agent to all of

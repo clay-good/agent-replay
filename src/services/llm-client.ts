@@ -50,7 +50,7 @@ export class LlmError extends Error {
 
   constructor(
     message: string,
-    public type: 'network' | 'auth' | 'rate_limit' | 'server' | 'parse',
+    public type: 'network' | 'auth' | 'rate_limit' | 'server' | 'request' | 'parse',
     public provider: string,
     public statusCode?: number,
     options?: ErrorOptions,
@@ -467,9 +467,17 @@ function handleHttpError(
   if (status === 401 || status === 403) {
     throw new LlmError(`Authentication failed: ${msg}`, 'auth', provider, status);
   }
+  // A 4xx is OUR request's problem, not the provider's. Labelling a 400 or a 404
+  // "Server error" pointed the reader at the wrong party — a malformed request,
+  // an unknown model name or a wrong endpoint all read as a provider outage, so
+  // the natural next step was "wait and retry" when the fix is local. Retry
+  // behavior is unchanged: retryability already keyed off `statusCode >= 500`,
+  // so these were never retried; only the message was misleading.
   const err = status === 429
     ? new LlmError(`Rate limited: ${msg}`, 'rate_limit', provider, status)
-    : new LlmError(`Server error: ${msg}`, 'server', provider, status);
+    : status < 500
+      ? new LlmError(`Request rejected (HTTP ${status}): ${msg}`, 'request', provider, status)
+      : new LlmError(`Server error: ${msg}`, 'server', provider, status);
   err.retryAfterMs = retryAfter;
   throw err;
 }

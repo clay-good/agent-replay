@@ -290,3 +290,39 @@ describe('cost across retries', () => {
   });
 });
 
+
+describe('a 4xx is our request, not the provider', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  // Labelling a 400 or 404 "Server error" pointed the reader at the wrong party:
+  // a malformed request, an unknown model name or a wrong endpoint all read as a
+  // provider outage, so the natural next step was "wait and retry" when the fix
+  // is local. Retryability already keyed off statusCode >= 500, so these were
+  // never retried — only the message misled.
+  it.each([[400], [404], [422]])('labels HTTP %i as a rejected request and does not retry', async (status) => {
+    const spy = vi.fn().mockResolvedValue({
+      status,
+      headers: { get: () => null },
+      json: async () => ({ error: { message: 'nope' } }),
+    } as unknown as Response);
+    vi.stubGlobal('fetch', spy);
+
+    await expect(
+      callLlm({ provider: 'anthropic', api_key: 'k', model: 'claude-haiku-4-5-20251001' }, { system: 's', user: 'u' }),
+    ).rejects.toThrow(new RegExp(`Request rejected \\(HTTP ${status}\\)`));
+    expect(spy.mock.calls).toHaveLength(1);
+  });
+
+  it('still labels a 5xx as a server error and retries it', async () => {
+    const spy = vi.fn().mockResolvedValue({
+      status: 503,
+      headers: { get: () => null },
+      json: async () => ({ error: { message: 'boom' } }),
+    } as unknown as Response);
+    vi.stubGlobal('fetch', spy);
+    await expect(
+      callLlm({ provider: 'anthropic', api_key: 'k', model: 'claude-haiku-4-5-20251001' }, { system: 's', user: 'u' }),
+    ).rejects.toThrow(/Server error/);
+    expect(spy.mock.calls.length).toBeGreaterThan(1);
+  }, 60000);
+});
