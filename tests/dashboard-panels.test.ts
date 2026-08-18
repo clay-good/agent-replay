@@ -31,6 +31,17 @@ describe('renderStatusBars', () => {
   });
 });
 
+describe('renderStatusBars edge inputs', () => {
+  it('bounds a status name longer than the panel', () => {
+    // An unbounded label pushed the row past the box edge, where blessed wraps
+    // it and the bars stop lining up.
+    const out = renderStatusBars({ titles: ['x'.repeat(60)], data: [5] }, 40);
+    for (const line of out.replace(/\{[^}]*\}/g, '').split('\n')) {
+      expect(line.length).toBeLessThanOrEqual(40);
+    }
+  });
+});
+
 describe('renderScoreSparkline', () => {
   const pts = (values: number[]) => values.map((value, i) => ({ label: `1${i}:00`, value }));
   /** Blessed markup tags are layout, not content — compare the text under them. */
@@ -54,6 +65,15 @@ describe('renderScoreSparkline', () => {
   it('keeps the most recent points when the series is wider than the panel', () => {
     const out = renderScoreSparkline(pts(Array.from({ length: 100 }, (_, i) => i)), 10);
     expect(plain(out)).toContain('last 99%');
+  });
+
+  it('ignores a non-finite score instead of reporting min NaN%', () => {
+    const out = renderScoreSparkline(
+      [{ label: '1:00', value: Number.NaN }, { label: '2:00', value: 40 }],
+      40,
+    );
+    expect(plain(out)).not.toContain('NaN');
+    expect(plain(out)).toContain('last 40%');
   });
 
   it('says there is no data rather than drawing a zero line', () => {

@@ -31,12 +31,17 @@ export function renderStatusBars(
   const data = counts.data ?? [];
   if (titles.length === 0) return '{gray-fg}(no traces yet){/gray-fg}';
 
-  const labelWidth = Math.max(...titles.map((t) => t.length));
+  // Bounded: a status name longer than the panel pushed the row past the box
+  // edge, where blessed wraps it and the bars stop lining up. Half the panel is
+  // the most any label may take.
+  const labelCap = Math.max(4, Math.floor(width / 2));
+  const shown = titles.map((t) => (t.length > labelCap ? `${t.slice(0, labelCap - 1)}…` : t));
+  const labelWidth = Math.max(...shown.map((t) => t.length));
   // Leave room for the label, a space, and the count.
   const barRoom = Math.max(1, width - labelWidth - String(Math.max(...data, 0)).length - 3);
   const max = Math.max(...data, 1);
 
-  return titles
+  return shown
     .map((title, i) => {
       const value = data[i] ?? 0;
       // A non-zero count always shows at least one cell, so a status that is
@@ -59,9 +64,14 @@ export function renderScoreSparkline(
 ): string {
   if (points.length === 0) return '{gray-fg}(no evaluations yet){/gray-fg}';
 
+  // Drop points that are not real measurements: a non-finite value poisoned the
+  // min/max and rendered the whole panel as "min NaN%".
+  const usable = points.filter((p) => Number.isFinite(p.value));
+  if (usable.length === 0) return '{gray-fg}(no evaluations yet){/gray-fg}';
+
   // Keep the most recent points that fit; the series is oldest-first, so this
   // drops the oldest and time still reads left to right.
-  const shown = points.slice(-Math.max(1, width));
+  const shown = usable.slice(-Math.max(1, width));
   const values = shown.map((p) => p.value);
   const min = Math.min(...values);
   const max = Math.max(...values);
