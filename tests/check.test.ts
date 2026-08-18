@@ -765,7 +765,7 @@ describe('runCheck refuses when no candidate matched the baseline', () => {
       const goldenPath = join(dir, 'golden.json');
       writeFileSync(goldenPath, JSON.stringify([{
         id: 'g1', agent_name: 'travel-bot', input: {}, expected_output: null,
-        steps_summary: [], eval_criteria: [], metadata: {},
+        steps_summary: [], eval_criteria: [], metadata: { status: 'completed' },
       }]));
       const notADir = join(dir, 'a-file');
       writeFileSync(notADir, 'not a directory');
@@ -893,3 +893,108 @@ function runCheckReport(goldenPath: string, dir: string): { ok: boolean; failed:
   return JSON.parse(out.join('\n')) as { ok: boolean; failed: number };
 }
 
+
+describe('a requested field the baseline cannot exercise is a broken gate, not a pass', () => {
+  // Every field loop skips a step whose golden side lacks the data it reads —
+  // correct per step, but when EVERY step is skipped the field compared nothing
+  // and the run still reported a green pass. `--fields model` against a baseline
+  // captured without per-step models is the everyday case: a CI job that added
+  // the flag precisely to catch model swaps became an unconditional pass. The
+  // unknown-field rejection was added against this exact false green; a VALID
+  // field with no data behind it reached it by a subtler route.
+  it('refuses --fields model when no baseline entry records a model', () => {
+    const golden = makeGolden();
+    expect(golden[0].steps_summary.every((s) => s.model == null)).toBe(true);
+
+    const c = candidate(baseline);
+    const report = checkGolden(golden, [c], { fields: ['model'] });
+
+    expect(report.uncompared).toEqual(['model']);
+    expect(report.ok).toBe(false);
+    // The candidate itself is not a regression — nothing was compared at all.
+    expect(report.failed).toBe(0);
+    expect(report.passed).toBe(1);
+  });
+
+  it('exits 2 (gate broken), not 1 (regression), and says so in both output modes', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ar-check-nofield-'));
+    try {
+      const cdb = ensureDatabase(resolve(dir, 'traces.db'));
+      ingestTrace(cdb, baseline);
+      const goldenPath = join(dir, 'golden.json');
+      writeFileSync(goldenPath, exportTraces(cdb, { agent_name: 'travel-bot' }, 'golden'));
+
+      const human = runCheckCapturing({ golden: goldenPath, dir, fields: 'model' });
+      expect(human.code).toBe(2);
+      expect(human.err).toMatch(/Nothing to compare for --fields model/);
+
+      const asJson = runCheckCapturing({ golden: goldenPath, dir, fields: 'model', json: true });
+      expect(asJson.code).toBe(2);
+      expect(JSON.parse(asJson.out).ok).toBe(false);
+    } finally {
+      resetConnection();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('still compares a field the baseline DOES carry', () => {
+    const golden = makeGolden();
+    golden[0].steps_summary[1].model = 'claude-sonnet-4';
+    const report = checkGolden(golden, [candidate(baseline)], { fields: ['model'] });
+    expect(report.uncompared).toEqual([]);
+    // The candidate records no model, so the recorded one is a real divergence.
+    expect(report.failed).toBe(1);
+  });
+
+  // The DEFAULT set deliberately spans fields that not every trace shape has —
+  // a trace with no tool calls has nothing for `tool_inputs`, and an old
+  // baseline has no recorded step outcomes. Refusing there would break every
+  // ordinary check, so the rule applies only to fields the caller NAMED.
+  it('does not refuse for the default field set', () => {
+    const golden = makeGolden();
+    const noTools: IngestTraceInput = {
+      ...baseline,
+      steps: [{ step_number: 1, step_type: 'thought', name: 'plan' }],
+    };
+    const g2 = JSON.parse(
+      (() => { ingestTrace(db, noTools); return exportTraces(db, { agent_name: 'travel-bot' }, 'golden'); })(),
+    ) as GoldenEntry[];
+    expect(checkGolden(golden, [candidate(baseline)], {}).uncompared).toEqual([]);
+    expect(checkGolden(g2, [], {}).uncompared).toEqual([]);
+  });
+});
+
+describe('a golden entry with no metadata.status is a damaged baseline', () => {
+  // `status` is the field that catches "this run now fails", and the comparison
+  // reads it from metadata.status — skipping silently when absent. So a
+  // baseline whose metadata block was pruned (the block a human trims first
+  // when hand-editing one for review) turned that comparison OFF and reported a
+  // green pass over a run that had started failing.
+  it('refuses the file instead of silently disabling the status comparison', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ar-check-nometa-'));
+    try {
+      const cdb = ensureDatabase(resolve(dir, 'traces.db'));
+      ingestTrace(cdb, { ...baseline, status: 'failed', error: 'boom' });
+      const entries = JSON.parse(exportTraces(cdb, { agent_name: 'travel-bot' }, 'golden')) as GoldenEntry[];
+
+      // Intact baseline: the candidate's status regression is caught.
+      const intact = join(dir, 'intact.json');
+      const good = structuredClone(entries);
+      good[0].metadata = { ...good[0].metadata, status: 'completed' };
+      writeFileSync(intact, JSON.stringify(good));
+      expect(runCheckCapturing({ golden: intact, dir }).code).toBe(1);
+
+      // Same baseline with metadata pruned: used to pass green at exit 0.
+      const pruned = join(dir, 'pruned.json');
+      const bad = structuredClone(entries) as unknown as Array<Record<string, unknown>>;
+      delete bad[0].metadata;
+      writeFileSync(pruned, JSON.stringify(bad));
+      const r = runCheckCapturing({ golden: pruned, dir });
+      expect(r.code).toBe(2);
+      expect(r.err).toMatch(/no metadata\.status/);
+    } finally {
+      resetConnection();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

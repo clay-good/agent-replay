@@ -43,6 +43,17 @@ export interface GoldenCheckReport {
    * nothing to say about it. Reported always; a failure only under --strict.
    */
   uncovered: number;
+  /**
+   * Fields the caller asked for by name that no matched candidate could
+   * actually compare, because every baseline lacked the data they read (a
+   * baseline with no per-step `model`, no tool_call step, or no recorded step
+   * outcome). Comparing nothing and reporting a pass is the same false green
+   * the unknown-field rejection exists to prevent — a typo is caught, but a
+   * *valid* field the baseline cannot exercise reached exit 0. Only populated
+   * for explicitly requested fields; the default set intentionally spans fields
+   * that not every trace shape has.
+   */
+  uncompared: string[];
   /** Overall CI verdict: no failures (and, in strict mode, no unmatched or uncovered). */
   ok: boolean;
 }
@@ -72,7 +83,8 @@ export function checkGolden(
   candidates: TraceWithDetails[],
   opts: { fields?: string[]; strict?: boolean } = {},
 ): GoldenCheckReport {
-  const fields = opts.fields && opts.fields.length ? opts.fields : [...DEFAULT_FIELDS];
+  const explicit = !!(opts.fields && opts.fields.length);
+  const fields = explicit ? (opts.fields as string[]) : [...DEFAULT_FIELDS];
   // Reject unknown field names so a typo (or an unsupported field) can't silently
   // compare nothing and report a false pass.
   const unknown = fields.filter((f) => !(KNOWN_FIELDS as readonly string[]).includes(f));
@@ -96,6 +108,9 @@ export function checkGolden(
   let failed = 0;
   let unmatched = 0;
 
+  // Field names for which at least one real comparison was performed against at
+  // least one baseline (see `uncompared` above).
+  const compared = new Set<string>();
   const covered = new Set<string>();
   for (const trace of candidates) {
     const key = goldenKey(trace.agent_name, trace.input);
@@ -113,9 +128,9 @@ export function checkGolden(
     // gave two identical candidates opposite verdicts (the first took the exact
     // match, the next was forced onto a leftover and falsely "regressed") and
     // could even hide a real regression as "unmatched" once the bucket emptied.
-    let divergences = diffAgainstGolden(trace, bucket[0], fields);
+    let divergences = diffAgainstGolden(trace, bucket[0], fields, compared);
     for (let i = 1; i < bucket.length && divergences.length > 0; i++) {
-      const div = diffAgainstGolden(trace, bucket[i], fields);
+      const div = diffAgainstGolden(trace, bucket[i], fields, compared);
       if (div.length < divergences.length) {
         divergences = div;
       }
@@ -134,21 +149,35 @@ export function checkGolden(
   let uncovered = 0;
   for (const [key, bucket] of index) if (!covered.has(key)) uncovered += bucket.length;
 
+  // Only meaningful once something was actually matched: a run with zero matched
+  // candidates is already refused upstream, and reporting "field X compared
+  // nothing" there would name the wrong problem.
+  const uncompared = explicit && passed + failed > 0 ? fields.filter((f) => !compared.has(f)) : [];
+
   return {
     results,
     passed,
     failed,
     unmatched,
     uncovered,
-    ok: failed === 0 && (!opts.strict || (unmatched === 0 && uncovered === 0)),
+    uncompared,
+    ok: failed === 0 && uncompared.length === 0 && (!opts.strict || (unmatched === 0 && uncovered === 0)),
   };
 }
 
-function diffAgainstGolden(trace: TraceWithDetails, golden: GoldenEntry, fields: string[]): Divergence[] {
+function diffAgainstGolden(
+  trace: TraceWithDetails,
+  golden: GoldenEntry,
+  fields: string[],
+  compared: Set<string> = new Set(),
+): Divergence[] {
   const divergences: Divergence[] = [];
   const gSteps = golden.steps_summary;
   const cSteps = trace.steps;
 
+  if (fields.includes('step_count')) {
+    compared.add('step_count');
+  }
   if (fields.includes('step_count') && gSteps.length !== cSteps.length) {
     divergences.push({ field: 'step_count', golden: gSteps.length, candidate: cSteps.length });
   }
@@ -156,6 +185,7 @@ function diffAgainstGolden(trace: TraceWithDetails, golden: GoldenEntry, fields:
   const n = Math.min(gSteps.length, cSteps.length);
 
   if (fields.includes('step_types')) {
+    if (n > 0) compared.add('step_types');
     for (let i = 0; i < n; i++) {
       if (gSteps[i].step_type !== cSteps[i].step_type) {
         divergences.push({ field: 'step_types', step_number: cSteps[i].step_number, golden: gSteps[i].step_type, candidate: cSteps[i].step_type });
@@ -165,6 +195,7 @@ function diffAgainstGolden(trace: TraceWithDetails, golden: GoldenEntry, fields:
   }
 
   if (fields.includes('step_names')) {
+    if (n > 0) compared.add('step_names');
     for (let i = 0; i < n; i++) {
       if (gSteps[i].name !== cSteps[i].name) {
         divergences.push({ field: 'step_names', step_number: cSteps[i].step_number, golden: gSteps[i].name, candidate: cSteps[i].name });
@@ -191,6 +222,7 @@ function diffAgainstGolden(trace: TraceWithDetails, golden: GoldenEntry, fields:
       const g = gSteps[i];
       const step = cSteps[i];
       if (g.step_type !== 'tool_call' || g.input === undefined) continue;
+      compared.add('tool_inputs');
       if (step.step_type !== 'tool_call') {
         // Name what replaced it. A bare `candidate: null` reads as "golden null
         // → got null" whenever the baseline itself recorded no tool input —
@@ -224,6 +256,7 @@ function diffAgainstGolden(trace: TraceWithDetails, golden: GoldenEntry, fields:
       // unknown — skip it rather than reading absence as success, which would
       // report a false regression for every failing step in an old baseline.
       if (gSteps[i].failed === undefined) continue;
+      compared.add('step_errors');
       // ONE-DIRECTIONAL: a step that starts failing is a regression; a step that
       // STOPS failing never is. A symmetric comparison sounds more principled and
       // is worse in practice — a baseline captured from a run that contained one
@@ -244,6 +277,7 @@ function diffAgainstGolden(trace: TraceWithDetails, golden: GoldenEntry, fields:
 
   if (fields.includes('status')) {
     const goldenStatus = (golden.metadata as { status?: string })?.status;
+    if (goldenStatus != null) compared.add('status');
     if (goldenStatus != null && goldenStatus !== trace.status) {
       divergences.push({ field: 'status', golden: goldenStatus, candidate: trace.status });
     }
@@ -256,6 +290,7 @@ function diffAgainstGolden(trace: TraceWithDetails, golden: GoldenEntry, fields:
       const g = gSteps[i];
       const step = cSteps[i];
       if (g.model == null) continue;
+      compared.add('model');
       if (g.model !== (step.model ?? null)) {
         divergences.push({ field: 'model', step_number: step.step_number, golden: g.model, candidate: step.model ?? null });
         break;

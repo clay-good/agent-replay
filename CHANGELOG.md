@@ -177,6 +177,29 @@ between them, and nothing else.
 
 ### Fixed
 
+- **The golden CI gate could report a green pass having compared nothing.**
+  Every field comparison skips a step whose baseline side lacks the data it
+  reads — correct per step, but when every step was skipped the field compared
+  nothing and the run still exited 0. `check --fields model` against a baseline
+  captured without per-step models (every hook-captured or ingested store) was
+  an unconditional pass, and it is the flag the README recommends for catching
+  model swaps. A field named on `--fields` that no baseline can exercise is now
+  a gate-broken refusal (exit 2), naming the field. Unknown field names were
+  already refused for this reason; a valid field with no data behind it reached
+  the same false green by a subtler route. The default field set is exempt: it
+  deliberately spans fields not every trace shape has.
+- A golden entry with no `metadata` silently disabled the `status` comparison —
+  the one field that catches "this run now fails" — and reported a green pass.
+  The baseline validator checked `steps_summary` but not `metadata`, and
+  `metadata` is the block a human is most likely to prune when hand-editing or
+  merging a baseline for review. `check` now refuses an entry without a string
+  `metadata.status`, which `export --format golden` writes without exception.
+- `stats` excluded forks from its headline totals but not from the by-status or
+  per-agent breakdowns, so the parts did not sum to the whole: "Traces: 5"
+  printed directly above a by-status summing to 6, and
+  `stats --json | jq .by_status.running` alerted on a `fork` — a debugging
+  action, not a run. Each fork also inflated its agent's count by one.
+
 - A decision's `confidence` was stored by live capture at any value while
   `ingest` refuses anything outside [0, 1], so `record` wrote traces that failed
   their own re-ingest — the same drift the option-shape rule was unified to

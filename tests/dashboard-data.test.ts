@@ -290,4 +290,28 @@ describe('store totals exclude forks', () => {
     expect(after.steps).toBe(before.steps);
     expect(after.totalTokens).toBe(before.totalTokens);
   });
+
+  // The exclusion was applied to the headline totals only, so `stats` printed
+  // "Traces: 5" directly above a by-status breakdown summing to 6, and a
+  // `stats --json | jq .by_status.running` alert fired on a `fork` — a
+  // debugging action, not a run. The parts must partition the same population
+  // the whole reports.
+  it('keeps the status and per-agent breakdowns partitioning the same population', () => {
+    const t = ingestTrace(db, {
+      agent_name: 'f', status: 'completed', input: {},
+      steps: [
+        { step_number: 1, step_type: 'tool_call', name: 'a' },
+        { step_number: 2, step_type: 'output', name: 'b' },
+      ],
+    });
+    forkTrace(db, t.id, 2);
+
+    const total = dashboardStats(db).traces;
+    expect(statusCounts(db).data.reduce((a, b) => a + b, 0)).toBe(total);
+    expect(agentStats(db).reduce((a, r) => a + r.count, 0)).toBe(total);
+    // Specifically: the fork lands `running`, which is what an alert watches.
+    const byStatus = (({ titles, data }) => Object.fromEntries(titles.map((t2, i) => [t2, data[i]])))(statusCounts(db));
+    expect(byStatus.running).toBe(0);
+    expect(agentStats(db)).toEqual([{ agent_name: 'f', count: 1, failed_or_timeout: 0 }]);
+  });
 });

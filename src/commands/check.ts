@@ -49,6 +49,34 @@ export function runCheck(opts: CheckOptions = {}): void {
     return;
   }
 
+  // Validate --fields BEFORE reading the baseline or touching the store. It was
+  // checked inside checkGolden, after every candidate had been fetched, so a
+  // plain typo was reported as whatever the data layer complained about first
+  // ("No traces matched...", exit 2 — never naming the bad field) or as exit 1
+  // from a store-open failure. `watch` already validates --interval before
+  // resolving a trace; usage errors belong before the work — including before
+  // the baseline-shape refusals below, so a typo'd field name is still the
+  // answer when the golden file is ALSO unusable.
+  const fields = opts.fields != null
+    ? opts.fields.split(',').map((s) => s.trim()).filter(Boolean)
+    : undefined;
+  // A list that names nothing silently reverted to the DEFAULT field set, so a
+  // script meaning to narrow the comparison got the full one instead — the same
+  // hole `diff --fields` had.
+  if (fields != null && fields.length === 0) {
+    fail(2, `--fields listed no field names: ${JSON.stringify(opts.fields)}`, `Known fields: ${KNOWN_FIELDS.join(', ')}`);
+    return;
+  }
+  const unknownFields = (fields ?? []).filter((f) => !(KNOWN_FIELDS as readonly string[]).includes(f));
+  if (unknownFields.length > 0) {
+    fail(
+      2,
+      `Unknown --fields value(s): ${unknownFields.join(', ')}.`,
+      `Known fields: ${KNOWN_FIELDS.join(', ')}`,
+    );
+    return;
+  }
+
   let golden: GoldenEntry[];
   try {
     const parsed = JSON.parse(readFileSync(resolve(opts.golden), 'utf-8'));
@@ -80,37 +108,33 @@ export function runCheck(opts: CheckOptions = {}): void {
     return;
   }
 
+  // `status` is the field that catches "this run now fails", and the comparison
+  // reads it from `metadata.status` — skipping the check entirely when it is
+  // absent. So a baseline whose `metadata` block was pruned (the block a human
+  // is most likely to trim when hand-editing or merging a baseline for review)
+  // silently turned that comparison OFF and reported a green pass on a run that
+  // had started failing. `export --format golden` writes `status` into every
+  // entry's metadata without exception, so a missing one means the file is
+  // damaged, not old — refuse it like any other unusable baseline rather than
+  // degrading to a check that compares less than the caller asked for.
+  const noStatus = golden.findIndex((g) => {
+    const meta = (g as GoldenEntry).metadata;
+    return !meta || typeof meta !== 'object' || Array.isArray(meta) || typeof (meta as { status?: unknown }).status !== 'string';
+  });
+  if (noStatus !== -1) {
+    fail(
+      2,
+      `Not a golden dataset: ${opts.golden} (entry ${noStatus + 1} has no metadata.status).`,
+      'Every entry from "agent-replay export --format golden" carries metadata.status; without it the status comparison silently passes. Re-export the baseline.',
+    );
+    return;
+  }
+
   if (golden.length === 0) {
     fail(
       2,
       `Golden file has no entries: ${opts.golden}`,
       'An empty baseline can never detect a regression. Re-export it with a filter that matches.',
-    );
-    return;
-  }
-
-  // Validate --fields BEFORE touching the store. It was checked inside
-  // checkGolden, after every candidate had been fetched, so a plain typo was
-  // reported as whatever the data layer complained about first ("No traces
-  // matched...", exit 2 — never naming the bad field) or as exit 1 from a
-  // store-open failure. `watch` already validates --interval before resolving a
-  // trace; usage errors belong before the work.
-  const fields = opts.fields != null
-    ? opts.fields.split(',').map((s) => s.trim()).filter(Boolean)
-    : undefined;
-  // A list that names nothing silently reverted to the DEFAULT field set, so a
-  // script meaning to narrow the comparison got the full one instead — the same
-  // hole `diff --fields` had.
-  if (fields != null && fields.length === 0) {
-    fail(2, `--fields listed no field names: ${JSON.stringify(opts.fields)}`, `Known fields: ${KNOWN_FIELDS.join(', ')}`);
-    return;
-  }
-  const unknownFields = (fields ?? []).filter((f) => !(KNOWN_FIELDS as readonly string[]).includes(f));
-  if (unknownFields.length > 0) {
-    fail(
-      2,
-      `Unknown --fields value(s): ${unknownFields.join(', ')}.`,
-      `Known fields: ${KNOWN_FIELDS.join(', ')}`,
     );
     return;
   }
@@ -247,6 +271,23 @@ export function runCheck(opts: CheckOptions = {}): void {
       2,
       `No candidate matched the baseline — ${candidates.length} trace(s) checked, none compared.`,
       'A check that matches nothing cannot detect a regression. Candidates are matched by agent name and a hash of the trace input, so this usually means the agent was renamed, the input template changed, or capture stopped recording the input (`hook --no-input`). Re-export the baseline from current runs, or pass --allow-empty if this is expected.',
+    );
+    return;
+  }
+
+  // A field named on --fields that no baseline could exercise compared NOTHING
+  // and reported a pass. `--fields model` on a baseline captured without
+  // per-step models is the common case: every comparison is skipped, the run
+  // reports "1 passed", and a CI job that added the flag specifically to catch
+  // model swaps is an unconditional green. Unknown field names are already
+  // refused for exactly this reason; a valid field with no data behind it is
+  // the same false green with a subtler cause. Exit 2 (gate broken), not 1
+  // (regression) — nothing regressed, the gate could not run as asked.
+  if (report.uncompared.length > 0) {
+    fail(
+      2,
+      `Nothing to compare for --fields ${report.uncompared.join(', ')} — no baseline entry carries that data.`,
+      'The baseline was exported from runs that never recorded it (a store captured without per-step models, or a baseline with no tool_call steps). Re-export the baseline from runs that exercise the field, or drop it from --fields.',
     );
     return;
   }

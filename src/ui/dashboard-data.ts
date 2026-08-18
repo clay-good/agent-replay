@@ -85,7 +85,14 @@ export function dashboardStats(db: Database.Database, opts: StatsFilter = {}): D
 /** One entry per trace status (in TRACE_STATUSES order), for the bar chart. */
 export function statusCounts(db: Database.Database, opts: StatsFilter = {}): { titles: string[]; data: number[] } {
   const since = opts.since;
-  const stmt = db.prepare(`SELECT COUNT(*) as cnt FROM agent_traces WHERE status = ?${since ? ` AND ${SINCE_PREDICATE}` : ''}`);
+  // Forks excluded, exactly as in dashboardStats above. This breakdown is
+  // printed directly under that headline count, so counting a never-executed
+  // copy here made the parts sum to more than the whole ("Traces: 5" over a
+  // by_status summing to 6), and `stats --json | jq .by_status.running` alerted
+  // on a `fork` — a debugging action, not a run.
+  const stmt = db.prepare(
+    `SELECT COUNT(*) as cnt FROM agent_traces WHERE parent_trace_id IS NULL AND status = ?${since ? ` AND ${SINCE_PREDICATE}` : ''}`,
+  );
   const titles: string[] = [];
   const data: number[] = [];
   for (const status of TRACE_STATUSES) {
@@ -111,6 +118,8 @@ export interface AgentStatRow {
 
 /**
  * Per-agent trace counts (with a failed/timeout tally), most traces first.
+ * Forks excluded, like every other aggregate here: each fork of an agent's
+ * trace otherwise inflated that agent's count by one.
  * Powers the non-interactive `stats` command; a plain aggregation with no
  * terminal dependency, like the rest of this module.
  */
@@ -122,7 +131,7 @@ export function agentStats(db: Database.Database, opts: StatsFilter = {}): Agent
               COUNT(*) as count,
               SUM(CASE WHEN status IN ('failed', 'timeout') THEN 1 ELSE 0 END) as failed_or_timeout
        FROM agent_traces
-       ${since ? `WHERE ${SINCE_PREDICATE}` : ''}
+       WHERE parent_trace_id IS NULL${since ? ` AND ${SINCE_PREDICATE}` : ''}
        GROUP BY agent_name
        ORDER BY count DESC, agent_name ASC`,
     )
