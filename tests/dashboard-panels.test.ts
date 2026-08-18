@@ -1,0 +1,86 @@
+import { describe, it, expect } from 'vitest';
+import Database from 'better-sqlite3';
+import { runMigrations } from '../src/db/migrations.js';
+import { ingestTrace, createEval } from '../src/services/trace-service.js';
+import { renderStatusBars, renderScoreSparkline } from '../src/ui/dashboard-panels.js';
+import { DashboardView } from '../src/ui/dashboard-view.js';
+
+describe('renderStatusBars', () => {
+  it('scales bars to the largest count and labels each row', () => {
+    const out = renderStatusBars({ titles: ['completed', 'failed'], data: [10, 5] }, 40);
+    const [first, second] = out.split('\n');
+    expect(first).toContain('completed');
+    expect(first).toContain('10');
+    expect(second).toContain('failed');
+    // The smaller count gets a visibly shorter bar.
+    const bars = (s: string) => (s.match(/█/g) ?? []).length;
+    expect(bars(first)).toBeGreaterThan(bars(second));
+  });
+
+  it('always draws at least one cell for a non-zero count', () => {
+    // A status that is PRESENT must not render as an empty row, which would be
+    // indistinguishable from absent.
+    const out = renderStatusBars({ titles: ['completed', 'failed'], data: [1000, 1] }, 40);
+    expect((out.split('\n')[1].match(/█/g) ?? []).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('draws nothing for a zero count, and says so when there is no data', () => {
+    const out = renderStatusBars({ titles: ['failed'], data: [0] }, 40);
+    expect(out).not.toContain('█');
+    expect(renderStatusBars({ titles: [], data: [] }, 40)).toContain('no traces');
+  });
+});
+
+describe('renderScoreSparkline', () => {
+  const pts = (values: number[]) => values.map((value, i) => ({ label: `1${i}:00`, value }));
+  /** Blessed markup tags are layout, not content — compare the text under them. */
+  const plain = (s: string) => s.replace(/\{[^}]*\}/g, '');
+
+  it('reports the range and the latest value', () => {
+    const out = renderScoreSparkline(pts([10, 90, 50]), 40);
+    expect(plain(out)).toContain('min 10%');
+    expect(plain(out)).toContain('max 90%');
+    expect(plain(out)).toContain('last 50%');
+    expect(plain(out)).toContain('10:00 → 12:00'); // oldest → newest, left to right
+  });
+
+  it('does not draw a flat series at the floor', () => {
+    // Every point is both the min and the max, so a naive scale puts them all at
+    // the lowest glyph — which reads as a collapse to zero.
+    const out = renderScoreSparkline(pts([80, 80, 80]), 40).split('\n')[0];
+    expect(out).not.toContain('▁');
+  });
+
+  it('keeps the most recent points when the series is wider than the panel', () => {
+    const out = renderScoreSparkline(pts(Array.from({ length: 100 }, (_, i) => i)), 10);
+    expect(plain(out)).toContain('last 99%');
+  });
+
+  it('says there is no data rather than drawing a zero line', () => {
+    expect(renderScoreSparkline([], 40)).toContain('no evaluations');
+  });
+});
+
+describe('DashboardView', () => {
+  it('builds and refreshes every panel against a real store', () => {
+    // A smoke test for the widget wiring, which nothing covered while the view
+    // was built on blessed-contrib. It catches a mistyped widget option or a
+    // changed setData shape — the failure modes of moving off that package.
+    const db = new Database(':memory:');
+    runMigrations(db);
+    const t = ingestTrace(db, {
+      agent_name: 'dash', status: 'completed', input: { q: 'x' },
+      steps: [{ step_number: 1, step_type: 'output', name: 'answer' }],
+    });
+    createEval(db, t.id, {
+      evaluator_type: 'rubric', evaluator_name: 'r', score: 0.8, passed: true, details: {},
+    });
+
+    const view = new DashboardView(db, { refreshIntervalMs: 60_000 });
+    expect(() => {
+      view.start();
+      view.stop();
+    }).not.toThrow();
+    db.close();
+  });
+});

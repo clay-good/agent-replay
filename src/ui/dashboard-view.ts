@@ -1,5 +1,4 @@
 import blessed from 'blessed';
-import contrib from 'blessed-contrib';
 import type Database from 'better-sqlite3';
 import type { Trace, EvalResult } from '../models/types.js';
 import type { TraceStatus } from '../models/enums.js';
@@ -7,6 +6,7 @@ import { formatDuration, formatRelativeTime } from '../utils/time.js';
 import { truncate } from '../utils/json.js';
 import { formatCostUsd, safeText } from './theme.js';
 import { dashboardStats, statusCounts, recentTraces, recentEvalScores } from './dashboard-data.js';
+import { renderStatusBars, renderScoreSparkline } from './dashboard-panels.js';
 
 /**
  * Full-screen blessed TUI dashboard.
@@ -29,11 +29,10 @@ export interface DashboardOptions {
 
 export class DashboardView {
   private screen!: blessed.Widgets.Screen;
-  private grid!: InstanceType<typeof contrib.grid>;
-  private barChart!: ReturnType<typeof contrib.bar>;
-  private traceTable!: ReturnType<typeof contrib.table>;
-  private lineChart!: ReturnType<typeof contrib.line>;
-  private activityLog!: ReturnType<typeof contrib.log>;
+  private barChart!: blessed.Widgets.BoxElement;
+  private traceTable!: blessed.Widgets.ListTableElement;
+  private lineChart!: blessed.Widgets.BoxElement;
+  private activityLog!: blessed.Widgets.Log;
   private statsBox!: blessed.Widgets.BoxElement;
   private db: Database.Database;
   private refreshInterval: number;
@@ -53,63 +52,67 @@ export class DashboardView {
       title: 'agent-replay dashboard',
     });
 
-    // 12x12 grid layout
-    this.grid = new contrib.grid({
-      rows: 12,
-      cols: 12,
-      screen: this.screen,
-    });
-
-    // ── Top-left: Trace Status Bar Chart (rows 0-5, cols 0-6) ────────
-    this.barChart = this.grid.set(0, 0, 5, 6, contrib.bar, {
-      label: ' Trace Statuses ',
-      barWidth: 10,
-      barSpacing: 4,
-      maxHeight: 50,
-      style: { fg: 'cyan' },
-      border: { type: 'line', fg: 'cyan' },
-    });
-
-    // ── Top-right: Aggregate Stats (rows 0-5, cols 6-12) ─────────────
-    this.statsBox = this.grid.set(0, 6, 5, 6, blessed.box, {
-      label: ' Stats ',
+    // Laid out in percentages rather than a grid widget: the grid came from
+    // `blessed-contrib`, which is no longer a dependency (see dashboard-panels).
+    // The proportions are the ones the 12x12 grid produced.
+    const panel = {
       tags: true,
-      padding: { left: 2, top: 1, right: 2, bottom: 1 },
-      border: { type: 'line', fg: 'cyan' },
+      border: { type: 'line' as const },
       style: { fg: 'white', border: { fg: 'cyan' } },
+    };
+
+    // ── Top-left: Trace Statuses ─────────────────────────────────────
+    this.barChart = blessed.box({
+      parent: this.screen,
+      label: ' Trace Statuses ',
+      top: 0, left: 0, width: '50%', height: '42%',
+      padding: { left: 2, top: 1, right: 2, bottom: 1 },
+      ...panel,
     });
 
-    // ── Middle-left: Trace List (rows 5-9, cols 0-6) ─────────────────
-    this.traceTable = this.grid.set(5, 0, 4, 6, contrib.table, {
+    // ── Top-right: Aggregate Stats ───────────────────────────────────
+    this.statsBox = blessed.box({
+      parent: this.screen,
+      label: ' Stats ',
+      top: 0, left: '50%', width: '50%', height: '42%',
+      padding: { left: 2, top: 1, right: 2, bottom: 1 },
+      ...panel,
+    });
+
+    // ── Middle-left: Recent Traces ───────────────────────────────────
+    this.traceTable = blessed.listtable({
+      parent: this.screen,
       label: ' Recent Traces ',
+      top: '42%', left: 0, width: '50%', height: '33%',
       keys: true,
-      interactive: true,
-      columnSpacing: 2,
-      columnWidth: [14, 20, 12, 10],
+      mouse: true,
+      align: 'left',
+      tags: true,
+      border: { type: 'line' },
       style: {
         fg: 'white',
+        border: { fg: 'cyan' },
         header: { fg: 'cyan', bold: true },
         cell: { selected: { fg: 'black', bg: 'cyan' } },
-        border: { fg: 'cyan' },
       },
-      border: { type: 'line', fg: 'cyan' },
     });
 
-    // ── Middle-right: Eval Score Line Chart (rows 5-9, cols 6-12) ────
-    this.lineChart = this.grid.set(5, 6, 4, 6, contrib.line, {
+    // ── Middle-right: Eval Scores ────────────────────────────────────
+    this.lineChart = blessed.box({
+      parent: this.screen,
       label: ' Eval Scores (recent) ',
-      showLegend: true,
-      style: { line: 'cyan', text: 'white', baseline: 'dim' },
-      border: { type: 'line', fg: 'cyan' },
+      top: '42%', left: '50%', width: '50%', height: '33%',
+      padding: { left: 2, top: 1, right: 2, bottom: 1 },
+      ...panel,
     });
 
-    // ── Bottom: Activity / Guardrail Log (rows 9-12, cols 0-12) ──────
-    this.activityLog = this.grid.set(9, 0, 3, 12, contrib.log, {
+    // ── Bottom: Activity Log ─────────────────────────────────────────
+    this.activityLog = blessed.log({
+      parent: this.screen,
       label: ' Activity Log ',
-      tags: true,
-      style: { fg: 'white', border: { fg: 'cyan' } },
-      border: { type: 'line', fg: 'cyan' },
-      bufferLength: 50,
+      top: '75%', left: 0, width: '100%', height: '25%',
+      scrollback: 50,
+      ...panel,
     });
 
     // ── Key bindings ─────────────────────────────────────────────────
@@ -172,7 +175,9 @@ export class DashboardView {
   // ── Data Queries ─────────────────────────────────────────────────────
 
   private updateStatusBar(): void {
-    this.barChart.setData(statusCounts(this.db));
+    this.barChart.setContent(
+      renderStatusBars(statusCounts(this.db), Math.max(10, (this.barChart.width as number) - 8)),
+    );
   }
 
   private updateStats(): void {
@@ -205,41 +210,22 @@ export class DashboardView {
       formatRelativeTime(r.started_at),
     ]);
 
-    this.traceTable.setData({
-      headers,
-      data,
-    });
+    // listtable takes headers as the first row.
+    this.traceTable.setData([headers, ...data]);
   }
 
   private updateEvalChart(): void {
     const rows = recentEvalScores(this.db);
-
-    if (rows.length === 0) {
-      this.lineChart.setData([
-        {
-          title: 'Eval Scores',
-          x: ['(no data)'],
-          y: [0],
-          style: { line: 'cyan' },
-        },
-      ]);
-      return;
-    }
-
     // recentEvalScores already returns oldest-first, so time reads left→right.
-    const x = rows.map((r) => {
+    const points = rows.map((r) => {
       const d = new Date(r.evaluated_at);
-      return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+      return {
+        label: `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`,
+        value: Math.round(r.score * 100),
+      };
     });
-    const y = rows.map((r) => Math.round(r.score * 100));
-
-    this.lineChart.setData([
-      {
-        title: 'Eval Scores',
-        x,
-        y,
-        style: { line: 'cyan' },
-      },
-    ]);
+    this.lineChart.setContent(
+      renderScoreSparkline(points, Math.max(10, (this.lineChart.width as number) - 8)),
+    );
   }
 }

@@ -2173,6 +2173,26 @@ between them, and nothing else.
   class open through a second alphabet on any string the write guard does not
   cover, such as an agent or step name.
 
+- **Installing `agent-replay` no longer pulls vulnerable transitive
+  dependencies.** A consumer install carried five advisories — three high
+  (`lodash`, reached twice) and two moderate (`xml2js`) — all of them via
+  `blessed-contrib`, and all of them from widgets this project never used: its
+  `map` widget pulls `map-canvas` → `xml2js`, and its `markdown` widget pulls
+  `marked-terminal` → `lodash`. The repo's own `overrides` hid this locally,
+  because overrides apply only to the root project and never reach the people
+  who install the package, so the audit was clean here and dirty for everyone
+  else. `blessed-contrib` also declares a malformed range (`~>=4.17.21`), which
+  resolves consumers onto a vulnerable `lodash` even though a patched one
+  exists.
+
+  The dashboard now draws on plain `blessed`, which is unaffected: the grid
+  becomes a percentage layout, the trace list a native `listtable` (same
+  arrow-key navigation), the activity log a native `log`, and the bar and line
+  charts a pair of pure string functions. A fresh consumer install now reports
+  **0 vulnerabilities**, and the panels are covered by tests for the first
+  time — the charts have unit tests, and a smoke test builds and refreshes the
+  whole view against a real store.
+
 - A tool result arriving after the turn ended was discarded, and left a phantom
   live run behind. Every hook fires as its own process, and a closing event
   (`PostToolUse`, `PostToolUseFailure`, `SubagentStop`) went through the same
