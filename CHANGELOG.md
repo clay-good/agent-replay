@@ -2173,6 +2173,43 @@ between them, and nothing else.
   class open through a second alphabet on any string the write guard does not
   cover, such as an agent or step name.
 
+- `eval --preset ai-root-cause` reported a clean 100% pass for a run that never
+  finished. Its applicability test read the trace error and the steps but not
+  the trace **status**, and `record` finalizes an abandoned stream as `timeout`
+  with no error text and no failing step — so the preset was "not applicable",
+  which stores score 1.0 and passed, without ever calling the provider. The
+  deterministic criteria already read status; this was the last reader that did
+  not. The cost estimator now sees status too, so it and the run agree about
+  which presets will actually run.
+
+- An AI verdict could be taken from the trace instead of from the model. The
+  fenced-code path was fixed to read the model's LAST block, but the fallback
+  still scanned from the first `{` to the last `}` — so a model that quoted the
+  trace's injected verdict inline and then disagreed in prose had the injected
+  object parsed as its answer. Both paths now read the last balanced object, and
+  the scan understands strings, so a quoted brace cannot end an object early.
+
+- The untrusted-content fence only neutralized its terminator in exactly the
+  case and spacing it emits. `>>>end untrusted trace content`, a doubled space,
+  a non-breaking space, or the words without the arrows all passed through
+  intact — and a model reads any of those as the end marker just as readily. The
+  neutralizer is now at least as generous as the reader.
+
+- A wrong-typed score from the model was read as full marks: `Number(["10"])` is
+  10 and `Number(true)` is 1, so a mis-shaped reply passed. Anything that is not
+  a finite number now scores 0.
+
+- `eval --ai` under-reported spend when a request timed out and was retried. A
+  provider that finishes generating and answers after the deadline still bills
+  for it, so the retry is a second charge, but the reported cost came from the
+  final attempt alone — and that number feeds the running total and the
+  `--max-cost` gate. Timed-out attempts are now counted; a 429 or 5xx is not,
+  since nothing was generated to bill for.
+
+- The `--max-cost` estimate allowed a flat ~200 tokens for everything around the
+  trace summary, which predated the injection guard now appended to every AI
+  prompt. Measured, the prompts ran up to 44% over that on a small trace.
+
 - **Installing `agent-replay` no longer pulls vulnerable transitive
   dependencies.** A consumer install carried five advisories — three high
   (`lodash`, reached twice) and two moderate (`xml2js`) — all of them via

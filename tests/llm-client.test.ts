@@ -235,3 +235,58 @@ describe('callLlm — timeout and retry', () => {
     expect(out.text).toBe('ok');
   });
 });
+
+describe('cost across retries', () => {
+  it('counts a timed-out attempt the provider still billed', () => {
+    // A provider that generates the completion and answers AFTER our deadline
+    // bills for that work, so the retry is a second charge — but the reported
+    // cost came from the final attempt's usage alone. That number feeds
+    // `eval --ai`'s running total and its --max-cost gate, so a budget meant to
+    // cap spend was reading a floor. A 429 or 5xx is not counted: nothing was
+    // generated to bill for.
+    return (async () => {
+      let call = 0;
+      vi.stubGlobal('fetch', async (_u: string, init?: { signal?: AbortSignal }) => {
+        call++;
+        if (call === 1) {
+          // Outlive the deadline, so our own abort fires.
+          await new Promise((r) => setTimeout(r, 60));
+          throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            content: [{ text: '{"ok":true}' }],
+            usage: { input_tokens: 1000, output_tokens: 1000 },
+          }),
+        } as unknown as Response;
+      });
+
+      const res = await callLlm(
+        { provider: 'anthropic', api_key: 'k', timeout_ms: 20, retry_base_delay_ms: 1 },
+        { system: 's', user: 'u' },
+      );
+      expect(call).toBe(2);
+      expect(res.billable_attempts).toBe(2);
+
+      // The single-attempt cost for the same usage, for comparison.
+      call = 0;
+      vi.stubGlobal('fetch', async () => {
+        call++;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            content: [{ text: '{"ok":true}' }],
+            usage: { input_tokens: 1000, output_tokens: 1000 },
+          }),
+        } as unknown as Response;
+      });
+      const once = await callLlm({ provider: 'anthropic', api_key: 'k' }, { system: 's', user: 'u' });
+      expect(once.billable_attempts).toBeUndefined();
+      expect(res.cost_estimate_usd).toBeCloseTo(once.cost_estimate_usd * 2, 10);
+    })();
+  });
+});
+

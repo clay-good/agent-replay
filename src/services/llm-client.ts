@@ -27,11 +27,26 @@ export interface LlmResponse {
   provider: string;
   cost_estimate_usd: number;
   latency_ms: number;
+  /**
+   * How many attempts the provider is likely to have billed for. Present only
+   * when more than one — a timed-out attempt that the provider completed anyway
+   * is charged, so `cost_estimate_usd` covers all of them.
+   */
+  billable_attempts?: number;
 }
 
 export class LlmError extends Error {
   /** Delay the provider asked for via `Retry-After`, when it sent one. */
   retryAfterMs?: number;
+
+  /**
+   * True when OUR deadline aborted the request, rather than the connection
+   * failing. The distinction matters for cost: a provider that generated the
+   * completion and answered after our deadline still bills for it, so a retry
+   * after a timeout is a second charge, while a connection that never landed
+   * is not billed at all.
+   */
+  timedOut?: boolean;
 
   constructor(
     message: string,
@@ -113,11 +128,30 @@ export async function callLlm(
   // between them — the wall-clock cost the caller actually paid.
   const start = Date.now();
 
+  // Attempts our own deadline aborted. A provider that finished generating and
+  // answered late still bills for that work, so the retry is a SECOND charge —
+  // but `cost_estimate_usd` was computed from the final attempt's usage alone,
+  // under-reporting spend by up to the retry count. That number feeds
+  // `eval --ai`'s running total and its `--max-cost` gate, so the budget meant
+  // to cap spend was reading a floor. A 429 or a 5xx is not counted: the
+  // provider produced nothing to bill for.
+  let billableAborts = 0;
+
   for (let attempt = 1; ; attempt++) {
     try {
-      return await callProvider(opts, model, maxTokens, request, start, timeoutMs);
+      const response = await callProvider(opts, model, maxTokens, request, start, timeoutMs);
+      if (billableAborts === 0) return response;
+      // The aborted attempts ran the same request, so the completed one is the
+      // best available proxy for what each of them cost. Approximate, and
+      // deliberately on the high side: a budget should over-estimate.
+      return {
+        ...response,
+        cost_estimate_usd: response.cost_estimate_usd * (1 + billableAborts),
+        billable_attempts: 1 + billableAborts,
+      };
     } catch (err) {
       if (attempt > retries || !isRetryable(err)) throw err;
+      if (err instanceof LlmError && err.timedOut) billableAborts++;
       await sleep(backoffMs(err, attempt, baseDelayMs));
     }
   }
@@ -399,7 +433,9 @@ function networkError(
   const msg = timedOut
     ? `Request timed out after ${timeoutMs}ms`
     : `Network error: ${err instanceof Error ? err.message : String(err)}`;
-  return new LlmError(msg, 'network', provider, undefined, { cause: err });
+  const error = new LlmError(msg, 'network', provider, undefined, { cause: err });
+  error.timedOut = timedOut;
+  return error;
 }
 
 /**
