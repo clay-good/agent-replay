@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { mkdirSync, existsSync, chmodSync } from 'node:fs';
+import { mkdirSync, existsSync, chmodSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 let instance: DatabaseConnection | null = null;
@@ -22,13 +22,30 @@ export class DatabaseConnection {
     // Restricting the directory covers the DB, its WAL/SHM sidecars, and config
     // in one place. Best-effort; a no-op on Windows.
     const dir = dirname(this.dbPath);
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true, mode: 0o700 });
-    }
     try {
-      chmodSync(dir, 0o700);
-    } catch {
-      // Non-POSIX filesystem — leave as-is rather than fail.
+      if (!existsSync(dir)) {
+        mkdirSync(dir, { recursive: true, mode: 0o700 });
+      }
+      // NARROW ONLY. This was an unconditional `chmod 0700`, described as a
+      // floor but acting as a set — so opening a store an operator had
+      // deliberately locked down (`chmod 500`) quietly restored owner write on
+      // it. Only tighten permissions that are broader than 0700; never loosen
+      // what someone chose.
+      try {
+        const mode = statSync(dir).mode & 0o777;
+        if ((mode & 0o077) !== 0) chmodSync(dir, mode & 0o700);
+      } catch {
+        // Non-POSIX filesystem — leave as-is rather than fail.
+      }
+    } catch (err) {
+      // Raised BEFORE the try below, so a working directory the user cannot
+      // write produced a raw `EACCES: permission denied, mkdir '.agent-replay'`
+      // — bypassing the actionable message every other open failure gets, and
+      // emitting non-JSON text for a `--json` caller. Route it through the same
+      // builder.
+      throw new Error(
+        `Could not open the database at ${this.dbPath}. ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
     try {

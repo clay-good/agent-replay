@@ -944,11 +944,42 @@ describe('a requested field the baseline cannot exercise is a broken gate, not a
   // "nothing to compare" (exit 2, gate broken) for the most severe regression it
   // could possibly see. The worse the regression, the more reliably it was
   // swallowed. Exercisability is a property of the BASELINE alone.
+  // Exercisability must be read from the baselines actually COMPARED, not from
+  // every entry in the file: an unrelated baseline that no candidate matched
+  // otherwise makes a field look exercisable and restores the false green.
+  it('ignores a baseline no candidate matched when deciding what was exercisable', () => {
+    // The baseline the candidate WILL match carries no tool call...
+    const noToolsRun: IngestTraceInput = {
+      agent_name: 'quiet-bot',
+      status: 'completed',
+      input: { task: 'just think' },
+      steps: [{ step_number: 1, step_type: 'thought', name: 'plan' }],
+    };
+    ingestTrace(db, noToolsRun);
+    // ...while an unrelated agent's baseline, which nothing will match, does.
+    ingestTrace(db, {
+      agent_name: 'other-bot',
+      status: 'completed',
+      input: { task: 'something else' },
+      steps: [{ step_number: 1, step_type: 'tool_call', name: 'grep', input: { q: 'x' } }],
+    });
+    const golden = JSON.parse(exportTraces(db, {}, 'golden')) as GoldenEntry[];
+    expect(golden.length).toBe(2);
+
+    // `tool_inputs` compares nothing against the matched baseline, so the run
+    // must refuse — the other agent's entry is irrelevant to this comparison.
+    const report = checkGolden(golden, [candidate(noToolsRun)], { fields: ['tool_inputs'] });
+    expect(report.uncompared).toEqual(['tool_inputs']);
+    expect(report.ok).toBe(false);
+  });
+
   it('reports the regression when the candidate produced no steps at all', () => {
     const golden = makeGolden();
     const crashed = candidate({ ...baseline, steps: [] });
     const report = checkGolden(golden, [crashed], { fields: ['step_count', 'tool_inputs'] });
 
+    // `uncompared` is empty because a failure always wins — asserted alongside
+    // the failure itself so this cannot pass merely by short-circuiting.
     expect(report.uncompared).toEqual([]);
     expect(report.failed).toBe(1);
     expect(report.results[0].divergences.map((d) => d.field)).toContain('step_count');

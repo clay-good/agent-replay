@@ -10,6 +10,7 @@ import { heading, safeText } from '../ui/theme.js';
 import { parseSinceToIso } from '../utils/time.js';
 import { errorMessage } from '../utils/json.js';
 import { resolveDataDir } from '../utils/paths.js';
+import { makeRefuse } from '../utils/refuse.js';
 
 export interface CheckOptions {
   golden?: string;
@@ -34,14 +35,14 @@ export function runCheck(opts: CheckOptions = {}): void {
   // --json | jq -r .ok` is the documented CI form, and printing only a red line
   // on stderr turned a "the gate could not run" case into a jq parse error —
   // breaking the --json contract instead of reporting the verdict.
+  // The SAME helper the other --json commands use, so the refusal shape is one
+  // shape. This kept its own copy and emitted a singular `hint` STRING where
+  // every sibling emits a `hints` ARRAY — so `check --json | jq -r '.hints[]'`,
+  // the CI pipeline this command exists for, silently yielded nothing on the
+  // refusal path. A second copy of a contract is how the contract splits.
+  const refuse = makeRefuse(opts.json);
   const fail = (code: number, message: string, hint?: string): void => {
-    if (opts.json) {
-      console.log(JSON.stringify({ ok: false, error: message, ...(hint ? { hint } : {}) }, null, 2));
-    } else {
-      console.error(chalk.red(`  ${message}`));
-      if (hint) console.error(chalk.dim(`  ${hint}`));
-    }
-    process.exitCode = code;
+    refuse(code, message, hint ? [hint] : []);
   };
 
   if (!opts.golden) {

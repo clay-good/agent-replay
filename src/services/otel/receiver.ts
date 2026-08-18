@@ -249,7 +249,42 @@ function upsertOtelTrace(db: Database.Database, input: MappedOtelTrace, stats: O
           )
           .get(target, candidateSpan) != null);
     const rootStep = targetRow?.synthetic || alreadyPresent ? undefined : candidate;
-    const steps = rootStep ? [...(input.steps ?? []), rootStep] : input.steps;
+
+    // The same rule, applied to EVERY span in the batch and not just the
+    // identity root. The root guard above exists because an exporter retries a
+    // batch it did not get a 200 for — but the retry's CHILD spans were appended
+    // unconditionally, so a redelivered batch permanently doubled the trace's
+    // steps and its token total (the merge adds the batch total to the running
+    // one). A lost 200, a client timeout after commit, or the retry the
+    // all-or-nothing transaction below explicitly plans for was enough. The span
+    // id needed to detect it was already in each step's metadata.
+    const incoming = input.steps ?? [];
+    let newSteps = incoming;
+    if (incoming.length > 0) {
+      const seen = new Set(
+        (db
+          .prepare(
+            `SELECT json_extract(metadata, '$.otel_span_id') AS span_id
+               FROM agent_trace_steps WHERE trace_id = ?`,
+          )
+          .all(target) as Array<{ span_id: unknown }>)
+          .map((r) => r.span_id)
+          .filter((id): id is string => typeof id === 'string'),
+      );
+      newSteps = incoming.filter((st) => {
+        const id = (st.metadata as { otel_span_id?: unknown } | undefined)?.otel_span_id;
+        return !(typeof id === 'string' && seen.has(id));
+      });
+    }
+
+    // Every span in this batch is already stored and it brings no new identity
+    // root: it is a redelivery, so merging it again would only inflate the
+    // totals. A batch that legitimately carries no spans at all (a token-only
+    // flush window) still merges, which is why the check requires that spans
+    // were actually present.
+    if (incoming.length > 0 && newSteps.length === 0 && !rootStep) return;
+
+    const steps = rootStep ? [...newSteps, rootStep] : newSteps;
     mergeBatchIntoTrace(db, target, { ...input, steps: steps ?? [] });
     stats.acceptedSpans += steps?.length ?? 0;
     return;

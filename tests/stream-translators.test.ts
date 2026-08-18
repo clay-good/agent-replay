@@ -403,8 +403,45 @@ describe('gemini-stream: a result that cannot be matched by id', () => {
     expect(getTrace(db, id)!.steps[0].error).toBe('nope');
   });
 
-  // With several open, the name picks the right one — the same rule
-  // `hook-adapter`'s findOpenToolStep uses, rather than a second invention.
+  // Gemini dispatches calls in PARALLEL batches whose results come back in call
+  // order, so the fallback must be oldest-first. Taking the most recent open
+  // step handed each result to the other call's step: both outputs swapped, the
+  // call that SUCCEEDED marked failed, and the call that actually failed stored
+  // clean — a fabricated failure and a fail-open in one.
+  it('pairs parallel id-less results in call order, not reverse', () => {
+    const t = makeTranslator('gemini-stream')!;
+    const id = run(t, [
+      { type: 'init', session_id: 's-par' },
+      { type: 'tool_use', name: 'Bash', input: { cmd: 'ls' } },
+      { type: 'tool_use', name: 'Bash', input: { cmd: 'boom' } },
+      { type: 'tool_result', output: 'result-of-ls' },
+      { type: 'tool_result', output: 'result-of-boom', is_error: true },
+      { type: 'result', exit_code: 0 },
+    ]);
+    const steps = getTrace(db, id)!.steps;
+    expect(steps[0].input).toEqual({ cmd: 'ls' });
+    expect(steps[0].output).toEqual({ output: 'result-of-ls' });
+    expect(steps[0].error).toBeNull();
+    expect(steps[1].input).toEqual({ cmd: 'boom' });
+    expect(steps[1].output).toEqual({ output: 'result-of-boom' });
+    expect(steps[1].error).toBe('result-of-boom');
+  });
+
+  // A name that matches nothing open is not evidence about some other call:
+  // attaching it would move a failure onto an unrelated tool, and fabricating a
+  // failure is the expensive direction.
+  it('does not attach a named result to an unrelated open call', () => {
+    const t = makeTranslator('gemini-stream')!;
+    const id = run(t, [
+      { type: 'init', session_id: 's-mismatch' },
+      { type: 'tool_use', name: 'Bash', input: {} },
+      { type: 'tool_result', name: 'WebFetch', is_error: true, error: 'nope' },
+      { type: 'result', exit_code: 0 },
+    ]);
+    expect(getTrace(db, id)!.steps[0].error).toBeNull();
+  });
+
+  // With several open, the name picks the right one.
   it('prefers a name match when several tools are open', () => {
     const t = makeTranslator('gemini-stream')!;
     const id = run(t, [
@@ -437,5 +474,33 @@ describe('gemini-stream: a result that cannot be matched by id', () => {
       { type: 'result', exit_code: 0, usage: { input_tokens: 100, output_tokens: 50, total_tokens: 150 } },
     ]);
     expect(getTrace(db, id)!.total_tokens).toBe(150);
+  });
+});
+
+describe('codex-exec: an item that is not an object', () => {
+  // `{"type":"item.completed","item":"text"}` is a shape the CLI can emit, and
+  // the bare string went into the `output` column as a JSON scalar where every
+  // reader expects an object. The gemini tool_result branch already wrapped a
+  // bare string for exactly this reason; the two branches disagreed.
+  it('wraps a bare-string item instead of storing a scalar', () => {
+    const t = makeTranslator('codex-exec')!;
+    const id = run(t, [
+      { type: 'thread.started', thread_id: 'th-str' },
+      { type: 'item.completed', item: 'hello world' },
+      { type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } },
+    ]);
+    const step = getTrace(db, id)!.steps[0];
+    expect(step.output).toEqual({ output: 'hello world' });
+  });
+
+  it('still stores a normal object item unchanged', () => {
+    const t = makeTranslator('codex-exec')!;
+    const id = run(t, [
+      { type: 'thread.started', thread_id: 'th-obj' },
+      { type: 'item.completed', item: { item_type: 'command_execution', command: 'ls' } },
+      { type: 'turn.completed', usage: {} },
+    ]);
+    const step = getTrace(db, id)!.steps[0];
+    expect((step.output as Record<string, unknown>).command).toBe('ls');
   });
 });

@@ -942,3 +942,53 @@ describe('a span with no name still round-trips', () => {
     expect(steps.some((s) => s.name === 'execute_tool')).toBe(true);
   });
 });
+
+describe('span attributes the log path already reads', () => {
+  function spanTrace(attrs: Array<{ key: string; value: unknown }>): ReturnType<typeof mapOtlpTraces>[number] {
+    return mapOtlpTraces({
+      resourceSpans: [{
+        resource: { attributes: [{ key: 'service.name', value: { stringValue: 'svc' } }] },
+        scopeSpans: [{
+          spans: [
+            {
+              traceId: 'cc', spanId: 'r1', name: 'invoke_agent',
+              startTimeUnixNano: '1700000000000000000', endTimeUnixNano: '1700000002000000000',
+              attributes: [{ key: 'gen_ai.operation.name', value: { stringValue: 'invoke_agent' } }],
+            },
+            {
+              traceId: 'cc', spanId: 'c1', parentSpanId: 'r1', name: 'chat',
+              startTimeUnixNano: '1700000000000000000', endTimeUnixNano: '1700000001000000000',
+              attributes: [{ key: 'gen_ai.operation.name', value: { stringValue: 'chat' } }, ...attrs],
+            },
+          ],
+        }],
+      }],
+    })[0];
+  }
+
+  // The two receivers front the same store, and the span path dropped the spend
+  // entirely: the identical `gen_ai.usage.cost` attribute produced a cost on
+  // /v1/logs and nothing on /v1/traces, so `stats` showed "Total cost: -" and
+  // `list --sort cost` was inert for every span-captured trace.
+  it('records the cost a span reports', () => {
+    expect(spanTrace([{ key: 'gen_ai.usage.cost', value: { doubleValue: 0.25 } }]).total_cost_usd).toBe(0.25);
+  });
+
+  it('reads a reported total when the input/output split is absent', () => {
+    expect(spanTrace([{ key: 'gen_ai.usage.total_tokens', value: { intValue: '500' } }]).total_tokens).toBe(500);
+  });
+
+  // A span reporting all three must not be counted twice.
+  it('prefers the split over a total, without adding both', () => {
+    const t = spanTrace([
+      { key: 'gen_ai.usage.input_tokens', value: { intValue: '100' } },
+      { key: 'gen_ai.usage.output_tokens', value: { intValue: '20' } },
+      { key: 'gen_ai.usage.total_tokens', value: { intValue: '120' } },
+    ]);
+    expect(t.total_tokens).toBe(120);
+  });
+
+  it('leaves cost null when no span reports one', () => {
+    expect(spanTrace([]).total_cost_usd ?? null).toBeNull();
+  });
+});

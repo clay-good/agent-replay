@@ -10,7 +10,7 @@ import { safeText } from '../ui/theme.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage } from '../utils/json.js';
 import { resolveDataDir } from '../utils/paths.js';
-import { makeRefuse } from '../utils/refuse.js';
+import { makeRefuse, openStoreOr } from '../utils/refuse.js';
 
 export interface DiffOptions {
   compact?: boolean;
@@ -31,7 +31,8 @@ export async function runDiff(
 ): Promise<void> {
   const refuse = makeRefuse(opts.json);
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
-  const db = ensureDatabase(dbPath);
+  const db = openStoreOr(refuse, () => ensureDatabase(dbPath), dbPath);
+  if (!db) return;
 
   // Resolve both traces (supports prefix-matching)
   // Resolved one at a time, each with its own guard, so the LEFT id's problem

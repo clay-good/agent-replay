@@ -11,7 +11,7 @@ import { renderTimeline, renderTree } from '../ui/timeline.js';
 import { evalTable } from '../ui/table.js';
 import { heading, separator, safeText } from '../ui/theme.js';
 import { resolveDataDir } from '../utils/paths.js';
-import { makeRefuse } from '../utils/refuse.js';
+import { makeRefuse, openStoreOr } from '../utils/refuse.js';
 import { errorMessage } from '../utils/json.js';
 
 export interface ShowOptions {
@@ -32,7 +32,8 @@ export interface ShowOptions {
 export function runShow(traceId: string, opts: ShowOptions = {}): void {
   const refuse = makeRefuse(opts.json);
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
-  const db = ensureDatabase(dbPath);
+  const db = openStoreOr(refuse, () => ensureDatabase(dbPath), dbPath);
+  if (!db) return;
 
   // An ambiguous prefix is a usage error answered in the requested shape — it
   // must not escape as a bare stack line, which would break the --json contract

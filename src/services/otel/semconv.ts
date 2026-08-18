@@ -133,6 +133,31 @@ function inputTokens(a: Record<string, unknown>): number {
 function outputTokens(a: Record<string, unknown>): number {
   return usage(num(a['gen_ai.usage.output_tokens'] ?? a['gen_ai.usage.completion_tokens'] ?? a['llm.token_count.completion']));
 }
+/**
+ * A span's total, for emitters that report only the total and not the split.
+ * Used ONLY when neither component is present, so a span reporting all three
+ * can't be counted twice.
+ */
+function totalTokensOnly(a: Record<string, unknown>): number {
+  return usage(num(a['gen_ai.usage.total_tokens'] ?? a['llm.token_count.total']));
+}
+/**
+ * The spend a span reports, read with the same keys as the log path
+ * (`log-events.ts`). The two receivers front the same store, and this one
+ * dropped the number entirely: the identical `gen_ai.usage.cost` attribute
+ * produced a cost on `/v1/logs` and nothing on `/v1/traces`, so `stats` showed
+ * "Total cost: -" and `list --sort cost` was inert for every span-captured
+ * trace while the value sat unread in the payload.
+ */
+function costUsd(a: Record<string, unknown>): number {
+  const c = num(a['gen_ai.usage.cost'] ?? a['cost_usd'] ?? a['cost']);
+  return Number.isFinite(c) && c > 0 ? c : 0;
+}
+/** Tokens for one span: the split when present, else a reported total. */
+function spanTokens(a: Record<string, unknown>): number {
+  const split = inputTokens(a) + outputTokens(a);
+  return split > 0 ? split : totalTokensOnly(a);
+}
 
 // ── Span flattening ─────────────────────────────────────────────────────────
 
@@ -248,7 +273,7 @@ function spanToStep(
   // A nested root (invoke_agent/workflow that isn't the identity root) has
   // no step type of its own — anchor it as a thought so children can nest.
   const stepType = classify(s.name, s.attrs).stepType ?? 'thought';
-  const tokens = inputTokens(s.attrs) + outputTokens(s.attrs);
+  const tokens = spanTokens(s.attrs);
   // Step numbers follow start-time order, but parentage is resolved by span
   // id regardless of order — so a child that STARTS BEFORE its parent
   // (clock skew, or an async wrapper) resolved to a forward reference, and
@@ -388,11 +413,13 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): MappedOtelTrace[] 
     // The root's own usage counts toward the trace. It is excluded from
     // stepSpans, so summing only those dropped it: a single-span agent trace
     // reported `total_tokens: null` despite carrying 150 tokens.
-    let totalTokens = root ? inputTokens(root.attrs) + outputTokens(root.attrs) : 0;
+    let totalTokens = root ? spanTokens(root.attrs) : 0;
+    let totalCost = root ? costUsd(root.attrs) : 0;
     const anyError = group.some((s) => s.errorMessage);
 
     const steps: IngestStepInput[] = stepSpans.map((s, i) => {
-      totalTokens += inputTokens(s.attrs) + outputTokens(s.attrs);
+      totalTokens += spanTokens(s.attrs);
+      totalCost += costUsd(s.attrs);
       return spanToStep(s, i, stepNumberOf);
     });
 
@@ -449,6 +476,7 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): MappedOtelTrace[] 
           ? Math.round((maxEnd - minStart) / 1e6)
           : null,
       total_tokens: totalTokens || null,
+      total_cost_usd: totalCost || null,
       // Carry the root's own attributes (model, provider, and any unmapped
       // gen_ai.* keys) the way every step already does — they were dropped
       // entirely, so a single-span trace recorded no model or provider at all.

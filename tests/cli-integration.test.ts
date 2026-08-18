@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { execFileSync, execFile, spawnSync } from 'node:child_process';
+import BetterSqlite3 from 'better-sqlite3';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1507,6 +1508,89 @@ describe('CLI integration', () => {
       const parsed = JSON.parse(r.stdout);
       expect(parsed.ok, `${args.join(' ')} should report ok:false`).toBe(false);
       expect(typeof parsed.error, `${args.join(' ')} should name the error`).toBe('string');
+    }
+  });
+
+  it('rejects a --modify-input that is not an object, but keeps null as a no-op', () => {
+    // The parsed value was typed as an object and never checked, so
+    // `--modify-input 5` stored the trace input as a bare scalar — a shape the
+    // model type and every other producer path guarantee against.
+    run(['record'], [
+      '{"v":1,"type":"trace_start","trace_id":"modin","agent_name":"m"}',
+      '{"v":1,"type":"step","trace_id":"modin","step_number":1,"step_type":"thought","name":"a"}',
+      '{"v":1,"type":"trace_end","trace_id":"modin","status":"completed"}',
+    ].join('\n'));
+
+    for (const bad of ['5', '"str"', '[1,2]', 'true']) {
+      const r = run(['fork', 'modin', '--from-step', '1', '--modify-input', bad]);
+      expect(r.code, `--modify-input ${bad}`).toBe(2);
+      expect(r.stderr).toMatch(/expected an object/);
+    }
+
+    // `null` keeps the original value and is not an error.
+    expect(run(['fork', 'modin', '--from-step', '1', '--modify-input', 'null']).code).toBe(0);
+    // An object still works.
+    expect(run(['fork', 'modin', '--from-step', '1', '--modify-input', '{"q":1}']).code).toBe(0);
+  });
+
+  it('names a duplicate policy instead of quoting the SQL constraint', () => {
+    const pattern = JSON.stringify({ name_contains: 'rm' });
+    expect(run(['guard', 'add', '--name', 'p1', '--action', 'deny', '--pattern', pattern]).code).toBe(0);
+    const again = run(['guard', 'add', '--name', 'p1', '--action', 'deny', '--pattern', pattern]);
+    expect(again.code).not.toBe(0);
+    const out = again.stderr + again.stdout;
+    expect(out).toMatch(/already exists/);
+    expect(out).not.toMatch(/UNIQUE constraint/);
+  });
+
+  it('gives check the same hints array every other --json command emits', () => {
+    // `check` kept its own copy of the refusal helper and emitted a singular
+    // `hint` STRING where every sibling emits a `hints` ARRAY — so
+    // `check --json | jq -r '.hints[]'`, the CI pipeline this command exists
+    // for, silently yielded nothing on the refusal path. A second copy of a
+    // contract is how the contract splits.
+    run(['record'], [
+      '{"v":1,"type":"trace_start","trace_id":"hintc","agent_name":"hintbot"}',
+      '{"v":1,"type":"step","trace_id":"hintc","step_number":1,"step_type":"thought","name":"a"}',
+      '{"v":1,"type":"trace_end","trace_id":"hintc","status":"completed"}',
+    ].join('\n'));
+    const golden = join(dir, 'g-hints.json');
+    expect(run(['export', '--format', 'golden', '--output', golden]).code).toBe(0);
+
+    const r = run(['check', '--golden', golden, '--agent', 'nosuchagent', '--json']);
+    expect(r.code).toBe(2);
+    const parsed = JSON.parse(r.stdout);
+    expect(parsed.ok).toBe(false);
+    expect(Array.isArray(parsed.hints)).toBe(true);
+    expect(parsed.hints.length).toBeGreaterThan(0);
+    expect(parsed.hint).toBeUndefined();
+  });
+
+  it('answers an unopenable store as JSON too, not just a missing trace', () => {
+    // Opening the store happens BEFORE each command's own refusal path, so an
+    // unopenable store — corrupt, unreadable, or written by a newer build —
+    // escaped to the top-level handler: a bare stderr line, exit 1, and nothing
+    // on stdout for a --json caller. The refusal-shape fix covered every case
+    // except this one, which is the case a pipeline is least able to guess at.
+    run(['record'], [
+      '{"v":1,"type":"trace_start","trace_id":"v99t","agent_name":"v"}',
+      '{"v":1,"type":"trace_end","trace_id":"v99t","status":"completed"}',
+    ].join('\n'));
+
+    // Mark the store as a schema this build does not support.
+    const sdb = new BetterSqlite3(join(dir, 'traces.db'));
+    try {
+      sdb.prepare('INSERT INTO schema_version (version) VALUES (99)').run();
+    } finally {
+      sdb.close();
+    }
+
+    for (const args of [['list', '--json'], ['stats', '--json'], ['decisions', 'v99t', '--json'], ['eval', 'v99t', '--json']]) {
+      const r = run(args);
+      expect(r.code, `${args.join(' ')} exit`).toBe(2);
+      const parsed = JSON.parse(r.stdout);
+      expect(parsed.ok).toBe(false);
+      expect(parsed.error).toMatch(/store|schema/i);
     }
   });
 });

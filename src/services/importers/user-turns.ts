@@ -28,13 +28,17 @@
  * typed.
  *
  * Tested by INVERSION rather than by a list of known wrappers. An earlier
- * version enumerated `<command-name>`, `<environment_context>` and friends, and
- * measuring it against the transcripts on this machine showed the list missing
- * the most common cases outright — `<recommended_plugins>`, `<system-reminder>`
- * and `<openlore-untrusted-data-…>` (a per-session random suffix, so no literal
- * could ever have matched it). Every harness envelope observed is either a
- * tag-like wrapper or one of a few injected notices; a person's question
- * essentially never opens with `<`. So the rule is the shape, not the name.
+ * version enumerated `<command-name>`, `<environment_context>` and friends.
+ * Measured over every transcript on this machine (4,466 Claude sessions and 506
+ * Codex rollouts, ~19,000 user turns), that list missed the most common wrapper
+ * by an order of magnitude — a task-notification block, 1,495 occurrences —
+ * along with `<environment_context>`, `<recommended_plugins>`, `<turn_aborted>`
+ * and `<openlore-untrusted-data-…>`, the last of which carries a per-session
+ * random suffix that no literal could ever have matched.
+ *
+ * Every harness envelope in that corpus is either a tag-like wrapper or one of
+ * a few injected notices, and of the ~1,950 turns opening with `<`, NOT ONE is
+ * a human-typed question. So the rule is the shape, not the name.
  *
  * Getting this wrong in either direction is cheap and recoverable: a missed
  * envelope costs a slightly worse prompt, and a question misread as an envelope

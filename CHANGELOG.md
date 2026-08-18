@@ -79,7 +79,8 @@ between them, and nothing else.
   token/cost totals, plus a per-status and per-agent breakdown (each agent's
   trace count and a failed+timeout tally). It exposes the same aggregates as the
   `dashboard` TUI but works in a plain terminal, a log, or CI, and `--json`
-  emits `{ overall, by_status, by_agent }` for piping into `jq` or a gate.
+  emits `{ since, overall, by_status, by_agent }` for piping into `jq` or a
+  gate.
   Previously these numbers were reachable only through the full-screen
   dashboard, which needs an interactive TTY. `stats --since <window>` (a
   duration like `7d`/`24h` or an ISO date, matching `list --since`) windows
@@ -179,6 +180,43 @@ between them, and nothing else.
 
 ### Fixed
 
+- The `--fields` "nothing to compare" guard scanned every entry in the golden
+  file rather than the entries a candidate actually matched, so an unrelated
+  agent's baseline could make a field look exercisable and restore the false
+  green the guard exists to prevent.
+- A `gemini-stream` result was paired with the most recently opened tool call,
+  but harnesses dispatch tools in parallel batches whose results return in call
+  order — so with two calls open, each result landed on the other's step: both
+  outputs swapped, the call that succeeded marked failed, and the call that
+  failed stored clean. Pairing is oldest-first now, and a result naming a tool
+  that no open call matches is left unpaired rather than moving a failure onto
+  an unrelated step.
+- `codex-exec` stored a non-object `item` as a bare JSON scalar in the `output`
+  column, where every reader expects an object — the `gemini-stream` branch
+  already wrapped one.
+- A duplicate policy name reported the raw SQLite constraint text, naming a
+  column instead of what to do about it.
+- `fork --modify-input` / `--modify-context` accepted any JSON value, so
+  `--modify-input 5` stored a scalar as the trace input. An object is now
+  required; an explicit `null` remains a no-op.
+- Opening a store re-widened a directory an operator had deliberately locked
+  down: the `chmod 0700` was described as a floor but acted as a set. It now
+  only tightens permissions broader than 0700.
+- A working directory the user cannot write produced a raw `EACCES … mkdir`
+  instead of the actionable message every other open failure gets.
+- The OTel span receiver dropped the cost a span reports, while the log receiver
+  read the identical attribute — so `stats` showed no cost and `list --sort cost`
+  was inert for every span-captured trace. It also ignored a reported
+  `total_tokens` when the input/output split was absent.
+- An OTLP batch an exporter redelivered had its child spans appended again,
+  permanently doubling the trace's steps and token total. Only the identity root
+  was guarded; every span in the batch is now checked.
+
+- `export --format golden` baked forks into the baseline, which then let a real
+  run that crashed part way reproduce the fork's shorter shape and pass. A golden
+  dataset is a set of known-good runs; a `json`/`jsonl` export is a backup and
+  still carries them.
+
 - Codex tool-failure detection never fired on a real rollout. It tested for a
   plain-object output and returned early — but measured across 60 recent
   sessions, 636 outputs are arrays of `{type, text}` parts and 109 are strings,
@@ -225,7 +263,14 @@ between them, and nothing else.
   wrote a bare line to stderr and left stdout empty, so a `| jq` pipeline got a
   parse error exactly where it expected a verdict it could read. All six now
   answer `{"ok": false, "error": ...}` on stdout, like `eval` and `check`
-  already did — from one shared helper rather than an eighth copy.
+  already did — from one shared helper rather than an eighth copy. That now
+  includes a store that cannot be opened at all (corrupt, unreadable, or written
+  by a newer build), which is opened before each command's own refusal path and
+  so was still escaping as a bare stderr line at exit 1.
+- `check --json` emitted a singular `hint` string where every other command
+  emits a `hints` array, so `check --json | jq -r '.hints[]'` — the CI pipeline
+  the command exists for — silently yielded nothing on the refusal path. It kept
+  its own copy of the refusal helper; it now uses the shared one.
 - `diff --ai --json` silently dropped `--ai`: the JSON output returned before
   the AI block ran, so there was no analysis in the payload, nothing on stderr,
   and exit 0 — while the same misconfiguration exits 1 interactively. A pipeline
@@ -2557,11 +2602,6 @@ between them, and nothing else.
   after the command, or (a lone carriage return) overwriting the line it sits on.
   The model-authored fields in the `diff --ai` and `eval --ai` panels are escaped
   now too.
-
-- `export --format golden` baked forks into the baseline, which then let a real
-  run that crashed part way reproduce the fork's shorter shape and pass. A golden
-  dataset is a set of known-good runs; a `json`/`jsonl` export is a backup and
-  still carries them.
 
 - `guard check` answered `allow` at exit 0 against a store holding no enabled
   policies — the same fail-open as `hook --enforce`, in the command documented

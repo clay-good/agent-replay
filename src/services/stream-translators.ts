@@ -120,7 +120,16 @@ export class CodexExecTranslator extends BaseTranslator {
     }
 
     if (type === 'item.completed') {
-      const item = (obj.item as Record<string, unknown>) ?? obj;
+      // Normalize a non-object item — `{"type":"item.completed","item":"text"}`
+      // is a shape the CLI can emit, and storing the bare string put a JSON
+      // scalar in the `output` column where every reader expects an object.
+      // The gemini tool_result branch already wraps a bare string for exactly
+      // this reason; the two branches now agree.
+      const rawItem = obj.item ?? obj;
+      const item: Record<string, unknown> =
+        rawItem !== null && typeof rawItem === 'object' && !Array.isArray(rawItem)
+          ? (rawItem as Record<string, unknown>)
+          : { output: rawItem };
       const itemType = str(item.item_type) ?? str(item.type) ?? 'item';
       const stepType = CODEX_ITEM_STEP_TYPE[itemType] ?? 'thought';
       const pre = this.ensureStart();
@@ -181,11 +190,15 @@ export class GeminiStreamTranslator extends BaseTranslator {
       if (byId != null) return byId;
     }
     if (name != null) {
-      for (let i = this.openOrder.length - 1; i >= 0; i--) {
-        if (this.openOrder[i].name === name) return this.openOrder[i].num;
-      }
+      // Oldest open call with this name — results arrive in call order.
+      const named = this.openOrder.find((o) => o.name === name);
+      // A NAME matching nothing open is not evidence about some other call.
+      // Attaching here would move a failure onto an unrelated tool, and
+      // fabricating a failure is the expensive direction — the same asymmetry
+      // the codex exit-code reader applies. Leave it unpaired instead.
+      return named?.num;
     }
-    return this.openOrder.length > 0 ? this.openOrder[this.openOrder.length - 1].num : undefined;
+    return this.openOrder.length > 0 ? this.openOrder[0].num : undefined;
   }
 
   /** Forget a step once its result has closed it. */

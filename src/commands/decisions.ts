@@ -4,7 +4,7 @@ import { listDecisions } from '../services/decision-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { heading, label, safeText } from '../ui/theme.js';
 import { resolveDataDir } from '../utils/paths.js';
-import { makeRefuse } from '../utils/refuse.js';
+import { makeRefuse, openStoreOr } from '../utils/refuse.js';
 import { errorMessage } from '../utils/json.js';
 
 export interface DecisionsOptions {
@@ -17,10 +17,11 @@ export interface DecisionsOptions {
  * with its options, chosen option, confidence, and rationale.
  */
 export function runDecisions(traceId: string, opts: DecisionsOptions = {}): void {
-  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
-  const db = ensureDatabase(dbPath);
-
   const refuse = makeRefuse(opts.json);
+  const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
+  const db = openStoreOr(refuse, () => ensureDatabase(dbPath), dbPath);
+  if (!db) return;
+
   let result;
   try {
     result = listDecisions(db, traceId);

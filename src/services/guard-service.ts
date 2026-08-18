@@ -57,6 +57,19 @@ export function addPolicy(
   const id = generateId('pol');
   const now = new Date().toISOString();
 
+  // `name` is UNIQUE, and the constraint's own message ("UNIQUE constraint
+  // failed: guardrail_policies.name") reached the user verbatim — naming a
+  // column rather than the thing they can do about it. Adding a policy twice is
+  // an ordinary mistake (a re-run of a setup script), so it gets an ordinary
+  // answer. Checked rather than caught so the message is the same whichever
+  // driver reports the collision.
+  const clash = db.prepare('SELECT id FROM guardrail_policies WHERE name = ?').get(policy.name);
+  if (clash) {
+    throw new Error(
+      `A policy named "${policy.name}" already exists — use a different --name, or "agent-replay guard remove" it first.`,
+    );
+  }
+
   db.prepare(
     `INSERT INTO guardrail_policies
       (id, name, description, action, priority, enabled, match_pattern, action_params, tags, created_at, updated_at)

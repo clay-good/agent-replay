@@ -6,7 +6,7 @@ import { ensureDatabase } from '../db/index.js';
 import { stepIcon, stepLabel, heading, label, safeText } from '../ui/theme.js';
 import type { StepType } from '../models/enums.js';
 import { resolveDataDir } from '../utils/paths.js';
-import { makeRefuse } from '../utils/refuse.js';
+import { makeRefuse, openStoreOr } from '../utils/refuse.js';
 import { errorMessage } from '../utils/json.js';
 
 export interface WhyOptions {
@@ -27,14 +27,15 @@ const LINK_LABELS: Record<CausalHop['link'], string> = {
  * from step N and explain how the agent got there.
  */
 export function runWhy(traceId: string, opts: WhyOptions = {}): void {
+  const refuse = makeRefuse(opts.json);
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
-  const db = ensureDatabase(dbPath);
+  const db = openStoreOr(refuse, () => ensureDatabase(dbPath), dbPath);
+  if (!db) return;
 
   // Parse with Number, not parseInt: `--step 1e2` must mean 100 (or be a usage
   // error), not a silently-truncated 1 that explains the wrong step. Matches
   // show/replay/fork's step-number flags. A missing flag is NaN → the required
   // error below; a non-integer or < 1 is a usage error.
-  const refuse = makeRefuse(opts.json);
   const stepNumber = Number(opts.step);
   if (!Number.isInteger(stepNumber) || stepNumber < 1) {
     refuse(2, '--step <N> is required and must be a positive integer.');

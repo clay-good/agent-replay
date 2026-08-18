@@ -19,6 +19,7 @@ import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage, safeRegex } from '../utils/json.js';
 import type { EvalResult } from '../models/types.js';
 import { resolveDataDir } from '../utils/paths.js';
+import { openStoreOr } from '../utils/refuse.js';
 
 export interface EvalOptions {
   rubric?: string;
@@ -73,7 +74,8 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
   }
 
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
-  const db = ensureDatabase(dbPath);
+  const db = openStoreOr(refuse, () => ensureDatabase(dbPath), dbPath);
+  if (!db) return;
 
   // Resolve trace
   let trace;

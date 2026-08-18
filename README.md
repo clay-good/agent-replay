@@ -316,8 +316,8 @@ agent-replay replay <trace-id> --speed 0
 # Replay only steps 3 through 7
 agent-replay replay <trace-id> --from-step 3 --to-step 7
 
-# Stop at a step and wait for a keypress before continuing
-agent-replay replay <trace-id> --pause 5
+# Wait for a keypress after each step
+agent-replay replay <trace-id> --pause
 ```
 
 ### Compare
@@ -396,7 +396,9 @@ agent-replay check --golden golden.json --strict --json
 agent-replay check --golden golden.json --fields model
 ```
 
-Comparable fields: `step_count`, `step_types`, `step_names`, `tool_inputs`, `step_errors`, `status` (the default set), plus opt-in `model`. `step_errors` compares whether each step FAILED — a step that starts erroring is a regression the other fields cannot see, since a hook-captured session finalizes `completed` from its Stop event however many tool calls failed inside it. It is one-directional: a step that *stops* failing is a fix, not a regression. Only the flag is compared, never the message, and a baseline exported before this field is skipped step by step. An unrecognized `--fields` value is rejected rather than silently comparing nothing — as a usage error (exit `2`) named for the bad field, checked before the store is opened, so a typo can't surface as "no traces matched" instead.
+Comparable fields: `step_count`, `step_types`, `step_names`, `tool_inputs`, `step_errors`, `status` (the default set), plus opt-in `model`. `step_errors` compares whether each step FAILED — a step that starts erroring is a regression the other fields cannot see, since a hook-captured session finalizes `completed` from its Stop event however many tool calls failed inside it. It is one-directional: a step that *stops* failing is a fix, not a regression. Only the flag is compared, never the message, and a baseline exported before this field is skipped step by step. An unrecognized `--fields` value is rejected rather than silently comparing nothing — as a usage error (exit `2`) named for the bad field, checked before the store is opened, so a typo can't surface as "no traces matched" instead. A *valid* field that no baseline entry can exercise (`--fields model` against a baseline captured without per-step models) is refused the same way, for the same reason: it would otherwise compare nothing and report a pass.
+
+A golden entry also carries `expected_output` and `eval_criteria`. These are recorded for downstream consumers and human review — **`check` does not compare them**; the gate is structural, over the fields listed above. `metadata` is required, though: an entry without `metadata.status` is refused, because the `status` comparison would otherwise be silently skipped.
 
 Candidates gathered in bulk are the runs that could actually regress: **forks and still-`running` traces are excluded**. A fork is a never-executed copy of a step prefix, so it matches its own baseline and then "diverges" on step count and status — one `fork` would otherwise turn the gate permanently red on a shared store. A running trace is mid-flight, so its partial shape is not a regression either. A trace named explicitly with `--trace` is always compared, whatever its lineage or status. For the same reason, `export --format golden` leaves forks out of a baseline, while `json` and `jsonl` exports are backups and keep them.
 
@@ -548,7 +550,7 @@ agent-replay stats --since 2026-08-01
 agent-replay stats --json
 ```
 
-The `--json` shape is `{ since, overall, by_status, by_agent }`, where `by_agent` lists each agent's trace `count` and a `failed_or_timeout` tally, most-active first (named for what it counts, so it can't be read as failures alone alongside `by_status`). `--since` windows every count to traces started at or after the cutoff (steps and evals by their parent trace's start time); the active-policy count is current config and is never windowed. A malformed `--since` is a usage error (exit `2`).
+The `--json` shape is `{ since, overall, by_status, by_agent }`, where `by_agent` lists each agent's trace `count` and a `failed_or_timeout` tally, most-active first (named for what it counts, so it can't be read as failures alone alongside `by_status`). `--since` windows every count to traces started at or after the cutoff (steps and evals by their parent trace's start time); the active-policy count is current config and is never windowed. A malformed `--since` is a usage error (exit `2`). **Forks are excluded from every count**, as they are from `check` and `export --format golden` — a fork is a never-executed copy, so counting it would report spend that never happened. `stats` can therefore report fewer traces than `list`, which shows them.
 
 ### Configuration
 

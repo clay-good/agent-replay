@@ -124,10 +124,17 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
       // Translated events go through the SAME validation gate as native ones.
       // They bypassed it entirely, which made the translators the one live
       // capture entry point with no check between a vendor's payload and the
-      // store — a bare-string `item`, a numeric or array `content`, or a tool
-      // name carrying control characters was written verbatim. The translators
-      // are our code, but their INPUT is the producer's, and every other route
-      // to a write (the JSONL protocol, the SDK's emit()) is already gated.
+      // store. The translators are our code, but their INPUT is the producer's,
+      // and every other route to a write (the JSONL protocol, the SDK's emit())
+      // is already gated.
+      //
+      // Be precise about what this buys TODAY: because every translator
+      // hard-codes a valid step_type, a non-empty name, a generated trace_id and
+      // a step_number >= 1, and never emits tags, decisions or usage numbers,
+      // validateEvent currently rejects nothing they produce. The value is that
+      // the two paths now share one gate, so a rule added to it covers both —
+      // not that it is catching something today. (`output` shape is normalized
+      // by the translators themselves; see the codex item branch.)
       for (const ev of translator.translate(obj)) applyTranslated(ev);
       continue;
     }

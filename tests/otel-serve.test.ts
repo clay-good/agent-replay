@@ -290,4 +290,41 @@ describe('otel serve (end-to-end)', () => {
     // An empty OTLP object is still a valid (empty) batch → 200.
     expect((await post(json, '{}')).status).toBe(200);
   }, 20000);
+
+  it('does not double count a batch an exporter redelivers', async () => {
+    // An OTLP exporter retries a batch it did not get a 200 for. The identity
+    // ROOT was already guarded against re-adding itself, but the batch's CHILD
+    // spans were appended unconditionally — so a lost 200, a client timeout
+    // after commit, or the retry the receiver's own transaction plans for
+    // permanently doubled the trace's steps AND its token total (the merge adds
+    // the batch total to the running one).
+    const url = await startReceiver();
+    for (let i = 0; i < 3; i++) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: OTLP_PAYLOAD,
+      });
+      expect(res.status).toBe(200);
+    }
+
+    const db = new Database(join(dir, 'traces.db'), { readonly: true });
+    try {
+      const trace = db
+        .prepare('SELECT id, total_tokens FROM agent_traces WHERE session_id = ?')
+        .get('conv-e2e') as { id: string; total_tokens: number | null } | undefined;
+      expect(trace).toBeDefined();
+      const after = db
+        .prepare('SELECT COUNT(*) c FROM agent_trace_steps WHERE trace_id = ?')
+        .get(trace!.id) as { c: number };
+      // One delivery's worth of steps, not three.
+      const single = db
+        .prepare("SELECT COUNT(*) c FROM agent_trace_steps WHERE trace_id = ? AND step_type = 'llm_call'")
+        .get(trace!.id) as { c: number };
+      expect(single.c).toBe(1);
+      expect(after.c).toBeLessThanOrEqual(2);
+    } finally {
+      db.close();
+    }
+  }, 30000);
 });

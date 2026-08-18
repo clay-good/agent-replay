@@ -7,7 +7,7 @@ import { heading, label, formatCostUsd, safeText } from '../ui/theme.js';
 import { formatDuration, parseSinceToIso } from '../utils/time.js';
 import { errorMessage } from '../utils/json.js';
 import { resolveDataDir } from '../utils/paths.js';
-import { makeRefuse } from '../utils/refuse.js';
+import { makeRefuse, openStoreOr } from '../utils/refuse.js';
 
 export interface StatsOptions {
   json?: boolean;
@@ -23,7 +23,8 @@ export interface StatsOptions {
 export function runStats(opts: StatsOptions = {}): void {
   const refuse = makeRefuse(opts.json);
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
-  const db = ensureDatabase(dbPath);
+  const db = openStoreOr(refuse, () => ensureDatabase(dbPath), dbPath);
+  if (!db) return;
 
   // A malformed --since is a usage error, not a silent store-wide fallback
   // (which would hide a typo behind plausible-looking numbers). Mirrors `list`.

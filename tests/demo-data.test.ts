@@ -151,7 +151,10 @@ describe('seedDemoData', () => {
 
   it('throws on duplicate seed due to unique policy names', () => {
     seedDemoData(db);
-    // Policies have UNIQUE name constraint, so re-seeding throws
-    expect(() => seedDemoData(db)).toThrow(/UNIQUE constraint/);
+    // Policy names are UNIQUE, so re-seeding still throws — but with a message
+    // that names the policy and what to do, rather than the raw constraint text
+    // ("UNIQUE constraint failed: guardrail_policies.name"), which named a
+    // column instead of the thing the user can act on.
+    expect(() => seedDemoData(db)).toThrow(/already exists/);
   });
 });

@@ -65,24 +65,48 @@ export function runFork(traceId: string, opts: ForkOptions): void {
   let modifiedInput: Record<string, unknown> | undefined;
   let modifiedContext: Record<string, unknown> | undefined;
 
-  if (opts.modifyInput) {
+  /**
+   * Parse a --modify-* value, requiring a JSON OBJECT.
+   *
+   * The result was typed `Record<string, unknown>` and never checked, so
+   * `--modify-input 5` stored the trace's input as the scalar `5` — a shape the
+   * model type and every other producer path guarantee against, waiting for the
+   * first consumer that does `Object.keys(input)`. Both flags are parsed here
+   * so they cannot disagree about what they accept.
+   */
+  /** Distinguishes "rejected" from the legal `null` no-op below. */
+  const REJECTED = Symbol('rejected');
+  const parseModifier = (raw: string, flag: string): Record<string, unknown> | undefined | typeof REJECTED => {
+    let parsed: unknown;
     try {
-      modifiedInput = JSON.parse(opts.modifyInput);
+      parsed = JSON.parse(raw);
     } catch {
-      console.error(chalk.red('  Invalid JSON for --modify-input'));
+      console.error(chalk.red(`  Invalid JSON for ${flag}`));
       process.exitCode = 2;
-      return;
+      return REJECTED;
     }
+    // `null` is a deliberate no-op — it keeps the original value, and the
+    // summary correctly reports no modification. Preserved explicitly so that
+    // requiring an object below does not take it away.
+    if (parsed === null) return undefined;
+    if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+      console.error(chalk.red(`  Invalid JSON for ${flag}: expected an object, got ${Array.isArray(parsed) ? 'an array' : typeof parsed}.`));
+      process.exitCode = 2;
+      return REJECTED;
+    }
+    return parsed as Record<string, unknown>;
+  };
+
+  if (opts.modifyInput) {
+    const parsed = parseModifier(opts.modifyInput, '--modify-input');
+    if (parsed === REJECTED) return;
+    modifiedInput = parsed;
   }
 
   if (opts.modifyContext) {
-    try {
-      modifiedContext = JSON.parse(opts.modifyContext);
-    } catch {
-      console.error(chalk.red('  Invalid JSON for --modify-context'));
-      process.exitCode = 2;
-      return;
-    }
+    const parsed = parseModifier(opts.modifyContext, '--modify-context');
+    if (parsed === REJECTED) return;
+    modifiedContext = parsed;
   }
 
   const spinner = startSpinner(

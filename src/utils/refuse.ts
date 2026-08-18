@@ -1,3 +1,4 @@
+import type Database from 'better-sqlite3';
 import chalk from 'chalk';
 
 /**
@@ -25,4 +26,34 @@ export function makeRefuse(json: boolean | undefined) {
     }
     process.exitCode = code;
   };
+}
+
+/**
+ * Open the store, answering a failure in the caller's requested shape.
+ *
+ * Opening happens before any command's own try block, so an unopenable store —
+ * a corrupt file, a permissions problem, or a schema written by a NEWER build
+ * than this one — escaped to the CLI's top-level handler: a bare stderr line,
+ * exit 1, and NOTHING on stdout for a `--json` caller. That broke the same
+ * contract the refusal helper above exists to keep, on the one code path where
+ * a pipeline most needs a document it can read. `check` already handled it this
+ * way; this is that handling, shared, rather than a copy per command.
+ *
+ * Exit 2, not 1: "the store cannot be opened" is a broken setup, not a runtime
+ * failure of the thing being asked for — the same split `check` documents
+ * between a regression (1) and a gate that could not run (2).
+ */
+export function openStoreOr(
+  refuse: ReturnType<typeof makeRefuse>,
+  open: () => Database.Database,
+  dbPath: string,
+): Database.Database | undefined {
+  try {
+    return open();
+  } catch (err) {
+    refuse(2, `Could not open the store: ${err instanceof Error ? err.message : String(err)}`, [
+      `Store path: ${dbPath}`,
+    ]);
+    return undefined;
+  }
 }
