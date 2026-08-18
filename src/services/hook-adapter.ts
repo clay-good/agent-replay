@@ -144,10 +144,28 @@ export function resolveHookRouting(
   payload: Record<string, unknown>,
   eventArg?: string,
 ): { action: HookAction; dialect: HookDialect } {
-  const eventName = str(payload.hook_event_name) ?? eventArg;
+  const eventName = resolveEventName(payload, eventArg);
   const action = eventAction(eventName);
   const dialect = detectDialect(payload, eventName);
   return { action, dialect };
+}
+
+/**
+ * Which event name to route by.
+ *
+ * The payload's own name wins — a harness knows what it dispatched — but only
+ * if we RECOGNIZE it. A name we cannot route (`tool.before` from a harness whose
+ * vocabulary we do not model) used to override the event the operator
+ * registered on the command line, so `hook PreToolUse --enforce` fell through to
+ * `unknown`: every gate skipped, exit 0, an unguarded allow — on a command line
+ * that states gating intent twice. The registered argument is the operator's
+ * declaration and is the right fallback.
+ */
+function resolveEventName(payload: Record<string, unknown>, eventArg?: string): string | undefined {
+  const fromPayload = str(payload.hook_event_name);
+  if (fromPayload && eventAction(fromPayload) !== 'unknown') return fromPayload;
+  if (eventArg && eventAction(eventArg) !== 'unknown') return eventArg;
+  return fromPayload ?? eventArg;
 }
 
 function nextStepNumber(db: Database.Database, traceId: string): number {
@@ -223,6 +241,25 @@ const OPEN_SESSION_TRACE_SQL =
 const SESSION_TRACE_SQL =
   'SELECT id FROM agent_traces WHERE session_id = ? AND parent_trace_id IS NULL' +
   ' ORDER BY julianday(started_at) DESC, started_at DESC LIMIT 1';
+
+/**
+ * The trace holding an OPEN step this closing event could actually close,
+ * preferred over merely the newest one.
+ *
+ * `session_id` is not exclusive to the hook path: `otel serve` merges on it, and
+ * both importers set it. So "the session's newest trace" can be one another
+ * writer created — or an earlier run of a reused session id — and the result
+ * would be attached there, or dropped, while the step it belongs to stays open
+ * forever. Matching on an open step of the same name resolves to the run that is
+ * actually waiting for this result.
+ */
+const SESSION_TRACE_WITH_OPEN_STEP_SQL =
+  `SELECT t.id FROM agent_traces t
+     JOIN agent_trace_steps s ON s.trace_id = t.id
+    WHERE t.session_id = ? AND t.parent_trace_id IS NULL
+      AND s.step_type = 'tool_call' AND s.ended_at IS NULL
+      AND (? IS NULL OR s.name = ?)
+    ORDER BY julianday(t.started_at) DESC, t.started_at DESC LIMIT 1`;
 
 /** Actions that finish earlier work and must never create a trace. */
 const CLOSING_ACTIONS: ReadonlySet<string> = new Set(['post_tool', 'post_tool_fail', 'subagent_stop']);
@@ -311,7 +348,7 @@ export function applyHookPayload(
   payload: Record<string, unknown>,
   opts: ApplyHookOptions = {},
 ): ApplyHookResult {
-  const eventName = str(payload.hook_event_name) ?? opts.eventArg;
+  const eventName = resolveEventName(payload, opts.eventArg);
   const action = eventAction(eventName);
   const dialect = detectDialect(payload, eventName);
   const sessionId = str(payload.session_id) ?? 'unknown-session';
@@ -331,7 +368,12 @@ export function applyHookPayload(
 
   let traceId: string;
   if (CLOSING_ACTIONS.has(action)) {
-    const row = db.prepare(SESSION_TRACE_SQL).get(sessionId) as { id: string } | undefined;
+    const closingTool = str(payload.tool_name) ?? null;
+    const row =
+      (db
+        .prepare(SESSION_TRACE_WITH_OPEN_STEP_SQL)
+        .get(sessionId, closingTool, closingTool) as { id: string } | undefined) ??
+      (db.prepare(SESSION_TRACE_SQL).get(sessionId) as { id: string } | undefined);
     if (!row) return { action, dialect, traceId: null, note: 'no trace for this session to close against' };
     traceId = row.id;
   } else {
@@ -353,7 +395,25 @@ export function applyHookPayload(
     }
 
     case 'pre_tool': {
-      const toolName = str(payload.tool_name) ?? 'tool';
+      // An unusable tool_name makes every name-keyed policy inert, so a
+      // `name_contains` deny cannot fire and the call is allowed. `guard-service`
+      // fails CLOSED on every unusable POLICY field; this is the same question
+      // about a STEP field, and it gets the same answer under enforcement.
+      // Capture keeps the old placeholder — recording something is better than
+      // recording nothing, and capture never gates.
+      const toolName = str(payload.tool_name);
+      if (opts.enforce && !toolName) {
+        return {
+          action, dialect, traceId,
+          note: 'pre_tool without a usable tool_name — cannot evaluate name-based policies',
+          enforcement: {
+            action: 'deny',
+            policy: null,
+            reason: 'agent-replay could not evaluate guard policies (the tool call carries no usable tool_name); blocking to fail closed',
+          },
+        };
+      }
+      const stepName = toolName ?? 'tool';
       const parentStep = agentId ? findAnchor(db, traceId, agentId) : undefined;
       const realInput = (payload.tool_input as Record<string, unknown>) ?? {};
       // --no-input redacts the input we STORE, but policy evaluation below must
@@ -366,7 +426,7 @@ export function applyHookPayload(
       const toolStepNumber = appendStepRetrying(db, traceId, (n) => ({
         step_number: n,
         step_type: 'tool_call',
-        name: toolName,
+        name: stepName,
         input: storedInput,
         started_at: isoNow(),
         parent_step: parentStep ?? null,
@@ -374,13 +434,13 @@ export function applyHookPayload(
       }));
 
       if (!opts.enforce) {
-        return { action, dialect, traceId, note: `opened tool_call "${toolName}"` };
+        return { action, dialect, traceId, note: `opened tool_call "${stepName}"` };
       }
 
       // Enforce: evaluate the proposed tool call (against the real input) and,
       // on a match, record a guard_check step linked to the attempt and return
       // the verdict.
-      const proposed = proposedToolStep(toolStepNumber, toolName, realInput);
+      const proposed = proposedToolStep(toolStepNumber, stepName, realInput);
       const verdict = verdictForMatches(evaluateStep(db, proposed));
       if (verdict.action === 'allow') {
         return { action, dialect, traceId, note: `allowed tool_call "${toolName}"` };

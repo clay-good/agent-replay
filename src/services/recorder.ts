@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { CaptureEvent } from './event-protocol.js';
-import { EVENT_PROTOCOL_VERSION } from './event-protocol.js';
+import { EVENT_PROTOCOL_VERSION, validateEvent } from './event-protocol.js';
 import {
   startTrace,
   appendStep,
@@ -196,7 +196,7 @@ export class TraceRecorder {
 
   /** Open a trace (status `running`) and return its id. */
   startTrace(input: StartTraceInput): string {
-    const { traceId } = applyEvent(this.db, {
+    const { traceId } = this.emit({
       v: EVENT_PROTOCOL_VERSION,
       type: 'trace_start',
       trace_id: input.trace_id,
@@ -217,17 +217,38 @@ export class TraceRecorder {
     return this.traceId;
   }
 
+  /**
+   * Validate, then apply.
+   *
+   * The SDK used to call `applyEvent` directly, so `validateEvent` — where the
+   * live path's rules live — never saw a programmatic event at all. The trace-id
+   * guard was moved to the write for exactly this reason; every OTHER rule
+   * (decision options and confidence, step_type, name, tags, negative counters)
+   * was left at the parser, so the SDK could store what `ingest` refuses and the
+   * trace could not be restored from its own export.
+   *
+   * A rejection THROWS here rather than warning: a JSONL stream is a foreign
+   * producer and leniency keeps the rest of the run, but an SDK call is this
+   * process's own code and a silently dropped event would be a bug it never
+   * learns about.
+   */
+  private emit(event: CaptureEvent): ApplyResult {
+    const { event: valid, warning } = validateEvent(event as unknown as Record<string, unknown>);
+    if (!valid) throw new Error(`invalid capture event: ${warning ?? 'rejected'}`);
+    return applyEvent(this.db, valid);
+  }
+
   private requireTrace(): string {
     if (!this.traceId) throw new Error('TraceRecorder: startTrace must be called first');
     return this.traceId;
   }
 
   startStep(step: StartStepInput): void {
-    applyEvent(this.db, { v: EVENT_PROTOCOL_VERSION, type: 'step_start', trace_id: this.requireTrace(), ...step });
+    this.emit({ v: EVENT_PROTOCOL_VERSION, type: 'step_start', trace_id: this.requireTrace(), ...step });
   }
 
   endStep(stepNumber: number, patch: EndStepInput = {}): void {
-    applyEvent(this.db, {
+    this.emit({
       v: EVENT_PROTOCOL_VERSION,
       type: 'step_end',
       trace_id: this.requireTrace(),
@@ -238,11 +259,11 @@ export class TraceRecorder {
 
   /** Record a complete step in one call. */
   step(step: StartStepInput & EndStepInput & { decision?: IngestDecisionInput; snapshot?: IngestSnapshotInput }): void {
-    applyEvent(this.db, { v: EVENT_PROTOCOL_VERSION, type: 'step', trace_id: this.requireTrace(), ...step });
+    this.emit({ v: EVENT_PROTOCOL_VERSION, type: 'step', trace_id: this.requireTrace(), ...step });
   }
 
   decision(stepNumber: number, decision: IngestDecisionInput): void {
-    applyEvent(this.db, {
+    this.emit({
       v: EVENT_PROTOCOL_VERSION,
       type: 'decision',
       trace_id: this.requireTrace(),
@@ -252,7 +273,7 @@ export class TraceRecorder {
   }
 
   snapshot(stepNumber: number, snapshot: IngestSnapshotInput): void {
-    applyEvent(this.db, {
+    this.emit({
       v: EVENT_PROTOCOL_VERSION,
       type: 'snapshot',
       trace_id: this.requireTrace(),
@@ -262,6 +283,6 @@ export class TraceRecorder {
   }
 
   endTrace(patch: EndTraceInput = {}): void {
-    applyEvent(this.db, { v: EVENT_PROTOCOL_VERSION, type: 'trace_end', trace_id: this.requireTrace(), ...patch });
+    this.emit({ v: EVENT_PROTOCOL_VERSION, type: 'trace_end', trace_id: this.requireTrace(), ...patch });
   }
 }

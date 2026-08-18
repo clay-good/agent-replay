@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
+import { forkTrace } from '../src/services/fork-service.js';
 import { ingestTrace, createEval } from '../src/services/trace-service.js';
 import { addPolicy } from '../src/services/guard-service.js';
 import { dashboardStats, statusCounts, agentStats, recentTraces, recentEvalScores } from '../src/ui/dashboard-data.js';
@@ -267,5 +268,26 @@ describe('dashboardStats token total', () => {
       steps: [{ step_number: 1, step_type: 'llm_call', name: 'a', tokens_used: 1 }],
     } as never);
     expect(dashboardStats(db).totalTokens).toBe(999);
+  });
+});
+
+describe('store totals exclude forks', () => {
+  it('does not count a never-executed fork as spend', () => {
+    // A fork copies a step prefix, tokens and all, so one `fork` of a 2-step
+    // 3000-token trace doubled `steps` and `totalTokens` — reporting spend that
+    // never happened. Every other fork-aware surface already filters on lineage.
+    const t = ingestTrace(db, {
+      agent_name: 'f', status: 'completed', input: {}, total_tokens: 3000,
+      steps: [
+        { step_number: 1, step_type: 'tool_call', name: 'a', tokens_used: 1000 },
+        { step_number: 2, step_type: 'output', name: 'b', tokens_used: 2000 },
+      ],
+    });
+    const before = dashboardStats(db);
+    forkTrace(db, t.id, 2);
+    const after = dashboardStats(db);
+    expect(after.traces).toBe(before.traces);
+    expect(after.steps).toBe(before.steps);
+    expect(after.totalTokens).toBe(before.totalTokens);
   });
 });

@@ -219,13 +219,23 @@ export function validateEvent(obj: unknown): ParseResult {
   }
 
   if (type === 'step_start' || type === 'step') {
-    if (typeof e.step_type !== 'string' || typeof e.name !== 'string') {
-      return { event: null, warning: `skipped: ${type} requires step_type and name` };
+    // A NON-EMPTY name: `ingest` requires one, so an empty string was a step this
+    // tool wrote that its own re-ingest refuses.
+    if (typeof e.step_type !== 'string' || typeof e.name !== 'string' || !e.name) {
+      return { event: null, warning: `skipped: ${type} requires step_type and a non-empty name` };
     }
     // Reject an unknown step_type here — it would otherwise fail the DB CHECK
     // constraint inside appendStep and (in a batch ingest) abort the trace.
     if (!(STEP_TYPES as readonly string[]).includes(e.step_type)) {
       return { event: null, warning: `skipped: ${type} has invalid step_type "${e.step_type}"` };
+    }
+  }
+  // Tags must be strings, not merely an array: `insertTraceRow` coerces the
+  // CONTAINER but never the elements, so `tags: [1, {x: 2}]` was stored and then
+  // rejected by `ingest` ("all tags must be strings").
+  if (e.tags != null) {
+    if (!Array.isArray(e.tags) || e.tags.some((t) => typeof t !== 'string')) {
+      return { event: null, warning: `skipped: ${type} tags must all be strings` };
     }
   }
   if (type === 'decision' && (typeof e.chosen !== 'string' || !e.chosen)) {

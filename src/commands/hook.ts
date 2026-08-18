@@ -120,11 +120,19 @@ export async function runHook(eventArg: string | undefined, opts: HookOptions = 
     payload = JSON.parse(trimmed) as Record<string, unknown>;
   } catch (err) {
     console.error(`agent-replay hook: invalid JSON payload: ${errorMessage(err)}`);
-    // Not a real, actionable tool call — capture-only, allow. (A malformed
-    // payload is the harness misbehaving, not a policy decision; blocking every
-    // event on garbage input would be worse than the capture gap.) Deliberately
-    // NOT routed through failClosedWithoutPayload above: unlike empty stdin, the
-    // harness did send something, and this allow is an explicit design choice.
+    // CAPTURE mode allows: a malformed payload is the harness misbehaving, not a
+    // policy decision, and blocking every event on garbage input would be worse
+    // than the capture gap.
+    //
+    // ENFORCE mode on a gating event does not. It was the last "we could not
+    // evaluate" outcome in this slice that answered allow — empty stdin,
+    // unreadable stdin, a missing store, an empty policy set and a store error
+    // all deny, and so does `guard check` on invalid JSON. A payload truncated
+    // by a broken pipe or a partial write is indistinguishable from garbage, so
+    // this is exactly the input a caller cannot vouch for. We cannot read the
+    // event name out of a payload that will not parse, so the REGISTERED event
+    // decides whether this call gates.
+    if (failClosedWithoutPayload(`invalid JSON payload: ${errorMessage(err)}`)) return;
     process.exitCode = 0;
     return;
   }

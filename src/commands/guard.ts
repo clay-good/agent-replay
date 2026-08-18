@@ -189,7 +189,8 @@ export function runGuardToggle(policyId: string, enabled: boolean, opts: GuardTo
 
   try {
     const name = setPolicyEnabled(db, policyId, enabled);
-    console.log(chalk.greenBright(`  Policy "${name}" ${enabled ? 'enabled' : 'disabled'}.`));
+    // The STORED name, read back from the database — not the argv the user typed.
+    console.log(chalk.greenBright(`  Policy "${safeText(name)}" ${enabled ? 'enabled' : 'disabled'}.`));
     if (!enabled) console.log(chalk.dim('  It stays in "guard list" and stops matching until re-enabled.'));
     console.log('');
   } catch (err) {
@@ -254,7 +255,7 @@ export function runGuardTest(traceId: string, opts: GuardTestOptions = {}): void
     for (const match of result.matches) {
       console.log(
         `     ${guardActionBadge(match.action)} ` +
-          chalk.white(match.policy.name) +
+          chalk.white(safeText(match.policy.name)) +
           chalk.dim(` — ${match.reason}`),
       );
     }
@@ -346,6 +347,14 @@ export async function runGuardCheck(opts: GuardCheckOptions = {}): Promise<void>
   }
   const step_input = parsed as Record<string, unknown>;
 
+  // A missing or non-string NAME was quietly coerced to '', which makes every
+  // name-keyed policy (`name_contains`, `name_regex`) unable to match — so an
+  // under-specified step disabled a whole class of denies and exited 0. Every
+  // other unusable field in this command denies; this one now does too.
+  if (typeof step_input.name !== 'string' || !step_input.name) {
+    denied('step must include a non-empty "name" — name-based policies cannot be evaluated without it');
+    return;
+  }
   if (typeof step_input.step_type !== 'string' || !isValidStepType(step_input.step_type)) {
     denied('step must include a valid "step_type"');
     return;
@@ -356,7 +365,7 @@ export async function runGuardCheck(opts: GuardCheckOptions = {}): Promise<void>
     trace_id: '',
     step_number: typeof step_input.step_number === 'number' ? step_input.step_number : 1,
     step_type: step_input.step_type as StepType,
-    name: typeof step_input.name === 'string' ? step_input.name : '',
+    name: step_input.name as string,
     input: (step_input.input as Record<string, unknown>) ?? {},
     output: (step_input.output as Record<string, unknown>) ?? null,
     started_at: '',

@@ -33,11 +33,19 @@ export function dashboardStats(db: Database.Database, opts: StatsFilter = {}): D
   const p = since ? sinceParams(since) : [];
   // Trace-level: a leading WHERE or an appended AND, depending on whether the
   // query already has a WHERE. Steps/evals: window by the parent trace's start.
-  const traceWhere = since ? `WHERE ${SINCE_PREDICATE}` : '';
-  const traceAnd = since ? `AND ${SINCE_PREDICATE}` : '';
+  //
+  // Forks are excluded from every total. A fork is a never-executed COPY of a
+  // step prefix, tokens and all, so counting it reported spend that never
+  // happened: one `fork` of a 2-step 3000-token trace doubled `steps` and
+  // `totalTokens`. Every other fork-aware surface — golden export, `check`,
+  // `watch`, the hook's open-trace lookup and the OTel merge — already filters
+  // on lineage; the store roll-up was the one that did not.
+  const notFork = 'parent_trace_id IS NULL';
+  const traceWhere = since ? `WHERE ${notFork} AND ${SINCE_PREDICATE}` : `WHERE ${notFork}`;
+  const traceAnd = since ? `AND ${notFork} AND ${SINCE_PREDICATE}` : `AND ${notFork}`;
   const childWhere = since
-    ? `WHERE trace_id IN (SELECT id FROM agent_traces WHERE ${SINCE_PREDICATE})`
-    : '';
+    ? `WHERE trace_id IN (SELECT id FROM agent_traces WHERE ${notFork} AND ${SINCE_PREDICATE})`
+    : `WHERE trace_id IN (SELECT id FROM agent_traces WHERE ${notFork})`;
   const count = (sql: string, params: unknown[] = []) => (db.prepare(sql).get(...params) as { cnt: number }).cnt;
   const scalar = (sql: string, params: unknown[] = []) => (db.prepare(sql).get(...params) as { v: number | null }).v;
   return {

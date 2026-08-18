@@ -1012,7 +1012,17 @@ export function estimateAiEvalCost(
  * that is not actually a finite number scores 0.
  */
 function numericScore(v: unknown): number {
-  return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  // A JSON-quoted number is the single most common way a model mis-sends one,
+  // and rejecting it scored a perfectly good reply 0 / failed, silently. Only a
+  // string that is ENTIRELY a number counts — `Number()` alone would still
+  // accept `[]` (0), `["10"]` (10) and `true` (1), which is what this guard
+  // exists to refuse.
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────

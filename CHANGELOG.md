@@ -2210,6 +2210,64 @@ between them, and nothing else.
   trace summary, which predated the injection guard now appended to every AI
   prompt. Measured, the prompts ran up to 44% over that on a small trace.
 
+- **Security (fail-open):** an unrecognized `hook_event_name` in the payload
+  overrode the event registered on the command line, so a harness whose pre-tool
+  event this tool does not model fell through to "unknown": the missing-store
+  gate, the empty-policy gate and policy evaluation were all skipped, and the
+  call was allowed at exit 0 — on a command line that states gating intent twice
+  (`hook PreToolUse --enforce`). The payload still wins when we recognize its
+  name; otherwise the registered argument decides.
+
+- **Security (fail-open):** a tool call with no usable `tool_name` was allowed.
+  It makes every name-keyed policy unable to match, so a `name_contains` deny
+  could not fire. `guard-service` fails closed on every unusable *policy* field;
+  under `--enforce` an unusable *step* field now gets the same answer. Capture
+  mode still never blocks.
+
+- **Security (fail-open):** a malformed JSON payload was allowed under
+  `--enforce`. It was the last "we could not evaluate" outcome in the slice that
+  answered allow — empty stdin, unreadable stdin, a missing store, an empty
+  policy set and a store error all deny, and so does `guard check` on invalid
+  JSON. A payload truncated by a broken pipe is indistinguishable from garbage,
+  which is exactly the input a caller cannot vouch for. Capture mode is
+  unchanged.
+
+- **Security (fail-open):** `guard check` coerced a missing or non-string `name`
+  to `''` and answered allow, silently disabling every name-keyed policy. Every
+  other unusable field in that command denies.
+
+- The SDK could store what `ingest` refuses. `TraceRecorder` built events and
+  called `applyEvent` directly, so `validateEvent` — where the live path's rules
+  live — never saw a programmatic event: an out-of-range decision confidence,
+  bare-string options, an empty `chosen`, an empty step name and non-string tags
+  all round-tripped into a trace that failed its own re-ingest. Every SDK
+  emission is validated now, and a rejection throws rather than warning, because
+  an SDK call is this process's own code rather than a foreign producer.
+
+- `stats` and the dashboard counted forks. A fork is a never-executed copy of a
+  step prefix, tokens and all, so one `fork` of a 2-step 3,000-token trace
+  doubled the store's `steps` and `totalTokens` — reporting spend that never
+  happened. Every other fork-aware surface already filtered on lineage.
+
+- `ingest` now says when it drops fork lineage. `export` writes
+  `parent_trace_id`, `ingest` has nowhere to put it, and a restored fork becomes
+  an ordinary trace — which the golden gate and `watch` then treat as a real run.
+  Rebuilding the link needs an in-file id remap and is left alone; going quiet
+  about it is not.
+
+- Arrow-key navigation in the dashboard's trace list survives a refresh again.
+  The list widget resets its selection on every `setData`, unlike the one it
+  replaced, so the cursor jumped back to the top row on each auto-refresh.
+
+- An AI score sent as a JSON-quoted number (`"9"`) scored 0 and failed. Guarding
+  against `["9"]` and `true` had also rejected the single most common way a model
+  mis-sends a number, silently failing a good reply.
+
+- A policy name is escaped wherever it is shown, and a closing hook event
+  resolves to the trace holding a matching open step rather than merely the
+  session's newest — `session_id` is not exclusive to the hook path, so another
+  writer's trace could absorb a result the live run was waiting for.
+
 - **Installing `agent-replay` no longer pulls vulnerable transitive
   dependencies.** A consumer install carried five advisories — three high
   (`lodash`, reached twice) and two moderate (`xml2js`) — all of them via

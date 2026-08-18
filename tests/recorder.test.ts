@@ -741,3 +741,38 @@ describe('a producer-chosen trace id cannot carry control characters', () => {
   });
 });
 
+describe('the SDK is held to the same rules as the JSONL stream', () => {
+  it('refuses what ingest would reject, instead of storing it', () => {
+    // `TraceRecorder` built events and called `applyEvent` DIRECTLY, so
+    // `validateEvent` — where the live path's rules live — never saw a
+    // programmatic event. The trace-id guard was moved to the write for exactly
+    // this reason; every other rule was left at the parser, so the SDK could
+    // store traces that fail their own re-ingest.
+    const r = new TraceRecorder(db);
+    r.startTrace({ agent_name: 'sdk', trigger: 'manual', input: {} });
+
+    const bad: [string, Record<string, unknown>][] = [
+      ['confidence out of range', { chosen: 'x', confidence: 5, options: [{ option: 'a' }] }],
+      ['bare-string options', { chosen: 'x', options: ['a', 'b'] }],
+      ['empty chosen', { chosen: '', options: [{ option: 'a' }] }],
+    ];
+    for (const [label, decision] of bad) {
+      expect(
+        () => r.step({ step_number: 1, step_type: 'decision', name: 'pick', input: {}, decision } as never),
+        label,
+      ).toThrow(/invalid capture event/);
+    }
+    expect(() => r.step({ step_number: 2, step_type: 'output', name: '', input: {} } as never)).toThrow();
+    expect(() =>
+      new TraceRecorder(db).startTrace({ agent_name: 'x', trigger: 'manual', input: {}, tags: [1] } as never),
+    ).toThrow();
+
+    // A legitimate decision is unaffected.
+    expect(() =>
+      r.step({
+        step_number: 3, step_type: 'decision', name: 'ok', input: {},
+        decision: { chosen: 'x', confidence: 0.9, options: [{ option: 'a', score: 0 }] },
+      } as never),
+    ).not.toThrow();
+  });
+});

@@ -210,8 +210,16 @@ export class DashboardView {
       formatRelativeTime(r.started_at),
     ]);
 
-    // listtable takes headers as the first row.
+    // listtable takes headers as the first row. `setData` ends with an
+    // unconditional `select(0)`, unlike the `setItems` the previous widget used
+    // (which restores the prior selection) — so every auto-refresh yanked the
+    // cursor back to the top row and arrow-key navigation was unusable on any
+    // live store. Restore the row the user was on.
+    const selected = (this.traceTable as unknown as { selected?: number }).selected ?? 0;
     this.traceTable.setData([headers, ...data]);
+    if (selected > 0 && data.length > 0) {
+      this.traceTable.select(Math.min(selected, data.length));
+    }
   }
 
   private updateEvalChart(): void {

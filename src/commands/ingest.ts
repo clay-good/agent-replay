@@ -117,6 +117,23 @@ export function runIngest(filePath: string, opts: IngestOptions = {}): void {
     console.log(chalk.yellow(`  Continuing with ${valid.length} valid trace(s).`));
   }
 
+  // Fork lineage is dropped: `insertTraceRow` hard-codes parent_trace_id to null
+  // (and ingest regenerates ids, so a parent reference in the file would not
+  // point anywhere), while `export` writes both fields. Restoring the link needs
+  // an in-file id remap and a decision about a fork whose parent is not in the
+  // file — a schema/semantics call. Saying so is not: a restored fork silently
+  // becomes an ordinary trace, and the guards that exclude forks (golden export,
+  // `check`, `watch`) then treat it as a real run.
+  const forks = valid.filter((t) => (t as unknown as { parent_trace_id?: unknown }).parent_trace_id != null).length;
+  if (forks > 0) {
+    console.log(
+      chalk.yellow(
+        `  Note: ${forks} trace(s) in this file are forks; they are restored as ordinary traces — ` +
+        'ingest cannot rebuild fork lineage, so `check` and `watch` will treat them as real runs.',
+      ),
+    );
+  }
+
   // Reported BEFORE the dry-run return: --dry-run is the documented preview of
   // the real run, so a preview that omits the one thing the real run warns about
   // is exactly the surprise it exists to prevent.

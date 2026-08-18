@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
 import { getTrace, listTraces, ingestTrace } from '../src/services/trace-service.js';
-import { applyHookPayload, detectDialect } from '../src/services/hook-adapter.js';
+import { applyHookPayload, detectDialect, resolveHookRouting } from '../src/services/hook-adapter.js';
 import { forkTrace } from '../src/services/fork-service.js';
 import { addPolicy } from '../src/services/guard-service.js';
 import { ensureDatabase, resetConnection } from '../src/db/index.js';
@@ -478,3 +478,64 @@ describe('a closing hook event that arrives after the turn ended', () => {
   });
 });
 
+describe('enforcement fails closed on a call it cannot evaluate', () => {
+  it('routes by the registered event when the payload names one we cannot route', () => {
+    // The payload's event name always won, so a harness whose pre-tool event we
+    // do not model (`tool.before`) made `action` unknown: the missing-store gate,
+    // the empty-policy gate and policy evaluation were ALL skipped and the call
+    // was allowed — on a command line stating gating intent twice (`PreToolUse`
+    // and `--enforce`). The registered argument is the operator's declaration.
+    expect(resolveHookRouting({ hook_event_name: 'tool.before' }, 'PreToolUse').action).toBe('pre_tool');
+    // A recognized payload name still wins over the argument.
+    expect(resolveHookRouting({ hook_event_name: 'Stop' }, 'PreToolUse').action).toBe('finalize');
+    // Both unrecognized stays unknown.
+    expect(resolveHookRouting({ hook_event_name: 'nope' }, 'alsonope').action).toBe('unknown');
+  });
+
+  it('denies a tool call with no usable tool_name under --enforce', () => {
+    // An unusable name makes every name-keyed policy unable to match, so a
+    // `name_contains` deny cannot fire. guard-service fails CLOSED on an
+    // unusable POLICY field; this is the same question about a STEP field.
+    addPolicy(db, { name: 'byname', match_pattern: { name_contains: 'bash' }, action: 'deny' });
+    const res = apply(
+      { hook_event_name: 'PreToolUse', session_id: 'n1', tool_input: { command: 'x' } },
+      { enforce: true },
+    );
+    expect(res.enforcement?.action).toBe('deny');
+
+    // Capture mode never blocks, and still records the step.
+    const capture = apply(
+      { hook_event_name: 'PreToolUse', session_id: 'n2', tool_input: { command: 'x' } },
+      { enforce: false },
+    );
+    expect(capture.enforcement).toBeUndefined();
+  });
+});
+
+describe('a closing event finds the run that is waiting for it', () => {
+  it('prefers the trace holding a matching open step over merely the newest', () => {
+    // session_id is not exclusive to the hook path — `otel serve` merges on it
+    // and both importers set it — so "the session's newest trace" can be one
+    // another writer created, and the result was attached there (or dropped)
+    // while the step it belonged to stayed open forever.
+    apply({ hook_event_name: 'SessionStart', session_id: 'shared', permission_mode: 'default' });
+    apply({ hook_event_name: 'PreToolUse', session_id: 'shared', tool_name: 'Bash', tool_input: { command: 'go' } });
+
+    // Another writer adds a NEWER trace for the same session.
+    ingestTrace(db, {
+      agent_name: 'other-writer', status: 'completed', session_id: 'shared',
+      input: {}, started_at: new Date(Date.now() + 60_000).toISOString(),
+      steps: [{ step_number: 1, step_type: 'output', name: 'x' }],
+    });
+
+    apply({
+      hook_event_name: 'PostToolUse', session_id: 'shared',
+      tool_name: 'Bash', tool_output: { stdout: 'LIVE' },
+    });
+
+    const hookTrace = listTraces(db, {}).items.find((t) => t.agent_name === 'claude-code')!;
+    const tool = getTrace(db, hookTrace.id)!.steps.find((s) => s.step_type === 'tool_call')!;
+    expect(tool.output).toEqual({ stdout: 'LIVE' });
+    expect(tool.ended_at).not.toBeNull();
+  });
+});

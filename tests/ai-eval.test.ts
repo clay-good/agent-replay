@@ -1051,6 +1051,17 @@ describe('the AI eval surface holds up against a hostile or sloppy model reply',
     }
   });
 
+  it('accepts a JSON-quoted number, which is how models usually mis-send one', () => {
+    // The first version of this guard rejected `"9"` along with `["9"]`, so a
+    // perfectly good reply scored 0 / failed, silently — a fix that broke the
+    // common case to close the rare one.
+    const quality = AI_PRESETS['ai-quality-review'].parse_response!(
+      JSON.stringify({ relevance: '9', completeness: '9', coherence: '9', accuracy: '9' }),
+    );
+    expect(quality.score).toBeCloseTo(0.9, 5);
+    expect(quality.passed).toBe(true);
+  });
+
   it('scores a wrong-typed field as zero, not as full marks', () => {
     // `Number(["10"])` is 10 and `Number(true)` is 1, so a mis-shaped reply
     // scored a PASS. Every such coercion erred in the permissive direction.

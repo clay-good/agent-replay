@@ -115,7 +115,7 @@ export function policyTable(policies: GuardrailPolicy[]): string {
       // was guaranteed to fail. A policy id is `pol_` + 12 chars, so the whole
       // thing fits.
       chalk.dim(p.id),
-      chalk.white(p.name),
+      chalk.white(safeText(p.name)),
       guardActionBadge(p.action),
       chalk.white(String(p.priority)),
       p.enabled ? chalk.green('Yes') : chalk.red('No'),
