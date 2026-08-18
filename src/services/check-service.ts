@@ -109,13 +109,16 @@ export function checkGolden(
   let unmatched = 0;
 
   const covered = new Set<string>();
-  // The baseline entries actually diffed against a candidate. Exercisability
-  // must be read from THESE, not from the whole file: scanning every entry let
-  // an unrelated baseline — one no candidate matched — make a field look
-  // exercisable, which restored the exact false green this guard exists to
-  // prevent (`--fields tool_inputs` passing green while comparing nothing,
-  // because some other agent's baseline happens to contain a tool call).
-  const comparedAgainst = new Set<GoldenEntry>();
+  // Per MATCHED CANDIDATE, the baseline entries it was diffed against.
+  //
+  // Exercisability is not a property of the file, and not of the run either: it
+  // is a property of each candidate's own baselines. Scanning the whole file
+  // let a baseline nothing matched make a field look exercisable; taking a
+  // run-wide union then let ONE agent that has tool calls re-arm the vacuous
+  // pass for every agent that does not — `--fields tool_inputs` refused
+  // correctly for `quiet-bot` alone, and passed green the moment another agent
+  // was in the same batch. Same false green, one level down each time.
+  const matchedFor: GoldenEntry[][] = [];
   for (const trace of candidates) {
     const key = goldenKey(trace.agent_name, trace.input);
     const bucket = index.get(key);
@@ -132,16 +135,17 @@ export function checkGolden(
     // gave two identical candidates opposite verdicts (the first took the exact
     // match, the next was forced onto a leftover and falsely "regressed") and
     // could even hide a real regression as "unmatched" once the bucket emptied.
-    comparedAgainst.add(bucket[0]);
+    const usedEntries: GoldenEntry[] = [bucket[0]];
     let divergences = diffAgainstGolden(trace, bucket[0], fields);
     for (let i = 1; i < bucket.length && divergences.length > 0; i++) {
-      comparedAgainst.add(bucket[i]);
+      usedEntries.push(bucket[i]);
       const div = diffAgainstGolden(trace, bucket[i], fields);
       if (div.length < divergences.length) {
         divergences = div;
       }
     }
 
+    matchedFor.push(usedEntries);
     covered.add(key);
     const ok = divergences.length === 0;
     if (ok) passed++;
@@ -166,8 +170,11 @@ export function checkGolden(
   //
   // Belt and braces: never preempt a real failure. If anything regressed, that
   // is the answer, whatever else could not be compared.
+  // A field is uncompared when ANY matched candidate's own baselines cannot
+  // exercise it — that candidate was reported as passing a comparison that
+  // never happened, whatever the other candidates managed.
   const uncompared = explicit && passed + failed > 0 && failed === 0
-    ? fields.filter((f) => ![...comparedAgainst].some((g) => entryExercises(g, f)))
+    ? fields.filter((f) => matchedFor.some((entries) => !entries.some((g) => entryExercises(g, f))))
     : [];
 
   return {

@@ -1,5 +1,5 @@
 import type { IngestDecisionInput, IngestSnapshotInput } from '../models/types.js';
-import { STEP_TYPES } from '../models/enums.js';
+import { STEP_TYPES, TRACE_STATUSES } from '../models/enums.js';
 import { decisionOptionProblem, isValidConfidence } from '../utils/validators.js';
 
 /**
@@ -215,6 +215,21 @@ export function validateEvent(obj: unknown): ParseResult {
   if (needsStep.includes(type)) {
     if (typeof e.step_number !== 'number' || !Number.isInteger(e.step_number) || e.step_number < 1) {
       return { event: null, warning: `skipped: ${type} requires a positive integer step_number` };
+    }
+  }
+
+  // A terminal status the schema does not know is REPORTED, not silently taken.
+  // `validateEvent` is the door both the JSONL stream and the SDK's emit() pass
+  // through, and it checked step_type, name, tags and confidence but never
+  // this — so `endTrace({status: 'Failed'})` (a case difference) sailed past the
+  // "an SDK call throws rather than silently drops" contract, and the stream
+  // path applied it with zero warnings. `ingest` rejects the identical value.
+  if (type === 'trace_end' && e.status != null) {
+    if (typeof e.status !== 'string' || !(TRACE_STATUSES as readonly string[]).includes(e.status)) {
+      return {
+        event: null,
+        warning: `skipped: trace_end has invalid status "${String(e.status)}" (must be one of: ${TRACE_STATUSES.join(', ')})`,
+      };
     }
   }
 

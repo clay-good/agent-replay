@@ -261,31 +261,68 @@ function upsertOtelTrace(db: Database.Database, input: MappedOtelTrace, stats: O
     const incoming = input.steps ?? [];
     let newSteps = incoming;
     if (incoming.length > 0) {
+      // Two identities, one rule: a span carries `otel_span_id`, a log record
+      // gets an `otel_log_key` stamped by the log mapper. The log path had no
+      // dedupe at all, so posting the same log batch twice stored every step
+      // again and doubled the token total — the same trigger, the same store,
+      // and a receiver-wide claim that was only true of spans.
       const seen = new Set(
         (db
           .prepare(
-            `SELECT json_extract(metadata, '$.otel_span_id') AS span_id
+            `SELECT json_extract(metadata, '$.otel_span_id') AS span_id,
+                    json_extract(metadata, '$.otel_log_key') AS log_key
                FROM agent_trace_steps WHERE trace_id = ?`,
           )
-          .all(target) as Array<{ span_id: unknown }>)
-          .map((r) => r.span_id)
+          .all(target) as Array<{ span_id: unknown; log_key: unknown }>)
+          .flatMap((r) => [r.span_id, r.log_key])
           .filter((id): id is string => typeof id === 'string'),
       );
       newSteps = incoming.filter((st) => {
-        const id = (st.metadata as { otel_span_id?: unknown } | undefined)?.otel_span_id;
+        const meta = st.metadata as { otel_span_id?: unknown; otel_log_key?: unknown } | undefined;
+        const id = meta?.otel_span_id ?? meta?.otel_log_key;
         return !(typeof id === 'string' && seen.has(id));
       });
     }
 
-    // Every span in this batch is already stored and it brings no new identity
-    // root: it is a redelivery, so merging it again would only inflate the
-    // totals. A batch that legitimately carries no spans at all (a token-only
-    // flush window) still merges, which is why the check requires that spans
-    // were actually present.
-    if (incoming.length > 0 && newSteps.length === 0 && !rootStep) return;
+    // Nothing in this batch is new: it is a redelivery, so merging it again
+    // would only inflate the totals. `alreadyPresent` covers the ROOT-ONLY
+    // retry — the common final flush, since the root span ends last — which
+    // carries no child steps at all and so slipped past a check that required
+    // `incoming.length > 0`.
+    if (!rootStep && newSteps.length === 0 && (incoming.length > 0 || alreadyPresent)) return;
 
     const steps = rootStep ? [...newSteps, rootStep] : newSteps;
-    mergeBatchIntoTrace(db, target, { ...input, steps: steps ?? [] });
+
+    // When dedupe actually removed something, recompute this batch's
+    // CONTRIBUTION rather than passing the mapper's batch-wide totals through.
+    // Those totals are summed over every span the batch carried, including the
+    // ones just dropped as duplicates — so a retry that brought one new span
+    // still added the whole batch's tokens and cost again, permanently
+    // inflating both. Deduping the steps and not the numbers fixed half the
+    // defect and left the half nobody looks at.
+    //
+    // ONLY when something was dropped: this same merge serves the /v1/logs
+    // path, whose steps carry no per-span cost (the log mapper reads spend from
+    // the record, not the step), so recomputing unconditionally would zero a
+    // cost that path had correctly summed. Nothing is deduped there, so nothing
+    // needs recomputing.
+    const deduped = newSteps.length < incoming.length || (candidate != null && alreadyPresent);
+    const totals = deduped
+      ? {
+          total_tokens:
+            steps.reduce((sum, st) => sum + (Number(st.tokens_used) || 0), 0) || null,
+          total_cost_usd:
+            steps.reduce(
+              (sum, st) => sum + (Number((st.metadata as { otel_cost_usd?: unknown } | undefined)?.otel_cost_usd) || 0),
+              0,
+            ) || null,
+        }
+      : {};
+    mergeBatchIntoTrace(db, target, {
+      ...input,
+      ...totals,
+      steps: steps ?? [],
+    });
     stats.acceptedSpans += steps?.length ?? 0;
     return;
   }

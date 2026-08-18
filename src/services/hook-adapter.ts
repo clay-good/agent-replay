@@ -303,7 +303,22 @@ function ensureTrace(
   }).immediate();
 }
 
-/** The most recent open (unclosed) tool_call step matching a tool name. */
+/**
+ * The OLDEST open (unclosed) tool_call step matching a tool name.
+ *
+ * Oldest, not newest. Harnesses dispatch tools in parallel batches and the
+ * results come back in call order, so `ORDER BY step_number DESC` handed each
+ * result to the wrong open call: with two `Bash` calls in flight, the first
+ * result closed the SECOND step. Both outputs were swapped, and — the expensive
+ * half — a failure landed on the call that had actually succeeded while the one
+ * that failed was stored clean. That is a fabricated failure and a fail-open in
+ * one, on the primary capture path for Claude Code.
+ *
+ * The same reasoning fixed the gemini stream translator's fallback pairing;
+ * this function was the precedent that argument cited, and it had the bug.
+ * FIFO is also what makes the two paths agree, which is the property worth
+ * having: both now close the oldest matching open call.
+ */
 function findOpenToolStep(
   db: Database.Database,
   traceId: string,
@@ -315,7 +330,7 @@ function findOpenToolStep(
     .prepare(
       `SELECT step_number, started_at FROM agent_trace_steps
        WHERE trace_id = ? AND step_type = 'tool_call' AND ended_at IS NULL ${clause}
-       ORDER BY step_number DESC LIMIT 1`,
+       ORDER BY step_number ASC LIMIT 1`,
     )
     .get(...params) as { step_number: number; started_at: string } | undefined;
 }

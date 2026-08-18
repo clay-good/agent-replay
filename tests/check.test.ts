@@ -973,6 +973,39 @@ describe('a requested field the baseline cannot exercise is a broken gate, not a
     expect(report.ok).toBe(false);
   });
 
+  // One agent that HAS tool calls must not re-arm the vacuous pass for an agent
+  // that does not. Exercisability belongs to each candidate's own baselines, not
+  // to the run as a whole.
+  it('refuses when any matched candidate cannot exercise the field', () => {
+    const quiet: IngestTraceInput = {
+      agent_name: 'quiet-bot',
+      status: 'completed',
+      input: { task: 'just think' },
+      steps: [{ step_number: 1, step_type: 'thought', name: 'plan' }],
+    };
+    const busy: IngestTraceInput = {
+      agent_name: 'busy-bot',
+      status: 'completed',
+      input: { task: 'do work' },
+      steps: [{ step_number: 1, step_type: 'tool_call', name: 'grep', input: { q: 'x' } }],
+    };
+    ingestTrace(db, quiet);
+    ingestTrace(db, busy);
+    const golden = JSON.parse(exportTraces(db, {}, 'golden')) as GoldenEntry[];
+
+    // Both candidates in one run: busy-bot exercises tool_inputs, quiet-bot
+    // cannot — so the run must still refuse rather than pass on busy-bot's
+    // behalf.
+    const report = checkGolden(golden, [candidate(quiet), candidate(busy)], { fields: ['tool_inputs'] });
+    expect(report.uncompared).toEqual(['tool_inputs']);
+    expect(report.ok).toBe(false);
+
+    // busy-bot alone is a genuine comparison and passes.
+    const busyOnly = checkGolden(golden, [candidate(busy)], { fields: ['tool_inputs'] });
+    expect(busyOnly.uncompared).toEqual([]);
+    expect(busyOnly.ok).toBe(true);
+  });
+
   it('reports the regression when the candidate produced no steps at all', () => {
     const golden = makeGolden();
     const crashed = candidate({ ...baseline, steps: [] });

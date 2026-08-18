@@ -180,6 +180,45 @@ between them, and nothing else.
 
 ### Fixed
 
+- **A failure could be recorded against the tool call that succeeded.** The
+  hook adapter closed the most recently opened tool step, but harnesses dispatch
+  tools in parallel batches whose results return in call order — so with two
+  calls in flight the first result closed the second step. Outputs were swapped,
+  and a `PostToolUseFailure` landed on the call that had actually succeeded
+  while the one that failed was stored clean: a fabricated failure and a
+  fail-open at once, on the primary capture path. Pairing is oldest-first now,
+  matching the stream translator.
+- A trace finalized with a terminal status the schema does not recognize was
+  stored as **completed**. `endTrace({ status: 'Failed' })` — a case difference —
+  and `aborted`, `cancelled` or `Timeout` all became success, and the
+  deterministic evaluators read `status`, so a run the caller explicitly
+  declared failed scored 1.0 PASS and exited 0. An unreadable terminal status
+  now coerces to `failed`, and `trace_end.status` is validated at the door both
+  the JSONL stream and the SDK pass through. A *missing* status still defaults
+  to completed — that is a clean stream ending normally, not a value that could
+  not be read.
+- `runCustomRubric`, a public export, had no lower bound on a criterion weight,
+  so a caller passing `weight: -1` alongside a positive one drove the score
+  above 1 — a rubric stored and displayed as **200% PASSED**. Weights are
+  clamped and the score is bounded on both sides.
+- A rubric whose criteria all weighed 0 divided by zero and reported "0% FAIL"
+  at exit 1 directly beside "All criteria passed" — a false CI regression whose
+  own report contradicted it. Rejected at parse time, along with duplicate
+  criterion names (which collapse in the stored details).
+- A malformed YAML rubric blamed a missing package for every parse error,
+  discarding the line and column the author needed; an empty rubric file leaked
+  a raw TypeError.
+- `ingestTrace` stored data the CLI refuses: negative token counts, a
+  `step_number` of 0, non-string tags and a numeric `started_at` — the last
+  stringified into the column, so every `--since` window and every ordering by
+  parsed instant answered about a time the run never had. It now runs the same
+  validation `ingest` does, so the two doors agree by construction.
+- The OTLP redelivery guard deduped steps but not the numbers: the merge still
+  received the batch-wide totals, so a retry re-added the tokens and cost of
+  spans it had just dropped, and a root-only retry (the common final flush)
+  skipped the guard entirely. `/v1/logs` had no dedupe at all — three identical
+  posts stored three copies of every step and tripled the token total.
+
 - The programmatic API answered for its own arguments in SQLite's voice: an
   invalid trace `status` or step `step_type` reached the database raw, so a
   caller got "CHECK constraint failed: status IN (...)" — a constraint name

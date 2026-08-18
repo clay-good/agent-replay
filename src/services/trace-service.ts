@@ -17,7 +17,7 @@ import type {
   ListTracesFilter,
 } from '../models/types.js';
 import { DECIDED_BY, STEP_TYPES, TRACE_STATUSES, TRIGGER_TYPES } from '../models/enums.js';
-import { isValidConfidence } from '../utils/validators.js';
+import { isValidConfidence, validateTraceInput } from '../utils/validators.js';
 import { SINCE_PREDICATE, sinceParams, DURATION_MS_EXPR } from '../utils/time.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -369,6 +369,24 @@ export function ingestTrace(
   db: Database.Database,
   input: IngestTraceInput,
 ): Trace {
+  // The SAME validation the `ingest` command performs, so the two public doors
+  // to this function agree by construction rather than by hand-copied guards.
+  //
+  // They did not. `ingest` refuses a negative `total_tokens`/`tokens_used`, a
+  // `step_number` of 0, non-string tags, a numeric `started_at` and a duplicate
+  // step number with precise field paths; a programmatic caller had all of them
+  // stored or coerced silently. The numeric `started_at` was the worst: it was
+  // stringified into the column, so every `--since` window and every ordering
+  // by parsed instant answered about a time the run never had. The rest
+  // surfaced as raw SQLite constraint text naming a column rather than the
+  // argument passed.
+  const validation = validateTraceInput(input);
+  if (!validation.valid) {
+    throw new Error(
+      `Invalid trace input: ${validation.errors.map((e) => `${e.field}: ${e.message}`).join('; ')}`,
+    );
+  }
+
   const traceId = generateId('trc');
   const timestamp = now();
 
@@ -1396,9 +1414,19 @@ export function updateTrace(
     // the live `record` path carries a free-string status, so a producer value
     // like "success" or "" would otherwise violate the CHECK constraint and abort
     // the whole finalization (dropping output/tokens/ended_at and leaving the
-    // trace stuck `running`). An unknown terminal status maps to `completed`,
-    // matching the recorder's own `?? 'completed'` default for a missing status.
-    params.push((TRACE_STATUSES as readonly string[]).includes(update.status as string) ? update.status : 'completed');
+    // trace stuck `running`).
+    //
+    // An unrecognized terminal status now maps to `failed`, not `completed`.
+    // Coercing upward was a fail-open: `endTrace({status: 'Failed'})` — a case
+    // difference — and `'aborted'`, `'cancelled'`, `'Timeout'` were all stored
+    // as SUCCESS, and the deterministic evaluators read `status`, so a run the
+    // caller explicitly declared failed scored 1.0 PASS and exited 0. Ask which
+    // direction costs more: reporting an unreadable outcome as failure is
+    // visible and correctable; reporting it as success is a false green nobody
+    // goes looking for. A MISSING status still defaults to `completed` at the
+    // recorder, which is a different question — that is a clean stream ending
+    // normally, not a value we could not read.
+    params.push((TRACE_STATUSES as readonly string[]).includes(update.status as string) ? update.status : 'failed');
   }
   if (update.output !== undefined) {
     sets.push('output = ?');

@@ -376,13 +376,24 @@ async function parseRubric(raw: string, path: string): Promise<{
     try {
       const { parse } = await import('yaml');
       parsed = parse(raw) as Record<string, unknown>;
-    } catch {
-      throw new Error('Failed to parse YAML rubric. Ensure the yaml package is available.');
+    } catch (err) {
+      // Report what actually went wrong. This claimed a missing package for any
+      // throw, and `yaml` is a hard dependency — so the one message a YAML
+      // author needs (the parse error's line and column) was discarded in
+      // favour of advice that is never right.
+      throw new Error(`Failed to parse YAML rubric: ${errorMessage(err)}`);
     }
   } else {
     parsed = JSON.parse(raw);
   }
 
+  // An empty file parses to null, and a bare list or scalar parses to a
+  // non-object — both then failed on `parsed.name` with a raw TypeError
+  // ("Cannot read properties of null"), which names JavaScript rather than the
+  // file the user wrote.
+  if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Rubric must be a JSON/YAML object with "name" and "criteria"');
+  }
   if (!parsed.name || typeof parsed.name !== 'string') {
     throw new Error('Rubric must have a "name" field');
   }
@@ -442,6 +453,28 @@ async function parseRubric(raw: string, path: string): Promise<{
           'rewrite it (for example as a character class) if so.',
       );
     }
+  }
+
+  // A rubric whose criteria all weigh 0 divides by zero: the scorer returns 0,
+  // so the run reported "0% FAIL" (exit 1) directly beside "All criteria
+  // passed" — a false CI regression on a correct trace, with the report
+  // contradicting itself. Zeroing a weight is normal authoring ("disable this
+  // one for now"), so the rubric as a whole must still be able to score.
+  const criteria = parsed.criteria as Array<Record<string, unknown>>;
+  if (!criteria.some((c) => Number(c.weight ?? 1) > 0)) {
+    throw new Error('Rubric must have at least one criterion with a weight greater than 0');
+  }
+
+  // Two criteria under one name collapse in `details.criteria`, so a consumer
+  // keying by name gets an arbitrary one of them and the human table prints two
+  // identical-looking rows with different verdicts.
+  const names = new Set<string>();
+  for (const c of criteria) {
+    const name = String(c.name);
+    if (names.has(name)) {
+      throw new Error(`Rubric has two criteria named ${JSON.stringify(name)} — names must be unique`);
+    }
+    names.add(name);
   }
 
   return parsed as Awaited<ReturnType<typeof parseRubric>>;

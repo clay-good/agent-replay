@@ -539,3 +539,43 @@ describe('a closing event finds the run that is waiting for it', () => {
     expect(tool.ended_at).not.toBeNull();
   });
 });
+
+describe('parallel tool calls pair in call order', () => {
+  // Harnesses dispatch tools in parallel batches and the results come back in
+  // call order, but the open-step lookup was `ORDER BY step_number DESC` — so
+  // with two `Bash` calls in flight the first result closed the SECOND step.
+  // Both outputs were swapped, and the expensive half is that a FAILURE landed
+  // on the call that had actually succeeded while the one that failed was
+  // stored clean: a fabricated failure and a fail-open at once, on the primary
+  // capture path. The same reasoning had already been applied to the gemini
+  // stream translator, citing this function as the precedent — it had the bug.
+  function openTwo(): string {
+    apply({ session_id: 'par', hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'first' } });
+    apply({ session_id: 'par', hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'second' } });
+    return listTraces(db, { session_id: 'par' }).items[0].id;
+  }
+
+  it('closes the oldest open call first, so outputs are not swapped', () => {
+    const id = openTwo();
+    apply({ session_id: 'par', hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_response: { out: 'result-of-first' } });
+    apply({ session_id: 'par', hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_response: { out: 'result-of-second' } });
+
+    const steps = getTrace(db, id)!.steps.filter((s) => s.step_type === 'tool_call');
+    expect((steps[0].input as { command?: string }).command).toBe('first');
+    expect(JSON.stringify(steps[0].output)).toContain('result-of-first');
+    expect((steps[1].input as { command?: string }).command).toBe('second');
+    expect(JSON.stringify(steps[1].output)).toContain('result-of-second');
+  });
+
+  it('puts a failure on the call that actually failed', () => {
+    const id = openTwo();
+    // The first call's result arrives first and it failed.
+    apply({ session_id: 'par', hook_event_name: 'PostToolUseFailure', tool_name: 'Bash', tool_response: { error: 'first exploded' } });
+
+    const steps = getTrace(db, id)!.steps.filter((s) => s.step_type === 'tool_call');
+    expect((steps[0].input as { command?: string }).command).toBe('first');
+    expect(steps[0].error).not.toBeNull();
+    // The call still in flight is untouched — no fabricated failure.
+    expect(steps[1].error).toBeNull();
+  });
+});

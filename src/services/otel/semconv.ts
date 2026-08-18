@@ -531,6 +531,13 @@ function messageContent(a: Record<string, unknown>, dir: 'input' | 'output'): Re
 
 function stepMetadata(a: Record<string, unknown>, spanId: string, parentSpanId?: string): Record<string, unknown> {
   const meta: Record<string, unknown> = { otel_span_id: spanId };
+  // The span's own spend, kept per step so a batch's contribution can be
+  // recomputed from the steps actually retained. The trace-level total is the
+  // sum over a whole batch, and a redelivered batch has some of its spans
+  // dropped as duplicates — without a per-span figure, the receiver could only
+  // add the batch total again and inflate the trace's cost.
+  const cost = num(a['gen_ai.usage.cost'] ?? a['cost_usd'] ?? a['cost']);
+  if (Number.isFinite(cost) && cost > 0) meta.otel_cost_usd = cost;
   // Preserve the OTel parent span id so a child arriving in a later export batch
   // can be re-linked to a parent step already stored from an earlier batch.
   if (parentSpanId) meta.otel_parent_span_id = parentSpanId;

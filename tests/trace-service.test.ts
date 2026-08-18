@@ -449,17 +449,26 @@ describe('updateTrace', () => {
     expect(() => updateTrace(db, 'nonexistent', { status: 'failed' })).toThrow(/not found/);
   });
 
-  it('coerces an unknown status to completed instead of violating the CHECK', () => {
+  it('coerces an unknown status to failed, not completed, and keeps the rest', () => {
     // The live `record` path types trace_end.status as a free string, so a
     // producer value like "success" must not crash the status CHECK and abort
     // the whole finalization (which would drop output/tokens and leave the trace
-    // stuck `running`). An unknown terminal status maps to `completed`.
+    // stuck `running`). But it must not coerce UPWARD either: mapping an
+    // unreadable terminal status to `completed` meant `endTrace({status:
+    // 'Failed'})` — a case difference — and 'aborted'/'cancelled'/'Timeout'
+    // were all stored as success, and the deterministic evaluators read status,
+    // so a run the caller declared failed scored 1.0 PASS and exited 0.
+    // Reporting an unreadable outcome as failure is visible and correctable;
+    // reporting it as success is a false green nobody goes looking for.
     const trace = ingestTrace(db, makeTrace({ status: 'running', steps: [] }));
     const updated = updateTrace(db, trace.id, { status: 'success', total_tokens: 900 });
-    expect(updated.status).toBe('completed');
+    expect(updated.status).toBe('failed');
+    // The rest of the finalization still lands — that is why this coerces at all.
     expect(updated.total_tokens).toBe(900);
-    // An empty-string status coerces the same way (not left as "").
-    expect(updateTrace(db, trace.id, { status: '' }).status).toBe('completed');
+    expect(updateTrace(db, trace.id, { status: '' }).status).toBe('failed');
+    expect(updateTrace(db, trace.id, { status: 'Failed' }).status).toBe('failed');
+    // A recognized status is untouched.
+    expect(updateTrace(db, trace.id, { status: 'completed' }).status).toBe('completed');
   });
 
   it('coerces a structured error object to JSON text on finalization', () => {
@@ -972,8 +981,13 @@ describe('the programmatic API answers for its own arguments', () => {
   // or step context. The CLI rejects the same values with precise field paths;
   // an SDK caller got the database's voice instead.
   it('names an invalid trace status instead of quoting the constraint', () => {
+    // `ingestTrace` now runs the same validation the CLI does, so it reports the
+    // field path; `startTrace` reaches the insert guard directly. Both name the
+    // offending value rather than a database constraint.
     expect(() => ingestTrace(db, { agent_name: 'a', status: 'cancelled' as never, input: {} }))
-      .toThrow(/Invalid trace status "cancelled"/);
+      .toThrow(/cancelled/);
+    expect(() => ingestTrace(db, { agent_name: 'a', status: 'cancelled' as never, input: {} }))
+      .not.toThrow(/CHECK constraint/);
     expect(() => startTrace(db, { agent_name: 'a', status: 'cancelled' as never }))
       .toThrow(/Invalid trace status/);
   });

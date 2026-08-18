@@ -396,7 +396,10 @@ export function runEval(
     totalWeight += criterion.weight;
   }
 
-  const overallScore = totalWeight > 0 ? weightedSum / totalWeight : 0;
+  // Bounded on both sides. The clamp above already prevents the >1 case, but
+  // the ratio is the number that gets stored, displayed and gated on, so it is
+  // pinned here too rather than relying on every future weight path.
+  const overallScore = totalWeight > 0 ? Math.min(1, Math.max(0, weightedSum / totalWeight)) : 0;
   // Derive `passed` from the same rounded score that is stored and displayed,
   // not the raw value. Otherwise a boundary score can read as a contradiction:
   // a raw 0.6997 fails a 0.700 threshold but rounds to 0.700 for display, so the
@@ -486,7 +489,15 @@ export function runCustomRubric(
     // rubric parsed straight from JSON/YAML) can supply a stringy weight. Without
     // this, `totalWeight += weight` below would string-concatenate and corrupt
     // the score — a fully-passing rubric could report as failed.
-    const weight = Number(c.weight ?? 1);
+    //
+    // Clamped to a non-negative, finite number. `parseRubric` refuses a negative
+    // weight, but this function is PUBLIC API and had no lower bound of its own,
+    // so a caller passing `weight: -1` alongside a positive one drove
+    // `weightedSum / totalWeight` above 1 — a rubric scoring 200% and stored as
+    // PASSED, rendered as "200%" by `show`. The same drift class as every other
+    // CLI-validates/SDK-does-not pair in this codebase.
+    const rawWeight = Number(c.weight ?? 1);
+    const weight = Number.isFinite(rawWeight) && rawWeight > 0 ? rawWeight : 0;
     const regex = safeRegex(c.pattern, 'i');
     if (!regex) {
       criteriaResults.push({
@@ -516,7 +527,10 @@ export function runCustomRubric(
     totalWeight += weight;
   }
 
-  const overallScore = totalWeight > 0 ? weightedSum / totalWeight : 0;
+  // Bounded on both sides. The clamp above already prevents the >1 case, but
+  // the ratio is the number that gets stored, displayed and gated on, so it is
+  // pinned here too rather than relying on every future weight path.
+  const overallScore = totalWeight > 0 ? Math.min(1, Math.max(0, weightedSum / totalWeight)) : 0;
   // Derive `passed` from the same rounded score that is stored and displayed
   // (see runEval), so a boundary score can't read as a self-contradiction.
   const score = Math.round(overallScore * 1000) / 1000;

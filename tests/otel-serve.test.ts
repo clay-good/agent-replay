@@ -328,3 +328,75 @@ describe('otel serve (end-to-end)', () => {
     }
   }, 30000);
 });
+
+describe('redelivery does not inflate the numbers either', () => {
+  // The step dedupe landed and the TOKENS did not: the merge still received the
+  // mapper's batch-wide totals, summed over every span the batch carried
+  // including the ones just dropped. And a ROOT-ONLY retry — the common final
+  // flush, since the root span ends last — carried no child steps at all, so it
+  // slipped past a guard that required incoming spans. Both halves are asserted
+  // here; the first version of this test never looked at total_tokens.
+  it('keeps tokens and cost stable across a root-only retry', async () => {
+    const url = await startReceiver();
+    const child = JSON.stringify({
+      resourceSpans: [{
+        resource: { attributes: [{ key: 'service.name', value: { stringValue: 's' } }] },
+        scopeSpans: [{ spans: [{
+          traceId: 'ee', spanId: 'c9', parentSpanId: 'r9', name: 'chat',
+          startTimeUnixNano: '1700000000000000000', endTimeUnixNano: '1700000001000000000',
+          attributes: [
+            { key: 'gen_ai.operation.name', value: { stringValue: 'chat' } },
+            { key: 'gen_ai.usage.input_tokens', value: { intValue: '10' } },
+            { key: 'gen_ai.usage.output_tokens', value: { intValue: '5' } },
+            { key: 'gen_ai.usage.cost', value: { doubleValue: 0.25 } },
+          ],
+        }] }],
+      }],
+    });
+    const root = JSON.stringify({
+      resourceSpans: [{
+        resource: { attributes: [{ key: 'service.name', value: { stringValue: 's' } }] },
+        scopeSpans: [{ spans: [{
+          traceId: 'ee', spanId: 'r9', name: 'invoke_agent',
+          startTimeUnixNano: '1700000000000000000', endTimeUnixNano: '1700000002000000000',
+          attributes: [
+            { key: 'gen_ai.operation.name', value: { stringValue: 'invoke_agent' } },
+            { key: 'gen_ai.usage.input_tokens', value: { intValue: '100' } },
+            { key: 'gen_ai.usage.output_tokens', value: { intValue: '50' } },
+            { key: 'gen_ai.usage.cost', value: { doubleValue: 1.5 } },
+          ],
+        }] }],
+      }],
+    });
+    const post = async (body: string): Promise<void> => {
+      const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+      expect(res.status).toBe(200);
+    };
+
+    await post(child);
+    await post(root);
+
+    const read = (): { total_tokens: number | null; total_cost_usd: number | null; steps: number } => {
+      const db = new Database(join(dir, 'traces.db'), { readonly: true });
+      try {
+        const t = db.prepare('SELECT id, total_tokens, total_cost_usd FROM agent_traces ORDER BY created_at DESC LIMIT 1')
+          .get() as { id: string; total_tokens: number | null; total_cost_usd: number | null };
+        const c = db.prepare('SELECT COUNT(*) c FROM agent_trace_steps WHERE trace_id = ?').get(t.id) as { c: number };
+        return { total_tokens: t.total_tokens, total_cost_usd: t.total_cost_usd, steps: c.c };
+      } finally {
+        db.close();
+      }
+    };
+
+    const before = read();
+    expect(before.total_tokens).toBe(165);
+    expect(before.total_cost_usd).toBeCloseTo(1.75, 8);
+
+    // The retry the exporter sends when it never saw the 200.
+    await post(root);
+    const after = read();
+    expect(after.total_tokens).toBe(before.total_tokens);
+    expect(after.total_cost_usd).toBeCloseTo(before.total_cost_usd!, 8);
+    expect(after.steps).toBe(before.steps);
+  }, 30000);
+});

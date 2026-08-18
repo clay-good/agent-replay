@@ -177,9 +177,17 @@ export class GeminiStreamTranslator extends BaseTranslator {
    * place, so an entirely id-less stream lost every result. The step was left
    * open forever with no output and, worse, no `error`: a run whose every tool
    * call failed was stored clean, which is the same fail-open the error path
-   * below was written to close. Falls back the way `hook-adapter`'s
-   * `findOpenToolStep` does — most recent open step, preferring a name match —
-   * rather than inventing a second rule for the same question.
+   * below was written to close.
+   *
+   * Matched OLDEST-FIRST, and a result naming a tool that no open call matches
+   * is left UNPAIRED. An earlier version took the most recent open step, citing
+   * `hook-adapter`'s `findOpenToolStep` as precedent — but that function
+   * documents its own `ORDER BY step_number DESC` as the CAUSE of a mis-pairing
+   * bug, for exactly the reason that applies here: harnesses dispatch tools in
+   * parallel batches and the results come back in call order. With two calls
+   * open, LIFO handed each result to the other one's step: both outputs
+   * swapped, the call that SUCCEEDED marked failed, and the call that failed
+   * stored clean. A wrong precedent is worse than none.
    */
   private openOrder: Array<{ num: number; name: string }> = [];
 

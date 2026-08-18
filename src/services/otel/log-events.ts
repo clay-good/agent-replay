@@ -253,11 +253,36 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
         source_format: isGemini ? 'gemini-cli-logs' : 'claude-code-logs',
         ...(followUpPrompts.length > 0 ? { follow_up_prompts: followUpPrompts } : {}),
       },
-      steps,
+      steps: withLogKeys(steps),
     });
   }
 
   return traces;
+}
+
+/**
+ * Stamp each step with a key identifying the log record it came from, so a
+ * batch an exporter redelivers can be recognized as one already stored.
+ *
+ * The span path dedupes on `otel_span_id`; log records carry no span id, so
+ * there was NO dedupe here at all — posting the same batch three times stored
+ * three copies of every step and tripled the token total, from the same trigger
+ * the span guard exists for (a lost 200, a timeout after commit, an exporter
+ * retry). The key is what identifies the record within its session: its
+ * timestamp, the kind of step it produced, its name, and an ordinal to keep two
+ * genuinely distinct records that share all three apart.
+ */
+function withLogKeys(steps: IngestStepInput[]): IngestStepInput[] {
+  const seen = new Map<string, number>();
+  return steps.map((step) => {
+    const base = `${step.started_at ?? ''}|${step.step_type}|${step.name ?? ''}`;
+    const ordinal = seen.get(base) ?? 0;
+    seen.set(base, ordinal + 1);
+    return {
+      ...step,
+      metadata: { ...(step.metadata ?? {}), otel_log_key: `${base}|${ordinal}` },
+    };
+  });
 }
 
 /** Gemini decision → decision record. auto_accept is a policy call; the rest are the user's. */
