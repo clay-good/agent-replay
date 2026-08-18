@@ -254,3 +254,21 @@ function truncateSurrogateSafe(s: string, max: number): string {
   if (s.length <= max) return s;
   return s.slice(0, safeCutIndex(s, max - 3)) + '...';
 }
+
+/**
+ * Escape every control character in a string bound for a terminal or a log.
+ *
+ * ONE definition, shared by the UI's `safeText` and by the service-layer
+ * warnings that echo a producer's own bytes back (an unknown event type, a bad
+ * step_type, an unparsable line, a hook's tool name). Those two had drifted:
+ * the renderer covered C0, DEL and C1 while the protocol's line preview stopped
+ * at DEL — so a message that quotes a producer value could still emit a raw
+ * ESC or U+009B into the supervisor's terminal and CI log, which is the whole
+ * thing the escaping exists to stop. Newline and tab are preserved; a message
+ * that wants them formatted keeps its own layout.
+ */
+export function escapeControlChars(text: string): string {
+  const normalized = text.replace(/\r\n/g, '\n');
+  // eslint-disable-next-line no-control-regex
+  return normalized.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
+}

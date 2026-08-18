@@ -784,11 +784,14 @@ describe('a terminal status the schema does not know', () => {
   // output, tokens and ended_at. Rejecting the whole `trace_end` traded a
   // fail-open for data loss, and left the trace to be finalized as a timeout.
   it('is repaired on the stream, keeping the rest of the finalization', () => {
+    // A value that maps to NOTHING. A recognizable synonym is a different case
+    // — see below — because treating one as unreadable let the wrapper's exit
+    // code override an outcome the child had actually stated.
     const { event, warning } = validateEvent({
       v: 1,
       type: 'trace_end',
       trace_id: 't1',
-      status: 'success',
+      status: 'wat',
       output: { text: 'the answer' },
       total_tokens: 500,
     });
@@ -799,6 +802,24 @@ describe('a terminal status the schema does not know', () => {
     expect((event as { status?: string }).status).toBe('failed');
     expect((event as { output?: unknown }).output).toEqual({ text: 'the answer' });
     expect((event as { total_tokens?: number }).total_tokens).toBe(500);
+  });
+
+  // A status we can READ is the producer's declaration, not a parse failure. A
+  // flat "anything unrecognized becomes failed, and the exit code then decides"
+  // laundered `status: "error"` + exit 0 back into `completed` — reopening the
+  // fail-open the repair was written to close, on the common shape of an agent
+  // that reports failure in-band while exiting 0.
+  it.each([
+    ['success', 'completed'],
+    ['ok', 'completed'],
+    ['error', 'failed'],
+    ['Failed', 'failed'],
+    ['aborted', 'failed'],
+    ['timed_out', 'timeout'],
+  ])('reads %s as %s and does not mark it repaired', (given, expected) => {
+    const { event, repaired } = validateEvent({ v: 1, type: 'trace_end', trace_id: 't1', status: given });
+    expect((event as { status?: string }).status).toBe(expected);
+    expect(repaired).toBeUndefined();
   });
 
   it('leaves a recognized status alone', () => {
@@ -813,8 +834,37 @@ describe('a terminal status the schema does not know', () => {
   it('is an error from the SDK', () => {
     const rec = new TraceRecorder(db);
     rec.startTrace({ agent_name: 'a' });
-    expect(() => rec.endTrace({ status: 'Failed' as never })).toThrow(/Invalid trace status "Failed"/);
+    expect(() => rec.endTrace({ status: 'wat' as never })).toThrow(/Invalid trace status "wat"/);
     // A valid one still works.
     expect(() => rec.endTrace({ status: 'failed' })).not.toThrow();
+  });
+});
+
+describe('warnings that quote a producer do not carry its control bytes', () => {
+  // These strings are echoed to the supervisor's terminal and CI log, and they
+  // quote the producer's own value back — an unknown event type, a bad
+  // step_type or status, an unparsable line. The protocol's line preview
+  // escaped only C0 and DEL while the renderer had been widened to C1, so two
+  // guards for one concept disagreed about what a control character is; both
+  // now share one definition.
+  const ESC = '\u001b';
+  const C1 = '\u009b';
+
+  it.each([
+    ['unknown event type', { v: 1, type: `evil${ESC}[31m${C1}2J` }],
+    ['invalid step_type', { v: 1, type: 'step', trace_id: 't', step_number: 1, step_type: `q${ESC}[31m${C1}2J`, name: 'n' }],
+    ['invalid status', { v: 1, type: 'trace_end', trace_id: 't', status: `x${ESC}[31m${C1}2J` }],
+  ])('escapes both alphabets in the %s warning', (_label, event) => {
+    const { warning } = validateEvent(event as Record<string, unknown>);
+    expect(warning).toBeTruthy();
+    expect(warning).not.toContain(ESC);
+    expect(warning).not.toContain(C1);
+    expect(warning).toContain('\\x1b');
+  });
+
+  it('escapes an unparsable line preview, C1 included', () => {
+    const { warning } = parseEventLine(`{bad${C1}2J`);
+    expect(warning).toBeTruthy();
+    expect(warning).not.toContain(C1);
   });
 });

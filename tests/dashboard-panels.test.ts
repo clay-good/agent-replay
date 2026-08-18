@@ -104,3 +104,42 @@ describe('DashboardView', () => {
     db.close();
   });
 });
+
+describe('the dashboard shows what is stored', () => {
+  // Its widgets run with blessed markup enabled, so blessed CONSUMES `{...}` in
+  // cell text: an agent name containing `{red-fg}` displayed as something other
+  // than what is stored — wrong output, and a producer setting colours in the
+  // TUI. `safeText` handles control characters; only blessed knows its own
+  // markup, so both are needed. The fix shipped without a test; this is it.
+  it('renders a name containing blessed markup literally', () => {
+    const db = new Database(':memory:');
+    runMigrations(db);
+    ingestTrace(db, {
+      agent_name: '{red-fg}pwn{/red-fg}',
+      status: 'completed',
+      input: {},
+      steps: [{ step_number: 1, step_type: 'output', name: 'a' }],
+    });
+
+    const view = new DashboardView(db, { refreshIntervalMs: 60_000 });
+    view.start();
+    try {
+      // Capture what the widget is actually handed, rather than guessing at an
+      // internal: blessed interprets the cell text, so the escaping has to be
+      // present at THIS boundary to matter.
+      const table = (view as unknown as { traceTable: { setData: (rows: string[][]) => void } }).traceTable;
+      let handed: string[][] = [];
+      const original = table.setData.bind(table);
+      table.setData = (rows: string[][]): void => { handed = rows; original(rows); };
+      (view as unknown as { refresh: () => void }).refresh();
+
+      const flat = handed.flat().join(' ');
+      expect(flat).not.toContain('{red-fg}');
+      // The text itself survives — this escapes markup, it does not drop content.
+      expect(flat).toContain('pwn');
+    } finally {
+      view.stop();
+      db.close();
+    }
+  });
+});

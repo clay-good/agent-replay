@@ -359,6 +359,33 @@ describe('a child whose terminal status we cannot read', () => {
   // child declared its outcome" suppressed the exit-code finalization: a child
   // that emitted `status: "success"` and then exited 0 was stored as a FAILURE
   // with no error text. The wrapper's fact overrides the stream's guess.
+  it('honours a status it can READ, even a synonym, over the exit code', async () => {
+    // `status: "error"` with exit 0 is the shape that matters: an agent that
+    // reports failure in-band while the process exits cleanly. Treating every
+    // unrecognized spelling as unreadable, and then letting the exit code
+    // decide, laundered this into `completed` — a false green the evaluators
+    // and `check --fields status` both read.
+    const dir = mkdtempSync(join(tmpdir(), 'ar-run-syn-'));
+    try {
+      const child = join(dir, 'child.mjs');
+      writeFileSync(
+        child,
+        [
+          "import { appendFileSync } from 'node:fs';",
+          "appendFileSync(process.env.AGENT_REPLAY_EVENTS, JSON.stringify({ v: 1, type: 'trace_end', trace_id: 'x', status: 'error', error: 'the tool crashed' }) + '\\n');",
+          'process.exit(0);',
+        ].join('\n'),
+      );
+      const res = await runWrapped(db, { command: process.execPath, args: [child], agentName: 'synbot' });
+      expect(res.exitCode).toBe(0);
+      const trace = getTrace(db, res.traceId)!;
+      expect(trace.status).toBe('failed');
+      expect(trace.error).toMatch(/the tool crashed/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20000);
+
   it('lets the exit code decide, and keeps what the child did report', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ar-run-repair-'));
     try {
@@ -367,7 +394,7 @@ describe('a child whose terminal status we cannot read', () => {
         child,
         [
           "import { appendFileSync } from 'node:fs';",
-          "appendFileSync(process.env.AGENT_REPLAY_EVENTS, JSON.stringify({ v: 1, type: 'trace_end', trace_id: 'x', status: 'success', total_tokens: 42 }) + '\\n');",
+          "appendFileSync(process.env.AGENT_REPLAY_EVENTS, JSON.stringify({ v: 1, type: 'trace_end', trace_id: 'x', status: 'wat', total_tokens: 42 }) + '\\n');",
           'process.exit(0);',
         ].join('\n'),
       );
@@ -384,7 +411,7 @@ describe('a child whose terminal status we cannot read', () => {
     }
   }, 20000);
 
-  it('still records a failure when the child actually fails', async () => {
+  it('still records a failure when an unreadable status meets a non-zero exit', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ar-run-repair2-'));
     try {
       const child = join(dir, 'child.mjs');
@@ -392,7 +419,7 @@ describe('a child whose terminal status we cannot read', () => {
         child,
         [
           "import { appendFileSync } from 'node:fs';",
-          "appendFileSync(process.env.AGENT_REPLAY_EVENTS, JSON.stringify({ v: 1, type: 'trace_end', trace_id: 'x', status: 'success' }) + '\\n');",
+          "appendFileSync(process.env.AGENT_REPLAY_EVENTS, JSON.stringify({ v: 1, type: 'trace_end', trace_id: 'x', status: 'wat' }) + '\\n');",
           'process.exit(3);',
         ].join('\n'),
       );

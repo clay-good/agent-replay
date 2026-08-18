@@ -180,16 +180,42 @@ between them, and nothing else.
 
 ### Fixed
 
+- **A child that declared failure and exited 0 was stored as a success.**
+  Repairing every unrecognized terminal status to `failed` and then letting the
+  wrapper's exit code override it laundered `status: "error"` back into
+  `completed` — reopening the fail-open the repair was written to close, on the
+  common shape of an agent that reports failure in-band while the process exits
+  cleanly. A status is now read before it is repaired: recognizable spellings
+  (`error`, `aborted`, `cancelled`, `Failed`, `ok`, `done`, `timed_out`, …) are
+  folded onto the four stored statuses and treated as the producer's
+  declaration, and only a value that maps to nothing is a repair the exit code
+  gets to decide.
+- The OTLP redelivery recompute was gated on whether the *surviving* steps
+  carried token attribution, which is not the same question. When the
+  redelivered span was the one carrying the tokens and the new span was a tool
+  call — the most ordinary mixed batch — the survivors had none, the recompute
+  was skipped, and the batch-wide totals were merged again. It is now gated on
+  which endpoint the batch came from.
+
 - **A tool result or model output could address the operator's terminal.**
   `JSON.stringify` escapes C0 controls but not C1 (U+0080-U+009F), and
   xterm/VTE/iTerm2 decode U+009B as CSI — so a step's `input`/`output` re-coloured
   the terminal from `show`, `show --tree` and `replay`, as did `show
   --snapshots`' environment and tool_state (keys as well as values), the AI eval
   panel's token counts, its JSON fallback and its box title, `watch`'s trace id,
-  a policy's match pattern in `guard list`, and a malformed option in
-  `decisions`. Escaping is applied at the shared stringify helper rather than
-  per call site. Verified by writing a hostile trace straight into SQLite and
-  scanning the output of every display command byte-wise: zero raw C1 sequences.
+  and a policy's match pattern in `guard list`. Escaping is applied at the shared
+  stringify helper rather than per call site. Verified by writing a hostile trace
+  straight into SQLite and scanning every display command's output byte-wise:
+  zero raw control sequences. (`decisions` was already escaped; the change there
+  is that a malformed option renders as JSON instead of `[object Object]`.)
+- The same class in the messages that quote a producer's own bytes BACK — an
+  unknown event type, an invalid `step_type` or `status`, an unparsable line,
+  and the note `hook` prints for every tool call, where the tool name is chosen
+  by the model. Those are written to a supervisor's terminal and CI log, and
+  they carried raw ESC as well as C1: the protocol's line preview escaped only
+  C0 and DEL while the renderer had been widened to C1, so two guards for one
+  concept disagreed about what a control character is. They now share one
+  definition (`escapeControlChars`), which `safeText` delegates to.
 - The dashboard rendered a *different* agent name than is stored: its widgets
   run with blessed markup enabled, so `{red-fg}` in a name was consumed as
   formatting. Cells are escaped for blessed as well as for the terminal.

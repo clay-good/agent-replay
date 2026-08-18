@@ -1,6 +1,7 @@
 import type { IngestDecisionInput, IngestSnapshotInput } from '../models/types.js';
 import { STEP_TYPES, TRACE_STATUSES } from '../models/enums.js';
 import { decisionOptionProblem, isValidConfidence } from '../utils/validators.js';
+import { escapeControlChars } from '../utils/json.js';
 
 /**
  * Versioned JSONL event protocol for incremental trace capture.
@@ -33,6 +34,26 @@ export const EVENT_TYPES = [
 const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/;
 
 export type EventType = (typeof EVENT_TYPES)[number];
+
+/**
+ * Terminal statuses a producer might reasonably write, folded onto the four the
+ * schema stores. Case-insensitive, because a case difference (`"Failed"`) is
+ * not a different outcome.
+ *
+ * This exists so a value we CAN read is treated as the producer's declaration
+ * rather than as something we failed to parse — the distinction `run` needs in
+ * order to know when its own exit code should decide instead.
+ */
+const STATUS_SYNONYMS: Record<string, string> = {
+  completed: 'completed', complete: 'completed', success: 'completed', succeeded: 'completed',
+  ok: 'completed', done: 'completed', finished: 'completed', passed: 'completed',
+  failed: 'failed', failure: 'failed', fail: 'failed', error: 'failed', errored: 'failed',
+  crashed: 'failed', aborted: 'failed', cancelled: 'failed', canceled: 'failed',
+  interrupted: 'failed',
+  timeout: 'timeout', timed_out: 'timeout', timedout: 'timeout',
+  running: 'running',
+};
+
 
 // ── Event shapes ────────────────────────────────────────────────────────────
 
@@ -190,15 +211,17 @@ export function validateEvent(obj: unknown): ParseResult {
   const e = obj as Record<string, unknown>;
 
   if (typeof e.type !== 'string' || !(EVENT_TYPES as readonly string[]).includes(e.type)) {
-    return { event: null, warning: `skipped: unknown event type "${String(e.type)}"` };
+    return { event: null, warning: `skipped: unknown event type "${escapeControlChars(String(e.type))}"` };
   }
   if (e.v != null && e.v !== EVENT_PROTOCOL_VERSION) {
     return { event: null, warning: `skipped: unsupported protocol version ${String(e.v)}` };
   }
 
   const type = e.type as EventType;
-  /** Set when a trace_end carried a status we repaired; reported at the end. */
+  /** Set when a trace_end carried a status we could not read at all. */
   let unusableStatus: string | null = null;
+  /** Set when a trace_end's status was a recognizable synonym we normalized. */
+  let mappedStatus: string | null = null;
 
   // trace_start needs an agent_name; every other event needs a trace_id and,
   // for step-scoped events, a step_number.
@@ -238,7 +261,18 @@ export function validateEvent(obj: unknown): ParseResult {
   // "an SDK call throws rather than silently drops" contract, and the stream
   // path applied it with zero warnings. `ingest` rejects the identical value.
   if (type === 'trace_end' && e.status != null) {
-    if (typeof e.status !== 'string' || !(TRACE_STATUSES as readonly string[]).includes(e.status)) {
+    // Try to UNDERSTAND the value before repairing it. A flat "anything
+    // unrecognized becomes failed, and the wrapper's exit code then overrides
+    // it" laundered `status: "error"` + exit 0 straight back into `completed`,
+    // reopening the fail-open it was written to close — and agents that report
+    // failure in-band while exiting 0 are the common shape. A value that maps
+    // to a known status is a DECLARATION (kept, and `run` honours it); only a
+    // value that maps to nothing is a repair the exit code gets to decide.
+    const mapped = typeof e.status === 'string' ? STATUS_SYNONYMS[e.status.trim().toLowerCase()] : undefined;
+    if (mapped != null) {
+      if (mapped !== e.status) mappedStatus = String(e.status);
+      e.status = mapped;
+    } else if (typeof e.status !== 'string' || !(TRACE_STATUSES as readonly string[]).includes(e.status)) {
       // Repaired, not dropped — one unusable FIELD must not cost the event.
       // Rejecting the whole `trace_end` threw away the run's output, tokens and
       // ended_at, and left the trace to be finalized as a timeout: trading a
@@ -261,7 +295,7 @@ export function validateEvent(obj: unknown): ParseResult {
     // Reject an unknown step_type here — it would otherwise fail the DB CHECK
     // constraint inside appendStep and (in a batch ingest) abort the trace.
     if (!(STEP_TYPES as readonly string[]).includes(e.step_type)) {
-      return { event: null, warning: `skipped: ${type} has invalid step_type "${e.step_type}"` };
+      return { event: null, warning: `skipped: ${type} has invalid step_type "${escapeControlChars(String(e.step_type))}"` };
     }
   }
   // Tags must be strings, not merely an array: `insertTraceRow` coerces the
@@ -344,8 +378,10 @@ export function validateEvent(obj: unknown): ParseResult {
       // no mention of it at all.
       warning: [
         unusableStatus != null
-          ? `trace_end status "${unusableStatus}" is not one of ${TRACE_STATUSES.join(', ')} — recorded as failed`
-          : null,
+          ? `trace_end status "${escapeControlChars(unusableStatus)}" is not one of ${TRACE_STATUSES.join(', ')} — recorded as failed`
+          : mappedStatus != null
+            ? `trace_end status "${escapeControlChars(mappedStatus)}" read as "${(obj as { status?: string }).status}"`
+            : null,
         `ignored ${dropped.join(', ')}: must be a non-negative finite number`,
       ].filter(Boolean).join('; '),
       ...(unusableStatus != null ? { repaired: 'status' as const } : {}),
@@ -355,8 +391,16 @@ export function validateEvent(obj: unknown): ParseResult {
   if (unusableStatus != null) {
     return {
       event: obj as CaptureEvent,
-      warning: `trace_end status "${unusableStatus}" is not one of ${TRACE_STATUSES.join(', ')} — recorded as failed`,
+      warning: `trace_end status "${escapeControlChars(unusableStatus)}" is not one of ${TRACE_STATUSES.join(', ')} — recorded as failed`,
+      // Only an UNREADABLE status is a repair. A recognized synonym is the
+      // producer's declaration and must not hand the decision to the exit code.
       repaired: 'status',
+    };
+  }
+  if (mappedStatus != null) {
+    return {
+      event: obj as CaptureEvent,
+      warning: `trace_end status "${escapeControlChars(mappedStatus)}" read as "${(obj as { status?: string }).status}"`,
     };
   }
   return { event: obj as CaptureEvent, warning: null };
@@ -368,6 +412,11 @@ function preview(s: string): string {
   // written straight to the supervisor's terminal and CI log. A child emitting
   // ESC sequences could move the cursor, recolor, or issue OSC commands in the
   // log of the tool watching it.
-  const safe = s.replace(/[\u0000-\u001f\u007f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
+  // The SHARED definition, so this and the renderer cannot disagree about what
+  // a control character is. This stopped at DEL while `safeText` had been
+  // widened to C1 — and a terminal that decodes UTF-8 C1 reads U+009B as CSI,
+  // so the class stayed open through the very messages that quote a producer's
+  // own bytes back at the operator.
+  const safe = escapeControlChars(s);
   return safe.length > 60 ? `${safe.slice(0, 57)}...` : safe;
 }

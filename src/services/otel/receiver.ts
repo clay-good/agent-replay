@@ -313,10 +313,20 @@ function upsertOtelTrace(db: Database.Database, input: MappedOtelTrace, stats: O
     // zero and ERASES the batch's real contribution. Requiring attribution
     // makes the recompute apply to the span path, which has it, and never to a
     // path that does not.
-    const hasAttribution = steps.some(
-      (st) => st.tokens_used != null || (st.metadata as { otel_cost_usd?: unknown } | undefined)?.otel_cost_usd != null,
-    );
-    const deduped = hasAttribution && (newSteps.length < incoming.length || (candidate != null && alreadyPresent));
+    // Gate on WHICH PATH this batch came from, not on what happened to survive
+    // the dedupe. Testing the retained steps for attribution looked equivalent
+    // and was not: when the duplicate span is the one carrying the tokens and
+    // the new span is a tool call (the most ordinary mixed batch there is), the
+    // survivors have no attribution, the recompute is skipped, and the mapper's
+    // BATCH-WIDE totals — which still include the dropped span's tokens — are
+    // merged again. That re-inflated exactly what the recompute exists to
+    // prevent. A span carries `otel_span_id`; a log-mapped step never does, and
+    // the log path is the one whose steps have no per-step attribution to
+    // recompute from.
+    const isSpanBatch = incoming.some(
+      (st) => typeof (st.metadata as { otel_span_id?: unknown } | undefined)?.otel_span_id === 'string',
+    ) || candidate != null;
+    const deduped = isSpanBatch && (newSteps.length < incoming.length || (candidate != null && alreadyPresent));
     const totals = deduped
       ? {
           total_tokens:

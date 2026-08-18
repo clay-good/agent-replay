@@ -1,6 +1,7 @@
 import { TRACE_STATUSES, STEP_TYPES, TRIGGER_TYPES, EVAL_TYPES, GUARD_ACTIONS, DECIDED_BY } from '../models/enums.js';
 import type { TraceStatus, StepType, TriggerType, EvalType, GuardAction, DecidedBy } from '../models/enums.js';
 import type { IngestTraceInput, IngestStepInput } from '../models/types.js';
+import { escapeControlChars } from './json.js';
 
 // ── Type guards ──────────────────────────────────────────────────────────────
 
@@ -62,14 +63,14 @@ export function validateTraceInput(input: unknown): ValidationResult {
   if (data.status != null && (typeof data.status !== 'string' || !isValidStatus(data.status))) {
     errors.push({
       field: 'status',
-      message: `Invalid status "${String(data.status)}". Must be one of: ${TRACE_STATUSES.join(', ')}`,
+      message: `Invalid status "${escapeControlChars(String(data.status))}". Must be one of: ${TRACE_STATUSES.join(', ')}`,
     });
   }
 
   if (data.trigger != null && (typeof data.trigger !== 'string' || !isValidTrigger(data.trigger))) {
     errors.push({
       field: 'trigger',
-      message: `Invalid trigger "${String(data.trigger)}". Must be one of: ${TRIGGER_TYPES.join(', ')}`,
+      message: `Invalid trigger "${escapeControlChars(String(data.trigger))}". Must be one of: ${TRIGGER_TYPES.join(', ')}`,
     });
   }
 
@@ -191,7 +192,7 @@ export function validateStepInput(input: unknown, index?: number): ValidationRes
   } else if (!isValidStepType(data.step_type)) {
     errors.push({
       field: `${prefix}step_type`,
-      message: `Invalid step_type "${data.step_type}". Must be one of: ${STEP_TYPES.join(', ')}`,
+      message: `Invalid step_type "${escapeControlChars(String(data.step_type))}". Must be one of: ${STEP_TYPES.join(', ')}`,
     });
   }
 

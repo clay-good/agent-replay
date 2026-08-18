@@ -179,8 +179,18 @@ describe('a zone-less timestamp is read the way SQLite reads it', () => {
     expect(parseInstant('2026-08-18T12:00:00+02:00')).toBe(parseInstant('2026-08-18T10:00:00Z'));
   });
 
+  // Pinned to a POSITIVE offset: under UTC or a negative one the old
+  // local-time reading also lands in the past, so the assertion held with the
+  // bug present. Only a zone ahead of UTC exposes it.
   it('does not report a past zone-less timestamp as being in the future', () => {
-    const past = new Date(Date.now() - 3_600_000).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
-    expect(formatRelativeTime(past)).not.toBe('in the future');
+    const prev = process.env.TZ;
+    try {
+      process.env.TZ = 'Europe/Berlin';
+      const past = new Date(Date.now() - 3_600_000).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+      expect(formatRelativeTime(past)).not.toBe('in the future');
+    } finally {
+      if (prev === undefined) delete process.env.TZ;
+      else process.env.TZ = prev;
+    }
   });
 });
