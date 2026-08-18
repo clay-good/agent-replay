@@ -3,7 +3,7 @@ import { startTrace, appendStep, updateStep, updateTrace } from './trace-service
 import { evaluateStep, verdictForMatches } from './guard-service.js';
 import type { TraceStep } from '../models/types.js';
 import type { GuardAction } from '../models/enums.js';
-import { escapeControlChars } from '../utils/json.js';
+import { escapeForMessage } from '../utils/json.js';
 
 /**
  * Stateless adapter for the stdin-JSON hook convention shared by Claude Code,
@@ -371,7 +371,7 @@ export function applyHookPayload(
   const noInput = !!opts.noInput;
 
   if (action === 'unknown') {
-    return { action, dialect, traceId: null, note: `ignored event "${escapeControlChars(String(eventName ?? '?'))}"` };
+    return { action, dialect, traceId: null, note: `ignored event "${escapeForMessage(String(eventName ?? '?'))}"` };
   }
 
   // finalize is the only action that must not create a trace it would immediately close.
@@ -450,7 +450,7 @@ export function applyHookPayload(
       }));
 
       if (!opts.enforce) {
-        return { action, dialect, traceId, note: `opened tool_call "${escapeControlChars(stepName)}"` };
+        return { action, dialect, traceId, note: `opened tool_call "${escapeForMessage(stepName)}"` };
       }
 
       // Enforce: evaluate the proposed tool call (against the real input) and,
@@ -459,7 +459,7 @@ export function applyHookPayload(
       const proposed = proposedToolStep(toolStepNumber, stepName, realInput);
       const verdict = verdictForMatches(evaluateStep(db, proposed));
       if (verdict.action === 'allow') {
-        return { action, dialect, traceId, note: `allowed tool_call "${escapeControlChars(String(toolName))}"` };
+        return { action, dialect, traceId, note: `allowed tool_call "${escapeForMessage(String(toolName))}"` };
       }
 
       // A denied call never executes, so no PostToolUse will ever close its
@@ -516,7 +516,7 @@ export function applyHookPayload(
         action,
         dialect,
         traceId,
-        note: `${verdict.action} tool_call "${escapeControlChars(String(toolName))}" [${escapeControlChars(String(verdict.policy))}]`,
+        note: `${verdict.action} tool_call "${escapeForMessage(String(toolName))}" [${escapeForMessage(String(verdict.policy))}]`,
         enforcement: { action: verdict.action, policy: verdict.policy, reason: verdict.reason },
       };
     }
@@ -554,7 +554,7 @@ export function applyHookPayload(
         return open.step_number;
       }).immediate();
       if (closed == null) return { action, dialect, traceId, note: 'no matching open tool step' };
-      return { action, dialect, traceId, note: `closed tool_call "${escapeControlChars(String(toolName ?? '?'))}"` };
+      return { action, dialect, traceId, note: `closed tool_call "${escapeForMessage(String(toolName ?? '?'))}"` };
     }
 
     case 'subagent_start': {
@@ -572,7 +572,7 @@ export function applyHookPayload(
           parent_session_id: str(payload.parent_session_id),
         },
       }));
-      return { action, dialect, traceId, note: `opened subagent anchor "${escapeControlChars(String(agentType))}"` };
+      return { action, dialect, traceId, note: `opened subagent anchor "${escapeForMessage(String(agentType))}"` };
     }
 
     case 'subagent_stop': {

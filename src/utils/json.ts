@@ -272,3 +272,19 @@ export function escapeControlChars(text: string): string {
   // eslint-disable-next-line no-control-regex
   return normalized.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
 }
+
+/**
+ * Escape a producer value bound for a ONE-LINE diagnostic.
+ *
+ * Same as {@link escapeControlChars} plus TAB and NEWLINE. A renderer wants
+ * those preserved — a multi-line error keeps its shape — but a warning is a
+ * single line, and a value carrying `\n` lets a producer forge one:
+ * `{"type":"evil\nagent-replay run: all good"}` prints a second line that
+ * reads exactly like this tool's own output, in the supervisor's terminal and
+ * CI log. So the message sites get the stricter class, and the render sites
+ * keep the lenient one.
+ */
+export function escapeForMessage(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/[\u0000-\u001f\u007f-\u009f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
+}

@@ -411,6 +411,37 @@ describe('a child whose terminal status we cannot read', () => {
     }
   }, 20000);
 
+  // RESTORED. A previous version of this suite pinned `status:'success'` +
+  // exit 3, and when the synonym map made `success` a declaration rather than a
+  // repair, that test was rewritten to use an unreadable value — removing the
+  // regressed case from coverage instead of deciding about it. The decision:
+  // a status the child DECLARED wins over the exit code (the documented policy,
+  // and the same answer a literal `completed` has always given), and the
+  // summary names both so the disagreement is never hidden.
+  it('keeps a declared status over a conflicting exit code, and names both', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ar-run-conflict-'));
+    try {
+      const child = join(dir, 'child.mjs');
+      writeFileSync(
+        child,
+        [
+          "import { appendFileSync } from 'node:fs';",
+          "appendFileSync(process.env.AGENT_REPLAY_EVENTS, JSON.stringify({ v: 1, type: 'trace_end', trace_id: 'x', status: 'success' }) + '\\n');",
+          'process.exit(3);',
+        ].join('\n'),
+      );
+      const res = await runWrapped(db, { command: process.execPath, args: [child], agentName: 'conflictbot' });
+      expect(res.exitCode).toBe(3);
+      const trace = getTrace(db, res.traceId)!;
+      // The declaration is kept — a normalized spelling is still a declaration.
+      expect(trace.status).toBe('completed');
+      // ...and the wrapper reports the disagreement rather than hiding it.
+      expect(res.status).toBe('completed');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20000);
+
   it('still records a failure when an unreadable status meets a non-zero exit', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ar-run-repair2-'));
     try {

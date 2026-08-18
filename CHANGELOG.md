@@ -180,6 +180,28 @@ between them, and nothing else.
 
 ### Fixed
 
+- The terminal-status synonym table was a plain object literal, so a lookup
+  resolved *inherited* keys: `status: "constructor"` returned Object's
+  constructor — a function assigned to a field typed as a string, its
+  native-code source echoed into the operator's warning, and the repair marker
+  left unset so `run` treated it as the child's declaration. The table has a
+  null prototype and the result is type-checked.
+- Diagnostics that quote a producer's value now escape newline and tab as well.
+  The renderer preserves both on purpose (a multi-line error keeps its shape),
+  but a one-line warning that carries a raw newline lets a producer forge a
+  second line reading exactly like this tool's own output, in the supervisor's
+  terminal and CI log. Two escapers now: the lenient one for rendering, a
+  stricter one for messages — which also restores tab/newline escaping the line
+  preview lost when the two were unified.
+- `skipped: unsupported protocol version …` still echoed a producer's raw ESC
+  and C1; it was missed by the sweep that fixed its siblings.
+- An OTLP batch carrying a first-time root was **skipped entirely** when all its
+  child spans were duplicates, so a rootless synthetic trace was never upgraded
+  and the root's own tokens were lost — the redelivery guard swallowing a
+  genuine first delivery. Token totals across batches are now pinned by tests
+  covering all three shapes (redelivery, synthetic upgrade, mixed batch), each
+  of which has been wrong in one direction or the other.
+
 - **A child that declared failure and exited 0 was stored as a success.**
   Repairing every unrecognized terminal status to `failed` and then letting the
   wrapper's exit code override it laundered `status: "error"` back into

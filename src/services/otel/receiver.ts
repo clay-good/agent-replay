@@ -294,7 +294,13 @@ function upsertOtelTrace(db: Database.Database, input: MappedOtelTrace, stats: O
     // retry — the common final flush, since the root span ends last — which
     // carries no child steps at all and so slipped past a check that required
     // `incoming.length > 0`.
-    if (!rootStep && newSteps.length === 0 && (incoming.length > 0 || alreadyPresent)) return;
+    // A batch whose root is NEW still brings something even when every one of
+    // its child spans is a duplicate: that root upgrades a rootless synthetic
+    // trace to a real one (and carries its own usage). Skipping it because
+    // `newSteps` was empty left the trace synthetic forever and dropped the
+    // root's tokens — the redelivery guard swallowing a genuine first delivery.
+    const bringsNewRoot = candidate != null && !alreadyPresent;
+    if (!bringsNewRoot && !rootStep && newSteps.length === 0 && (incoming.length > 0 || alreadyPresent)) return;
 
     const steps = rootStep ? [...newSteps, rootStep] : newSteps;
 
@@ -327,12 +333,22 @@ function upsertOtelTrace(db: Database.Database, input: MappedOtelTrace, stats: O
       (st) => typeof (st.metadata as { otel_span_id?: unknown } | undefined)?.otel_span_id === 'string',
     ) || candidate != null;
     const deduped = isSpanBatch && (newSteps.length < incoming.length || (candidate != null && alreadyPresent));
+    // Count the ROOT's own usage too, even when it is being absorbed as the
+    // trace's identity rather than appended as a step. `rootStep` is undefined
+    // both when the root is already present (a redelivery — correctly excluded)
+    // and when the target is a SYNTHETIC trace being upgraded by this batch, and
+    // the mapper's batch total includes the root's usage in that case. Reducing
+    // over `steps` alone therefore silently UNDER-counted: a rootless trace
+    // upgraded by a batch that also redelivered a stored child lost the root's
+    // tokens entirely. Over-counting was the bug this recompute fixed; this is
+    // the same mistake with the sign flipped.
+    const contributing = rootStep || alreadyPresent || candidate == null ? steps : [...steps, candidate];
     const totals = deduped
       ? {
           total_tokens:
-            steps.reduce((sum, st) => sum + (Number(st.tokens_used) || 0), 0) || null,
+            contributing.reduce((sum, st) => sum + (Number(st.tokens_used) || 0), 0) || null,
           total_cost_usd:
-            steps.reduce(
+            contributing.reduce(
               (sum, st) => sum + (Number((st.metadata as { otel_cost_usd?: unknown } | undefined)?.otel_cost_usd) || 0),
               0,
             ) || null,

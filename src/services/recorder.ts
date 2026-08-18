@@ -285,11 +285,12 @@ export class TraceRecorder {
 
   endTrace(patch: EndTraceInput = {}): void {
     // The SDK is our own code, so a status it cannot use is a CALLER error and
-    // is reported. The stream path deliberately repairs the same value instead
-    // (an unusable field must not cost a producer its output and tokens) — but
-    // a programmatic caller writing `endTrace({status: 'Failed'})` wants to hear
-    // that the case did not match, not to discover later that the run was
-    // silently recorded as failed.
+    // is reported. The stream is more forgiving on purpose: it NORMALIZES a
+    // recognizable spelling (`Failed`, `error`, `ok`) onto the four stored
+    // statuses and only repairs what it cannot read at all, because it carries
+    // a producer's data and an unusable field must not cost them their output
+    // and tokens. A programmatic caller writing `endTrace({status: 'Failed'})`
+    // wants to hear that the case did not match — they can spell it correctly.
     if (patch.status != null && !(TRACE_STATUSES as readonly string[]).includes(patch.status)) {
       throw new Error(`Invalid trace status "${patch.status}". Valid: ${TRACE_STATUSES.join(', ')}`);
     }

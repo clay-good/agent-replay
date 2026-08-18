@@ -862,9 +862,43 @@ describe('warnings that quote a producer do not carry its control bytes', () => 
     expect(warning).toContain('\\x1b');
   });
 
-  it('escapes an unparsable line preview, C1 included', () => {
-    const { warning } = parseEventLine(`{bad${C1}2J`);
+  it('escapes an unparsable line preview, ESC and C1 alike', () => {
+    const { warning } = parseEventLine(`{bad${ESC}[31m${C1}2J`);
     expect(warning).toBeTruthy();
     expect(warning).not.toContain(C1);
+    // ESC asserted too — it is the alphabet the preview was said to cover, and
+    // the previous version of this test only checked C1.
+    expect(warning).not.toContain(ESC);
   });
+
+  // A one-line diagnostic must not let a producer forge a second line that
+  // reads like this tool's own output. The renderer deliberately preserves
+  // newline and tab (a multi-line error keeps its shape); a message must not.
+  it('escapes a newline so a producer cannot forge a log line', () => {
+    const { warning } = validateEvent({ v: 1, type: 'evil\nagent-replay run: all good' });
+    expect(warning).toBeTruthy();
+    expect(warning).not.toContain('\n');
+    expect(warning).toContain('\\x0a');
+  });
+
+  it('escapes a producer-supplied protocol version', () => {
+    const { warning } = validateEvent({ v: `9${ESC}[31m${C1}2J`, type: 'trace_end', trace_id: 't' });
+    expect(warning).toMatch(/unsupported protocol version/);
+    expect(warning).not.toContain(ESC);
+    expect(warning).not.toContain(C1);
+  });
+
+  // A plain object literal resolves INHERITED keys, so `status: "constructor"`
+  // returned Object's constructor: a function assigned to a field typed string,
+  // its native-code source echoed into the warning, and the repair marker left
+  // unset so `run` treated it as a declaration.
+  it.each(['constructor', '__proto__', 'Constructor', 'valueOf'])(
+    'does not resolve %s through the prototype chain',
+    (name) => {
+      const { event, repaired } = validateEvent({ v: 1, type: 'trace_end', trace_id: 't', status: name });
+      expect(typeof (event as { status?: unknown }).status).toBe('string');
+      expect((event as { status?: string }).status).toBe('failed');
+      expect(repaired).toBe('status');
+    },
+  );
 });

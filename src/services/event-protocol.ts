@@ -1,7 +1,7 @@
 import type { IngestDecisionInput, IngestSnapshotInput } from '../models/types.js';
 import { STEP_TYPES, TRACE_STATUSES } from '../models/enums.js';
 import { decisionOptionProblem, isValidConfidence } from '../utils/validators.js';
-import { escapeControlChars } from '../utils/json.js';
+import { escapeForMessage } from '../utils/json.js';
 
 /**
  * Versioned JSONL event protocol for incremental trace capture.
@@ -44,7 +44,7 @@ export type EventType = (typeof EVENT_TYPES)[number];
  * rather than as something we failed to parse — the distinction `run` needs in
  * order to know when its own exit code should decide instead.
  */
-const STATUS_SYNONYMS: Record<string, string> = {
+const STATUS_SYNONYMS: Record<string, string> = Object.assign(Object.create(null) as Record<string, string>, {
   completed: 'completed', complete: 'completed', success: 'completed', succeeded: 'completed',
   ok: 'completed', done: 'completed', finished: 'completed', passed: 'completed',
   failed: 'failed', failure: 'failed', fail: 'failed', error: 'failed', errored: 'failed',
@@ -52,7 +52,7 @@ const STATUS_SYNONYMS: Record<string, string> = {
   interrupted: 'failed',
   timeout: 'timeout', timed_out: 'timeout', timedout: 'timeout',
   running: 'running',
-};
+});
 
 
 // ── Event shapes ────────────────────────────────────────────────────────────
@@ -211,10 +211,10 @@ export function validateEvent(obj: unknown): ParseResult {
   const e = obj as Record<string, unknown>;
 
   if (typeof e.type !== 'string' || !(EVENT_TYPES as readonly string[]).includes(e.type)) {
-    return { event: null, warning: `skipped: unknown event type "${escapeControlChars(String(e.type))}"` };
+    return { event: null, warning: `skipped: unknown event type "${escapeForMessage(String(e.type))}"` };
   }
   if (e.v != null && e.v !== EVENT_PROTOCOL_VERSION) {
-    return { event: null, warning: `skipped: unsupported protocol version ${String(e.v)}` };
+    return { event: null, warning: `skipped: unsupported protocol version ${escapeForMessage(String(e.v))}` };
   }
 
   const type = e.type as EventType;
@@ -268,8 +268,13 @@ export function validateEvent(obj: unknown): ParseResult {
     // failure in-band while exiting 0 are the common shape. A value that maps
     // to a known status is a DECLARATION (kept, and `run` honours it); only a
     // value that maps to nothing is a repair the exit code gets to decide.
+    // A null-prototype table, AND a string check on the result. A plain object
+    // literal resolves inherited keys, so `status: "constructor"` returned
+    // Object's constructor — a FUNCTION assigned to a field typed string, with
+    // the native-code source echoed into the operator's warning and the repair
+    // marker left unset, so `run` treated it as a declaration.
     const mapped = typeof e.status === 'string' ? STATUS_SYNONYMS[e.status.trim().toLowerCase()] : undefined;
-    if (mapped != null) {
+    if (typeof mapped === 'string') {
       if (mapped !== e.status) mappedStatus = String(e.status);
       e.status = mapped;
     } else if (typeof e.status !== 'string' || !(TRACE_STATUSES as readonly string[]).includes(e.status)) {
@@ -295,7 +300,7 @@ export function validateEvent(obj: unknown): ParseResult {
     // Reject an unknown step_type here — it would otherwise fail the DB CHECK
     // constraint inside appendStep and (in a batch ingest) abort the trace.
     if (!(STEP_TYPES as readonly string[]).includes(e.step_type)) {
-      return { event: null, warning: `skipped: ${type} has invalid step_type "${escapeControlChars(String(e.step_type))}"` };
+      return { event: null, warning: `skipped: ${type} has invalid step_type "${escapeForMessage(String(e.step_type))}"` };
     }
   }
   // Tags must be strings, not merely an array: `insertTraceRow` coerces the
@@ -378,9 +383,9 @@ export function validateEvent(obj: unknown): ParseResult {
       // no mention of it at all.
       warning: [
         unusableStatus != null
-          ? `trace_end status "${escapeControlChars(unusableStatus)}" is not one of ${TRACE_STATUSES.join(', ')} — recorded as failed`
+          ? `trace_end status "${escapeForMessage(unusableStatus)}" is not one of ${TRACE_STATUSES.join(', ')} — recorded as failed`
           : mappedStatus != null
-            ? `trace_end status "${escapeControlChars(mappedStatus)}" read as "${(obj as { status?: string }).status}"`
+            ? `trace_end status "${escapeForMessage(mappedStatus)}" read as "${(obj as { status?: string }).status}"`
             : null,
         `ignored ${dropped.join(', ')}: must be a non-negative finite number`,
       ].filter(Boolean).join('; '),
@@ -391,7 +396,7 @@ export function validateEvent(obj: unknown): ParseResult {
   if (unusableStatus != null) {
     return {
       event: obj as CaptureEvent,
-      warning: `trace_end status "${escapeControlChars(unusableStatus)}" is not one of ${TRACE_STATUSES.join(', ')} — recorded as failed`,
+      warning: `trace_end status "${escapeForMessage(unusableStatus)}" is not one of ${TRACE_STATUSES.join(', ')} — recorded as failed`,
       // Only an UNREADABLE status is a repair. A recognized synonym is the
       // producer's declaration and must not hand the decision to the exit code.
       repaired: 'status',
@@ -400,7 +405,7 @@ export function validateEvent(obj: unknown): ParseResult {
   if (mappedStatus != null) {
     return {
       event: obj as CaptureEvent,
-      warning: `trace_end status "${escapeControlChars(mappedStatus)}" read as "${(obj as { status?: string }).status}"`,
+      warning: `trace_end status "${escapeForMessage(mappedStatus)}" read as "${(obj as { status?: string }).status}"`,
     };
   }
   return { event: obj as CaptureEvent, warning: null };
@@ -417,6 +422,6 @@ function preview(s: string): string {
   // widened to C1 — and a terminal that decodes UTF-8 C1 reads U+009B as CSI,
   // so the class stayed open through the very messages that quote a producer's
   // own bytes back at the operator.
-  const safe = escapeControlChars(s);
+  const safe = escapeForMessage(s);
   return safe.length > 60 ? `${safe.slice(0, 57)}...` : safe;
 }
