@@ -44,6 +44,10 @@ The system SHALL persist every evaluation as an eval record (evaluator type `rub
 
 The system SHALL compare traces against a golden dataset via `agent-replay check --golden <file>`, matching candidate traces to golden traces by agent name and input hash, diffing on a structural field allowlist (step count, step types, step names, tool-call inputs, per-step failure, final status) rather than raw output text, and exiting non-zero with a divergence report when any matched trace regresses. `--fields` SHALL override the allowlist and `--json` SHALL emit the report as structured data. Candidates gathered in bulk SHALL exclude forked traces (a never-executed copy of a step prefix, which otherwise matches its own baseline and diverges on step count and status — reporting a regression that never happened) and traces still `running` (a partial shape is not a regression). A trace named explicitly with `--trace` SHALL still be compared, whatever its lineage or status.
 
+The gate SHALL refuse rather than report a pass whenever it cannot actually compare: a field named on `--fields` that no matched baseline can exercise, a baseline entry without a string `metadata.status`, an empty baseline, and a run in which no candidate matched (unless `--allow-empty`) are each a gate-broken refusal at exit 2, distinct from the exit 1 that means a regression. A trace whose input is empty SHALL NOT be matchable — an empty input is the absence of an identity, not an identity that every such trace shares — and an unmatchable baseline counts as unexercised. `--agent` SHALL match by substring and `--agent-exact` by exact name; they are mutually exclusive, and an empty value for either is a usage error rather than a silently widened scope.
+
+`expected_output` and `eval_criteria` in a golden entry are carried for downstream consumers and human review; the gate SHALL NOT interpret them as assertions.
+
 #### Scenario: Regression detected in CI
 
 - **WHEN** `agent-replay check --golden golden.json --agent travel-bot --since 1d` finds a trace whose tool-call sequence differs from its golden counterpart

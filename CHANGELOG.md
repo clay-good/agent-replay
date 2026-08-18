@@ -140,6 +140,19 @@ between them, and nothing else.
 
 ### Changed
 
+- The openspec specs now describe what the implementation actually guarantees.
+  `openspec validate --all` only checks document structure, so nothing had
+  verified the normative statements against the binary. The specs had fallen
+  behind in three places: the Codex importer's second tool family
+  (`custom_tool_call`, the dominant form in real rollouts), its `event_msg`
+  wrapper and `token_count` totals, plus import idempotency, the identity key,
+  prompt/preamble retention, `ended_at`, streaming and the line limit
+  (trace-capture); how an OTel trace's status derives from its root span rather
+  than any child, and redelivery de-duplication (telemetry-ingest); and every
+  gate-broken refusal, unmatchable empty inputs, `--agent-exact`, and the fact
+  that `expected_output`/`eval_criteria` are carried rather than asserted
+  (trace-evaluation). Each statement added was verified against the binary.
+
 - Transcript imports read the file a line at a time instead of loading it whole.
   Slurping it as one string and splitting that kept three copies alive at once —
   the string, the array of lines and the parsed records — measuring 436 MB of
