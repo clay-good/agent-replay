@@ -192,6 +192,14 @@ between them, and nothing else.
 
 ### Fixed
 
+- A guardrail pattern made only of zero-width or soft-hyphen characters matched
+  **every** step. Folding strips those, so the needle became the empty string,
+  which is a substring of everything — a deny policy blocked `read_file` and all
+  else, reporting "name contains ''" as though the name really matched. A stray
+  zero-width character pasted into a pattern is exactly how that happens. Such a
+  needle is now treated as an unusable pattern, taking the same path a non-string
+  one does: still fail-closed for a blocking policy, but saying why.
+
 - `show --tree` now states a step's depth once the indent stops growing. The
   indent is capped so a deep tree renders at all, but past the cap every level
   draws the same 122 spaces — a step at depth 60 was indistinguishable from one

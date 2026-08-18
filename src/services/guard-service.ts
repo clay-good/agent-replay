@@ -397,7 +397,16 @@ export function foldForMatch(text: string): string {
 
 function containsNeedle(value: unknown): string | null {
   if (typeof value === 'object') return null;
-  return foldForMatch(String(value));
+  const folded = foldForMatch(String(value));
+  // A needle that FOLDS AWAY to nothing is unusable, not a match-anything.
+  // `''` is a substring of every string, so a pattern written with only
+  // zero-width or soft-hyphen characters — a stray one pasted into a policy is
+  // exactly how this happens — silently matched every step: a deny policy
+  // blocked `read_file` and everything else, with a reason line reading "name
+  // contains ''". Returning null routes it to the same "unusable — failing
+  // closed" path a non-string needle takes, which still blocks for a deny
+  // policy but says WHY.
+  return folded === '' && String(value) !== '' ? null : folded;
 }
 
 function matchesPolicy(step: TraceStep, policy: GuardrailPolicy): string | null {

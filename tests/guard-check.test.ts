@@ -553,3 +553,36 @@ describe('a duplicate policy name loses the same way however it is detected', ()
     }
   });
 });
+
+describe('a needle that folds away is unusable, not a match-anything', () => {
+  // Folding strips zero-width and soft-hyphen characters, so a pattern written
+  // with only those folds to the empty string — and `''` is a substring of every
+  // string. A deny policy therefore blocked EVERY step, including `read_file`,
+  // with a reason line reading "name contains ''". A stray zero-width character
+  // pasted into a policy is exactly how that happens. It now takes the same
+  // "unusable pattern" path a non-string needle does: still fail-closed for a
+  // blocking policy, but saying why.
+  const ZW = '\u200b\u200c';
+
+  it('fails closed with a reason for a deny policy', () => {
+    addPolicy(db, { name: 'zw', action: 'deny', match_pattern: { name_contains: ZW } });
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'read_file' })));
+    expect(v.action).toBe('deny');
+    expect(v.reason).toMatch(/unusable/);
+    // The point: it is not reported as though the name genuinely matched.
+    expect(v.reason).not.toMatch(/name contains ''/);
+  });
+
+  it('does not fire at all for a warn policy', () => {
+    addPolicy(db, { name: 'zwarn', action: 'warn', match_pattern: { name_contains: ZW } });
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'read_file' })));
+    expect(v.action).toBe('allow');
+  });
+
+  it('still folds a needle that has real content alongside zero-width padding', () => {
+    addPolicy(db, { name: 'padded', action: 'deny', match_pattern: { name_contains: `de${ZW}lete` } });
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'delete_user' })));
+    expect(v.action).toBe('deny');
+    expect(v.reason).not.toMatch(/unusable/);
+  });
+});
