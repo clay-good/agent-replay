@@ -95,6 +95,7 @@ program
   .description('Import an on-disk session log (Claude Code transcript or Codex rollout JSONL) as a trace')
   .option('--format <format>', 'Log format: claude-transcript (default), codex-rollout', 'claude-transcript')
   .option('--tags <tags>', 'Comma-separated tags to add to the imported trace')
+  .option('--replace', 'Re-import a session already in the store (use when the transcript has grown)')
   .option('--dir <path>', 'Custom data directory')
   .action(async (path, opts) => {
     const { runImport } = await import('./commands/import.js');

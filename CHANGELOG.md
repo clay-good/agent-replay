@@ -30,6 +30,8 @@ between them, and nothing else.
 
 ### Added
 
+- `import --replace` re-imports a session that is already in the store.
+
 - `check --golden` compares whether each step FAILED. A baseline could not carry
   step failure at all, so the regression class the gate most needs to catch —
   identical step shape where every tool call now errors — was structurally
@@ -176,6 +178,53 @@ between them, and nothing else.
   trace in. An explicit `--dir` still wins.
 
 ### Fixed
+
+- **The Codex importer dropped roughly nine tenths of what the agent did.** It
+  handled only `function_call`, while the current Codex CLI emits most tool
+  invocations as the freeform `custom_tool_call` — measured across 40 recent
+  rollouts, 194 custom against 25 function. Every one of them was counted into
+  "Records skipped" and stored nowhere, at exit 0, so replay, diff and eval
+  analysed a session that appeared to have done almost nothing. Both families
+  now run through one branch, paired by `call_id` as before.
+- The Codex importer never set `total_tokens`, so imported sessions showed "-"
+  forever and a store mixing captured and imported runs reported totals that
+  omitted the imported ones. It now reads the session's `token_count` records.
+  Those totals are cumulative, so the last one is the answer: summing them
+  over-counted by 34x on a real session (214,648,081 against an actual
+  6,267,854).
+- The Codex importer never recorded a step `error`, so an imported trace read as
+  a clean run to `hallucination-check`, `completeness-check` and `check
+  --golden`'s `step_errors` baseline — a fail-open on exactly the traces this
+  tool exists to audit. A non-zero exit code or an explicit failure in the
+  paired output is now recorded, as the Claude importer already did.
+- Records wrapped in `event_msg` were matched against the literal string
+  `"event_msg"` and skipped. It is the more common wrapper in real rollouts
+  (7,471 records against 4,351 for `response_item` across 60 sessions), and the
+  session token totals live inside it.
+- **Claude token totals were short by a factor of ~478.** Only
+  `input_tokens + output_tokens` were summed, dropping both cache fields, which
+  is where nearly all of a real session's consumption sits: on a 52 MB
+  transcript the stored figure was 1,216,025 against an actual 581,945,188, and
+  the billable-but-uncached 4.3M `cache_creation` went with it. `stats`, the
+  dashboard totals and every budget-shaped reading were meaningless for imported
+  traces. The main loop and its subagent twin now share one helper.
+- **Every user turn after the first was discarded by both importers**, so a
+  59-turn session imported with one question and the rest unrecoverable — while
+  the two other paths that assemble a trace from turns (the batch merge and the
+  OTLP mapper) both keep them in `metadata.follow_up_prompts`. The importers now
+  follow that convention.
+- The one turn that was kept was usually not a prompt. Real transcripts open
+  with a harness envelope — a slash-command block, injected instructions, an
+  environment preamble — so `trace.input.prompt`, which `why`, the summarizer,
+  the rubric evals and `check` all read as "what was asked", held boilerplate.
+  The prompt is now the first turn that is not an envelope, with the envelope
+  still used when that is all the session has.
+- **Importing the same session twice created a whole duplicate trace.** Nothing
+  checked, so a re-run after a crash — or a scheduled loop over a session
+  directory — silently doubled every store-wide number and left indistinguishable
+  rows in `list` with no way to tell the copies apart or clean them up. A session
+  already in the store is now reported and left alone, with `--replace` to
+  re-import it (also how a transcript that has grown is refreshed).
 
 - **The golden CI gate could report a green pass having compared nothing.**
   Every field comparison skips a step whose baseline side lacks the data it

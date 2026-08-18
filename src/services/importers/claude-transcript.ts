@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { dirname, join, basename } from 'node:path';
 import { ingestTrace } from '../trace-service.js';
+import { selectPrompt } from './user-turns.js';
 import type { IngestTraceInput, IngestStepInput, Trace } from '../../models/types.js';
 
 /**
@@ -59,6 +60,29 @@ interface Block {
  * concatenates too. The Codex *stream* translator was hardened against exactly
  * this; the importers were missed.
  */
+/**
+ * Every token a `usage` block reports, not just the uncached pair.
+ *
+ * Summing `input_tokens + output_tokens` alone dropped the two cache fields,
+ * which is where nearly all of a real Claude Code session's consumption lives:
+ * on a 52 MB transcript from this machine the pair totalled 1,216,025 against
+ * an actual 581,945,188 — the stored figure was 0.2% of the truth, and the
+ * billable-but-uncached `cache_creation` 4.3M was lost with it. `stats`, the
+ * dashboard totals and anything budget-shaped read that number.
+ *
+ * One helper, called from both the main loop and the subagent twin below, so
+ * the two cannot drift apart on what a token total means.
+ */
+export function usageTokens(usage: Record<string, unknown> | undefined): number {
+  if (!usage) return 0;
+  return (
+    toNum(usage.input_tokens) +
+    toNum(usage.output_tokens) +
+    toNum(usage.cache_creation_input_tokens) +
+    toNum(usage.cache_read_input_tokens)
+  );
+}
+
 function toNum(v: unknown): number {
   const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN;
   // Clamp at zero: a negative usage count is not a token total, and it survived
@@ -164,6 +188,8 @@ export function importClaudeTranscript(
 
   let sessionId: string | undefined;
   let input: Record<string, unknown> | undefined;
+  /** Every user turn, in order; split into prompt + follow-ups after the loop. */
+  const userTurns: string[] = [];
   let lastAssistantText = '';
   let totalTokens = 0;
   let imported = 0;
@@ -187,9 +213,7 @@ export function importClaudeTranscript(
 
     const message = rec.message as { content?: unknown; usage?: Record<string, unknown> } | undefined;
     const content = message?.content;
-    if (message?.usage) {
-      totalTokens += toNum(message.usage.input_tokens) + toNum(message.usage.output_tokens);
-    }
+    if (message?.usage) totalTokens += usageTokens(message.usage);
 
     let contributed = false;
 
@@ -201,8 +225,11 @@ export function importClaudeTranscript(
       // `!input` alone treated an EMPTY first user record as "input captured",
       // because `{prompt: ''}` is truthy — so the next, real prompt was
       // discarded and the trace kept no question at all.
-      if (type === 'user' && !hasPrompt(input)) {
-        input = { prompt: content };
+      if (type === 'user') {
+        // EVERY user turn is retained now (as the prompt, or as a follow-up),
+        // so a turn contributes whenever it has text — it is no longer tallied
+        // as skipped merely for arriving second.
+        userTurns.push(content);
         contributed = content.trim().length > 0;
       } else if (type === 'assistant') {
         lastAssistantText = content;
@@ -219,8 +246,8 @@ export function importClaudeTranscript(
             // shape real Claude Code user records actually use, so fixing only
             // the string branch left the bug fully reachable — and left the two
             // branches disagreeing about the tally for the identical situation.
-            if (type === 'user' && !hasPrompt(input)) {
-              input = { prompt: block.text ?? '' };
+            if (type === 'user') {
+              userTurns.push(block.text ?? '');
               contributed = (block.text ?? '').trim().length > 0;
             } else if (type === 'assistant' && block.text) {
               lastAssistantText = block.text;
@@ -358,6 +385,9 @@ export function importClaudeTranscript(
   // prompt reported "0 record(s) imported, 1 skipped" and then created a trace
   // with an empty prompt and no steps, exiting 0 — a success verdict for an
   // import that captured nothing.
+  const selected = selectPrompt(userTurns);
+  input = selected.input;
+
   if (steps.length === 0 && !hasPrompt(input)) {
     // Warn BEFORE this early return, not after: "nothing importable" plus
     // "0 record(s) skipped" is exactly when the user most needs to hear that a
@@ -378,7 +408,11 @@ export function importClaudeTranscript(
     started_at: startedAt,
     total_tokens: totalTokens || null,
     tags: opts.tags,
-    metadata: { source_format: SOURCE_FORMAT, source_version: SOURCE_VERSION },
+    metadata: {
+      source_format: SOURCE_FORMAT,
+      source_version: SOURCE_VERSION,
+      ...(selected.followUps.length > 0 ? { follow_up_prompts: selected.followUps } : {}),
+    },
     steps,
   };
 
@@ -430,7 +464,7 @@ function buildSubagentSteps(
     const type = rec.type as string | undefined;
     if (type === 'user' || type === 'assistant') {
       const message = rec.message as { content?: unknown; usage?: Record<string, unknown> } | undefined;
-      if (message?.usage) tokens += toNum(message.usage.input_tokens) + toNum(message.usage.output_tokens);
+      if (message?.usage) tokens += usageTokens(message.usage);
       const content = message?.content;
       if (!Array.isArray(content)) {
         if (typeof content === 'string' && type === 'assistant') {

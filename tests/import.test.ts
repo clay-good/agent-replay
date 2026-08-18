@@ -1,9 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { runMigrations } from '../src/db/migrations.js';
+import { ensureDatabase, resetConnection } from '../src/db/index.js';
+import { runImport } from '../src/commands/import.js';
 import { getTrace } from '../src/services/trace-service.js';
 import { importClaudeTranscript } from '../src/services/importers/claude-transcript.js';
 
@@ -216,12 +218,14 @@ describe('importClaudeTranscript — subagents', () => {
     expect(report.skipped).toBe(1);
   });
 
-  it('counts a follow-up user turn and an empty-text block as skipped, not imported', () => {
-    // A record that captures no input and emits no step must be tallied as
-    // skipped (the imported+skipped=records invariant). Two such zero-step
-    // records — a follow-up user turn (no user step type retains it) and an
-    // assistant record whose only text block is empty — were mis-counted as
-    // imported because `contributed` was set unconditionally in the text paths.
+  it('keeps a follow-up user turn, and still counts an empty block as skipped', () => {
+    // A record that captures nothing and emits no step must be tallied as
+    // skipped (the imported+skipped=records invariant) — that still holds for
+    // the empty-text assistant record. A follow-up user turn is no longer one
+    // of those: it used to be retained NOWHERE, so a multi-turn session kept
+    // only its first question. It now goes to `metadata.follow_up_prompts`,
+    // the convention the batch merge and the OTLP mapper already follow, and
+    // therefore counts as imported.
     const path = fixture([
       { type: 'user', sessionId: 's4', message: { content: 'first prompt' } },
       { type: 'user', sessionId: 's4', message: { content: 'second prompt' } },
@@ -230,8 +234,12 @@ describe('importClaudeTranscript — subagents', () => {
     ]);
     const report = importClaudeTranscript(db, path);
     expect(report.imported + report.skipped).toBe(4);
-    expect(report.imported).toBe(2); // first user prompt + assistant answer
-    expect(report.skipped).toBe(2);  // follow-up user turn + empty-text assistant
+    expect(report.imported).toBe(3); // both user turns + assistant answer
+    expect(report.skipped).toBe(1);  // empty-text assistant only
+
+    const trace = getTrace(db, report.trace!.id)!;
+    expect(trace.input).toEqual({ prompt: 'first prompt' });
+    expect(trace.metadata.follow_up_prompts).toEqual(['second prompt']);
   });
 
   it('imports subagent transcript files as nested steps under an anchor', () => {
@@ -540,3 +548,169 @@ describe('a file that captured nothing is a failed import in both importers', ()
   });
 });
 
+
+describe('a usage block is more than its uncached pair', () => {
+  // Summing `input_tokens + output_tokens` alone dropped both cache fields,
+  // which is where nearly all of a real session's consumption lives: on a 52 MB
+  // transcript from this machine the stored figure was 1,216,025 against an
+  // actual 581,945,188 — 0.2% of the truth — and the billable-but-uncached
+  // 4.3M `cache_creation` went with it. `stats`, the dashboard totals and
+  // anything budget-shaped read that number.
+  it('counts cache_creation and cache_read tokens', () => {
+    const path = fixture([
+      { type: 'user', sessionId: 'tok', message: { content: 'go' } },
+      {
+        type: 'assistant',
+        sessionId: 'tok',
+        message: {
+          content: [{ type: 'text', text: 'done' }],
+          usage: { input_tokens: 10, output_tokens: 20, cache_creation_input_tokens: 300, cache_read_input_tokens: 4000 },
+        },
+      },
+    ]);
+    expect(getTrace(db, importClaudeTranscript(db, path).trace!.id)!.total_tokens).toBe(4330);
+  });
+
+  // The subagent path is a TWIN of the main loop and has drifted from it
+  // before, so both are asserted in one test: they now share one helper, and
+  // this fails if either side stops using it.
+  it('counts them the same way inside a subagent transcript', () => {
+    const path = fixture([
+      { type: 'user', sessionId: 'tok-sub', message: { role: 'user', content: 'research' } },
+      { type: 'assistant', sessionId: 'tok-sub', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'tu1', name: 'Task', input: {} }], usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 8 } } },
+      { type: 'user', sessionId: 'tok-sub', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'ok' }] } },
+    ]);
+    const subDir = join(dir, 'transcript', 'subagents');
+    mkdirSync(subDir, { recursive: true });
+    writeFileSync(
+      join(subDir, 'agent-t1.jsonl'),
+      [{ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'found it' }], usage: { input_tokens: 2, output_tokens: 3, cache_creation_input_tokens: 100, cache_read_input_tokens: 900 } } }]
+        .map((l) => JSON.stringify(l)).join('\n'),
+    );
+    // main 1+1+8 = 10, subagent 2+3+100+900 = 1005
+    expect(getTrace(db, importClaudeTranscript(db, path).trace!.id)!.total_tokens).toBe(1015);
+  });
+});
+
+describe('the stored prompt is what the person asked', () => {
+  // Real transcripts open with a harness envelope — a slash-command block,
+  // injected instructions, an environment preamble — so `trace.input.prompt`,
+  // which `why`, the summarizer, the rubric evals and `check` all read as
+  // "what was asked", held boilerplate while the real question sat in a turn
+  // that was discarded outright.
+  it('skips a slash-command envelope and keeps the real question', () => {
+    const path = fixture([
+      { type: 'user', sessionId: 'env', message: { content: '<command-name>/goal</command-name>\n<command-message>goal</command-message>' } },
+      { type: 'user', sessionId: 'env', message: { content: 'why did the deploy fail?' } },
+      { type: 'assistant', sessionId: 'env', message: { content: [{ type: 'text', text: 'because...' }] } },
+    ]);
+    const trace = getTrace(db, importClaudeTranscript(db, path).trace!.id)!;
+    expect(trace.input).toEqual({ prompt: 'why did the deploy fail?' });
+    // The envelope is preserved, not silently dropped.
+    expect(trace.metadata.follow_up_prompts).toEqual(['<command-name>/goal</command-name>\n<command-message>goal</command-message>']);
+  });
+
+  // An envelope prompt beats no prompt at all: a session that is ALL envelope
+  // must still import with its first turn, as it did before.
+  it('falls back to the first turn when every turn is an envelope', () => {
+    const path = fixture([
+      { type: 'user', sessionId: 'env2', message: { content: '<command-name>/x</command-name>' } },
+      { type: 'assistant', sessionId: 'env2', message: { content: [{ type: 'text', text: 'ok' }] } },
+    ]);
+    const trace = getTrace(db, importClaudeTranscript(db, path).trace!.id)!;
+    expect(trace.input).toEqual({ prompt: '<command-name>/x</command-name>' });
+    expect(trace.metadata.follow_up_prompts).toBeUndefined();
+  });
+
+  // Narrow by design: a question that merely MENTIONS a wrapper word is a
+  // question. Missing an envelope costs a slightly worse prompt; misreading a
+  // real question as one loses it from the field every reader treats as the ask.
+  it('does not mistake an ordinary question for an envelope', () => {
+    const path = fixture([
+      { type: 'user', sessionId: 'env3', message: { content: 'what does <command-name> mean in the transcript format?' } },
+      { type: 'assistant', sessionId: 'env3', message: { content: [{ type: 'text', text: 'it is...' }] } },
+    ]);
+    expect(getTrace(db, importClaudeTranscript(db, path).trace!.id)!.input)
+      .toEqual({ prompt: 'what does <command-name> mean in the transcript format?' });
+  });
+});
+
+describe('importing the same session twice', () => {
+  // Nothing checked, so a re-run after a crash — or a scheduled loop over a
+  // session directory — silently doubled every store-wide number and left
+  // indistinguishable rows in `list` with no way to tell the copies apart.
+  let storeDir: string;
+
+  beforeEach(() => {
+    storeDir = mkdtempSync(join(tmpdir(), 'ar-import-dupe-'));
+  });
+
+  afterEach(() => {
+    resetConnection();
+    rmSync(storeDir, { recursive: true, force: true });
+  });
+
+  /** Run the command quietly and return what it wrote to stderr. */
+  function importQuietly(path: string, opts: { replace?: boolean } = {}): string {
+    const err: string[] = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, 'error').mockImplementation((m?: unknown) => { err.push(String(m)); });
+    try {
+      runImport(path, { dir: storeDir, ...opts });
+    } finally {
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+    }
+    return err.join('\n');
+  }
+
+  function traces(): Array<{ id: string }> {
+    const sdb = ensureDatabase(resolve(storeDir, 'traces.db'));
+    return sdb.prepare('SELECT id FROM agent_traces ORDER BY started_at ASC').all() as Array<{ id: string }>;
+  }
+
+  function transcript(): string {
+    return fixture([
+      { type: 'user', sessionId: 'dupe-1', message: { content: 'go' } },
+      { type: 'assistant', sessionId: 'dupe-1', message: { content: [{ type: 'text', text: 'ok' }] } },
+    ]);
+  }
+
+  it('leaves the store with one trace and names the one already there', () => {
+    const path = transcript();
+    expect(importQuietly(path)).toBe('');
+    const [first] = traces();
+    expect(first).toBeDefined();
+
+    const err = importQuietly(path);
+    expect(err).toMatch(/already imported/);
+    expect(err).toMatch(/--replace/);
+    // The trace kept is the ORIGINAL — the copy just made is dropped, so an id
+    // anything already refers to stays valid.
+    expect(traces().map((t) => t.id)).toEqual([first.id]);
+    // Not an error: a scheduled loop re-running is the normal case.
+    expect(process.exitCode ?? 0).toBe(0);
+  });
+
+  it('--replace swaps the old trace for a fresh import', () => {
+    const path = transcript();
+    importQuietly(path);
+    const [first] = traces();
+
+    importQuietly(path, { replace: true });
+    const after = traces();
+    expect(after).toHaveLength(1);
+    expect(after[0].id).not.toBe(first.id);
+  });
+
+  // A different session in the same format is a different trace, and the same
+  // session id under a different source format is a different session.
+  it('does not confuse two different sessions', () => {
+    importQuietly(transcript());
+    importQuietly(fixture([
+      { type: 'user', sessionId: 'dupe-2', message: { content: 'other' } },
+      { type: 'assistant', sessionId: 'dupe-2', message: { content: [{ type: 'text', text: 'ok' }] } },
+    ]));
+    expect(traces()).toHaveLength(2);
+  });
+});

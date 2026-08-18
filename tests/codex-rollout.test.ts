@@ -58,11 +58,13 @@ describe('importCodexRollout', () => {
     expect(trace.steps.some((s) => s.step_type === 'thought' && s.name === 'reasoning')).toBe(true);
   });
 
-  it('counts a follow-up user turn as skipped, not imported (no user step home)', () => {
-    // A normal multi-turn session. The first user prompt is the trace input and
-    // both assistant answers are steps, but a follow-up user turn is retained
-    // nowhere (there is no 'user' step type). It must count as skipped — before,
-    // it was marked imported while its text was dropped, inflating the tally.
+  it('keeps a follow-up user turn instead of discarding it', () => {
+    // A normal multi-turn session. Every user turn after the first used to be
+    // retained NOWHERE and counted as skipped — a session's later questions were
+    // unrecoverable from the store, while the two other paths that assemble a
+    // trace from turns (the batch merge and the OTLP mapper) both keep them in
+    // `metadata.follow_up_prompts`. It now follows that convention, so a turn
+    // with text counts as imported.
     const path = fixture([
       { type: 'session_meta', payload: { id: 'roll-mt' } },
       { type: 'response_item', payload: { type: 'message', role: 'user', content: 'first question' } },
@@ -71,12 +73,12 @@ describe('importCodexRollout', () => {
       { type: 'response_item', payload: { type: 'message', role: 'assistant', content: 'second answer' } },
     ]);
     const report = importCodexRollout(db, path);
-    // 5 records; the follow-up user turn is the one skipped.
     expect(report.imported + report.skipped).toBe(5);
-    expect(report.skipped).toBe(1);
+    expect(report.skipped).toBe(0);
 
     const trace = getTrace(db, report.trace!.id)!;
     expect(trace.input).toEqual({ prompt: 'first question' });
+    expect(trace.metadata.follow_up_prompts).toEqual(['second question']);
     expect(trace.steps.filter((s) => s.name === 'assistant_message')).toHaveLength(2);
   });
 
@@ -204,3 +206,104 @@ describe('a rollout that captured nothing is a failed import', () => {
   });
 });
 
+
+describe('codex-rollout: the freeform tool family', () => {
+  // `custom_tool_call` is how the current Codex CLI emits most tool
+  // invocations (the freeform exec / apply-patch tools). Handling only
+  // `function_call` routed them to `default: skipped` and stored them nowhere,
+  // exit 0, with no signal that most of what the agent did was missing —
+  // measured across 40 real rollouts on this machine, 194 custom vs 25
+  // function, so roughly nine tenths of tool activity was dropped.
+  it('imports a custom_tool_call and pairs it with its output', () => {
+    const path = fixture([
+      { type: 'session_meta', payload: { id: 'roll-custom' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: 'list the files' } },
+      { type: 'response_item', payload: { type: 'custom_tool_call', name: 'exec', input: '{"cmd":"ls"}', call_id: 'cc1' } },
+      { type: 'response_item', payload: { type: 'custom_tool_call_output', call_id: 'cc1', output: [{ type: 'input_text', text: 'a.txt' }] } },
+    ]);
+    const report = importCodexRollout(db, path);
+    expect(report.skipped).toBe(0);
+
+    const trace = getTrace(db, report.trace!.id)!;
+    const tool = trace.steps.find((s) => s.step_type === 'tool_call')!;
+    expect(tool.name).toBe('exec');
+    expect(tool.input).toEqual({ cmd: 'ls' });
+    expect(tool.output).toEqual({ output: [{ type: 'input_text', text: 'a.txt' }] });
+  });
+
+  it('keeps an unparseable freeform input verbatim rather than losing it', () => {
+    const path = fixture([
+      { type: 'session_meta', payload: { id: 'roll-freeform' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: 'go' } },
+      { type: 'response_item', payload: { type: 'custom_tool_call', name: 'exec', input: 'const r = await tools.exec_command({cmd:"ls"});', call_id: 'cc2' } },
+    ]);
+    const trace = getTrace(db, importCodexRollout(db, path).trace!.id)!;
+    expect(trace.steps.find((s) => s.step_type === 'tool_call')!.input)
+      .toEqual({ arguments: 'const r = await tools.exec_command({cmd:"ls"});' });
+  });
+
+  // A failed tool stored with no `error` reads as a clean run to
+  // hallucination-check's no_error_steps criterion, completeness-check, and
+  // `check --golden`'s step_errors baseline — a fail-open on exactly the traces
+  // this tool exists to audit. The claude-transcript importer already did this.
+  it('records a failed tool call as failed', () => {
+    const path = fixture([
+      { type: 'session_meta', payload: { id: 'roll-fail' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: 'build it' } },
+      { type: 'response_item', payload: { type: 'custom_tool_call', name: 'exec', input: '{}', call_id: 'f1' } },
+      { type: 'response_item', payload: { type: 'custom_tool_call_output', call_id: 'f1', output: { metadata: { exit_code: 2 }, output: 'boom' } } },
+      { type: 'response_item', payload: { type: 'function_call', name: 'shell', arguments: '{}', call_id: 'f2' } },
+      { type: 'response_item', payload: { type: 'function_call_output', call_id: 'f2', output: { success: false, output: 'nope' } } },
+      { type: 'response_item', payload: { type: 'function_call', name: 'ok', arguments: '{}', call_id: 'f3' } },
+      { type: 'response_item', payload: { type: 'function_call_output', call_id: 'f3', output: { metadata: { exit_code: 0 }, output: 'fine' } } },
+    ]);
+    const trace = getTrace(db, importCodexRollout(db, path).trace!.id)!;
+    const byName = Object.fromEntries(trace.steps.filter((s) => s.step_type === 'tool_call').map((s) => [s.name, s]));
+    expect(byName.exec.error).toMatch(/exited with code 2/);
+    expect(byName.shell.error).toBe('nope');
+    // Both families run through ONE branch, so the pair is tested together:
+    // these two have drifted apart before.
+    expect(byName.ok.error).toBeNull();
+  });
+
+  // An exit code that does not parse must NOT fabricate a failure — the
+  // opposite default from the failure flag above, and deliberate: over-reading
+  // a flag only makes a real failure more visible, while inventing a failed run
+  // from an unreadable field is a wrong answer about what happened.
+  it('does not invent a failure from an unparseable exit code', () => {
+    const path = fixture([
+      { type: 'session_meta', payload: { id: 'roll-nan' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: 'go' } },
+      { type: 'response_item', payload: { type: 'function_call', name: 'shell', arguments: '{}', call_id: 'n1' } },
+      { type: 'response_item', payload: { type: 'function_call_output', call_id: 'n1', output: { metadata: { exit_code: 'ENOENT' }, output: 'x' } } },
+    ]);
+    const trace = getTrace(db, importCodexRollout(db, path).trace!.id)!;
+    expect(trace.steps.find((s) => s.step_type === 'tool_call')!.error).toBeNull();
+  });
+
+  // `info.total_token_usage` is CUMULATIVE for the session, so the last record
+  // is the total. Summing them over-counted by 34x on a real 82-record session
+  // (214,648,081 against an actual 6,267,854).
+  it('takes the session token total from the last token_count, not their sum', () => {
+    const path = fixture([
+      { type: 'session_meta', payload: { id: 'roll-tokens' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: 'go' } },
+      // The REAL wrapper: rollouts carry token_count inside `event_msg`, not as
+      // a top-level type. Testing the tidier shape passed while the importer
+      // still skipped every record a real file emits.
+      { type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { total_tokens: 100 } } } },
+      { type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { total_tokens: 250 } } } },
+    ]);
+    const report = importCodexRollout(db, path);
+    expect(report.skipped).toBe(0);
+    expect(getTrace(db, report.trace!.id)!.total_tokens).toBe(250);
+  });
+
+  it('leaves the total unset when a rollout carries no token_count', () => {
+    const path = fixture([
+      { type: 'session_meta', payload: { id: 'roll-notokens' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: 'go' } },
+    ]);
+    expect(getTrace(db, importCodexRollout(db, path).trace!.id)!.total_tokens).toBeNull();
+  });
+});

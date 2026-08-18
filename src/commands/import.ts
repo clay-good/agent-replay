@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import chalk from 'chalk';
 import { ensureDatabase } from '../db/index.js';
+import { deleteTrace } from '../services/trace-service.js';
 import { importClaudeTranscript } from '../services/importers/claude-transcript.js';
 import { importCodexRollout } from '../services/importers/codex-rollout.js';
 import { summaryPanel } from '../ui/boxen-panels.js';
@@ -11,6 +12,7 @@ export interface ImportOptions {
   format?: string;
   tags?: string;
   dir?: string;
+  replace?: boolean;
 }
 
 const SUPPORTED = ['claude-transcript', 'codex-rollout'];
@@ -19,6 +21,15 @@ const SUPPORTED = ['claude-transcript', 'codex-rollout'];
  * `agent-replay import <path> --format <fmt>` — best-effort conversion of an
  * on-disk session log into a trace. Unrecognized records are skipped and
  * counted; the imported/skipped tally is reported.
+ *
+ * Importing the same session twice does NOT create a second trace. Nothing
+ * checked, so a re-run after a crash — or the obvious shell loop over a
+ * session directory, on a schedule —
+ * silently doubled every store-wide number (`stats`, the dashboard totals, any
+ * eval over the store) and left N indistinguishable rows in `list` with no way
+ * to tell the copies apart or clean them up. A session already in the store is
+ * reported and left alone; `--replace` re-imports it, which is also how a
+ * transcript that has GROWN since the last import is refreshed.
  */
 export function runImport(filePath: string, opts: ImportOptions = {}): void {
   const format = opts.format ?? 'claude-transcript';
@@ -52,9 +63,45 @@ export function runImport(filePath: string, opts: ImportOptions = {}): void {
     return;
   }
 
+  // Identity is the session id plus the source format: two different tools can
+  // number their sessions however they like, and the same id from a different
+  // format is a different session. A file with NO session id cannot be
+  // identified at all, so it is imported as before — noted in the docs rather
+  // than guessed at from a file path, which moves.
+  const sessionId = report.trace.session_id;
+  const sourceFormat = (report.trace.metadata as { source_format?: unknown } | null)?.source_format;
+  const priors = sessionId
+    ? (db
+        .prepare(
+          `SELECT id FROM agent_traces
+            WHERE session_id = ?
+              AND id != ?
+              AND json_extract(metadata, '$.source_format') IS ?
+            ORDER BY started_at ASC`,
+        )
+        .all(sessionId, report.trace.id, sourceFormat ?? null) as Array<{ id: string }>)
+    : [];
+
+  if (priors.length > 0) {
+    if (!opts.replace) {
+      // Drop the copy we just made rather than leaving the store with two. This
+      // is not an error — a loop over a session directory re-running after a
+      // crash is the normal case — so it exits 0 and says what to pass to
+      // actually re-import.
+      deleteTrace(db, report.trace.id);
+      console.error(
+        chalk.yellow(`  Session already imported as ${priors[0].id} — nothing changed.`),
+      );
+      console.error(chalk.dim('  Pass --replace to import it again (use this when the transcript has grown since).'));
+      return;
+    }
+    for (const prior of priors) deleteTrace(db, prior.id);
+  }
+
   console.log('');
   console.log(
     summaryPanel('Import Summary', {
+      ...(priors.length > 0 ? { Replaced: priors.map((p) => p.id).join(', ') } : {}),
       'Trace ID': report.trace.id,
       'Session': report.trace.session_id ?? '(none)',
       'Steps': report.steps,
