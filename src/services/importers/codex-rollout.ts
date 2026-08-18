@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { readFileSync } from 'node:fs';
+import { readJsonlLines } from './jsonl-reader.js';
 import { basename } from 'node:path';
 import { ingestTrace } from '../trace-service.js';
 import { selectPrompt } from './user-turns.js';
@@ -83,8 +83,11 @@ export function importCodexRollout(
   filePath: string,
   opts: { tags?: string[] } = {},
 ): ImportReport {
-  const raw = readFileSync(filePath, 'utf-8');
-  const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
+  // Streamed, not slurped: reading the file as one string and splitting it kept
+  // three copies alive (string + line array + records) — 436 MB of peak RSS for
+  // a real 52 MB transcript — and a JS string cannot exceed ~512 MB, so a large
+  // session failed outright with no partial import. See readJsonlLines.
+  const lines = readJsonlLines(filePath);
 
   const records: Record<string, unknown>[] = [];
   let skipped = 0;

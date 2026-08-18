@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
+import { readJsonlLines } from './jsonl-reader.js';
 import { dirname, join, basename } from 'node:path';
 import { ingestTrace } from '../trace-service.js';
 import { selectPrompt } from './user-turns.js';
@@ -125,8 +126,11 @@ export function importClaudeTranscript(
   filePath: string,
   opts: { tags?: string[] } = {},
 ): ImportReport {
-  const raw = readFileSync(filePath, 'utf-8');
-  const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
+  // Streamed, not slurped: reading the file as one string and splitting it kept
+  // three copies alive (string + line array + records) — 436 MB of peak RSS for
+  // a real 52 MB transcript — and a JS string cannot exceed ~512 MB, so a large
+  // session failed outright with no partial import. See readJsonlLines.
+  const lines = readJsonlLines(filePath);
 
   const records: Record<string, unknown>[] = [];
   let skipped = 0;
@@ -328,9 +332,9 @@ export function importClaudeTranscript(
       const anchor = stepNumber;
       const subRecords: Record<string, unknown>[] = [];
       try {
-        for (const l of readFileSync(join(subDir, f), 'utf-8').split('\n')) {
-          const trimmed = l.trim();
-          if (!trimmed) continue;
+        // Streamed like the main transcript: a subagent file can be large too,
+        // and this read had the same whole-file-string ceiling.
+        for (const trimmed of readJsonlLines(join(subDir, f))) {
           // Parse each line on its own, like the main transcript, so one bad
           // line (e.g. a truncated final line from a killed run) skips only
           // that line instead of discarding the whole subagent file.

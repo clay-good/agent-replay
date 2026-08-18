@@ -191,6 +191,8 @@ agent-replay import <same-file>              # "Session already imported as trc_
 agent-replay import <same-file> --replace    # re-import it (use this when the transcript has grown)
 ```
 
+Transcripts are read a line at a time rather than loaded whole, so peak memory tracks the trace being built rather than the file: a 52 MB session imports in ~270 MB instead of ~440 MB, and a session larger than ~512 MB imports at all (it previously failed with "Cannot create a string longer than 0x1fffffe8 characters" and no partial import — a 647 MB transcript now imports its 672,000 steps).
+
 Sessions are identified by session id, source format **and** source filename — a Claude Code subagent sidecar (`<session>/subagents/agent-*.jsonl`) carries the same session id as its parent transcript, so the file has to be part of the identity. A file that carries no session id is imported each time it is named, and a trace imported before this identity existed is never replaced.
 
 #### Enforcement (block dangerous tool calls live)

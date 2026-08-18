@@ -133,6 +133,17 @@ between them, and nothing else.
 
 ### Changed
 
+- Transcript imports read the file a line at a time instead of loading it whole.
+  Slurping it as one string and splitting that kept three copies alive at once —
+  the string, the array of lines and the parsed records — measuring 436 MB of
+  peak RSS for a real 52 MB session, and a JavaScript string cannot exceed
+  ~512 MB, so a larger session failed outright with "Cannot create a string
+  longer than 0x1fffffe8 characters" and produced no partial import. Long agent
+  sessions do reach that size. The same 52 MB session now peaks at 268 MB, a
+  647 MB one imports its 672,000 steps, and the resulting trace is byte-identical
+  to what the previous reader produced (tallies, steps, tokens and per-step
+  errors all compared on a real transcript).
+
 - A criterion that detects a failed run can now fail its preset on its own.
   `hallucination-check` and `completeness-check` weigh their criteria 0.4 / 0.3 /
   0.3 against a 0.7 threshold, so a lone zeroed 0.3-weight criterion landed on
