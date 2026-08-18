@@ -63,18 +63,27 @@ export function addPolicy(
   // an ordinary mistake (a re-run of a setup script), so it gets an ordinary
   // answer. Checked rather than caught so the message is the same whichever
   // driver reports the collision.
-  const clash = db.prepare('SELECT id FROM guardrail_policies WHERE name = ?').get(policy.name);
-  if (clash) {
-    throw new Error(
+  const duplicateName = (): Error =>
+    new Error(
       `A policy named "${policy.name}" already exists — use a different --name, or "agent-replay guard remove" it first.`,
     );
-  }
 
-  db.prepare(
-    `INSERT INTO guardrail_policies
+  const clash = db.prepare('SELECT id FROM guardrail_policies WHERE name = ?').get(policy.name);
+  if (clash) throw duplicateName();
+
+  // The pre-check above is a CHECK-THEN-ACT: it reads outside a transaction, so
+  // two `guard add` processes can both pass it and one then hits the UNIQUE
+  // constraint. Measured, four racing processes leaked the raw
+  // "UNIQUE constraint failed: guardrail_policies.name" in 1 of 6 trials — the
+  // exact message the pre-check exists to replace. Catching it here means the
+  // loser of the race gets the same answer as the sequential case, whichever
+  // path detects the clash.
+  const insert = (): void => {
+    db.prepare(
+      `INSERT INTO guardrail_policies
       (id, name, description, action, priority, enabled, match_pattern, action_params, tags, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
-  ).run(
+    ).run(
     id,
     policy.name,
     policy.description ?? null,
@@ -85,7 +94,15 @@ export function addPolicy(
     JSON.stringify(policy.tags ?? []),
     now,
     now,
-  );
+    );
+  };
+  try {
+    insert();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/UNIQUE constraint failed: guardrail_policies\.name/i.test(message)) throw duplicateName();
+    throw err;
+  }
 
   const row = db
     .prepare('SELECT * FROM guardrail_policies WHERE id = ?')

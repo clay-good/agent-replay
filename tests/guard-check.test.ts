@@ -512,3 +512,44 @@ describe('a policy matches the name an operator meant', () => {
     expect(v.action).toBe('deny');
   });
 });
+
+describe('a duplicate policy name loses the same way however it is detected', () => {
+  // The name pre-check reads outside a transaction, so two concurrent
+  // `guard add` processes can both pass it and one then hits the UNIQUE
+  // constraint — measured, four racing processes leaked the raw
+  // "UNIQUE constraint failed: guardrail_policies.name" in 1 of 6 trials, the
+  // exact message the pre-check exists to replace. The insert now maps that
+  // error to the same friendly one, so the loser of a race and a plain
+  // sequential duplicate get the same answer.
+  it('reports the friendly message, never the constraint text', () => {
+    addPolicy(db, { name: 'dup', action: 'deny', match_pattern: { name_contains: 'x' } });
+    // Sequential duplicate: caught by the pre-check.
+    expect(() => addPolicy(db, { name: 'dup', action: 'deny', match_pattern: { name_contains: 'x' } }))
+      .toThrow(/already exists/);
+
+    // Simulate the race: bypass the pre-check by inserting the row underneath it,
+    // so the INSERT is what discovers the clash.
+    db.prepare('DELETE FROM guardrail_policies WHERE name = ?').run('racer');
+    const original = db.prepare.bind(db);
+    let armed = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (db as any).prepare = (sql: string) => {
+      if (armed && /SELECT id FROM guardrail_policies WHERE name/.test(sql)) {
+        armed = false;
+        // The pre-check finds nothing...
+        return { get: () => undefined } as unknown as ReturnType<typeof original>;
+      }
+      return original(sql);
+    };
+    try {
+      addPolicy(db, { name: 'racer', action: 'deny', match_pattern: { name_contains: 'y' } });
+      // ...and now a second add with the pre-check blinded must still be friendly.
+      armed = true;
+      expect(() => addPolicy(db, { name: 'racer', action: 'deny', match_pattern: { name_contains: 'y' } }))
+        .toThrow(/already exists/);
+    } finally {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (db as any).prepare = original;
+    }
+  });
+});

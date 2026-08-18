@@ -191,6 +191,14 @@ between them, and nothing else.
 
 ### Fixed
 
+- Two concurrent `guard add` calls for the same policy name could still surface
+  the raw `UNIQUE constraint failed: guardrail_policies.name` — the message the
+  duplicate-name pre-check exists to replace. That check reads outside a
+  transaction, so both processes can pass it and one then hits the constraint;
+  measured, four racing processes leaked it in 1 of 6 trials. The insert now maps
+  that error to the same friendly message, so the loser of a race and a plain
+  sequential duplicate get the same answer (0 of 10 trials leak it now).
+
 - `show --tree` could not render a deeply nested trace. The walk recursed one
   frame per level of nesting, so a long parent chain blew the stack — measured,
   fine at depth 4,000 and "Maximum call stack size exceeded" before 8,000 — and

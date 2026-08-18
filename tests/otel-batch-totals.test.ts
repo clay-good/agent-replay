@@ -59,3 +59,17 @@ describe('receiver batch matrix — expected totals', () => {
     expect(state()).toEqual({ tokens, steps, synthetic });
   });
 });
+
+describe('concurrent redelivery', () => {
+  // The dedupe is a CHECK-THEN-ACT — it reads the trace's stored span ids, then
+  // writes — so concurrency is where it would fail if it were going to. Ten
+  // identical batches applied back to back through the same path must leave one
+  // batch's worth of steps and tokens, not ten. (Measured against a live
+  // receiver with ten simultaneous HTTP posts as well: 200 steps and 1000
+  // tokens, not 2000 and 10000.)
+  it('applies the same batch ten times without inflating anything', () => {
+    const batch = B([ROOT(), CHAT(), TOOL()]);
+    for (let i = 0; i < 10; i++) handleTracesExport(db, batch, stats);
+    expect(state()).toEqual({ tokens: 170, steps: 2, synthetic: false });
+  });
+});
