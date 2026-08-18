@@ -17,6 +17,7 @@ export interface CheckOptions {
   golden?: string;
   trace?: string;
   agent?: string;
+  agentExact?: string;
   since?: string;
   fields?: string;
   strict?: boolean;
@@ -48,6 +49,16 @@ export function runCheck(opts: CheckOptions = {}): void {
 
   if (!opts.golden) {
     fail(2, '--golden <file> is required.');
+    return;
+  }
+
+  // `--agent` is a SUBSTRING match, which is right for browsing and wrong for a
+  // gate: `--agent assistant` selects `travel-assistant` and `research-assistant`
+  // too, and under --strict those unrelated candidates make the run red. So a
+  // gate can name one agent exactly instead. Both at once is a usage error
+  // rather than a silent precedence rule.
+  if (opts.agent && opts.agentExact) {
+    fail(2, '--agent and --agent-exact are mutually exclusive.', 'Use --agent for a substring match, --agent-exact to name one agent.');
     return;
   }
 
@@ -182,7 +193,8 @@ export function runCheck(opts: CheckOptions = {}): void {
     // Mirrors `exportTraces`, which was moved off a fixed 10000 cap for the same
     // reason (a truncated scan corrupts the very datasets built from it).
     const filter: Record<string, unknown> = { limit: -1 };
-    if (opts.agent) filter.agent_name = opts.agent;
+    if (opts.agentExact) filter.agent_name_exact = opts.agentExact;
+    else if (opts.agent) filter.agent_name = opts.agent;
     if (opts.since) {
       try {
         filter.since = parseSinceToIso(opts.since);

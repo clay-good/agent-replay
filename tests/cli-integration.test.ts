@@ -1593,4 +1593,17 @@ describe('CLI integration', () => {
       expect(parsed.error).toMatch(/store|schema/i);
     }
   });
+
+  it('rejects --agent together with --agent-exact', () => {
+    const golden = join(dir, 'g-both.json');
+    writeFileSync(golden, JSON.stringify([{
+      id: 'g1', agent_name: 'a', input: { t: 1 }, expected_output: null,
+      steps_summary: [], eval_criteria: [], metadata: { status: 'completed' },
+    }]));
+    const r = run(['check', '--golden', golden, '--agent', 'a', '--agent-exact', 'b', '--json']);
+    expect(r.code).toBe(2);
+    const parsed = JSON.parse(r.stdout);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error).toMatch(/mutually exclusive/);
+  });
 });

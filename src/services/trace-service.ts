@@ -1284,7 +1284,14 @@ export function listTraces(
     conditions.push('status = ?');
     params.push(filter.status);
   }
-  if (filter.agent_name) {
+  if (filter.agent_name_exact) {
+    // Exact match, for a caller that needs to name ONE agent — a regression gate
+    // in particular, where the substring form below selects agents the user did
+    // not ask about. Checked before the substring branch so the two can never
+    // both apply.
+    conditions.push('agent_name = ?');
+    params.push(filter.agent_name_exact);
+  } else if (filter.agent_name) {
     // Substring match, but escape the LIKE metacharacters in the user's term so
     // they stay literal — agent names routinely contain `_` (e.g. "travel_bot"),
     // which unescaped matches any character ("travel-bot"), and a literal `%`

@@ -1124,3 +1124,43 @@ describe('an empty input is not an identity', () => {
     expect(report.ok).toBe(true);
   });
 });
+
+describe('naming exactly one agent for a gate', () => {
+  // `--agent` is a SUBSTRING match, which is right for browsing and wrong for a
+  // gate: `--agent assistant` also selects `travel-assistant` and
+  // `research-assistant`, and under --strict those unrelated candidates decide
+  // the verdict. A gate needs to name one agent.
+  const mk = (name: string, task: string): IngestTraceInput => ({
+    agent_name: name,
+    status: 'completed',
+    input: { task },
+    steps: [{ step_number: 1, step_type: 'tool_call', name: 'go', input: { q: task } }],
+  });
+
+  it('selects only the named agent, where the substring form selects three', () => {
+    const runs = [mk('travel-assistant', 'trip'), mk('research-assistant', 'paper'), mk('assistant', 'plain')];
+    for (const r of runs) ingestTrace(db, r);
+    const golden = JSON.parse(exportTraces(db, {}, 'golden')) as GoldenEntry[];
+    expect(golden).toHaveLength(3);
+
+    const candidates = runs.map((r) => candidate(r));
+    // Substring: every agent whose name contains "assistant" is compared.
+    expect(checkGolden(golden, candidates, {}).passed).toBe(3);
+
+    // Exact: only the one named. The other two baselines are then unexercised,
+    // which --strict correctly reports — a gate naming one agent wants a
+    // baseline for that agent.
+    const exact = candidates.filter((c) => c.agent_name === 'assistant');
+    const report = checkGolden(golden, exact, { strict: true });
+    expect(report.passed).toBe(1);
+    expect(report.uncovered).toBe(2);
+    expect(report.ok).toBe(false);
+
+    // With a matching single-agent baseline, the exact gate is green.
+    const oneGolden = golden.filter((g) => g.agent_name === 'assistant');
+    const scoped = checkGolden(oneGolden, exact, { strict: true });
+    expect(scoped.passed).toBe(1);
+    expect(scoped.uncovered).toBe(0);
+    expect(scoped.ok).toBe(true);
+  });
+});

@@ -30,6 +30,13 @@ between them, and nothing else.
 
 ### Added
 
+- `check --agent-exact <name>` selects exactly one agent, for a regression gate.
+  `--agent` matches by substring, which is right for browsing and wrong for a
+  gate: `--agent assistant` also selects `travel-assistant` and
+  `research-assistant`, and under `--strict` those unrelated candidates decide
+  the verdict. Pair it with a baseline exported for the same agent. The two flags
+  are mutually exclusive rather than one silently taking precedence.
+
 - `import --replace` re-imports a session that is already in the store.
 
 - `check --golden` compares whether each step FAILED. A baseline could not carry

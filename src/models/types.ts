@@ -242,6 +242,12 @@ export interface ListTracesFilter {
   id?: string;
   status?: string;
   agent_name?: string;
+  /**
+   * Exact agent name. Takes precedence over the substring `agent_name` — a
+   * regression gate needs to name ONE agent, and the substring form selects
+   * agents the caller did not ask about.
+   */
+  agent_name_exact?: string;
   tag?: string;
   session_id?: string;
   since?: string;
