@@ -10,6 +10,9 @@ import {
   resolveApiKey,
   resolveProvider,
   configProblems,
+  loadRawConfig,
+  ConfigFileError,
+  configPath,
 } from '../src/services/config-service.js';
 import type { AgentReplayConfig } from '../src/services/config-service.js';
 
@@ -337,5 +340,95 @@ describe('a hand-edited config cannot disable the spend cap', () => {
   it('reports nothing for a clean config', () => {
     write({ provider: 'anthropic', max_tokens: 1024 });
     expect(configProblems(dir)).toEqual([]);
+  });
+});
+
+
+describe('a broken config file is not a missing one', () => {
+  const DIR = join(tmpdir(), `ar-config-broken-${Date.now()}`);
+  beforeEach(() => mkdirSync(DIR, { recursive: true }));
+  afterEach(() => rmSync(DIR, { recursive: true, force: true }));
+
+  it('throws for a file that exists but is not valid JSON', () => {
+    // Every read failure used to collapse to `null`, which the commands render
+    // as "No configuration found. Run `agent-replay init` first." — while
+    // `init` answers "Already initialized. Use --force." The two contradict
+    // each other, neither names the parse error, and the user is sent to a
+    // command that refuses to run. Meanwhile the stored API key is still on
+    // disk, so `test-ai` said "No AI provider configured" about a real key.
+    writeFileSync(join(DIR, 'config.json'), '{"ai": {"provider": "auto",}}');
+    expect(() => loadConfig(DIR)).toThrow(ConfigFileError);
+    expect(() => loadConfig(DIR)).toThrow(/is not valid JSON/);
+  });
+
+  it('throws for JSON that is not an object', () => {
+    writeFileSync(join(DIR, 'config.json'), '"just a string"');
+    expect(() => loadConfig(DIR)).toThrow(ConfigFileError);
+  });
+
+  it('names the file in the error, so the user knows what to fix', () => {
+    writeFileSync(join(DIR, 'config.json'), '{oops');
+    expect(() => loadConfig(DIR)).toThrow(configPath(DIR));
+  });
+
+  it('still returns null when there really is no config file', () => {
+    // The distinction only helps if "absent" still reads as absent.
+    expect(loadConfig(DIR)).toBeNull();
+    expect(loadRawConfig(DIR)).toBeNull();
+  });
+});
+
+describe('loadRawConfig does not drop what a writer must preserve', () => {
+  const DIR = join(tmpdir(), `ar-config-raw-${Date.now()}`);
+  beforeEach(() => mkdirSync(DIR, { recursive: true }));
+  afterEach(() => rmSync(DIR, { recursive: true, force: true }));
+
+  it('keeps an unusable value that the sanitizing reader drops', () => {
+    // `config set` writes back whatever it read. Reading through the sanitizer
+    // meant setting an UNRELATED key permanently deleted the invalid
+    // `ai.max_tokens` the user was being warned about — the typo became
+    // unrecoverable and every later `config list` reported a clean config.
+    writeFileSync(
+      join(DIR, 'config.json'),
+      JSON.stringify({ version: '1', ai: { provider: 'auto', max_tokens: '4096' } }),
+    );
+    expect(loadConfig(DIR)!.ai!.max_tokens).toBeUndefined(); // consumers: dropped
+    expect(loadRawConfig(DIR)!.ai!.max_tokens).toBe('4096'); // writers: intact
+  });
+});
+
+describe('a blank value is not a value', () => {
+  // An env key would satisfy `resolveApiKey` before the config file is even
+  // consulted, which would make these assertions pass for the wrong reason.
+  beforeEach(() => {
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.GOOGLE_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+  });
+
+  it('treats an empty stored API key as not configured', () => {
+    // It used to be stored as `''`, which `config get` displayed as `***` —
+    // looking set — while every truthiness test downstream treated it as
+    // absent, so `test-ai` told the user to set the key they had just set.
+    const cfg = makeConfig({ ai: { provider: 'anthropic', api_keys: { anthropic: '' } } } as Partial<AgentReplayConfig>);
+    expect(resolveApiKey('anthropic', cfg)).toBeNull();
+    expect(resolveProvider(cfg)).toBeNull();
+  });
+
+  it('falls back to the default model for a blank ai.model, however the provider was chosen', () => {
+    // `modelOwner('')` is null, and a null owner means "suits any provider", so
+    // an empty model beat DEFAULT_MODELS and was sent to the provider AS the
+    // model name (`Testing anthropic ()`). The auto path guarded on
+    // truthiness, so the SAME config behaved differently depending on whether
+    // `ai.provider` was explicit.
+    const explicit = resolveProvider(makeConfig({
+      ai: { provider: 'anthropic', model: '', api_keys: { anthropic: 'sk-test' } },
+    } as Partial<AgentReplayConfig>));
+    const auto = resolveProvider(makeConfig({
+      ai: { provider: 'auto', model: '', api_keys: { anthropic: 'sk-test' } },
+    } as Partial<AgentReplayConfig>));
+
+    expect(explicit!.model).not.toBe('');
+    expect(explicit!.model).toBe(auto!.model); // the two paths now agree
   });
 });

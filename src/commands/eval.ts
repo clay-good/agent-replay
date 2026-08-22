@@ -184,7 +184,19 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
 
   // AI-powered evaluation
   if (opts.ai || isAiPreset) {
-    const config = loadConfig(opts.dir);
+    // A config file that exists but cannot be parsed is its own failure, and it
+    // must not be reported as "No AI provider configured" — that names the
+    // wrong problem and points at setting a key that is already in the file.
+    // Reported through `refuse` so the --json contract still holds.
+    let config;
+    try {
+      config = loadConfig(opts.dir);
+    } catch (err) {
+      refuse(1, errorMessage(err), [
+        'Fix the file, or start over with: agent-replay init --force',
+      ]);
+      return;
+    }
     const resolved = resolveProvider(config);
     if (!resolved) {
       refuse(1, 'No AI provider configured.', [

@@ -243,6 +243,31 @@ between them, and nothing else.
 
 ### Fixed
 
+- **A broken `config.json` was reported as a missing one.** Every read failure —
+  a stray trailing comma from a hand-edit, an unreadable file, a directory in
+  its place — collapsed to `null`, which every config command rendered as *"No
+  configuration found. Run `agent-replay init` first."* `init` then answered
+  *"Already initialized … Use --force"*, so the two messages contradicted each
+  other, neither named the parse error, and the user was pointed at a command
+  that refuses to run. The stored API key was still sitting in the file the
+  whole time, so `test-ai` and `eval --ai` reported "No AI provider configured"
+  about a key that was right there. A config file that exists but cannot be used
+  is now its own error, naming the file and the parse position.
+- **`config set` permanently deleted an unrelated invalid value.** The reader
+  drops unusable values so that one bad key cannot make the whole config
+  unreadable — but `config set` wrote that sanitized copy back, so setting any
+  key destroyed the invalid `ai.max_tokens` the user was being warned about.
+  The typo became unrecoverable and every later `config list` reported a clean
+  config. Writers now start from the file as it actually is.
+- **`config set <key> ""` stored a blank that looked set and behaved unset.** An
+  empty API key was displayed as `***` by `config get` and `config list` while
+  every check downstream treated it as absent — so `test-ai` told the user to
+  set the key they had just set. An empty `ai.model` was worse: it was sent to
+  the provider AS the model name (`Testing anthropic ()`), but only when
+  `ai.provider` was explicit, since the auto-detect path guarded on truthiness
+  and the explicit path did not. Empty values are now refused at `config set`,
+  and a blank key or model already on disk is treated as unset by both paths.
+
 - **`dashboard` hung forever when there was no terminal**, after writing
   alt-screen and mouse-tracking escape sequences into whatever its output was
   redirected to. It built the full-screen TUI unconditionally, so with stdin a

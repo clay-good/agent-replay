@@ -7,6 +7,8 @@ import {
   resolveProvider,
   configPath,
   configProblems,
+  loadRawConfig,
+  ConfigFileError,
 } from '../services/config-service.js';
 import type { AgentReplayConfig } from '../services/config-service.js';
 import { callLlm } from '../services/llm-client.js';
@@ -15,6 +17,40 @@ import { errorMessage } from '../utils/json.js';
 
 export interface ConfigOptions {
   dir?: string;
+}
+
+/**
+ * Read the config for a command, telling a BROKEN file apart from a MISSING one.
+ *
+ * Every read failure used to collapse into `null`, which every command here
+ * rendered as "No configuration found. Run `agent-replay init` first." — while
+ * `init` answered "Already initialized. Use --force." The two messages
+ * contradicted each other, neither named the actual problem, and the user was
+ * pointed at a command that refuses to run. Returns `undefined` once it has
+ * reported the problem and set an exit code.
+ */
+function readConfigOr(
+  load: (dir?: string) => AgentReplayConfig | null,
+  opts: ConfigOptions,
+  missingIsError: boolean,
+): AgentReplayConfig | undefined {
+  let config: AgentReplayConfig | null;
+  try {
+    config = load(opts.dir);
+  } catch (err) {
+    if (!(err instanceof ConfigFileError)) throw err;
+    console.error(chalk.red(`  ${err.message}`));
+    console.error(chalk.dim('  Fix the file, or start over with: agent-replay init --force'));
+    process.exitCode = 2;
+    return undefined;
+  }
+  if (!config) {
+    const say = missingIsError ? console.error : console.log;
+    say(chalk.yellow('  No configuration found. Run `agent-replay init` first.'));
+    if (missingIsError) process.exitCode = 2;
+    return undefined;
+  }
+  return config;
 }
 
 // ── config list ──────────────────────────────────────────────────────────
@@ -51,11 +87,8 @@ function reportConfigProblems(dir?: string): void {
 }
 
 export function runConfigList(opts: ConfigOptions = {}): void {
-  const config = loadConfig(opts.dir);
-  if (!config) {
-    console.log(chalk.yellow('  No configuration found. Run `agent-replay init` first.'));
-    return;
-  }
+  const config = readConfigOr(loadConfig, opts, false);
+  if (!config) return;
 
   console.log('');
   console.log(chalk.cyan.bold('  Configuration'));
@@ -97,12 +130,8 @@ export function runConfigList(opts: ConfigOptions = {}): void {
 // ── config get ───────────────────────────────────────────────────────────
 
 export function runConfigGet(key: string, opts: ConfigOptions = {}): void {
-  const config = loadConfig(opts.dir);
-  if (!config) {
-    console.error(chalk.yellow('  No configuration found. Run `agent-replay init` first.'));
-    process.exitCode = 2;
-    return;
-  }
+  const config = readConfigOr(loadConfig, opts, true);
+  if (!config) return;
 
   // Reject an unknown key rather than answering "(not set)" for it. `config
   // set` already refuses the same key at exit 2, so a typo was undetectable
@@ -136,12 +165,13 @@ export function runConfigGet(key: string, opts: ConfigOptions = {}): void {
 // ── config set ───────────────────────────────────────────────────────────
 
 export function runConfigSet(key: string, value: string, opts: ConfigOptions = {}): void {
-  const config = loadConfig(opts.dir);
-  if (!config) {
-    console.error(chalk.yellow('  No configuration found. Run `agent-replay init` first.'));
-    process.exitCode = 2;
-    return;
-  }
+  // loadRawConfig, NOT loadConfig: the sanitizing reader DROPS unusable values,
+  // and this function writes the object back. Setting an unrelated key therefore
+  // deleted the invalid `ai.max_tokens` the user was being warned about — the
+  // typo became unrecoverable and every later `config list` reported a clean
+  // config. A writer starts from the file as it actually is.
+  const config = readConfigOr(loadRawConfig, opts, true);
+  if (!config) return;
 
   // One list, shared with `config get` and with the message below — the message
   // used to repeat the array as a literal string, which is a copy that can go
@@ -149,6 +179,18 @@ export function runConfigSet(key: string, value: string, opts: ConfigOptions = {
   if (!(VALID_KEYS as readonly string[]).includes(key)) {
     console.error(chalk.yellow(`  Unknown key: ${key}`));
     console.error(chalk.dim(`  Valid keys: ${VALID_KEYS.join(', ')}`));
+    process.exitCode = 2;
+    return;
+  }
+
+  // An EMPTY value is a usage error, not "clear this key". Stored blanks were
+  // worse than useless: an empty `ai.api_keys.anthropic` displayed as `***`,
+  // looking set while behaving unset, and an empty `ai.model` was sent to the
+  // provider AS the model name. Same rule the rest of the CLI applies to an
+  // empty narrowing flag — a value that quietly means its opposite is refused.
+  if (value.trim() === '') {
+    console.error(chalk.red(`  ${key} was given an empty value.`));
+    console.error(chalk.dim('  Pass a value. To restore defaults, re-run: agent-replay init --force'));
     process.exitCode = 2;
     return;
   }
@@ -202,12 +244,8 @@ export function runConfigSet(key: string, value: string, opts: ConfigOptions = {
 // ── config test-ai ───────────────────────────────────────────────────────
 
 export async function runConfigTestAi(opts: ConfigOptions = {}): Promise<void> {
-  const config = loadConfig(opts.dir);
-  if (!config) {
-    console.error(chalk.yellow('  No configuration found. Run `agent-replay init` first.'));
-    process.exitCode = 2;
-    return;
-  }
+  const config = readConfigOr(loadConfig, opts, true);
+  if (!config) return;
 
   // This is the AI diagnostic command, so a key the loader had to drop is
   // exactly what the user is here to find out about — a typo'd `ai.provider`

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { execFileSync, execFile, spawnSync } from 'node:child_process';
 import BetterSqlite3 from 'better-sqlite3';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1605,6 +1605,51 @@ describe('CLI integration', () => {
     const parsed = JSON.parse(r.stdout);
     expect(parsed.ok).toBe(false);
     expect(parsed.error).toMatch(/mutually exclusive/);
+  });
+
+  describe('config set', () => {
+    it('refuses an empty value instead of storing a blank', () => {
+      // A blank was worse than useless: an empty API key displayed as `***`,
+      // looking set while behaving unset, so `test-ai` told the user to set the
+      // key they had just set; an empty ai.model was sent to the provider AS
+      // the model name.
+      for (const key of ['ai.api_keys.anthropic', 'ai.model']) {
+        const r = run(['config', 'set', key, '']);
+        expect(r.code).toBe(2);
+        expect(r.stderr).toMatch(/empty value/);
+      }
+    });
+
+    it('does not delete an unrelated invalid key it was warned about', () => {
+      // `config set` wrote back the SANITIZED config, so setting one key
+      // permanently dropped the invalid `ai.max_tokens` the user was being
+      // warned about — unrecoverable, and every later `config list` then
+      // reported a clean config.
+      const cfgPath = join(dir, 'config.json');
+      const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+      cfg.ai = { ...(cfg.ai ?? {}), max_tokens: '4096' };
+      writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+
+      expect(run(['config', 'set', 'ai.provider', 'anthropic']).code).toBe(0);
+
+      const after = JSON.parse(readFileSync(cfgPath, 'utf8'));
+      expect(after.ai.max_tokens).toBe('4096'); // still on disk, still fixable
+      expect(after.ai.provider).toBe('anthropic'); // and the requested key did change
+      // (the warning itself goes to stderr on a zero exit, which `run` does not
+      // capture; `config-service.test.ts` covers that the value is still
+      // reported as a problem on read.)
+    });
+
+    it('names a parse error instead of claiming there is no config', () => {
+      const cfgPath = join(dir, 'config.json');
+      writeFileSync(cfgPath, readFileSync(cfgPath, 'utf8').replace('{', '{,'));
+
+      const r = run(['config', 'list']);
+      expect(r.code).toBe(2);
+      expect(r.stderr).toMatch(/not valid JSON/);
+      // The old message sent the user to a command that then refuses to run.
+      expect(r.stdout + r.stderr).not.toMatch(/No configuration found/);
+    });
   });
 
   describe('dashboard', () => {

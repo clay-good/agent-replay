@@ -50,15 +50,69 @@ export function configPath(dir?: string): string {
   return join(resolve(resolveDataDir(dir)), 'config.json');
 }
 
-export function loadConfig(dir?: string): AgentReplayConfig | null {
+/**
+ * A config file that EXISTS but cannot be used — unparseable, unreadable, or
+ * not a file at all.
+ *
+ * Distinct from "no config file", and the distinction is the whole point. Every
+ * read failure used to collapse to `null`, which the commands rendered as
+ * *"No configuration found. Run `agent-replay init` first."* — so one stray
+ * trailing comma from a hand-edit told the user their config was ABSENT while
+ * it sat on disk with their API key in it, `init` answered *"Already
+ * initialized … Use --force"*, and the two messages contradicted each other
+ * with neither naming the parse error. `test-ai` and `eval` reported "No AI
+ * provider configured" for a key that was right there.
+ */
+export class ConfigFileError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConfigFileError';
+  }
+}
+
+/**
+ * Parse the config file without dropping unusable values.
+ *
+ * `loadConfig` sanitizes on read, which is right for consumers — one bad key
+ * must not make the whole config unreadable. But a WRITER must start from the
+ * file as it is: `config set` saved the sanitized copy back, so setting an
+ * unrelated key permanently deleted the invalid `ai.max_tokens` the user was
+ * being warned about, leaving nothing to fix and no sign it had happened.
+ *
+ * Throws {@link ConfigFileError} for a file that exists but cannot be read.
+ */
+export function loadRawConfig(dir?: string): AgentReplayConfig | null {
   const path = configPath(dir);
   if (!existsSync(path)) return null;
+  let raw: string;
   try {
-    const raw = readFileSync(path, 'utf-8');
-    return sanitizeConfig(JSON.parse(raw) as AgentReplayConfig);
-  } catch {
-    return null;
+    raw = readFileSync(path, 'utf-8');
+  } catch (err) {
+    throw new ConfigFileError(
+      `${path} could not be read: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
+  try {
+    const parsed = JSON.parse(raw) as AgentReplayConfig;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('expected a JSON object');
+    }
+    return parsed;
+  } catch (err) {
+    throw new ConfigFileError(
+      `${path} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+/**
+ * The config file's usable contents, or `null` if there is no config file.
+ *
+ * Throws {@link ConfigFileError} if a file IS there but cannot be used, so a
+ * broken config is never reported as a missing one.
+ */
+export function loadConfig(dir?: string): AgentReplayConfig | null {
+  return sanitizeConfig(loadRawConfig(dir));
 }
 
 /**
@@ -185,8 +239,14 @@ export function resolveApiKey(
   const envVal = envKey ? process.env[envKey] : undefined;
   if (envVal) return envVal;
 
-  // Config file
-  return config?.ai?.api_keys?.[provider] ?? null;
+  // Config file. A BLANK stored key is not a key: `config set
+  // ai.api_keys.anthropic ""` used to store `''`, which `config get` then
+  // displayed as `***` — indistinguishable from a real key — while every
+  // truthiness test downstream treated it as absent, so `test-ai` told the user
+  // to set the key they had just set. Normalize it to "not configured" here,
+  // which is what the rest of the code already assumed.
+  const fromFile = config?.ai?.api_keys?.[provider];
+  return typeof fromFile === 'string' && fromFile.trim() !== '' ? fromFile : null;
 }
 
 /**
@@ -236,7 +296,14 @@ export function resolveProvider(config: AgentReplayConfig | null): ResolvedProvi
         // auth/400 error at eval time — and priced the request off Anthropic's
         // sheet, so `--max-cost` gated on a number for a different vendor. A
         // model of no known family (a proxy's own name) still passes through.
-        model: typeof configured === 'string' && modelSuitsProvider(configured, preferred)
+        // The blank check matters as much as the family check: `modelOwner('')`
+        // is null, and a null owner means "suits any provider", so an empty
+        // `ai.model` beat DEFAULT_MODELS and was sent to the provider AS the
+        // model name (`Testing anthropic ()`). The auto path below already
+        // guarded on truthiness, so the same config behaved differently
+        // depending on whether `ai.provider` was explicit.
+        model: typeof configured === 'string' && configured.trim() !== ''
+          && modelSuitsProvider(configured, preferred)
           ? configured
           : DEFAULT_MODELS[preferred],
       };
@@ -254,7 +321,10 @@ export function resolveProvider(config: AgentReplayConfig | null): ResolvedProvi
   // schema check, and a non-string was passed through as "suits any provider" —
   // moving the crash from here into the provider adapter (`long.startsWith is
   // not a function`), or sending the number itself as the model name.
-  const configuredModel = typeof config?.ai?.model === 'string' ? config.ai.model : undefined;
+  const configuredModel =
+    typeof config?.ai?.model === 'string' && config.ai.model.trim() !== ''
+      ? config.ai.model
+      : undefined;
   const preferredByModel = configuredModel
     ? providers.find((p) => modelOwner(configuredModel) === p)
     : undefined;
