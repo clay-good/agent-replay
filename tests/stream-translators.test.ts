@@ -509,3 +509,68 @@ describe('codex-exec: an item that is not an object', () => {
     expect((step.output as Record<string, unknown>).command).toBe('ls');
   });
 });
+
+
+describe('a translated stream reports what it dropped', () => {
+  // `record` counts and reports every line it rejects, so a silent loss is
+  // impossible on the native path. The translated formats had no counter at
+  // all: an unpairable `tool_result` took the tool's OUTPUT with it and the run
+  // still reported "Warnings: 0" — the tool call stored looking clean and
+  // output-less, its result gone.
+  //
+  // Producing no events is not always a loss, which is why the translator
+  // reports the reason rather than the caller inferring one from an empty
+  // array: a repeated `init`, or a line that only accumulates usage, correctly
+  // yields nothing.
+
+  it('flags a gemini tool_result that pairs with no open call', () => {
+    // With a call still open, an unmatched id deliberately falls back to the
+    // oldest open one — that is documented behavior and not a drop. The loss
+    // happens when there is nothing open to attach the result to, and the
+    // payload it carries has nowhere to go.
+    const t = makeTranslator('gemini-stream')!;
+    t.translate({ type: 'init', session_id: 's1' });
+
+    expect(t.translate({ type: 'tool_result', id: 'NOMATCH', output: { data: 1 } })).toEqual([]);
+    expect(t.lastSkip()).toMatch(/matched no open tool call/);
+  });
+
+  it('flags an unrecognized event type in both translators', () => {
+    for (const format of ['gemini-stream', 'codex-exec']) {
+      const t = makeTranslator(format)!;
+      t.translate({ type: 'init', session_id: 's1' });
+      t.translate({ type: 'made_up_kind', payload: 1 });
+      // Read ONCE — the reason is cleared on read, so a second call is null.
+      const reason = t.lastSkip();
+      expect(reason, format).toMatch(/unrecognized/);
+      expect(reason, format).toMatch(/made_up_kind/);
+    }
+  });
+
+  it('does NOT flag a line that legitimately produces no events', () => {
+    // The distinction the reason channel exists for. A second `init` is a
+    // no-op, not a loss — flagging it would train the reader to ignore
+    // warnings.
+    const t = makeTranslator('gemini-stream')!;
+    t.translate({ type: 'init', session_id: 's1' });
+    expect(t.translate({ type: 'init', session_id: 's1' })).toEqual([]);
+    expect(t.lastSkip()).toBeNull();
+  });
+
+  it('clears the reason once read, so it is reported once', () => {
+    const t = makeTranslator('gemini-stream')!;
+    t.translate({ type: 'init', session_id: 's1' });
+    t.translate({ type: 'made_up_kind' });
+    expect(t.lastSkip()).not.toBeNull();
+    expect(t.lastSkip()).toBeNull();
+  });
+
+  it('pairs a tool_result normally, with nothing flagged', () => {
+    const t = makeTranslator('gemini-stream')!;
+    t.translate({ type: 'init', session_id: 's1' });
+    t.translate({ type: 'tool_use', id: 't1', name: 'ls', input: {} });
+    const out = t.translate({ type: 'tool_result', id: 't1', output: { ok: true } });
+    expect(out.length).toBeGreaterThan(0);
+    expect(t.lastSkip()).toBeNull();
+  });
+});

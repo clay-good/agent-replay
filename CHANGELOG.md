@@ -295,6 +295,18 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **`record --format gemini-stream` and `--format codex-exec` dropped lines and
+  reported "Warnings: 0".** The native protocol counts and reports every line it
+  rejects, precisely so a silent loss is impossible; the translated formats had
+  no counter at all. A `tool_result` that paired with no open tool call took the
+  tool's **output** with it — the call was stored looking clean and
+  output-less — and an event type the translator had never heard of vanished
+  the same way, both under a clean summary at exit 0. Translators now say why
+  they produced no events, and `record` reports it. The distinction matters:
+  producing nothing is sometimes correct (a repeated `init`, a line that only
+  accumulates usage), so an empty result alone could not be used as the
+  signal — flagging those would train the reader to ignore warnings.
+
 - **`import --replace` deleted the forks of the trace it replaced.** A fork
   inherits its parent's `session_id` *and* its `source_format`/`source_file`
   metadata, so every fork of the session matched the "already imported" key and

@@ -13,6 +13,20 @@ import type { CaptureEvent } from './event-protocol.js';
 export interface StreamTranslator {
   translate(obj: Record<string, unknown>): CaptureEvent[];
   finalize(): CaptureEvent[];
+  /**
+   * Why the LAST `translate` call produced no events, or null if producing none
+   * was normal.
+   *
+   * An empty return is ambiguous on its own: a second `init` line legitimately
+   * yields nothing, and so does a line whose type this translator has never
+   * heard of — but only one of those is data loss. `record` reports how many
+   * lines it rejected precisely so a silent drop is impossible, and the
+   * translated formats had no counter at all: a `tool_result` that paired with
+   * no open call took its payload with it and the run still reported
+   * "Warnings: 0". This lets the caller tell the two apart without the
+   * translator having to invent an event.
+   */
+  lastSkip(): string | null;
 }
 
 abstract class BaseTranslator implements StreamTranslator {
@@ -28,6 +42,14 @@ abstract class BaseTranslator implements StreamTranslator {
   // `result`). If so, reaching EOF without it means the run was interrupted.
   protected expectsTerminalEvent = false;
   protected sawTerminal = false;
+  /** Set by a translator when it drops a line; read and cleared by `lastSkip`. */
+  protected skipReason: string | null = null;
+
+  lastSkip(): string | null {
+    const reason = this.skipReason;
+    this.skipReason = null;
+    return reason;
+  }
 
   protected abstract agentName: string;
 
@@ -194,6 +216,11 @@ export class CodexExecTranslator extends BaseTranslator {
       ];
     }
 
+    // A line of a kind this translator does not know. Harnesses add event types
+    // between releases, so this is expected — but it must be counted, since the
+    // alternative is a stream that silently loses whatever the new type carries
+    // while reporting a clean capture.
+    this.skipReason = `unrecognized codex-exec event type ${JSON.stringify(type)}`;
     return [];
   }
 }
@@ -285,7 +312,15 @@ export class GeminiStreamTranslator extends BaseTranslator {
     if (type === 'tool_result') {
       const id = str(obj.id) ?? str(obj.tool_use_id);
       const num = this.resolveToolStep(id, str(obj.name));
-      if (num == null) return [];
+      if (num == null) {
+        // This is the costly drop: the result carries the tool's OUTPUT, and
+        // with no open call to attach it to the payload is gone. Leaving the
+        // call open is the right repair — inventing a step for it would
+        // fabricate a call the agent never made — but it must be reported, or
+        // a tool call is stored looking clean and output-less.
+        this.skipReason = `tool_result matched no open tool call${id ? ` (id ${id})` : ''}`;
+        return [];
+      }
       this.closeToolStep(num);
       // Wrap a bare-string result in an object (like the `message` handler
       // below). A raw string is stored verbatim as TEXT and then fails to
@@ -387,6 +422,7 @@ export class GeminiStreamTranslator extends BaseTranslator {
       return this.finalize();
     }
 
+    this.skipReason = `unrecognized gemini-stream event type ${JSON.stringify(type)}`;
     return [];
   }
 }

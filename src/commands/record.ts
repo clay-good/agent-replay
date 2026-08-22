@@ -135,7 +135,18 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
       // the two paths now share one gate, so a rule added to it covers both —
       // not that it is catching something today. (`output` shape is normalized
       // by the translators themselves; see the codex item branch.)
-      for (const ev of translator.translate(obj)) applyTranslated(ev);
+      const translated = translator.translate(obj);
+      for (const ev of translated) applyTranslated(ev);
+      // Report a line the translator dropped, the way the native path reports a
+      // line it rejects. Producing no events is not always a loss — a repeated
+      // `init`, or a line that only records usage, legitimately yields none —
+      // so the translator says which it was rather than the caller guessing
+      // from an empty array.
+      const skipped = translator.lastSkip();
+      if (skipped) {
+        warnings++;
+        console.error(chalk.yellow(`  ⚠ skipped: ${skipped}`));
+      }
       continue;
     }
 
