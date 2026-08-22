@@ -74,3 +74,10 @@ The gate SHALL refuse rather than report a pass whenever it cannot actually comp
 - **THEN** the command reports a `step_errors` divergence and exits non-zero, even when every other structural field matches
 - **AND** a step that stops failing is NOT reported, since a fix is not a regression
 
+#### Scenario: The agent chooses differently
+
+- **WHEN** a matched candidate records a different `chosen` option than its golden counterpart at the same step, and `decisions` is among the compared fields
+- **THEN** the command reports a `decisions` divergence and exits non-zero, even though step count, types, names, tool inputs and status all still match
+- **AND** `decisions` is NOT in the default field set, because no baseline exported before it carries the data and defaulting to it would turn a working gate into the "nothing to compare" refusal on upgrade
+- **AND** a step whose golden counterpart recorded no decision is not faulted, since a step that made none is not evidence the candidate should not make one
+
