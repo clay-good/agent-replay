@@ -19,8 +19,11 @@ jobs:
       fail-fast: false
       matrix:
         # Vitest 4 (the test runner) requires Node's util.styleText, added in
-        # 20.12, so the dev/test toolchain floor is 20 — test on active + next LTS.
-        node-version: ['20.x', '22.x']
+        # 20.12, so the dev/test toolchain floor is 20.12. The upper end matters
+        # just as much: better-sqlite3 is a native module, and a Node release it
+        # has no prebuild for fails to *install*, not to test. Cover the floor,
+        # the LTS lines, and the current release so that break shows up here.
+        node-version: ['20.x', '22.x', '24.x', '26.x']
     steps:
       - uses: actions/checkout@v5
       - name: Use Node.js ${{ matrix.node-version }}

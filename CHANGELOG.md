@@ -140,6 +140,19 @@ between them, and nothing else.
 
 ### Changed
 
+- **The supported Node range is now `>=20.12`, and `better-sqlite3` moved to
+  `^12.11.1`.** The old `>=18` floor was a promise the package could not keep:
+  `better-sqlite3` v11 does not compile against Node 24 or newer (V8 removed
+  the `v8::Object::GetPrototype` and `PropertyCallbackInfo::This` APIs it uses),
+  and it has no prebuilt binary for those releases — so `npm install -g
+  agent-replay` on a current Node failed at *install* time with a C++ compiler
+  error, before any code ran. Node 18 has been end-of-life since April 2025,
+  and CI already floored at 20 because Vitest 4 needs `util.styleText` (added
+  in 20.12), so the declared range was the only thing still claiming 18.
+  `better-sqlite3` 12.11.1 ships prebuilds for Node 20 through 26. The CI
+  matrix now also covers Node 24 and 26, and a new test ties the advertised
+  `engines` range to the range the native dependency actually supports, so a
+  future bump cannot quietly outrun it.
 - The openspec specs now describe what the implementation actually guarantees.
   `openspec validate --all` only checks document structure, so nothing had
   verified the normative statements against the binary. The specs had fallen

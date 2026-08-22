@@ -47,7 +47,7 @@ agent-replay show <trace-id>       # inspect a trace step-by-step
 agent-replay replay <trace-id>     # animated terminal replay
 ```
 
-Requires **Node.js 18+**.
+Requires **Node.js 20.12+**.
 
 ## Commands
 
