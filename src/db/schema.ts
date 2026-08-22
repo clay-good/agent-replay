@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { julianDayExpr } from '../utils/time.js';
 
 /**
  * Full SQLite schema for agent-replay.
@@ -14,7 +15,7 @@ import type Database from 'better-sqlite3';
  *   - Added guardrail_policies table (adapted from 002_policies.sql policy_rules)
  */
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 const SCHEMA_V1 = `
 -- ============================================================================
@@ -211,6 +212,30 @@ CREATE INDEX IF NOT EXISTS idx_agent_traces_started_instant
     ON agent_traces(julianday(started_at), started_at);
 `;
 
+// v5: the SAME expression index, over the REPAIRED instant expression.
+//
+// v4 indexes `julianday(started_at)`, and the ORDER BY matched it exactly. But
+// `julianday()` returns NULL for an ISO-8601 basic-format offset (`+0200`) —
+// what `date +%FT%T%z` emits and what `ingest` stores verbatim — so those rows
+// had no instant to sort by and clustered at one end, ranked among themselves
+// by BYTES. That is the very failure the v4 ordering exists to prevent, on the
+// one format it did not cover: `list` printed the newest trace last, `list
+// --limit 1` returned the wrong trace, and `watch` attached to the wrong
+// running run.
+//
+// `julianDayExpr` already knows the repair (retry the basic form as the
+// extended one) and is used for durations, but its own docstring forbade it in
+// an ORDER BY precisely because v4's index would no longer match and every
+// query would full-scan. This index removes that constraint by indexing the
+// repaired expression itself, so ordering can be correct AND keyed.
+//
+// The v4 index is deliberately kept: `SINCE_PREDICATE`'s indexed disjunct is
+// still a bare `julianday(started_at)`, and that is the expression it matches.
+const SCHEMA_V5_OBJECTS = `
+CREATE INDEX IF NOT EXISTS idx_agent_traces_started_instant_v2
+    ON agent_traces(${julianDayExpr('started_at')}, started_at);
+`;
+
 /** True if `table` already has a column named `column`. */
 function hasColumn(db: Database.Database, table: string, column: string): boolean {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
@@ -242,6 +267,12 @@ export function applySchemaV3(db: Database.Database): void {
 export function applySchemaV4(db: Database.Database): void {
   db.exec(SCHEMA_V4_OBJECTS);
   db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(4);
+}
+
+/** Migrate a v4 database in place to v5 (records schema version 5). */
+export function applySchemaV5(db: Database.Database): void {
+  db.exec(SCHEMA_V5_OBJECTS);
+  db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(5);
 }
 
 /** Get the current schema version, or 0 if no schema exists. */

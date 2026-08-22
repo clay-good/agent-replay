@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { SCHEMA_VERSION, getSchemaVersion, applySchemaV1, applySchemaV2, applySchemaV3, applySchemaV4 } from './schema.js';
+import { SCHEMA_VERSION, getSchemaVersion, applySchemaV1, applySchemaV2, applySchemaV3, applySchemaV4, applySchemaV5 } from './schema.js';
 
 /**
  * Run any pending migrations, upgrading the database to the latest schema.
@@ -52,6 +52,11 @@ export function runMigrations(db: Database.Database): number {
     // v3 → v4: an expression index for the parsed-instant ordering `list` and
     // the dashboard use, which the plain started_at index cannot serve.
     if (current < 4) applySchemaV4(db);
+
+    // v4 → v5: the same expression index over the instant expression that also
+    // parses ISO basic-format offsets, so the parsed-instant ordering is correct
+    // for those rows AND still served by an index. Additive only.
+    if (current < 5) applySchemaV5(db);
   }).immediate();
 
   return SCHEMA_VERSION;

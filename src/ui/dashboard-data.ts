@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { TRACE_STATUSES } from '../models/enums.js';
-import { SINCE_PREDICATE, sinceParams, DURATION_MS_EXPR } from '../utils/time.js';
+import { SINCE_PREDICATE, sinceParams, DURATION_MS_EXPR, julianDayExpr } from '../utils/time.js';
 
 /**
  * Pure data queries behind the dashboard TUI. Kept separate from the blessed
@@ -156,7 +156,7 @@ export function recentTraces(db: Database.Database, limit = 30): DashboardTraceR
   return db
     .prepare(
       `SELECT id, agent_name, status, started_at FROM agent_traces
-        ORDER BY julianday(started_at) DESC, started_at DESC LIMIT ?`,
+        ORDER BY ${julianDayExpr('started_at')} DESC, started_at DESC LIMIT ?`,
     )
     .all(limit) as DashboardTraceRow[];
 }

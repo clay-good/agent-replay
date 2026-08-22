@@ -243,6 +243,26 @@ between them, and nothing else.
 
 ### Fixed
 
+- **`list` printed the newest trace last, `list --limit 1` returned the wrong
+  trace, and `watch` attached to the wrong running run** — for any trace whose
+  `started_at` carries an ISO-8601 basic-format offset (`+0200`). Ordering used
+  `julianday(started_at)`, which returns NULL for that form, so those rows had
+  no instant to sort by: they clustered at one end of every result and were
+  ranked among themselves by BYTES, which is exactly the failure the
+  parsed-instant ordering exists to prevent. `--limit` then dropped the wrong
+  rows, and `watch` with no arguments showed a live session doing nothing while
+  the real run went unwatched.
+
+  Ordering now uses the repaired expression that already handles the format for
+  durations. That was previously ruled out because schema v4 indexes the bare
+  `julianday(started_at)`, so wrapping the column would have made every ordered
+  query full-scan — so **schema v5 adds an expression index over the repaired
+  expression**, and the ordering is now both correct and keyed. The migration is
+  additive (a new index; no table is rewritten) and v4's index is kept, since
+  `SINCE_PREDICATE`'s indexed disjunct still matches it. A test asserts the
+  query plan, because an ordering that is correct but unindexed would look
+  identical in behavior while scanning the whole store.
+
 - **A `--dir` or `AGENT_REPLAY_DIR` beginning with `~` created a directory
   literally named `~`.** A shell expands the tilde before the CLI sees it, so
   this only bit where nothing does — a quoted `--dir '~/traces'`, a hook or

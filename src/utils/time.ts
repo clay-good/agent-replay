@@ -60,9 +60,13 @@ export function sinceParams(since: string): [string, string, string] {
  * for. Inserting the missing colon recovers those rows; a timestamp julianday
  * cannot parse at all still yields NULL, as before.
  *
- * Use this for aggregates and computed values, NOT in an `ORDER BY` or `WHERE`
- * on `started_at`: schema v4 indexes `julianday(started_at)` exactly, and
- * wrapping it in COALESCE would make those queries full-scan again.
+ * Safe to use in an `ORDER BY` on `started_at`: schema v5 indexes exactly this
+ * expression, for exactly that purpose. (It was not always — v4 indexed the
+ * bare `julianday(started_at)`, so wrapping the column made every ordered query
+ * full-scan, and the ordering was left wrong for basic-offset rows instead.)
+ *
+ * Still NOT for the indexed disjunct of `SINCE_PREDICATE`, which matches the v4
+ * index and repairs the format in its fallback branch instead — see there.
  */
 export function julianDayExpr(col: string): string {
   return `COALESCE(

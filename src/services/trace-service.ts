@@ -18,7 +18,7 @@ import type {
 } from '../models/types.js';
 import { DECIDED_BY, STEP_TYPES, TRACE_STATUSES, TRIGGER_TYPES } from '../models/enums.js';
 import { isValidConfidence, validateTraceInput } from '../utils/validators.js';
-import { SINCE_PREDICATE, sinceParams, DURATION_MS_EXPR } from '../utils/time.js';
+import { SINCE_PREDICATE, sinceParams, DURATION_MS_EXPR, julianDayExpr } from '../utils/time.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -1235,7 +1235,7 @@ export function getMostRecentRunningTrace(db: Database.Database): Trace | null {
   const row = db
     .prepare(
       "SELECT * FROM agent_traces WHERE status = 'running' AND parent_trace_id IS NULL" +
-        ' ORDER BY julianday(started_at) DESC, started_at DESC LIMIT 1',
+        ` ORDER BY ${julianDayExpr('started_at')} DESC, started_at DESC LIMIT 1`,
     )
     .get() as Record<string, unknown> | undefined;
   return row ? rowToTrace(row) : null;
@@ -1354,7 +1354,13 @@ export function listTraces(
   // parsed instant, keeping the byte order as a secondary key for a timestamp
   // julianday cannot parse at all (NULL), so no row is ever dropped or
   // arbitrarily placed among its unparseable peers.
-  const STARTED_EXPRS = ['julianday(started_at)', 'started_at'];
+  //
+  // Use `julianDayExpr`, not a bare `julianday()`: the latter returns NULL for
+  // an ISO basic-format offset (`+0200`), so those rows had no instant to sort
+  // by and clustered at one end ranked by BYTES — the newest trace printed
+  // last, and `--limit 1` returned the wrong one. Schema v5 indexes exactly
+  // this expression, so the ordering stays keyed.
+  const STARTED_EXPRS = [julianDayExpr('started_at'), 'started_at'];
   const sortMap: Record<string, string> = {
     started_at: 'started_at',
     duration: DURATION_EXPR,
