@@ -177,6 +177,48 @@ function earlierRef(ref: unknown, stepNumber: number): number | null {
   return n;
 }
 
+/**
+ * `earlierRef`, plus the step actually EXISTING in this trace.
+ *
+ * Range alone is not enough. A reference can be a perfectly well-formed
+ * "earlier" number and still point at nothing — a producer whose own counter
+ * skips, or the ordinary case where one step was rejected (a bad `step_type`)
+ * and the next step references it. The row was stored with a dangling number
+ * and three things went wrong, each verified:
+ *
+ *   - `why` looked the number up, found nothing, and fell through to its
+ *     `prior_decision` fallback — presenting a DIFFERENT antecedent as fact,
+ *     with no hint that the recorded one was unresolvable.
+ *   - `show --tree` printed "⟵ caused by #2" for a step not in the trace, so
+ *     two surfaces contradicted each other about one trace.
+ *   - `export` then produced a trace `ingest` REFUSES ("references step 2,
+ *     which does not exist in this trace") — the tool rejecting its own
+ *     output, which is the failure the OTel merge guards against by name.
+ *
+ * `validateTraceInput` already checks existence on the `ingest` path, and the
+ * spec requires it ("A parent reference MUST point to an existing, earlier step
+ * in the same trace"); the live path is where it was missing. The referenced
+ * step must be strictly earlier, so by the time this runs it is already stored
+ * — existence is answerable here.
+ */
+function existingEarlierRef(
+  db: Database.Database,
+  traceId: string,
+  ref: unknown,
+  stepNumber: number,
+  field: string,
+  dropped: string[],
+): number | null {
+  const n = earlierRef(ref, stepNumber);
+  if (n == null) return null;
+  const row = db
+    .prepare('SELECT 1 AS ok FROM agent_trace_steps WHERE trace_id = ? AND step_number = ?')
+    .get(traceId, n) as { ok: number } | undefined;
+  if (row) return n;
+  dropped.push(`${field} -> step ${n}`);
+  return null;
+}
+
 /** Parse a JSON TEXT column back into an object. */
 function parseJson(raw: string | null): Record<string, unknown> | null {
   if (raw === null || raw === undefined) return null;
@@ -887,6 +929,8 @@ export function appendStep(
   db: Database.Database,
   traceId: string,
   input: IngestStepInput,
+  /** Receives a note for each causal reference dropped, so a caller can report it. */
+  droppedRefs: string[] = [],
 ): TraceStep {
   // Verify trace exists and is running
   const trace = db
@@ -939,15 +983,16 @@ export function appendStep(
       // hook adapter's existing error guard.
       jsonOrNull(input.error),
       jsonStr(input.metadata),
-      // Keep only a strictly-earlier reference. `ingest` validates this, but the
-      // live record/SDK path passes producer values straight through — and
-      // causalWalk's contract ("references are validated to point strictly
-      // earlier, so the walk is acyclic") depends on it. A forward reference
-      // made `why` present time-travelling causality as fact: step 1 rendered
-      // "caused by #2", a step that hadn't happened yet. A self-reference is
-      // dropped for the same reason.
-      earlierRef(input.parent_step ?? input.parent_step_number, input.step_number),
-      earlierRef(input.caused_by_step ?? input.caused_by_step_number, input.step_number),
+      // Keep only a strictly-earlier reference that EXISTS. `ingest` validates
+      // both, but the live record/SDK path passed producer values straight
+      // through — and causalWalk's contract ("references are validated to point
+      // strictly earlier, so the walk is acyclic") depends on it. A forward
+      // reference made `why` present time-travelling causality as fact: step 1
+      // rendered "caused by #2", a step that hadn't happened yet. A
+      // self-reference is dropped for the same reason, and a DANGLING one — see
+      // `existingEarlierRef` — for a worse one.
+      existingEarlierRef(db, traceId, input.parent_step ?? input.parent_step_number, input.step_number, 'parent_step', droppedRefs),
+      existingEarlierRef(db, traceId, input.caused_by_step ?? input.caused_by_step_number, input.step_number, 'caused_by_step', droppedRefs),
     );
 
     if (input.decision) {

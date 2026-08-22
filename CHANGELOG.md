@@ -305,6 +305,21 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **Live capture stored causal references to steps that do not exist, and `why`
+  then invented a different antecedent and presented it as fact.** The live
+  path checked a `parent_step`/`caused_by_step` for *range* (a positive integer,
+  strictly earlier) but never for *existence* — so a producer whose counter
+  skips, or the ordinary case where one step is rejected for a bad `step_type`
+  and the next references it, stored a dangling number. `why` looked it up,
+  found nothing, and fell through to its "prior decision" fallback with no hint
+  that the recorded cause was unresolvable; `show --tree` printed `caused by #2`
+  for a step not in the trace, so two surfaces contradicted each other about one
+  trace; and `export` produced a trace `ingest` **refuses** — the tool rejecting
+  its own output. `ingest` already checked existence, and the decision-tracing
+  spec requires it. The reference must point strictly earlier, so the step is
+  already stored by then and existence is answerable at write time; a dangling
+  one is now dropped and reported by `record` and `run`.
+
 - **A producer's string was re-typed by what it happened to say.** `input` and
   `output` stored a string as-is whenever it parsed as JSON, so the type a value
   came back as depended on its content: `"42"` returned the number 42, `"true"`

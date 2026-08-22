@@ -25,6 +25,12 @@ function isoNow(): string {
 export interface ApplyResult {
   /** The trace this event belongs to (resolved for trace_start). */
   traceId: string;
+  /**
+   * Something was repaired while storing this event, and the caller should say
+   * so. A dropped causal reference is the case today: silently discarding it
+   * left `why` and `show --tree` disagreeing about the same trace.
+   */
+  warning?: string;
 }
 
 /**
@@ -54,6 +60,7 @@ export function applyEvent(db: Database.Database, event: CaptureEvent): ApplyRes
     }
 
     case 'step_start': {
+      const droppedRefs: string[] = [];
       appendStep(db, event.trace_id!, {
         step_number: event.step_number,
         step_type: event.step_type,
@@ -64,8 +71,13 @@ export function applyEvent(db: Database.Database, event: CaptureEvent): ApplyRes
         parent_step: event.parent_step ?? event.parent_step_number ?? null,
         caused_by_step: event.caused_by_step ?? event.caused_by_step_number ?? null,
         metadata: event.metadata,
-      });
-      return { traceId: event.trace_id! };
+      }, droppedRefs);
+      return {
+        traceId: event.trace_id!,
+        ...(droppedRefs.length > 0
+          ? { warning: `ignored ${droppedRefs.join(', ')}: no such step in this trace` }
+          : {}),
+      };
     }
 
     case 'step_end': {
@@ -82,6 +94,7 @@ export function applyEvent(db: Database.Database, event: CaptureEvent): ApplyRes
     }
 
     case 'step': {
+      const droppedRefs: string[] = [];
       appendStep(db, event.trace_id!, {
         step_number: event.step_number,
         step_type: event.step_type,
@@ -99,8 +112,13 @@ export function applyEvent(db: Database.Database, event: CaptureEvent): ApplyRes
         caused_by_step: event.caused_by_step ?? event.caused_by_step_number ?? null,
         decision: event.decision,
         snapshot: event.snapshot,
-      });
-      return { traceId: event.trace_id! };
+      }, droppedRefs);
+      return {
+        traceId: event.trace_id!,
+        ...(droppedRefs.length > 0
+          ? { warning: `ignored ${droppedRefs.join(', ')}: no such step in this trace` }
+          : {}),
+      };
     }
 
     case 'decision': {

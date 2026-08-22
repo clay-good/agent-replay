@@ -3,7 +3,7 @@ import Database from 'better-sqlite3';
 import { applySchemaV1, applySchemaV2, applySchemaV3, SCHEMA_VERSION } from '../src/db/schema.js';
 import { runMigrations } from '../src/db/migrations.js';
 import { getSchemaVersion } from '../src/db/schema.js';
-import { ingestTrace, getTrace, listTraces, attachDecision } from '../src/services/trace-service.js';
+import { ingestTrace, getTrace, listTraces, attachDecision, appendStep } from '../src/services/trace-service.js';
 import { forkTrace } from '../src/services/fork-service.js';
 import { exportTraces } from '../src/services/export-service.js';
 import { listDecisions, causalWalk } from '../src/services/decision-service.js';
@@ -634,5 +634,81 @@ describe('getTrace resolves a canonical id from the primary key index', () => {
     // shortest, answering about a trace the caller did not name.
     expect(() => getTrace(db, 'trc_ab')).toThrow(/Ambiguous trace id/);
     expect(getTrace(db, 'trc_zzz')).toBeNull();
+  });
+});
+
+
+describe('a causal reference to a step that does not exist is not stored', () => {
+  // `earlierRef` enforced RANGE but not EXISTENCE, so a well-formed "earlier"
+  // number could point at nothing — a producer whose counter skips, or the
+  // ordinary case where one step is rejected (a bad `step_type`) and the next
+  // references it. Three things went wrong, and the first is the worst:
+  //
+  //   - `why` looked the number up, found nothing, and fell through to its
+  //     `prior_decision` fallback — presenting a DIFFERENT antecedent as fact.
+  //   - `show --tree` printed "caused by #2" for a step not in the trace, so
+  //     two surfaces disagreed about one trace.
+  //   - `export` produced a trace `ingest` REFUSES, the tool rejecting its own
+  //     output.
+  //
+  // `validateTraceInput` already checked existence on the `ingest` path, and
+  // decision-tracing's spec requires it; the live path was where it was missing.
+  beforeEach(() => runMigrations(db));
+
+  function trace() {
+    return ingestTrace(db, { agent_name: 'a', input: {} } as never);
+  }
+
+  it('drops a dangling reference and reports it', () => {
+    const t = trace();
+    appendStep(db, t.id, { step_number: 1, step_type: 'decision', name: 'plan', input: {} } as never);
+
+    const dropped: string[] = [];
+    appendStep(db, t.id, {
+      step_number: 3, step_type: 'tool_call', name: 'run_grep', input: {},
+      caused_by_step: 2, // step 2 was never stored
+    } as never, dropped);
+
+    expect(dropped.join(' ')).toMatch(/caused_by_step -> step 2/);
+    const stored = getTrace(db, t.id)!;
+    expect(stored.steps.find((st) => st.step_number === 3)!.caused_by_step_number).toBeNull();
+  });
+
+  it('keeps a reference to a step that IS there', () => {
+    const t = trace();
+    appendStep(db, t.id, { step_number: 1, step_type: 'decision', name: 'plan', input: {} } as never);
+    const dropped: string[] = [];
+    appendStep(db, t.id, {
+      step_number: 2, step_type: 'tool_call', name: 'act', input: {}, caused_by_step: 1,
+    } as never, dropped);
+
+    expect(dropped).toEqual([]);
+    expect(getTrace(db, t.id)!.steps[1].caused_by_step_number).toBe(1);
+  });
+
+  it('checks parent_step the same way', () => {
+    const t = trace();
+    appendStep(db, t.id, { step_number: 1, step_type: 'thought', name: 'a', input: {} } as never);
+    const dropped: string[] = [];
+    appendStep(db, t.id, {
+      step_number: 5, step_type: 'tool_call', name: 'b', input: {}, parent_step: 4,
+    } as never, dropped);
+
+    expect(dropped.join(' ')).toMatch(/parent_step -> step 4/);
+    expect(getTrace(db, t.id)!.steps[1].parent_step_number).toBeNull();
+  });
+
+  it('does not confuse a reference into ANOTHER trace for an existing one', () => {
+    // Existence is per trace: the step number exists in the store, but not here.
+    const other = trace();
+    appendStep(db, other.id, { step_number: 1, step_type: 'thought', name: 'x', input: {} } as never);
+
+    const t = trace();
+    const dropped: string[] = [];
+    appendStep(db, t.id, {
+      step_number: 2, step_type: 'tool_call', name: 'b', input: {}, parent_step: 1,
+    } as never, dropped);
+
+    expect(dropped.join(' ')).toMatch(/parent_step -> step 1/);
   });
 });

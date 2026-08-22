@@ -93,8 +93,9 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
     if (event.type === 'trace_start') return;
     event.trace_id = trace.id;
     try {
-      applyEvent(db, event);
+      const { warning: applyWarning } = applyEvent(db, event);
       applied++;
+      if (applyWarning) process.stderr.write(`agent-replay run: ${applyWarning}\n`);
       // Note only an EXPLICIT terminal status, and only once it actually
       // persisted. A statusless trace_end defaults to 'completed' (indistinct
       // from still-open), so it must not suppress the exit-code finalization

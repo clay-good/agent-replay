@@ -68,10 +68,18 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
       event.tags = [...own, ...extraTags];
     }
     try {
-      const { traceId } = applyEvent(db, event);
+      const { traceId, warning: applyWarning } = applyEvent(db, event);
       touched.add(traceId);
       if (event.type === 'trace_start') opened.add(traceId);
       applied++;
+      // A repair made while STORING the event — today, a causal reference to a
+      // step that does not exist. Dropping it is right (`why` and `show --tree`
+      // would otherwise disagree about the same trace, and `export` would
+      // produce something `ingest` refuses), but doing it silently is not.
+      if (applyWarning) {
+        warnings++;
+        console.error(chalk.yellow(`  ⚠ ${applyWarning}`));
+      }
       if (event.type === 'step' || event.type === 'step_start') totalSteps++;
     } catch (err) {
       warnings++;
