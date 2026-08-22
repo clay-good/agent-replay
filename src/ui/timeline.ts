@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import type { TraceStep } from '../models/types.js';
 import type { StepType } from '../models/enums.js';
-import { stepIcon, stepLabel, colors, label, separator, safeText } from './theme.js';
+import { stepIcon, stepLabel, colors, label, separator, safeText, safeLine} from './theme.js';
 import { hasRenderableContent } from '../utils/json.js';
 import { formatDuration } from '../utils/time.js';
 
@@ -56,7 +56,7 @@ export function renderTimeline(
     const num = chalk.dim(String(step.step_number).padStart(2));
     const icon = stepIcon(step.step_type as StepType);
     const typeLabel = stepLabel(step.step_type as StepType);
-    const name = chalk.white.bold(`"${safeText(step.name)}"`);
+    const name = chalk.white.bold(`"${safeLine(step.name)}"`);
     const dur = step.duration_ms != null
       ? chalk.dim(formatDuration(step.duration_ms))
       : '';
@@ -76,7 +76,7 @@ export function renderTimeline(
 
     // Model info for llm_call steps
     if (step.model) {
-      lines.push(`  ${chalk.dim(pipe)}      ${label('Model:')} ${chalk.white(safeText(step.model))}`);
+      lines.push(`  ${chalk.dim(pipe)}      ${label('Model:')} ${chalk.white(safeLine(step.model))}`);
     }
 
     // Input
@@ -94,15 +94,28 @@ export function renderTimeline(
     // Decision record (for decision steps)
     if (step.decision) {
       const conf = step.decision.confidence != null ? chalk.dim(` (confidence ${step.decision.confidence})`) : '';
-      lines.push(`  ${chalk.dim(pipe)}      ${label('Chose:')} ${chalk.greenBright(safeText(step.decision.chosen))}${conf}`);
+      lines.push(`  ${chalk.dim(pipe)}      ${label('Chose:')} ${chalk.greenBright(safeLine(step.decision.chosen))}${conf}`);
       if (step.decision.rationale) {
-        lines.push(`  ${chalk.dim(pipe)}      ${label('Because:')} ${chalk.dim(safeText(step.decision.rationale))}`);
+        lines.push(`  ${chalk.dim(pipe)}      ${label('Because:')} ${chalk.dim(safeLine(step.decision.rationale))}`);
       }
     }
 
     // Error
+    //
+    // A multi-line error keeps its line breaks — a stack trace or a Windows
+    // child's CRLF output is shaped information, and two tests pin that. But a
+    // continuation line used to be emitted raw, so it started at column 0 with
+    // no gutter and read as agent-replay's own output: `'line1\nagent-replay:
+    // all checks passed'` printed a line indistinguishable from this tool
+    // speaking. The trace is written by the agent under test, so that is a
+    // forgery primitive, not a formatting quirk. Keep the breaks, but draw
+    // every continuation inside the gutter, where it is visibly trace content.
     if (step.error) {
-      lines.push(`  ${chalk.dim(pipe)}      ${chalk.redBright('Error:')} ${chalk.red(safeText(step.error))}`);
+      const errLines = safeText(step.error).split('\n');
+      lines.push(`  ${chalk.dim(pipe)}      ${chalk.redBright('Error:')} ${chalk.red(errLines[0])}`);
+      for (const cont of errLines.slice(1)) {
+        lines.push(`  ${chalk.dim(pipe)}             ${chalk.red(cont)}`);
+      }
     }
 
     // Token usage
@@ -172,7 +185,7 @@ export function renderTree(steps: TraceStep[], options: TimelineOptions = {}): s
   const emit = (step: TraceStep, indent: string, cappedDepth?: number): void => {
     const icon = stepIcon(step.step_type as StepType);
     const typeLabel = stepLabel(step.step_type as StepType);
-    const name = chalk.white.bold(`"${safeText(step.name)}"`);
+    const name = chalk.white.bold(`"${safeLine(step.name)}"`);
     const causal =
       step.caused_by_step_number != null
         ? chalk.dim(` ⟵ caused by #${step.caused_by_step_number}`)
@@ -184,7 +197,7 @@ export function renderTree(steps: TraceStep[], options: TimelineOptions = {}): s
     const depthNote = cappedDepth != null ? chalk.dim(`  [depth ${cappedDepth}]`) : '';
     lines.push(`  ${indent}${branch}${chalk.dim(`#${step.step_number}`)} ${icon} ${typeLabel}  ${name}${causal}${dur}${depthNote}`);
     if (step.decision) {
-      lines.push(`  ${indent}   ${label('chose')} ${chalk.greenBright(safeText(step.decision.chosen))}`);
+      lines.push(`  ${indent}   ${label('chose')} ${chalk.greenBright(safeLine(step.decision.chosen))}`);
     }
     // The tree is the view for understanding why an agent did what it did, and
     // it is only reached when a trace HAS causal structure — so on a failed
@@ -192,7 +205,7 @@ export function renderTree(steps: TraceStep[], options: TimelineOptions = {}): s
     // default timeline prints. The compact view still omits input/output and
     // per-step detail by design; an error is not detail.
     if (step.error) {
-      lines.push(`  ${indent}   ${label('error')} ${chalk.redBright(safeText(truncateJson(step.error, 100)))}`);
+      lines.push(`  ${indent}   ${label('error')} ${chalk.redBright(safeLine(truncateJson(step.error, 100)))}`);
     }
   };
 

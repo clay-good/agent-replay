@@ -2,7 +2,7 @@ import Table from 'cli-table3';
 import chalk from 'chalk';
 import type { Trace, EvalResult, GuardrailPolicy } from '../models/types.js';
 import type { TraceStatus } from '../models/enums.js';
-import { statusBadge, scoreBadge, passBadge, guardActionBadge, colors, safeText } from './theme.js';
+import { statusBadge, scoreBadge, passBadge, guardActionBadge, colors, safeText, safeLine} from './theme.js';
 import { formatRelativeTime } from '../utils/time.js';
 import { isPossiblyAbandoned } from '../services/trace-service.js';
 import { effectiveDurationMs, formatDuration } from '../utils/time.js';
@@ -45,7 +45,7 @@ export function traceTable(traces: Trace[]): string {
       : statusBadge(t.status as TraceStatus);
     table.push([
       chalk.dim(safeText(t.id.slice(0, 12))),
-      chalk.white(safeText(t.agent_name)),
+      chalk.white(safeLine(t.agent_name)),
       status,
       chalk.white(stepCountStr(t)),
       formatDurationShort(effectiveDurationMs(t)),
@@ -79,11 +79,11 @@ export function evalTable(evals: EvalResult[]): string {
   for (const e of evals) {
     const details = summarizeDetails(e.details);
     table.push([
-      chalk.white(safeText(e.evaluator_name)),
+      chalk.white(safeLine(e.evaluator_name)),
       chalk.dim(e.evaluator_type),
       scoreBadge(e.score),
       passBadge(e.passed),
-      chalk.dim(safeText(details)),
+      chalk.dim(safeLine(details)),
     ]);
   }
 
@@ -115,7 +115,7 @@ export function policyTable(policies: GuardrailPolicy[]): string {
       // was guaranteed to fail. A policy id is `pol_` + 12 chars, so the whole
       // thing fits.
       chalk.dim(p.id),
-      chalk.white(safeText(p.name)),
+      chalk.white(safeLine(p.name)),
       guardActionBadge(p.action),
       chalk.white(String(p.priority)),
       p.enabled ? chalk.green('Yes') : chalk.red('No'),

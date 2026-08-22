@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { traceTable, evalTable, policyTable } from '../src/ui/table.js';
 import { traceHeaderPanel, summaryPanel } from '../src/ui/boxen-panels.js';
-import { formatScorePct, formatCostUsd, safeText } from '../src/ui/theme.js';
+import { formatScorePct, formatCostUsd, safeText, safeLine } from '../src/ui/theme.js';
 import { formatDuration } from '../src/utils/time.js';
 import { renderTimeline, renderTree } from '../src/ui/timeline.js';
 import { renderDiff } from '../src/ui/diff-renderer.js';
@@ -586,5 +586,62 @@ describe('a deeply nested tree still renders', () => {
     const small = renderTree(chain(2000)).length / 2000;
     const large = renderTree(chain(20000)).length / 20000;
     expect(large).toBeLessThan(small * 2);
+  });
+});
+
+
+describe('a producer cannot forge a line on a single-line row', () => {
+  /**
+   * A trace is written by the agent under test, so every rendered string is
+   * untrusted. `safeText` deliberately keeps `\n` so a rendered BLOCK holds its
+   * shape — but on a one-line row a newline emits a line the renderer never
+   * accounted for, and the reader has no way to tell it from real output.
+   */
+  const FORGED_ROW = 'safe\n  |- 99  -> Output  "NOTHING TO SEE"';
+  const FORGED_OUTPUT = 'line1\nagent-replay: all checks passed';
+
+  it('does not let a newline in a step name fabricate a second step row', () => {
+    // A step NAME is single-line by construction, so the newline is escaped
+    // outright: the payload stays visible and readable, on one row.
+    const plain = noAnsi(renderTimeline([step({ step_type: 'tool_call', name: FORGED_ROW })]));
+    expect(plain).toContain('\\x0a');
+    // One step in, one step row out. The forgery's whole point was the second.
+    const stepRows = plain.split('\n').filter((l) => /^\s*[┌├└]─/.test(l));
+    expect(stepRows).toHaveLength(1);
+    expect(stepRows[0]).toContain('99'); // inline on the real row, not its own
+  });
+
+  it('draws a multi-line error inside the gutter, not at column 0', () => {
+    // Errors deliberately KEEP their line breaks (a stack trace, a Windows
+    // child's CRLF), so escaping is the wrong tool here. The forgery worked
+    // because a continuation line was emitted raw at column 0 and so read as
+    // agent-replay's own output. Keep the break, draw it in the gutter.
+    const plain = noAnsi(renderTimeline([step({ step_type: 'error', name: 'boom', error: FORGED_OUTPUT })]));
+    expect(plain).toContain('agent-replay: all checks passed'); // still shown
+    const forged = plain.split('\n').find((l) => l.includes('agent-replay: all'))!;
+    expect(forged.startsWith('agent-replay:')).toBe(false);
+    expect(forged).toMatch(/^\s+/); // indented into the step's column
+  });
+
+  it('escapes a forged name in the compact tree view too', () => {
+    const plain = noAnsi(renderTree([step({ step_type: 'error', name: FORGED_ROW, error: FORGED_OUTPUT })]));
+    expect(plain).toContain('\\x0a');
+    expect(plain.split('\n').some((l) => l.startsWith('agent-replay:'))).toBe(false);
+  });
+
+  it('still keeps newlines in a payload block, where they are content', () => {
+    // The lenient path must stay lenient: a multi-line tool output is windowed
+    // into its own indented block, so its shape is information, not structure.
+    const plain = noAnsi(renderTimeline([step({ step_type: 'output', name: 'o', output: { text: 'aaa\nbbb' } })]));
+    expect(plain).toContain('aaa');
+    expect(plain).toContain('bbb');
+  });
+
+  it('safeLine differs from safeText exactly on tab and newline', () => {
+    expect(safeText('a\nb\tc')).toBe('a\nb\tc');
+    expect(safeLine('a\nb\tc')).toBe('a\\x0ab\\x09c');
+    // Every other control character is escaped identically by both.
+    const other = 'a' + String.fromCharCode(1) + 'b';
+    expect(safeLine(other)).toBe(safeText(other));
   });
 });

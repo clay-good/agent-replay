@@ -9,7 +9,7 @@ import { traceHeaderPanel } from '../ui/boxen-panels.js';
 import { truncate } from '../utils/json.js';
 import { renderTimeline, renderTree } from '../ui/timeline.js';
 import { evalTable } from '../ui/table.js';
-import { heading, separator, safeText } from '../ui/theme.js';
+import { heading, separator, safeText, safeLine} from '../ui/theme.js';
 import { resolveDataDir } from '../utils/paths.js';
 import { makeRefuse, openStoreOr } from '../utils/refuse.js';
 import { errorMessage } from '../utils/json.js';
@@ -169,7 +169,7 @@ function renderSnapshots(
 
     console.log(
       chalk.dim(`  Step ${step.step_number}`) +
-        chalk.white(` "${safeText(step.name)}"`) +
+        chalk.white(` "${safeLine(step.name)}"`) +
         chalk.dim(` — token_count: ${snapshot.token_count}`),
     );
 

@@ -243,6 +243,27 @@ between them, and nothing else.
 
 ### Fixed
 
+- **A newline in a trace could forge a line of output.** A trace is written by
+  the agent under test, so every rendered string is untrusted — and `safeText`
+  deliberately preserves `\n` so a rendered block keeps its shape. On a
+  one-line row that was a forgery primitive, and both forms reproduced in `show`
+  and `replay`:
+  - a step name of `safe\n  ├─ 99  ➡ Output  "…"` drew a **fabricated step
+    row**, indistinguishable from a real one;
+  - an error of `line1\nagent-replay: all checks passed` drew a line at column
+    0 with no gutter, reading as **agent-replay's own output** in the
+    operator's terminal and CI log.
+
+  `escapeForMessage` already existed for exactly this reason and the render
+  sites' own comments pointed at it, but the single-line renderers never
+  adopted it. They now use a named `safeLine` for fields that are single-line by
+  construction (step name, model, decision, agent name, evaluator, policy name).
+  Errors are handled differently on purpose: they keep their line breaks, since
+  a stack trace or a Windows child's CRLF output is shaped information, and
+  every continuation line is now drawn inside the step's gutter, where it is
+  visibly trace content rather than tool output. Payload blocks (`input`,
+  `output`, JSON) stay lenient — there a newline is content, not structure.
+
 - **`list` printed the newest trace last, `list --limit 1` returned the wrong
   trace, and `watch` attached to the wrong running run** — for any trace whose
   `started_at` carries an ISO-8601 basic-format offset (`+0200`). Ordering used

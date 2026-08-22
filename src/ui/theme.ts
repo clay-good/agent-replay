@@ -1,7 +1,7 @@
 import chalk, { type ChalkInstance } from 'chalk';
 import type { TraceStatus, StepType } from '../models/enums.js';
 import { STEP_TYPE_ICONS, STEP_TYPE_LABELS } from '../models/enums.js';
-import { escapeControlChars } from '../utils/json.js';
+import { escapeControlChars, escapeForMessage } from '../utils/json.js';
 
 // ── Color palette ─────────────────────────────────────────────────────────
 
@@ -102,8 +102,33 @@ export function formatCostUsd(cost: number): string {
 export function safeText(text: string): string {
   // Delegates to the lenient escaper: the same control-character class the
   // message escaper uses, minus tab and newline, which a rendered block keeps.
-  // A single-line row should use `escapeForMessage` instead — see json.ts.
+  // A single-line row should use `safeLine` instead — see below.
   return escapeControlChars(text);
+}
+
+/**
+ * Escape a producer value bound for a ONE-LINE row.
+ *
+ * `safeText` deliberately preserves `\n` so a rendered BLOCK keeps its shape.
+ * On a single-line row that is a forgery primitive: the trace is written by the
+ * agent under test, so a `\n` in a step name or error emits a second line the
+ * renderer never accounted for. Two concrete forgeries this closes, both of
+ * which reproduced in `show` and `replay`:
+ *
+ *   name  = 'safe\n  ├─ 99  ➡ Output  "NOTHING TO SEE"'
+ *     → a fabricated step row, indistinguishable from a real one.
+ *   error = 'line1\nagent-replay: all checks passed'
+ *     → a line at column 0, with no `│` gutter, reading as this tool's own
+ *       output in the operator's terminal and CI log.
+ *
+ * Same reasoning and same escaper as {@link escapeForMessage}, which the
+ * diagnostic sites already use; the render sites that emit one line per value
+ * needed it too. Payload surfaces (`input`, `output`, JSON blocks) stay lenient
+ * — they are windowed into their own indented block, where a newline is content
+ * rather than structure.
+ */
+export function safeLine(text: string): string {
+  return escapeForMessage(text);
 }
 
 export function scoreBadge(score: number): string {
