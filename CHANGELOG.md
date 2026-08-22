@@ -295,6 +295,16 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **A span id repeated inside a single OTLP batch was stored twice.** The merge
+  path already refuses a span id it saw in an *earlier* batch — that is what
+  makes an exporter's retry safe — but the check compares against what is
+  stored, so it cannot see a duplicate that arrives twice inside one payload. A
+  batch listing the same span twice became two steps sharing an `otel_span_id`,
+  with its tokens counted twice (3 steps and 45 tokens where 2 and 30 were
+  correct). The identity and the argument are the same on either side of a batch
+  boundary, so the same rule now applies within one. A span carrying no id is
+  left alone, since there is nothing to key on.
+
 - **The Codex importer counted an orphan tool output as imported.** A
   `function_call_output` / `custom_tool_call_output` whose `call_id` pairs with
   no call record lands in no step — routine when a rollout is head-truncated, or

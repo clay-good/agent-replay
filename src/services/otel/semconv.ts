@@ -386,7 +386,25 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): MappedOtelTrace[] 
   });
 
   const traces: MappedOtelTrace[] = [];
-  for (const [, group] of byTrace) {
+  for (const [, group0] of byTrace) {
+    // Drop a span id repeated WITHIN this batch, keeping the first.
+    //
+    // The merge path already refuses a span id it has seen in an EARLIER batch,
+    // which is what makes an exporter's retry safe. That check compares against
+    // what is stored, so it cannot see a duplicate that arrives twice inside
+    // one payload — and a batch listing the same span twice was stored as two
+    // steps with the same `otel_span_id`, double-counting its tokens. The same
+    // identity, the same argument, so the same answer: a span id is unique by
+    // construction, and a second occurrence is a redelivery whichever side of a
+    // batch boundary it lands on. A span with no id is left alone, since there
+    // is nothing to key on.
+    const seenSpanIds = new Set<string>();
+    const group = group0.filter((sp) => {
+      if (!sp.spanId) return true;
+      if (seenSpanIds.has(sp.spanId)) return false;
+      seenSpanIds.add(sp.spanId);
+      return true;
+    });
     // Order by start time, but sort a span missing startTimeUnixNano (flattened
     // to 0 by num()) to the END, not the front — otherwise it steals step_number
     // 1 and the trace's start time from genuinely-earlier, fully-timed spans.

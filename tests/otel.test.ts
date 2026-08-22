@@ -1044,3 +1044,56 @@ describe('a failed tool is a step error, not a failed run', () => {
     expect(t.error).toBeTruthy();
   });
 });
+
+
+describe('a span id repeated inside one batch is a redelivery too', () => {
+  // The merge path already refuses a span id it saw in an EARLIER batch, which
+  // is what makes an exporter's retry safe. That check compares against what is
+  // STORED, so it cannot see a duplicate arriving twice inside one payload —
+  // and a batch listing the same span twice was stored as two steps sharing an
+  // `otel_span_id`, double-counting its tokens. The identity and the argument
+  // are the same on either side of a batch boundary.
+  const span = (spanId: string, name: string) => ({
+    traceId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    spanId,
+    name,
+    startTimeUnixNano: '1000000000',
+    endTimeUnixNano: '2000000000',
+    attributes: [{ key: 'gen_ai.usage.input_tokens', value: { intValue: '15' } }],
+  });
+  const batch = (spans: unknown[]) => ({ resourceSpans: [{ scopeSpans: [{ spans }] }] });
+
+  it('keeps the first occurrence and drops the repeat', () => {
+    const [t] = mapOtlpTraces(batch([
+      span('1111111111111111', 'chat gpt-4'),
+      span('1111111111111111', 'chat gpt-4'),
+      span('2222222222222222', 'execute_tool ls'),
+    ]) as never);
+
+    expect(t.steps).toHaveLength(2);
+    expect(t.steps!.map((st) => (st.metadata as { otel_span_id?: string }).otel_span_id))
+      .toEqual(['1111111111111111', '2222222222222222']);
+    // The token total must not double-count either — that is the damage.
+    expect(t.total_tokens).toBe(30);
+  });
+
+  it('leaves genuinely distinct spans alone', () => {
+    const [t] = mapOtlpTraces(batch([
+      span('1111111111111111', 'chat gpt-4'),
+      span('2222222222222222', 'execute_tool ls'),
+      span('3333333333333333', 'execute_tool cat'),
+    ]) as never);
+    expect(t.steps).toHaveLength(3);
+    expect(t.total_tokens).toBe(45);
+  });
+
+  it('does not fuse spans that simply have no id', () => {
+    // There is nothing to key on, so they must all survive rather than
+    // collapsing into one.
+    const [t] = mapOtlpTraces(batch([
+      { ...span('', 'execute_tool a'), spanId: '' },
+      { ...span('', 'execute_tool b'), spanId: '' },
+    ]) as never);
+    expect(t.steps).toHaveLength(2);
+  });
+});
