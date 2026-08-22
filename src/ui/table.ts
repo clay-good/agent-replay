@@ -6,6 +6,7 @@ import { statusBadge, scoreBadge, passBadge, guardActionBadge, colors, safeText,
 import { formatRelativeTime } from '../utils/time.js';
 import { isPossiblyAbandoned } from '../services/trace-service.js';
 import { effectiveDurationMs, formatDuration } from '../utils/time.js';
+import { truncateToWidth } from './width.js';
 
 // ── Generic table factory ─────────────────────────────────────────────────
 
@@ -53,7 +54,7 @@ export function traceTable(traces: Trace[]): string {
       : statusBadge(t.status as TraceStatus);
     table.push([
       chalk.dim(safeText(t.id.slice(0, 12))),
-      chalk.white(safeLine(truncate(t.agent_name, AGENT_NAME_MAX))),
+      chalk.white(safeLine(truncateToWidth(t.agent_name, AGENT_NAME_MAX))),
       status,
       chalk.white(stepCountStr(t)),
       formatDurationShort(effectiveDurationMs(t)),
@@ -129,7 +130,7 @@ export function policyTable(policies: GuardrailPolicy[]): string {
       p.enabled ? chalk.green('Yes') : chalk.red('No'),
       // The only unescaped cell in this table: a policy's match pattern is
       // author-supplied JSON, and JSON.stringify leaves C1 controls intact.
-      chalk.dim(safeText(truncate(JSON.stringify(p.match_pattern), 40))),
+      chalk.dim(safeText(truncateToWidth(JSON.stringify(p.match_pattern), 40))),
     ]);
   }
 
@@ -181,10 +182,10 @@ function summarizeDetails(details: Record<string, unknown>): string {
   if (details.skipped) return String(details.reason ?? 'Skipped');
 
   // AI eval: root cause
-  if (details.root_cause) return truncate(String(details.root_cause), 50);
+  if (details.root_cause) return truncateToWidth(String(details.root_cause), 50);
 
   // AI eval: quality review
-  if (details.overall_assessment) return truncate(String(details.overall_assessment), 50);
+  if (details.overall_assessment) return truncateToWidth(String(details.overall_assessment), 50);
 
   // AI eval: security audit
   if (details.risk_level != null) return `Risk: ${details.risk_level}`;
@@ -206,10 +207,7 @@ function summarizeDetails(details: Record<string, unknown>): string {
     if (failed.length === 0) return 'All criteria passed';
     return failed.map((c) => c.name).join(', ');
   }
-  return truncate(JSON.stringify(details), 50);
+  return truncateToWidth(JSON.stringify(details), 50);
 }
 
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max - 3) + '...';
-}
+

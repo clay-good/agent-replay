@@ -294,6 +294,11 @@ agent-replay watch <trace-id> --interval 200
 
 With no id it picks the most recent `running` trace — by start *instant*, not by the spelling of the timestamp — so it's the natural companion to a hook-instrumented session in another terminal. It exits when the trace is finalized.
 
+`--interval` is in milliseconds and is capped at `2147483647` ms — above that
+Node's timer overflows and clamps to 1 ms, polling the database about a
+thousand times a second rather than almost never, so it is a usage error (exit
+`2`) instead.
+
 A producer that opens a step and closes it later (the two-phase `step_start`/`step_end` protocol) gets two lines per step: the announcement when the step starts, and a closing line carrying what only the end knows — duration, tokens, and any error. A producer that writes a complete step in one event gets a single line. Text that came from the agent (step names, errors, models, decision rationales) is escaped before it reaches your terminal, so a control sequence in a tool's stderr cannot retarget the terminal you are watching from.
 
 ### Explain decisions
@@ -527,6 +532,12 @@ agent-replay export --format golden --tag production --output golden.json
 # Include stored evals and per-step context snapshots
 agent-replay export --format json --with-evals --with-snapshots --output full.json
 ```
+
+An **empty** value for `--status`, `--agent`, `--tag` or `--since` is a usage
+error (exit `2`), as it is for `list`. It matters more here, because `export`
+writes: a widened `--agent ""` would dump the whole store into a file you
+believed held one agent's traces, and a golden baseline built that way then
+gates CI on runs it was never meant to cover.
 
 A trace id and the filter flags (`--status`, `--agent`, `--tag`, `--since`) are
 mutually exclusive: pass an id to export exactly one trace, or filters to export a

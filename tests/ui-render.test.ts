@@ -756,3 +756,38 @@ describe('panels degrade rather than crash at an absurd terminal width', () => {
     expect(atWidth(80, () => summaryPanel('T', { Traces: 1 }))).toContain('╭');
   });
 });
+
+
+describe('table and diff cells are budgeted in columns too', () => {
+  // Three copies of `truncate` existed: json.ts's, table.ts's and
+  // diff-renderer's. All three measured UTF-16 code units against what is a
+  // COLUMN budget (`colWidths`), so a CJK cell rendered about twice its
+  // allotted width and pushed the border out. table.ts's copy was additionally
+  // not surrogate-safe, so it could cut an emoji in half — the very defect the
+  // diff renderer had already been fixed for, in a sibling file.
+  const cellWidth = (out: string, marker: string) => {
+    const line = noAnsi(out).split('\n').find((l) => l.includes(marker))!;
+    return stringWidth(line);
+  };
+
+  it('does not let a CJK agent name overflow its column', () => {
+    const wide = noAnsi(traceTable([trace({ agent_name: '完了'.repeat(60) })]));
+    const plain = noAnsi(traceTable([trace({ agent_name: 'a'.repeat(120) })]));
+    const widest = (t: string) => Math.max(...t.split('\n').map((l) => stringWidth(l)));
+    // The CJK row must not be dramatically wider than the ASCII one; before,
+    // the same 40-unit budget bought 80 columns.
+    expect(widest(wide)).toBeLessThanOrEqual(widest(plain) + 4);
+  });
+
+  it('never leaves a lone surrogate in a table cell', () => {
+    const LONE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    for (let n = 30; n <= 60; n++) {
+      const out = traceTable([trace({ agent_name: 'a'.repeat(n % 7) + '😀'.repeat(40) })]);
+      expect(LONE.test(out), `n=${n}`).toBe(false);
+    }
+  });
+
+  it('leaves a short ASCII name untouched, so the common case is unchanged', () => {
+    expect(noAnsi(traceTable([trace({ agent_name: 'travel-bot' })]))).toContain('travel-bot');
+  });
+});

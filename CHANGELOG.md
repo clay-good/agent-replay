@@ -257,6 +257,17 @@ between them, and nothing else.
 
 ### Fixed
 
+- **Table and diff cells were budgeted in code units, not columns.** Three
+  copies of `truncate` existed — in `json.ts`, `table.ts` and
+  `diff-renderer.ts` — and all measured UTF-16 code units against what is a
+  **column** budget (`colWidths`). A CJK character is one code unit and two
+  columns, so a cell built to a 40-unit budget rendered 80 columns wide and
+  pushed the table border out. `table.ts`'s copy was additionally not
+  surrogate-safe, so it could cut an emoji in half — the exact defect the diff
+  renderer had already been fixed for, in a sibling file that had its own copy.
+  All three now share one width-aware truncation, which walks by code point and
+  so cannot split a pair either.
+
 - **`export` and `check --since` still widened on an empty value.** `list` was
   fixed for this; its siblings were not. It matters most in `export`, which
   WRITES: `export --agent "$AGENT"` with the variable unset silently dumped the

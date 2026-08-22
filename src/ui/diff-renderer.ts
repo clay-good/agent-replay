@@ -5,6 +5,7 @@ import type { Trace, TraceDiffResult, StepDiff } from '../models/types.js';
 import type { TraceStatus } from '../models/enums.js';
 import { windowedAround } from '../utils/json.js';
 import { statusBadge, colors, heading, separator, label, safeText } from './theme.js';
+import { truncateToWidth } from './width.js';
 
 /**
  * Render a side-by-side trace diff with prominent divergence indicator.
@@ -128,7 +129,7 @@ function formatDiffValue(val: unknown, field: string, other?: unknown): string {
   // "(none)" by the null guard above; this branch handles the side that has the
   // value, so show it (green) rather than blanking it too.
   if (field === 'missing_right' || field === 'missing_left') {
-    return chalk.green(safeText(truncate(String(val), 34)));
+    return chalk.green(safeText(truncateToWidth(String(val), 34)));
   }
 
   // Escaped like every other render path: a step name or error reaches this
@@ -150,21 +151,7 @@ function formatDiffValue(val: unknown, field: string, other?: unknown): string {
  * with nothing suggesting they should.
  */
 
-/**
- * Move a cut index off the low half of a surrogate pair. Slicing between the
- * halves of an astral character (an emoji in a prompt is enough) leaves a lone
- * surrogate, which renders as U+FFFD — in BOTH columns, so the mojibake looked
- * like the difference.
- */
-function safeCut(s: string, index: number): number {
-  const code = s.charCodeAt(index);
-  return code >= 0xdc00 && code <= 0xdfff ? index + 1 : index;
-}
 
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, safeCut(s, max - 3)) + '...';
-}
 
 /**
  * "3 in model, 5 step presence" — a count the label can stand behind.
