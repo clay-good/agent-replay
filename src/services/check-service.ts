@@ -9,10 +9,16 @@ import type { GoldenEntry } from './export-service.js';
  * than raw output text, so non-deterministic wording never trips the check.
  */
 
-// Compared by default. `model` is opt-in via --fields (model swaps are often
-// intentional, so it shouldn't fail a default regression check).
+// Compared by default. `model` and `decisions` are opt-in via --fields.
+//
+// `model` because a model swap is often intentional, so it should not fail a
+// default regression check. `decisions` because no baseline exported before it
+// existed carries the data, and adding it to the defaults would turn every such
+// baseline into the "nothing to compare" refusal — a gate that was working
+// would start reporting itself broken on upgrade. Re-export the baseline and
+// pass `--fields ...,decisions` to gate on it.
 export const DEFAULT_FIELDS = ['step_count', 'step_types', 'step_names', 'tool_inputs', 'step_errors', 'status'] as const;
-export const KNOWN_FIELDS = [...DEFAULT_FIELDS, 'model'] as const;
+export const KNOWN_FIELDS = [...DEFAULT_FIELDS, 'model', 'decisions'] as const;
 export type CheckField = (typeof KNOWN_FIELDS)[number];
 
 export interface Divergence {
@@ -236,6 +242,8 @@ function entryExercises(g: GoldenEntry, field: string): boolean {
       return (g.metadata as { status?: unknown } | undefined)?.status != null;
     case 'model':
       return steps.some((s) => s.model != null);
+    case 'decisions':
+      return steps.some((s) => s.decision != null);
     default:
       // An unknown field is rejected before this runs; treat it as exercisable
       // so a future field can never silently become a refusal.
@@ -358,6 +366,30 @@ function diffAgainstGolden(trace: TraceWithDetails, golden: GoldenEntry, fields:
       if (g.model !== (step.model ?? null)) {
         divergences.push({ field: 'model', step_number: step.step_number, golden: g.model, candidate: step.model ?? null });
         break;
+      }
+    }
+  }
+
+  // Opt-in: catch the agent CHOOSING differently at the same step.
+  //
+  // This is the divergence a structural gate is otherwise blind to. Rename
+  // nothing, change no tool, and swap `escalate_to_human` for `delete_records`:
+  // step count, types, names, tool inputs and status all still match, and the
+  // gate reports green. Positional, like `tool_inputs` and `model` above, and
+  // only where the baseline recorded a decision — a step that made none is not
+  // evidence that the candidate should not make one.
+  //
+  // Every differing step is reported rather than only the first: unlike a model
+  // swap, which is usually one setting applied throughout, two decisions going
+  // the wrong way are two separate things a reader needs to see.
+  if (fields.includes('decisions')) {
+    for (let i = 0; i < n; i++) {
+      const g = gSteps[i];
+      const step = cSteps[i];
+      if (g.decision == null) continue;
+      const chosen = step.decision?.chosen ?? null;
+      if (g.decision !== chosen) {
+        divergences.push({ field: 'decisions', step_number: step.step_number, golden: g.decision, candidate: chosen });
       }
     }
   }

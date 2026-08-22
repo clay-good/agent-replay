@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { runMigrations } from '../src/db/migrations.js';
-import { ingestTrace, getTrace, createEval, deleteTrace } from '../src/services/trace-service.js';
+import { ingestTrace, getTrace, createEval, deleteTrace, listTraces } from '../src/services/trace-service.js';
 import { exportTraces } from '../src/services/export-service.js';
 import { checkGolden, inputHash, stableStringify } from '../src/services/check-service.js';
 import { ensureDatabase, resetConnection } from '../src/db/index.js';
@@ -1244,5 +1244,94 @@ describe('check refuses and reports in the documented shapes', () => {
     }]));
     const { code } = check({ golden, trace: 'trc_nope' });
     expect(code).toBe(1);
+  });
+});
+
+
+describe('the gate can see the agent CHOOSING differently', () => {
+  // The divergence a structural gate is otherwise blind to: rename nothing,
+  // change no tool, and swap one decision for its opposite, and step count,
+  // types, names, tool inputs and status all still match — green. `diff` calls
+  // the decision "the single field this whole tool exists to explain", and
+  // `why`/`decisions` are built on it, but the baseline never carried it.
+  //
+  // Opt-in via --fields, like `model`: no baseline exported before this carries
+  // the data, and adding it to the defaults would turn every such baseline into
+  // the "nothing to compare" refusal — a working gate reporting itself broken
+  // on upgrade.
+  let dir: string;
+  let cdb: ReturnType<typeof ensureDatabase>;
+
+  const withDecision = (chosen: string) => ({
+    agent_name: 'chooser',
+    input: { task: 'handle the ticket' },
+    status: 'completed' as const,
+    steps: [
+      { step_number: 1, step_type: 'thought' as const, name: 'consider', input: {} },
+      {
+        step_number: 2, step_type: 'decision' as const, name: 'pick an action', input: {},
+        decision: { chosen, options: [], rationale: 'because' },
+      },
+    ],
+  });
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ar-check-decisions-'));
+    cdb = ensureDatabase(resolve(dir, 'traces.db'));
+  });
+  afterEach(() => {
+    resetConnection();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function golden(): GoldenEntry[] {
+    return JSON.parse(exportTraces(cdb, {}, 'golden')) as GoldenEntry[];
+  }
+
+  /** The stored traces, as `checkGolden` wants them. */
+  function candidates() {
+    return listTraces(cdb, {}).items.map((t) => getTrace(cdb, t.id)!);
+  }
+
+  it('carries the chosen option into the baseline', () => {
+    ingestTrace(cdb, withDecision('escalate_to_human') as never);
+    const step = golden()[0].steps_summary.find((s) => s.step_number === 2)!;
+    expect(step.decision).toBe('escalate_to_human');
+  });
+
+  it('passes when the agent chooses the same way', () => {
+    ingestTrace(cdb, withDecision('escalate_to_human') as never);
+    const base = golden();
+    const res = checkGolden(base, candidates(), { fields: ['step_count', 'decisions'] });
+    expect(res.results.every((r) => r.passed)).toBe(true);
+  });
+
+  it('REGRESSES when the agent chooses the opposite action', () => {
+    ingestTrace(cdb, withDecision('escalate_to_human') as never);
+    const base = golden();
+
+    // Same shape, opposite choice — every default field still matches.
+    cdb.prepare("UPDATE agent_trace_decisions SET chosen = 'delete_records'").run();
+
+    const withoutIt = checkGolden(base, candidates(), { fields: ['step_count', 'step_types', 'step_names', 'status'] });
+    expect(withoutIt.results.every((r) => r.passed)).toBe(true); // blind, as before
+
+    const withIt = checkGolden(base, candidates(), { fields: ['step_count', 'decisions'] });
+    const failed = withIt.results.find((r) => !r.passed);
+    expect(failed).toBeDefined();
+    const d = failed!.divergences.find((x) => x.field === 'decisions')!;
+    expect(d.golden).toBe('escalate_to_human');
+    expect(d.candidate).toBe('delete_records');
+    expect(d.step_number).toBe(2);
+  });
+
+  it('does not fault a step the baseline recorded no decision for', () => {
+    // A step that made no decision is not evidence the candidate should not
+    // make one; only a recorded choice is compared.
+    ingestTrace(cdb, withDecision('escalate_to_human') as never);
+    const base = golden();
+    base[0].steps_summary[0].decision = undefined;
+    const res = checkGolden(base, candidates(), { fields: ['decisions'] });
+    expect(res.results.every((r) => r.passed)).toBe(true);
   });
 });

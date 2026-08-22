@@ -27,6 +27,22 @@ export interface GoldenStepSummary {
   /** Present when the step recorded a model, so checks can opt into diffing it. */
   model?: string | null;
   /**
+   * The option this step CHOSE, present only when the step recorded a decision.
+   *
+   * A structural gate that cannot see this cannot see an agent taking the
+   * opposite action at the same step: rename nothing, change no tool, and swap
+   * `escalate_to_human` for `delete_records`, and every default field still
+   * matches. `diff` calls the decision "the single field this whole tool exists
+   * to explain", and `why`/`decisions` are built on it, but the baseline never
+   * carried it.
+   *
+   * Written only where a decision exists, following `model` rather than
+   * `failed`: absence here means "this step made no decision", and a baseline
+   * where NO step carries one is caught by the existing "nothing to compare for
+   * --fields" refusal rather than passing green.
+   */
+  decision?: string;
+  /**
    * Whether this step recorded an error; written for every step of a baseline
    * exported by this version, so an ABSENT key means the baseline predates the
    * field and that step's outcome is unknown.
@@ -173,6 +189,7 @@ function exportGolden(db: Database.Database, items: Trace[]): string {
         name: s.name,
         ...(s.step_type === 'tool_call' ? { input: s.input } : {}),
         ...(s.model != null ? { model: s.model } : {}),
+        ...(s.decision?.chosen != null ? { decision: s.decision.chosen } : {}),
         // Written for every step, true or false. Emitting it only for failures
         // made "no key" ambiguous between "this step succeeded" and "this
         // baseline predates the field", and the check then skipped the entry —

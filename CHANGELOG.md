@@ -45,6 +45,17 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Added
 
+- **`check --fields decisions` gates on what the agent CHOSE.** The structural
+  gate was blind to the one divergence the tool exists to explain: rename
+  nothing, change no tool, and swap `escalate_to_human` for `delete_records`,
+  and step count, types, names, tool inputs and status all still match — green.
+  `export --format golden` now carries each step's chosen option, and
+  `--fields decisions` compares it. Opt-in like `model`, because no baseline
+  exported before this carries the data and making it a default would turn a
+  working gate into the "nothing to compare" refusal on upgrade. Only a step the
+  baseline recorded a decision for is compared, and every differing step is
+  reported rather than just the first.
+
 - `check --agent-exact <name>` selects exactly one agent, for a regression gate.
   `--agent` matches by substring, which is right for browsing and wrong for a
   gate: `--agent assistant` also selects `travel-assistant` and
