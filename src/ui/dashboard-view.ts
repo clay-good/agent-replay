@@ -49,6 +49,13 @@ export class DashboardView {
   start(): void {
     this.screen = blessed.screen({
       smartCSR: true,
+      // Without this, blessed substitutes `?` for every wide or astral
+      // character in its draw path — so a Japanese agent name rendered as
+      // `??????????` in the Recent Traces panel while `list` showed the same
+      // name correctly. The dashboard is the one surface that reads a trace's
+      // text through blessed rather than straight to stdout, so it is the one
+      // surface that needs to be told the terminal is UTF-8.
+      fullUnicode: true,
       title: 'agent-replay dashboard',
     });
 

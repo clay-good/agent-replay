@@ -3,6 +3,7 @@ import type { TraceStep } from '../models/types.js';
 import type { StepType } from '../models/enums.js';
 import { stepIcon, stepLabel, colors, label, separator, safeText, safeLine } from './theme.js';
 import { hasRenderableContent, truncate } from '../utils/json.js';
+import stringWidth from 'string-width';
 import { formatDuration } from '../utils/time.js';
 
 export interface TimelineOptions {
@@ -295,8 +296,36 @@ function truncateJson(obj: unknown, maxLen: number): string {
     str = String(obj);
   }
   str = safeText(str);
-  if (str.length <= maxLen) return str;
-  return str.slice(0, maxLen - 3) + '...';
+  return truncateToWidth(str, maxLen);
+}
+
+/**
+ * Truncate to a budget of terminal COLUMNS, not UTF-16 code units.
+ *
+ * The budget here is a width — it is derived from `process.stdout.columns` — so
+ * measuring the string with `.length` was comparing two different units. A CJK
+ * or emoji character occupies two columns and a combining mark occupies none,
+ * so a line built to a 90-unit budget rendered about 193 columns wide: it
+ * wrapped several times and broke the `│` gutter that makes the timeline
+ * readable. `cli-table3` and `boxen` already measure with `string-width`; this
+ * renderer did its own arithmetic and did not.
+ *
+ * Iterates by code point and stops as soon as the budget is spent, so a 500 KB
+ * payload costs about a screenful of work rather than a pass over the whole
+ * string. A pair is never split, since iteration is per code point.
+ */
+function truncateToWidth(str: string, maxCols: number): string {
+  if (str.length <= maxCols && stringWidth(str) <= maxCols) return str;
+  const budget = Math.max(0, maxCols - 3); // room for the ellipsis
+  let out = '';
+  let used = 0;
+  for (const ch of str) {
+    const w = stringWidth(ch);
+    if (used + w > budget) return out + '...';
+    out += ch;
+    used += w;
+  }
+  return out;
 }
 
 /** Strip ANSI escape codes (for re-applying styling) */

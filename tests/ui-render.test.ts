@@ -4,6 +4,7 @@ import { traceHeaderPanel, summaryPanel } from '../src/ui/boxen-panels.js';
 import { formatScorePct, formatCostUsd, safeText, safeLine } from '../src/ui/theme.js';
 import { formatDuration } from '../src/utils/time.js';
 import { renderTimeline, renderTree } from '../src/ui/timeline.js';
+import stringWidth from 'string-width';
 import { renderDiff } from '../src/ui/diff-renderer.js';
 import type { Trace, TraceStep, EvalResult, GuardrailPolicy, TraceDiffResult } from '../src/models/types.js';
 import type { StepType } from '../src/models/enums.js';
@@ -673,5 +674,48 @@ describe('one hostile trace cannot destroy the view', () => {
   it('bounds it in the compact tree view as well', () => {
     const out = noAnsi(renderTree([step({ step_type: 'tool_call', name: 'B'.repeat(200000) })]));
     expect(Math.max(...out.split('\n').map((l) => l.length))).toBeLessThan(200);
+  });
+});
+
+
+describe('the timeline budgets terminal columns, not UTF-16 code units', () => {
+  // `maxWidth` comes from `process.stdout.columns`, so it is a WIDTH — but the
+  // truncation measured the string with `.length`. A CJK or emoji character
+  // occupies two columns, so a line built to a 90-unit budget rendered about
+  // 193 columns wide: it wrapped several times and broke the `│` gutter that
+  // makes the timeline readable. cli-table3 and boxen already measure with
+  // string-width; this renderer did its own arithmetic.
+  const widest = (out: string) =>
+    Math.max(...noAnsi(out).split('\n').map((l) => stringWidth(l)));
+
+  it('keeps a wide-character payload within the requested width', () => {
+    const out = renderTimeline(
+      [step({ step_type: 'output', name: 'o', output: { text: '完了'.repeat(80) } })],
+      { maxWidth: 100 },
+    );
+    // Allowing for the row prefix and gutter, which sit outside the content
+    // budget. The bug produced roughly double the budget, not a few columns over.
+    expect(widest(out)).toBeLessThan(120);
+  });
+
+  // Note: this one passed BEFORE the fix too, and it is kept as a guard rather
+  // than as evidence. An astral emoji is a surrogate pair, so `.length` counts
+  // 2 for it and its display width is also 2 — the old arithmetic was wrong in
+  // a way that happened to cancel out here. CJK is the discriminating case:
+  // one code unit, two columns. Keeping both documents which is which.
+  it('does the same for emoji, which are also two columns wide', () => {
+    const out = renderTimeline(
+      [step({ step_type: 'output', name: 'o', output: { text: '😀'.repeat(200) } })],
+      { maxWidth: 100 },
+    );
+    expect(widest(out)).toBeLessThan(120);
+  });
+
+  it('leaves narrow text alone, so the common case is unchanged', () => {
+    const out = renderTimeline(
+      [step({ step_type: 'output', name: 'o', output: { text: 'short and plain' } })],
+      { maxWidth: 100 },
+    );
+    expect(noAnsi(out)).toContain('short and plain');
   });
 });

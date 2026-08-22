@@ -243,6 +243,19 @@ between them, and nothing else.
 
 ### Fixed
 
+- **Non-Latin text rendered wrongly in two different ways.** The timeline
+  budgeted its width in UTF-16 code units while the budget itself came from
+  `process.stdout.columns` — two different units. A CJK character is one code
+  unit but two columns, so a line built to a 90-unit budget rendered about 193
+  columns: it wrapped several times and broke the `│` gutter that makes the
+  timeline readable. It now measures with `string-width`, as `cli-table3` and
+  `boxen` already did (measured 193 → 107 columns against a ~100 budget), and
+  `string-width` is now a direct dependency rather than one relied on
+  transitively. Separately, the dashboard's blessed screen was created without
+  `fullUnicode`, so blessed substituted `?` for every wide or astral character
+  in its draw path — a Japanese agent name showed as `??????????` in the Recent
+  Traces panel while `list` displayed the same name correctly.
+
 - **One trace could make the whole listing unreadable.** `agent_name` and a
   step's `name` are producer-controlled and were rendered unbounded, while every
   neighbouring field was windowed. cli-table3 sizes a column to its widest cell,
