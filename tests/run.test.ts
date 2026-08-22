@@ -4,6 +4,7 @@ import { runMigrations } from '../src/db/migrations.js';
 import { getTrace } from '../src/services/trace-service.js';
 import { runWrapped } from '../src/services/harness-service.js';
 import { resolveDataDir } from '../src/utils/paths.js';
+import { homedir } from 'node:os';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -298,6 +299,49 @@ describe('AGENT_REPLAY_DIR handshake', () => {
       expect(resolveDataDir('')).toBe('.agent-replay');
       process.env.AGENT_REPLAY_DIR = '/handed/down';
       expect(resolveDataDir('')).toBe('/handed/down');
+    } finally {
+      if (prev === undefined) delete process.env.AGENT_REPLAY_DIR;
+      else process.env.AGENT_REPLAY_DIR = prev;
+    }
+  });
+
+  it('treats a whitespace-only value as unset too', () => {
+    // The guard above tested `!== ''`, so `AGENT_REPLAY_DIR="   "` slipped
+    // through and created a directory literally named three spaces — the same
+    // hazard as the empty value, wearing a name that is nearly invisible in a
+    // directory listing.
+    const prev = process.env.AGENT_REPLAY_DIR;
+    try {
+      process.env.AGENT_REPLAY_DIR = '   ';
+      expect(resolveDataDir()).toBe('.agent-replay');
+      expect(resolveDataDir('  ')).toBe('.agent-replay');
+      expect(resolveDataDir('\t\n')).toBe('.agent-replay');
+      process.env.AGENT_REPLAY_DIR = '/handed/down';
+      expect(resolveDataDir('   ')).toBe('/handed/down');
+    } finally {
+      if (prev === undefined) delete process.env.AGENT_REPLAY_DIR;
+      else process.env.AGENT_REPLAY_DIR = prev;
+    }
+  });
+
+  it('expands a leading ~, which no shell was there to expand', () => {
+    // A quoted `--dir '~/traces'`, a hook or settings JSON file, a Docker or
+    // systemd `Environment=`, a CI `env:` block — none of these are shell
+    // expanded, so the tilde arrived literal and `resolve()` made a directory
+    // actually NAMED `~` under the CWD. The store went somewhere the user never
+    // meant, and a read command against it reported an empty store at exit 0.
+    const prev = process.env.AGENT_REPLAY_DIR;
+    const home = homedir();
+    try {
+      expect(resolveDataDir('~')).toBe(home);
+      expect(resolveDataDir('~/traces')).toBe(join(home, 'traces'));
+      process.env.AGENT_REPLAY_DIR = '~/from-env';
+      expect(resolveDataDir()).toBe(join(home, 'from-env'));
+      // Another account's home needs a password-database lookup that is not
+      // portable; guessing would be worse than the literal path.
+      expect(resolveDataDir('~someone/traces')).toBe('~someone/traces');
+      // A tilde anywhere but the start is an ordinary character.
+      expect(resolveDataDir('/tmp/~/traces')).toBe('/tmp/~/traces');
     } finally {
       if (prev === undefined) delete process.env.AGENT_REPLAY_DIR;
       else process.env.AGENT_REPLAY_DIR = prev;

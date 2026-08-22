@@ -243,6 +243,22 @@ between them, and nothing else.
 
 ### Fixed
 
+- **A `--dir` or `AGENT_REPLAY_DIR` beginning with `~` created a directory
+  literally named `~`.** A shell expands the tilde before the CLI sees it, so
+  this only bit where nothing does — a quoted `--dir '~/traces'`, a hook or
+  settings JSON file, a Docker or systemd `Environment=`, a CI `env:` block.
+  The store was created under the working directory instead of the home
+  directory, and a read command pointed at it reported an empty store at exit 0
+  rather than the traces the user asked for. A leading `~` or `~/` now expands;
+  `~otheruser/` is deliberately left alone, since resolving another account's
+  home is not portable.
+- **A whitespace-only `AGENT_REPLAY_DIR` created a directory named spaces.** The
+  guard that treats a blank store path as unset tested `!== ''`, so `"   "`
+  slipped past it — the same hazard the guard exists to prevent, wearing a name
+  that is nearly invisible in a directory listing. The "is this set at all?"
+  decision now uses the trimmed value; the path itself is still passed through
+  untrimmed, since a directory name may legitimately end in a space.
+
 - **`list` widened to the whole store when a filter flag was given an empty
   value.** `list --agent "$AGENT"` with `$AGENT` unset returned every trace at
   exit 0, which reads exactly like a correct narrow result — the same silent
