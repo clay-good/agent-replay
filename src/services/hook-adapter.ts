@@ -170,6 +170,30 @@ function resolveEventName(payload: Record<string, unknown>, eventArg?: string): 
   return fromPayload ?? eventArg;
 }
 
+/**
+ * The event name an enforcement RESPONSE should carry.
+ *
+ * The router deliberately ignores a `hook_event_name` it cannot route and falls
+ * back to the name the operator registered on the command line — but the
+ * response formatter read the payload's name directly, so a decision could be
+ * LABELLED with the name that had just been ignored. Claude Code keys
+ * `hookSpecificOutput` on a matching `hookEventName`, so a deny labelled
+ * `tool.before` is not applied — and the process exits 0, so the call runs. A
+ * gate that answers in a language the harness does not read is not a gate.
+ *
+ * Same resolution order as `resolveEventName`, ending at `PreToolUse` because
+ * that is the only event enforcement gates.
+ */
+export function enforcementEventName(
+  payload: Record<string, unknown>,
+  eventArg?: string,
+): string {
+  const fromPayload = str(payload.hook_event_name);
+  if (fromPayload && eventAction(fromPayload) !== 'unknown') return fromPayload;
+  if (eventArg && eventAction(eventArg) !== 'unknown') return eventArg;
+  return eventArg ?? 'PreToolUse';
+}
+
 function nextStepNumber(db: Database.Database, traceId: string): number {
   const row = db
     .prepare('SELECT MAX(step_number) as m FROM agent_trace_steps WHERE trace_id = ?')

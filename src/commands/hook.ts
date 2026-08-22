@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import { existsSync } from 'node:fs';
 import { ensureDatabase } from '../db/index.js';
-import { applyHookPayload, formatEnforcementResponse, resolveHookRouting } from '../services/hook-adapter.js';
+import { applyHookPayload, formatEnforcementResponse, resolveHookRouting, enforcementEventName} from '../services/hook-adapter.js';
 import type { HookDialect } from '../services/hook-adapter.js';
 import { listPolicies } from '../services/guard-service.js';
 import { errorMessage } from '../utils/json.js';
@@ -194,7 +194,7 @@ export async function runHook(eventArg: string | undefined, opts: HookOptions = 
 
     // Enforce mode: answer the harness in its documented dialect.
     if (opts.enforce && result.enforcement) {
-      const hookEventName = (typeof payload.hook_event_name === 'string' ? payload.hook_event_name : eventArg) ?? 'PreToolUse';
+      const hookEventName = enforcementEventName(payload, eventArg);
       const resp = formatEnforcementResponse(forced ?? result.dialect, result.enforcement, hookEventName);
       if (resp.stdout) process.stdout.write(`${JSON.stringify(resp.stdout)}\n`);
       if (resp.stderrReason) console.error(`agent-replay hook: BLOCK — ${resp.stderrReason}`);
@@ -212,7 +212,7 @@ export async function runHook(eventArg: string | undefined, opts: HookOptions = 
     if (opts.enforce) {
       const { action, dialect } = resolveHookRouting(payload, eventArg);
       if (action === 'pre_tool') {
-        const hookEventName = (typeof payload.hook_event_name === 'string' ? payload.hook_event_name : eventArg) ?? 'PreToolUse';
+        const hookEventName = enforcementEventName(payload, eventArg);
         const resp = formatEnforcementResponse(
           forced ?? dialect,
           { action: 'deny', policy: null, reason: `agent-replay could not evaluate guard policies (${errorMessage(err)}); blocking to fail closed` },

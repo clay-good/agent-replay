@@ -295,6 +295,17 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **`hook --enforce` labelled its decision with an event name the harness will
+  not match.** Routing deliberately ignores a `hook_event_name` it cannot route
+  and falls back to the event registered on the command line — that fallback
+  exists because an unroutable name used to skip every gate. But the response
+  formatter read the payload's name directly, so a deny could come back labelled
+  with the very name that had just been ignored. Claude Code keys
+  `hookSpecificOutput` on a matching `hookEventName`, so such a decision is not
+  applied, and the process exits 0, so the call runs. Reproduced with
+  `tool.before`, `"PreToolUse "` (trailing space) and `pretooluse`. The response
+  now carries the name routing actually used.
+
 - **A rubric with `threshold: 0` reported "All criteria passed" at 0%.** The
   Details column selects failing criteria with `score < threshold`, which cannot
   express "did not pass" when the threshold is 0 — nothing is below it — so

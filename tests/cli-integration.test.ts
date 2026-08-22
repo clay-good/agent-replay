@@ -1607,6 +1607,27 @@ describe('CLI integration', () => {
     expect(parsed.error).toMatch(/mutually exclusive/);
   });
 
+  it('hook --enforce labels its decision with the event the harness matches', () => {
+    // End-to-end, through the CLI: an unroutable `hook_event_name` used to be
+    // echoed straight back into `hookSpecificOutput.hookEventName`, where
+    // Claude Code would not match it — so the deny was not applied, and the
+    // process exits 0, so the call runs.
+    expect(
+      run(['guard', 'add', '--name', 'nodel', '--action', 'deny',
+           '--pattern', JSON.stringify({ name_contains: 'delete' })]).code,
+    ).toBe(0);
+
+    const r = run(
+      ['hook', 'PreToolUse', '--enforce'],
+      JSON.stringify({ session_id: 'q', hook_event_name: 'tool.before', tool_name: 'delete_user' }),
+    );
+    const out = JSON.parse(r.stdout.trim().split('\n')[0]) as {
+      hookSpecificOutput: { hookEventName: string; permissionDecision: string };
+    };
+    expect(out.hookSpecificOutput.hookEventName).toBe('PreToolUse');
+    expect(out.hookSpecificOutput.permissionDecision).toBe('deny');
+  });
+
   describe('narrowing flags refuse an empty value in every command', () => {
     // `list` was fixed first; its siblings were not. `export` matters MOST of
     // the three, because it WRITES: a widened `--agent ""` silently dumps the

@@ -3,7 +3,7 @@ import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
 import { addPolicy } from '../src/services/guard-service.js';
 import { getTrace, listTraces } from '../src/services/trace-service.js';
-import { applyHookPayload, formatEnforcementResponse } from '../src/services/hook-adapter.js';
+import { applyHookPayload, formatEnforcementResponse, enforcementEventName } from '../src/services/hook-adapter.js';
 
 let db: Database.Database;
 
@@ -244,5 +244,39 @@ describe('formatEnforcementResponse', () => {
     const r = formatEnforcementResponse('claude-code', warn, 'PreToolUse');
     expect(r.exitCode).toBe(0);
     expect((r.stdout as any).systemMessage).toContain('heads up');
+  });
+});
+
+
+describe('an enforcement decision is labelled with a name the harness matches', () => {
+  // The router deliberately IGNORES a `hook_event_name` it cannot route and
+  // falls back to the event the operator registered on the command line — that
+  // fallback exists because an unroutable name used to skip every gate. But the
+  // response formatter read the payload's name directly, so the decision could
+  // be labelled with the very name that had just been ignored.
+  //
+  // Claude Code keys `hookSpecificOutput` on a matching `hookEventName`, so a
+  // deny labelled `tool.before` is not applied — and the process exits 0, so
+  // the call runs. A gate that answers in a language the harness does not read
+  // is not a gate.
+  it.each([
+    ['an unroutable name', 'tool.before'],
+    ['a name with trailing whitespace', 'PreToolUse '],
+    ['a name in the wrong case', 'pretooluse'],
+  ])('resolves %s to the registered event', (_label, given) => {
+    expect(enforcementEventName({ hook_event_name: given }, 'PreToolUse')).toBe('PreToolUse');
+  });
+
+  it('keeps a routable payload name, which is the normal case', () => {
+    expect(enforcementEventName({ hook_event_name: 'PreToolUse' }, 'PreToolUse')).toBe('PreToolUse');
+    // And a routable payload name wins over a differing registered one.
+    expect(enforcementEventName({ hook_event_name: 'PostToolUse' }, 'PreToolUse')).toBe('PostToolUse');
+  });
+
+  it('falls back to the registered event, then to PreToolUse', () => {
+    expect(enforcementEventName({}, 'PreToolUse')).toBe('PreToolUse');
+    expect(enforcementEventName({})).toBe('PreToolUse');
+    // Neither routable: the operator's declaration is still the better guess.
+    expect(enforcementEventName({ hook_event_name: 'x' }, 'y')).toBe('y');
   });
 });
