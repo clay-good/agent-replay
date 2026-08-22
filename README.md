@@ -814,6 +814,27 @@ A `decision` block:
 
 `decided_by` is one of `agent` (the model chose), `user` (a human at a permission prompt), or `policy` (a policy engine). `confidence` is between 0 and 1. Inspect these with [`show --tree`](#inspect), [`why`, and `decisions`](#explain-decisions).
 
+> **How values are stored, exactly.** Three things are worth knowing before you
+> compare a trace to what you sent:
+>
+> - **`input` and `output` keep their type.** A string stays a string — a tool
+>   that returns the text `null`, `42` or `true` reads back as that text, not as
+>   JSON null, a number or a boolean. A string that is genuinely an object or an
+>   array (`{...}`, `[...]`) is stored as the structure it spells, so a producer
+>   that hands over pre-serialized JSON — an OTel attribute, a harness payload —
+>   gets structure back rather than a quoted blob.
+> - **`error` is text.** The column is TEXT, so a structured error object is
+>   flattened to JSON text and reads back as a string. It round-trips stably
+>   (export → ingest → export is identical), but it is not returned as the
+>   object you sent.
+> - **Trace-level totals are taken at face value.** `total_tokens`,
+>   `total_duration_ms` and `total_cost_usd` are stored as the producer reported
+>   them and are never reconciled against the steps, so a producer that reports a
+>   total disagreeing with its own steps is what `stats` will report. Only when a
+>   total is *absent* do the per-step counts fill in. (The one exception is the
+>   OpenTelemetry receiver's cross-batch merge, which recomputes as it
+>   assembles.)
+
 > **Schema migration:** these fields arrived in schema v2; the current schema is v5 (v3, v4 and v5 add indexes only, no columns). Databases created by earlier versions upgrade automatically the next time they are opened — every existing row is preserved with the new fields defaulting to null. The upgrade is one-way (there is no down-migration).
 
 ### Step Types

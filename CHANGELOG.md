@@ -155,6 +155,16 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Changed
 
+- **The README now states exactly how a value is stored**, for the three cases
+  where what comes back is not literally what went in: `input`/`output` keep
+  their type (a string stays a string; a string that spells an object or array
+  is stored as that structure), `error` is a TEXT column so a structured error
+  flattens to JSON text, and trace-level totals are taken at face value and
+  never reconciled against the steps — so a producer whose total disagrees with
+  its own steps is what `stats` reports. All three were verified against the
+  binary; the last two are deliberate and unchanged, they were simply
+  undocumented.
+
 - **Dropped two runtime dependencies nothing imported.** `cli-highlight` and
   `figures` were declared in `dependencies`, so npm downloaded and installed
   them (~200 KB) for every consumer of `agent-replay`, and they counted toward
