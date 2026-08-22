@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { runMigrations } from '../src/db/migrations.js';
 import { ensureDatabase, resetConnection } from '../src/db/index.js';
 import { runImport } from '../src/commands/import.js';
+import { forkTrace } from '../src/services/fork-service.js';
 import { getTrace } from '../src/services/trace-service.js';
 import { importClaudeTranscript } from '../src/services/importers/claude-transcript.js';
 
@@ -706,6 +707,38 @@ describe('importing the same session twice', () => {
     const after = traces();
     expect(after).toHaveLength(1);
     expect(after[0].id).not.toBe(first.id);
+  });
+
+  it('refuses --replace rather than taking a fork down with its parent', () => {
+    // A fork inherits its parent's session_id AND its source_format /
+    // source_file metadata, so it matched the priors key and was deleted
+    // alongside the parent. `--replace` is the documented way to refresh a
+    // transcript that has grown, so the routine refresh destroyed the user's
+    // what-if sandboxes.
+    //
+    // Excluding forks from the query is not enough on its own: `parent_trace_id`
+    // is ON DELETE SET NULL, so a surviving fork would be silently PROMOTED to
+    // a real run — and `parent_trace_id IS NULL` is the only thing marking a
+    // fork as never-executed, which golden export, `check`, `stats` and `watch`
+    // all rely on.
+    const path = transcript();
+    importQuietly(path);
+    const [parent] = traces();
+
+    const sdb = ensureDatabase(resolve(storeDir, 'traces.db'));
+    forkTrace(sdb, parent.id, 1);
+    expect(traces()).toHaveLength(2);
+
+    const err = importQuietly(path, { replace: true });
+    expect(err).toMatch(/Refusing to replace/);
+    expect(err).toMatch(/fork/i);
+    // Both survive, and the fork is still a fork.
+    expect(traces()).toHaveLength(2);
+    const rows = sdb
+      .prepare('SELECT id, parent_trace_id FROM agent_traces')
+      .all() as Array<{ id: string; parent_trace_id: string | null }>;
+    expect(rows.find((r) => r.id === parent.id)).toBeDefined();
+    expect(rows.some((r) => r.parent_trace_id === parent.id)).toBe(true);
   });
 
   // A different session in the same format is a different trace, and the same

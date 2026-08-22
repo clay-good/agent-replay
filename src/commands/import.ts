@@ -91,6 +91,7 @@ export function runImport(filePath: string, opts: ImportOptions = {}): void {
           `SELECT id FROM agent_traces
             WHERE session_id = ?
               AND id != ?
+              AND parent_trace_id IS NULL
               AND json_extract(metadata, '$.source_format') IS ?
               AND json_extract(metadata, '$.source_file') IS ?
             ORDER BY ${julianDayExpr('started_at')} ASC, started_at ASC`,
@@ -111,6 +112,46 @@ export function runImport(filePath: string, opts: ImportOptions = {}): void {
       console.error(chalk.dim('  Pass --replace to import it again (use this when the transcript has grown since).'));
       return;
     }
+    // Refuse rather than take a fork down with the trace it came from.
+    //
+    // A fork inherits its parent's `session_id` AND its `source_format` /
+    // `source_file` metadata, so before the `parent_trace_id IS NULL` clause
+    // above every fork of the session matched the priors key and was deleted
+    // alongside the parent — `--replace` is the documented way to refresh a
+    // transcript that has grown, so the routine refresh destroyed the user's
+    // what-if sandboxes.
+    //
+    // Excluding forks from the query is necessary but not sufficient: the
+    // parent row is still deleted, and `parent_trace_id` is declared
+    // `ON DELETE SET NULL`, so a surviving fork would be silently PROMOTED to
+    // a real run. `parent_trace_id IS NULL` is the only thing that marks a fork
+    // as never-executed, and golden export, `check`, `stats` and `watch` all
+    // rely on it — so the fork would start counting as a real trace, and as
+    // spend that never happened.
+    //
+    // Re-pointing the fork at the new trace is not available either: the
+    // refreshed transcript may have different steps, so `forked_from_step`
+    // would no longer mean what it meant. Which of the two the user wants is a
+    // real decision, so ask for it instead of guessing.
+    const forks = db
+      .prepare(
+        `SELECT id, parent_trace_id FROM agent_traces
+          WHERE parent_trace_id IN (${priors.map(() => '?').join(', ')})`,
+      )
+      .all(...priors.map((p) => p.id)) as Array<{ id: string; parent_trace_id: string }>;
+
+    if (forks.length > 0) {
+      deleteTrace(db, report.trace.id); // drop the copy we just made
+      console.error(
+        chalk.red(`  Refusing to replace ${priors.map((p) => p.id).join(', ')}: ${forks.length} fork(s) derive from it.`),
+      );
+      console.error(chalk.dim(`  Forks: ${forks.map((f) => f.id).join(', ')}`));
+      console.error(chalk.dim('  Deleting the parent would leave each fork looking like a real run.'));
+      console.error(chalk.dim('  Delete the forks first, or import without --replace to keep both copies.'));
+      process.exitCode = 1;
+      return;
+    }
+
     for (const prior of priors) deleteTrace(db, prior.id);
   }
 

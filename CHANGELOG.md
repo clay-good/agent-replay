@@ -295,6 +295,22 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **`import --replace` deleted the forks of the trace it replaced.** A fork
+  inherits its parent's `session_id` *and* its `source_format`/`source_file`
+  metadata, so every fork of the session matched the "already imported" key and
+  was deleted alongside the parent — and `--replace` is the documented way to
+  refresh a transcript that has grown, so the routine refresh destroyed the
+  user's what-if sandboxes. Excluding forks from that lookup is not enough on
+  its own: `parent_trace_id` is `ON DELETE SET NULL`, so a surviving fork would
+  be silently **promoted to a real run**, and `parent_trace_id IS NULL` is the
+  only thing marking a fork as never-executed — golden export, `check`, `stats`
+  and `watch` all rely on it, so the fork would start counting as real spend.
+  Re-pointing the fork at the new trace is not available either, since a
+  refreshed transcript may have different steps and `forked_from_step` would no
+  longer mean what it meant. `--replace` now refuses when forks derive from the
+  trace, naming them and the two ways forward. Every sibling lookup in the
+  codebase already excluded forks for this reason; this one door did not.
+
 - **A guardrail policy with an empty `*_contains` needle blocked every step.**
   `''` is a substring of every string, so `guard add --pattern
   '{"name_contains":""}' --action deny` was stored without complaint and then
