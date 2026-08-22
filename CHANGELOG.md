@@ -140,6 +140,16 @@ between them, and nothing else.
 
 ### Changed
 
+- **Dropped two runtime dependencies nothing imported.** `cli-highlight` and
+  `figures` were declared in `dependencies`, so npm downloaded and installed
+  them (~200 KB) for every consumer of `agent-replay`, and they counted toward
+  the audit surface — while no file in `src/` referenced either one. A new test
+  asserts that every declared runtime dependency is actually imported. It
+  deliberately matches dynamic imports too: `yaml` is loaded through
+  `await import('yaml')` inside the rubric parser, and a stricter check would
+  have called a real dependency unused, which is the dangerous direction to be
+  wrong in.
+
 - **Two capabilities that had no spec at all now have one.** `openspec validate`
   checks document structure, not truth, so a whole area can change while the
   specs stay silent and green — which is what happened here: nothing described
