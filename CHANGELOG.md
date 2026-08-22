@@ -280,6 +280,15 @@ between them, and nothing else.
 
 ### Fixed
 
+- **A store in a read-only directory now says why it cannot be opened.** The
+  message was "check file and directory permissions", which does not convey the
+  surprising part: the database runs in WAL mode, and WAL keeps its index in a
+  `-shm` sidecar SQLite creates **next to** the database — so the DIRECTORY must
+  be writable even for a command that only reads. An operator who deliberately
+  locked a store down with `chmod 500` had no way to guess that from the old
+  wording. There is no read-only mode to offer instead: opening the store with
+  `readonly: true` fails identically, for the same reason.
+
 - **Table and diff cells were budgeted in code units, not columns.** Three
   copies of `truncate` existed — in `json.ts`, `table.ts` and
   `diff-renderer.ts` — and all measured UTF-16 code units against what is a

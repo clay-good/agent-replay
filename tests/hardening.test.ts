@@ -297,6 +297,44 @@ describe('corrupt database handling', () => {
     }
   });
 
+  it('names the DIRECTORY when a read-only directory is what blocks the open', () => {
+    // The surprising part, and the one the old message did not say: the store
+    // runs in WAL mode, whose `-shm` index sidecar SQLite creates NEXT TO the
+    // database — so the directory must be writable even for a command that
+    // only reads. An operator who deliberately locked a store down with `chmod
+    // 500` got "check file and directory permissions" from `list` and no way
+    // to tell which of the two was the problem. There is no read-only mode to
+    // offer instead: opening with `readonly: true` fails identically.
+    if (process.platform === 'win32') return;
+    const root = mkdtempSync(join(tmpdir(), 'ar-ro-dir-'));
+    const dir = join(root, '.agent-replay');
+    const dbPath = join(dir, 'traces.db');
+    try {
+      ensureDatabase(dbPath);
+      resetConnection();
+      chmodSync(dir, 0o500);
+
+      let message = '';
+      try {
+        ensureDatabase(dbPath).prepare('SELECT 1').get();
+        return; // running as root, or a filesystem that permits it
+      } catch (err) {
+        message = (err as Error).message;
+      }
+      expect(message).not.toMatch(/corrupted/i);
+      expect(message).toMatch(/directory must be writable/i);
+      expect(message).toMatch(/WAL/);
+    } finally {
+      resetConnection();
+      try {
+        chmodSync(dir, 0o700);
+      } catch {
+        // already gone
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('does not blame corruption for a store it merely cannot open for writing', () => {
     // Regression: the catch-all reported EVERY open failure as "may be
     // corrupted" — including a read-only file or mount and a permissions

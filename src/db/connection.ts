@@ -139,7 +139,17 @@ export class DatabaseConnection {
           : code.startsWith('SQLITE_BUSY') || code.startsWith('SQLITE_LOCKED')
             ? 'It is locked by another process — retry once that process exits.'
             : code.startsWith('SQLITE_READONLY') || code.startsWith('SQLITE_PERM') || code === 'SQLITE_CANTOPEN'
-              ? 'It could not be opened for writing — check file and directory permissions.'
+              // Name the surprising part. The store runs in WAL mode, and WAL
+              // keeps its index in a `-shm` sidecar that SQLite creates next to
+              // the database — so the DIRECTORY must be writable even to READ.
+              // An operator who deliberately locked a store down with `chmod
+              // 500` got "check permissions" for `list`, which reads, and had
+              // no way to guess that the directory was the problem rather than
+              // the file. There is no read-only mode to offer instead: opening
+              // read-only fails the same way, for the same reason.
+              ? 'The store directory must be writable, even for read-only commands: ' +
+                'the database runs in WAL mode, whose index sidecar is created next to it. ' +
+                'Check the permissions on the directory, not just the file.'
               : 'It may be corrupted, locked, or unreadable.';
       throw new Error(`Could not open the database at ${this.dbPath}. ${cause} (${detail})`);
     }
