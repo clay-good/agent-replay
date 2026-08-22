@@ -902,3 +902,46 @@ describe('warnings that quote a producer do not carry its control bytes', () => 
     },
   );
 });
+
+
+describe('a causal reference that is not strictly earlier is dropped WITH a warning', () => {
+  // `appendStep` already refuses to store a forward or self reference —
+  // `causalWalk`'s contract depends on the graph being acyclic, and a forward
+  // reference made `why` present time-travelling causality as fact ("step 1
+  // caused by #2"). But it dropped the value in SILENCE, while `ingest` rejects
+  // the same input loudly with the field named. The live path was the one door
+  // where a producer could send a reference, be told nothing, and later find it
+  // missing. The precedent for an unusable FIELD on this path is the numeric
+  // sweep beside it: drop the field, keep the step, and say which field went.
+  const step = (over: Record<string, unknown>) => validateEvent({
+    v: 1, type: 'step', trace_id: 't', step_number: 3, step_type: 'tool_call', name: 'x', ...over,
+  });
+
+  it.each([
+    ['a forward reference', { parent_step: 5 }],
+    ['a self reference', { caused_by_step: 3 }],
+    ['a zero reference', { parent_step: 0 }],
+    ['a non-integer reference', { parent_step: 1.5 }],
+  ])('warns about %s', (_label, over) => {
+    const { event, warning } = step(over);
+    expect(warning).toMatch(/strictly earlier/);
+    for (const key of Object.keys(over)) {
+      expect((event as unknown as Record<string, unknown>)[key]).toBeUndefined();
+    }
+  });
+
+  it('keeps a genuinely earlier reference, with no warning', () => {
+    const { event, warning } = step({ parent_step: 1, caused_by_step: 2 });
+    expect(warning).toBeFalsy();
+    expect((event as unknown as Record<string, unknown>).parent_step).toBe(1);
+    expect((event as unknown as Record<string, unknown>).caused_by_step).toBe(2);
+  });
+
+  it('still names the numeric reason when both kinds are dropped', () => {
+    // The two sweeps share one warning line; an earlier version of this fix
+    // collapsed them and lost the numeric explanation.
+    const { warning } = step({ parent_step: 9, tokens_used: -1 });
+    expect(warning).toMatch(/non-negative finite number/);
+    expect(warning).toMatch(/strictly earlier/);
+  });
+});

@@ -295,6 +295,17 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **Live capture dropped a forward causal reference in silence.** A
+  `parent_step` or `caused_by_step` that does not point strictly earlier is
+  already refused at write time — `causalWalk` depends on the graph being
+  acyclic, and a forward reference made `why` present time-travelling causality
+  as fact — but the live `record`/SDK path discarded it without a word, while
+  `ingest` rejects the same input loudly with the field named. It was the one
+  door where a producer could send a reference, be told nothing, and later find
+  it missing. It is now reported the way an unusable numeric field beside it
+  already is: the field is dropped, the step is kept, and the warning names both
+  the field and why.
+
 - **The OTLP logs endpoint reported a rejection only when the WHOLE batch was
   unrecognized.** The guard was "nothing mapped", so a batch in which anything
   at all was recognized answered a bare 200 and the rest was discarded silently

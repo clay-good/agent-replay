@@ -375,7 +375,29 @@ export function validateEvent(obj: unknown): ParseResult {
       dropped.push(field);
     }
   }
-  if (dropped.length > 0) {
+  // A causal reference that does not point strictly EARLIER is not a
+  // reference. `appendStep` already refuses to store one — `causalWalk`'s
+  // contract depends on the graph being acyclic, and a forward reference made
+  // `why` present time-travelling causality as fact ("step 1 caused by #2") —
+  // but it dropped the value in silence. `ingest` rejects the same input
+  // loudly, with the field named, so the live path was the one door where a
+  // producer could send a reference, be told nothing, and find it missing.
+  // Same treatment as the numeric fields above: drop the field, keep the step,
+  // and say which field went.
+  const droppedRefs: string[] = [];
+  const stepNo = (e as { step_number?: unknown }).step_number;
+  if (typeof stepNo === 'number') {
+    for (const field of ['parent_step', 'caused_by_step', 'parent_step_number', 'caused_by_step_number'] as const) {
+      const v = (e as Record<string, unknown>)[field];
+      if (v == null) continue;
+      if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v >= stepNo) {
+        delete (e as Record<string, unknown>)[field];
+        droppedRefs.push(field);
+      }
+    }
+  }
+
+  if (dropped.length > 0 || droppedRefs.length > 0) {
     return {
       event: obj as CaptureEvent,
       // Joined with a status repair when both happened: an early return here
@@ -387,7 +409,12 @@ export function validateEvent(obj: unknown): ParseResult {
           : mappedStatus != null
             ? `trace_end status "${escapeForMessage(mappedStatus)}" read as "${(obj as { status?: string }).status}"`
             : null,
-        `ignored ${dropped.join(', ')}: must be a non-negative finite number`,
+        dropped.length > 0
+          ? `ignored ${dropped.join(', ')}: must be a non-negative finite number`
+          : null,
+        droppedRefs.length > 0
+          ? `ignored ${droppedRefs.join(', ')}: must reference a strictly earlier step`
+          : null,
       ].filter(Boolean).join('; '),
       ...(unusableStatus != null ? { repaired: 'status' as const } : {}),
     };
