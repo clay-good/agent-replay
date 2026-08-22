@@ -114,11 +114,21 @@ export function importCodexRollout(
   // here — a `custom_tool_call` pairs with a `custom_tool_call_output` exactly
   // as a `function_call` pairs with a `function_call_output`.
   const outputs = new Map<string, unknown>();
+  // Which call_ids exist as an actual CALL. An output whose id pairs with
+  // nothing is stored NOWHERE — routine when a rollout is head-truncated, or
+  // when the call record itself was unparseable — so counting it as imported
+  // reports content the store does not have. `imported + skipped = records`
+  // still held; what it counted was wrong. The sibling claude-transcript
+  // importer already tracks exactly this, as `toolUseIds`.
+  const callIds = new Set<string>();
   for (const rec of records) {
     const it = itemOf(rec);
     const t = String(it.type);
     if ((t === 'function_call_output' || t === 'custom_tool_call_output') && it.call_id != null) {
       outputs.set(String(it.call_id), it.output);
+    }
+    if ((t === 'function_call' || t === 'custom_tool_call') && it.call_id != null) {
+      callIds.add(String(it.call_id));
     }
   }
 
@@ -189,10 +199,18 @@ export function importCodexRollout(
         break;
       }
       case 'function_call_output':
-      case 'custom_tool_call_output':
-        // indexed in the first pass
-        contributed = true;
+      case 'custom_tool_call_output': {
+        // Indexed in the first pass — but it only CONTRIBUTED if a call record
+        // exists to carry it. An orphan output lands in NO step, so reporting
+        // it as imported credits the store with content it does not hold.
+        // Counted as skipped rather than merely uncounted, so
+        // `imported + skipped = records` still holds — the same bookkeeping the
+        // empty-text case a few lines below already does for the same reason.
+        const paired = it.call_id != null && callIds.has(String(it.call_id));
+        if (paired) contributed = true;
+        else skipped++;
         break;
+      }
       case 'token_count': {
         // `info.total_token_usage` is CUMULATIVE for the session (verified
         // monotonic across real rollouts), so the last record is the total and

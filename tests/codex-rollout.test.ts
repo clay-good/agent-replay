@@ -343,3 +343,46 @@ describe('codex-rollout: the freeform tool family', () => {
     expect(getTrace(db, importCodexRollout(db, path).trace!.id)!.total_tokens).toBeNull();
   });
 });
+
+
+describe('an orphan tool output is not counted as imported', () => {
+  // A `*_output` whose call_id pairs with no call record lands in NO step —
+  // routine when a rollout is head-truncated, or when the call record itself
+  // was unparseable. Counting it as imported credits the store with content it
+  // does not hold: `imported + skipped = records` still balanced, but what it
+  // counted was wrong. The sibling claude-transcript importer already tracked
+  // exactly this (`toolUseIds`); codex had no equivalent.
+  it('counts a paired output but not an orphan', () => {
+    const path = fixture([
+      { type: 'session_meta', payload: { id: 'roll-orphan' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: 'go' } },
+      { type: 'response_item', payload: { type: 'function_call', name: 'shell', arguments: '{}', call_id: 'c1' } },
+      { type: 'response_item', payload: { type: 'function_call_output', call_id: 'c1', output: 'ok' } },
+      { type: 'response_item', payload: { type: 'function_call_output', call_id: 'nope', output: 'lost data' } },
+    ]);
+    const report = importCodexRollout(db, path);
+
+    expect(report.skipped).toBeGreaterThanOrEqual(1); // the orphan
+    expect(report.imported + report.skipped).toBe(5); // the invariant still holds
+    // And the paired call is still a real step carrying its output.
+    const stored = db
+      .prepare('SELECT step_type, output FROM agent_trace_steps WHERE trace_id = ?')
+      .all(report.trace!.id) as Array<{ step_type: string; output: string | null }>;
+    const tool = stored.find((st) => st.step_type === 'tool_call');
+    expect(tool).toBeDefined();
+    expect(String(tool?.output)).toContain('ok');
+    // Nothing anywhere holds the orphan's payload, which is the point.
+    expect(JSON.stringify(stored)).not.toContain('lost data');
+  });
+
+  it('counts an orphan custom_tool_call_output the same way', () => {
+    const path = fixture([
+      { type: 'session_meta', payload: { id: 'roll-orphan-2' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: 'go' } },
+      { type: 'response_item', payload: { type: 'custom_tool_call_output', call_id: 'nope', output: 'lost' } },
+    ]);
+    const report = importCodexRollout(db, path);
+    expect(report.skipped).toBeGreaterThanOrEqual(1);
+    expect(report.imported + report.skipped).toBe(3);
+  });
+});

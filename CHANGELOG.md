@@ -295,6 +295,15 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **The Codex importer counted an orphan tool output as imported.** A
+  `function_call_output` / `custom_tool_call_output` whose `call_id` pairs with
+  no call record lands in no step — routine when a rollout is head-truncated, or
+  when the call record itself was unparseable — but it was reported as imported
+  anyway, crediting the store with content it does not hold. The Claude
+  transcript importer already tracked exactly this for its own orphan tool
+  results; Codex had no equivalent. Such a record is now counted as skipped, so
+  `imported + skipped = records` still holds.
+
 - **`hook --enforce` labelled its decision with an event name the harness will
   not match.** Routing deliberately ignores a `hook_event_name` it cannot route
   and falls back to the event registered on the command line — that fallback
