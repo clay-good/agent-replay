@@ -243,6 +243,22 @@ between them, and nothing else.
 
 ### Fixed
 
+- **`dashboard` hung forever when there was no terminal**, after writing
+  alt-screen and mouse-tracking escape sequences into whatever its output was
+  redirected to. It built the full-screen TUI unconditionally, so with stdin a
+  pipe there was no keypress to exit on: a CI job that ran it never finished,
+  and its log filled with control codes. It now refuses with exit 2 and points
+  at `stats --json`, the way `guard` checks for a terminal before prompting and
+  `replay --pause` skips its wait.
+- **`dashboard --refresh` accepted values that turned into a busy loop.** Node
+  clamps a timer delay above 2,147,483 ms to **1 ms**, so `--refresh
+  999999999999` — plainly "refresh almost never" — re-ran every dashboard
+  aggregate about a thousand times a second, the exact inverse of the request.
+  Values above the timer maximum are now refused rather than clamped, the same
+  reasoning the command already applied to a malformed value. Argument
+  validation deliberately runs before the terminal check, so a typo is still
+  reported to the script that made it.
+
 - **A newline in a trace could forge a line of output.** A trace is written by
   the agent under test, so every rendered string is untrusted — and `safeText`
   deliberately preserves `\n` so a rendered block keeps its shape. On a

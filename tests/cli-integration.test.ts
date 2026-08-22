@@ -1607,6 +1607,42 @@ describe('CLI integration', () => {
     expect(parsed.error).toMatch(/mutually exclusive/);
   });
 
+  describe('dashboard', () => {
+    // Every `run()` here is non-interactive by construction: execFileSync gives
+    // the child a pipe, not a terminal. That IS the case under test.
+    it('refuses to start without a terminal instead of hanging', () => {
+      // It used to construct the blessed screen unconditionally: alt-screen and
+      // mouse-tracking escapes went into the redirected stream, and since no
+      // keypress could ever arrive, it never returned. A CI job that ran it
+      // hung until something killed it, with a log full of control codes.
+      const r = run(['dashboard']);
+      expect(r.code).toBe(2);
+      expect(r.stderr).toMatch(/interactive terminal/i);
+      // Nothing may reach stdout — the escapes are the other half of the bug.
+      expect(r.stdout).toBe('');
+      // eslint-disable-next-line no-control-regex
+      expect(r.stdout + r.stderr).not.toMatch(/\u001b\[\?1049h/); // alt-screen
+    });
+
+    it('refuses a --refresh that would overflow the timer into a busy loop', () => {
+      // Node clamps a >32-bit timer delay to 1ms, so "refresh almost never"
+      // became "refresh a thousand times a second" — the exact inverse of the
+      // request, re-running every dashboard aggregate.
+      const r = run(['dashboard', '--refresh', '999999999999']);
+      expect(r.code).toBe(2);
+      expect(r.stderr).toMatch(/maximum is 2147483 seconds/);
+    });
+
+    it('reports a bad --refresh even though there is no terminal either', () => {
+      // Argument validation runs FIRST on purpose: a typo belongs to the script
+      // that made it, and must not be masked by the environment check.
+      const r = run(['dashboard', '--refresh', 'abc']);
+      expect(r.code).toBe(2);
+      expect(r.stderr).toMatch(/Invalid --refresh/);
+      expect(r.stderr).not.toMatch(/interactive terminal/i);
+    });
+  });
+
   it.each([['--status'], ['--agent'], ['--tag'], ['--session'], ['--since']])(
     'list rejects an empty %s value rather than listing every trace',
     (flag) => {
