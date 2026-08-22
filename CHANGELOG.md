@@ -305,6 +305,20 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **Four smaller `check` contract defects.** A baseline whose `steps_summary`
+  holds a `null` or a bare string died inside the comparison with *"Cannot read
+  properties of null"*, naming neither the file nor the entry — the same
+  diagnostic failure the adjacent shape guard exists to prevent, one level
+  deeper. `check --json` with `--golden` omitted printed a bare commander usage
+  line to stderr and produced nothing on stdout, breaking the documented
+  `--json` contract; the command's own guard for that case existed but never
+  ran, because a `requiredOption` is enforced before the command body. `check
+  --trace <missing>` exited 2 where the README's table and `diff` both say 1, so
+  a CI script splitting 1 (a regression) from 2 (a broken gate) read a typo'd id
+  as a broken gate. And a divergence whose baseline entry simply lacked the
+  field emitted no `golden` key at all, against a type that declares it
+  required.
+
 - **`export --format golden` to stdout suppressed both baseline-trust
   warnings.** The warning was emitted only for a `--output` file, on the stated
   reasoning that it "would be noise in the middle of someone's pipeline" — but

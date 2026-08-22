@@ -362,5 +362,18 @@ function diffAgainstGolden(trace: TraceWithDetails, golden: GoldenEntry, fields:
     }
   }
 
-  return divergences;
+  // Normalize an ABSENT value to null before returning.
+  //
+  // `Divergence.golden` is declared non-optional, but a baseline entry that
+  // simply lacks the field (a hand-edited or merged file) yields `undefined` —
+  // and `JSON.stringify` ELIDES an undefined property, so `check --json`
+  // emitted divergence objects with no `golden` key at all, against a type that
+  // promises one. A consumer reading `d.golden` got undefined with nothing to
+  // distinguish "the baseline said nothing here" from a malformed response.
+  // `?? null` only touches undefined, so a genuine null, false or 0 is kept.
+  return divergences.map((d) => ({
+    ...d,
+    golden: d.golden ?? null,
+    candidate: d.candidate ?? null,
+  }));
 }

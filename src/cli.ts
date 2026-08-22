@@ -331,7 +331,13 @@ program
 program
   .command('check')
   .description('Compare traces against a golden dataset; exits non-zero on regression (CI-ready)')
-  .requiredOption('--golden <file>', 'Golden dataset file (from "export --format golden")')
+  // `option`, not `requiredOption`: commander enforces a required option BEFORE
+  // the command body runs, printing a bare usage line to stderr and exiting 2 —
+  // which breaks the `--json` contract this repo documents ("a refusal is
+  // reported as {"ok": false, "error": ...} so a `check --json | jq -r .ok`
+  // pipeline still reads a verdict"). `runCheck` has always carried its own
+  // guard for a missing --golden; it just never got to run. It does now.
+  .option('--golden <file>', 'Golden dataset file (from "export --format golden")')
   .option('--trace <id>', 'Check a single trace by ID')
   .option('--agent <name>', 'Check traces from this agent (substring match)')
   .option('--agent-exact <name>', 'Check traces from exactly this agent (a gate should name one agent)')

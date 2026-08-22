@@ -1181,3 +1181,68 @@ describe('naming exactly one agent for a gate', () => {
     expect(scoped.ok).toBe(true);
   });
 });
+
+
+describe('check refuses and reports in the documented shapes', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ar-check-shapes-'));
+    const cdb = ensureDatabase(resolve(dir, 'traces.db'));
+    ingestTrace(cdb, baseline);
+  });
+  afterEach(() => {
+    resetConnection();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** Run `check` quietly, returning what it wrote to stdout and its exit code. */
+  function check(opts: Record<string, unknown>): { out: string; code: number } {
+    const outs: string[] = [];
+    const prev = process.exitCode;
+    process.exitCode = 0;
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((m?: unknown) => void outs.push(String(m)));
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      runCheck({ dir, json: true, ...opts } as never);
+    } finally {
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+    }
+    const code = (process.exitCode as number) ?? 0;
+    process.exitCode = prev;
+    return { out: outs.join('\n'), code };
+  }
+
+  it('names an unusable steps_summary ENTRY, not just a missing array', () => {
+    // The shape guard checked one level down, so a hand-edited or merged
+    // baseline holding a null in `steps_summary` reached the comparison and
+    // died there on `.step_type` — "Cannot read properties of null", naming
+    // neither the file nor the entry. That is the diagnostic failure the guard
+    // exists to prevent, one level deeper.
+    const golden = join(dir, 'nullstep.json');
+    writeFileSync(golden, JSON.stringify([{
+      id: 'g1', agent_name: 'a', input: {}, expected_output: null,
+      steps_summary: [null], eval_criteria: [], metadata: { status: 'completed' },
+    }]));
+
+    const { out, code } = check({ golden });
+    expect(code).toBe(2);
+    const parsed = JSON.parse(out) as { ok: boolean; error: string };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error).toMatch(/not a golden dataset/i);
+    expect(parsed.error).not.toMatch(/Cannot read properties/);
+  });
+
+  it('answers a missing trace with exit 1, as the documented table says', () => {
+    // `diff` already answers 1 for the same condition. A CI script that splits
+    // 1 (a regression) from 2 (the gate itself is broken) read a typo'd
+    // --trace id as a broken gate.
+    const golden = join(dir, 'g.json');
+    writeFileSync(golden, JSON.stringify([{
+      id: 'g1', agent_name: 'a', input: {}, expected_output: null,
+      steps_summary: [], eval_criteria: [], metadata: { status: 'completed' },
+    }]));
+    const { code } = check({ golden, trace: 'trc_nope' });
+    expect(code).toBe(1);
+  });
+});

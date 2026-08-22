@@ -139,6 +139,23 @@ export function runCheck(opts: CheckOptions = {}): void {
     );
     return;
   }
+  // The ELEMENTS too, not just the array. The guard above checks the shape one
+  // level down, so a hand-edited or merged baseline holding a null or a bare
+  // string in `steps_summary` still reached the comparison and died there on
+  // `.step_type` — reporting "Cannot read properties of null", which names
+  // neither the file nor the entry. That is the same diagnostic failure this
+  // guard exists to prevent, one level deeper.
+  const badStep = golden.findIndex((g) =>
+    (g as GoldenEntry).steps_summary.some((st) => !st || typeof st !== 'object'),
+  );
+  if (badStep !== -1) {
+    fail(
+      2,
+      `Not a golden dataset: ${opts.golden} (entry ${badStep + 1} has a steps_summary entry that is not an object).`,
+      'Golden files come from "agent-replay export --format golden"; a hand-edited or merged baseline can lose an entry this way.',
+    );
+    return;
+  }
 
   // `status` is the field that catches "this run now fails", and the comparison
   // reads it from `metadata.status` — skipping the check entirely when it is
@@ -200,7 +217,11 @@ export function runCheck(opts: CheckOptions = {}): void {
       return;
     }
     if (!t) {
-      fail(2, `Trace not found: ${opts.trace}`);
+      // Exit 1, not 2: the README's table lists "trace not found" under 1, and
+      // `diff` already answers 1 for the same condition. A CI script that
+      // splits 1 (a regression) from 2 (the gate itself is broken) otherwise
+      // read a typo'd --trace id as a broken gate.
+      fail(1, `Trace not found: ${opts.trace}`);
       return;
     }
     candidates.push(t);
