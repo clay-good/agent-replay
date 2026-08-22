@@ -67,6 +67,10 @@ export class DatabaseConnection {
       );
     }
 
+    // Whether WE are the ones creating the store file. Checked before opening,
+    // since `new Database()` creates it.
+    const creatingStore = !existsSync(this.dbPath);
+
     try {
       this.db = new Database(this.dbPath);
       // Set the lock patience FIRST. Converting a rollback-journal database to
@@ -90,6 +94,29 @@ export class DatabaseConnection {
       this.db.pragma('journal_mode = WAL');
       // Enable foreign key enforcement
       this.db.pragma('foreign_keys = ON');
+
+      // Make the store file itself owner-only, at creation.
+      //
+      // A trace holds prompts, tool inputs and tool outputs. Until now the only
+      // thing protecting them was the 0700 on the directory — the database file
+      // was created 0644 by the process umask — so the protection vanished
+      // whenever the directory was not ours to tighten: `mkdir -p
+      // /var/lib/agent-replay && agent-replay init --dir …`, a mounted volume,
+      // any pre-created path. Setting the mode on the FILE protects the content
+      // regardless of who made the directory, which is the property actually
+      // wanted, and it lets the directory keep belonging to whoever made it.
+      //
+      // Only at creation: an operator who later opens the file up did so
+      // deliberately, and a read command must never rewrite a mode.
+      if (creatingStore) {
+        for (const suffix of ['', '-wal', '-shm']) {
+          try {
+            if (existsSync(this.dbPath + suffix)) chmodSync(this.dbPath + suffix, 0o600);
+          } catch {
+            // Non-POSIX filesystem — leave as-is rather than fail.
+          }
+        }
+      }
     } catch (err) {
       // A corrupt or non-SQLite file at the path throws a raw SqliteError; turn
       // it into a clear, actionable message instead of a stack trace.

@@ -140,6 +140,17 @@ between them, and nothing else.
 
 ### Changed
 
+- **Documentation now matches the binary.** `openspec/specs/trace-inspection`
+  claimed an ambiguous trace-id prefix returns "the first match — there is no
+  ambiguity error", which is the exact inverse of what the code does and would
+  have licensed reintroducing a fixed bug; it also omitted `list --session`, the
+  empty-filter refusal, instant-based ordering, and both `dashboard` refusals.
+  `openspec/specs/guardrails` did not record that `guard add` refuses a pattern
+  that cannot match as written. `openspec/project.md` still said Node >= 18. The
+  README's schema note still said v4, and did not document the new `list`,
+  `dashboard` and `config set` refusals, the `avgDurationSample` field, or the
+  store's file permissions. All corrected against the running binary.
+
 - **The export scaling guard no longer measures time at all.** It asserted that
   a 3000-trace export finishes in under 5 seconds — an absolute wall-clock
   bound in a suite that runs files in parallel and spawns real CLI processes, so
@@ -245,6 +256,29 @@ between them, and nothing else.
   trace in. An explicit `--dir` still wins.
 
 ### Fixed
+
+- **`show`, `init`, `ingest` and `replay` crashed at a terminal width of 1 or 2
+  columns.** `boxen` reads `process.stdout.columns` itself and subtracts its
+  border width, computing a negative count and throwing `RangeError: Invalid
+  count value: -1`. `process.stdout.columns` is whatever the environment
+  reports, not necessarily a real terminal width, and a wrong one must degrade
+  the drawing rather than stop the command. The panels now fall back to plain
+  text — the content is what the user came for; the border is decoration.
+
+- **The store file itself is now owner-only (`0600`).** The directory mode was
+  the only thing protecting trace contents — prompts, tool inputs, tool outputs
+  — and `traces.db` was created `0644` by the umask, so the protection vanished
+  whenever the directory was not `agent-replay`'s to tighten: `mkdir -p
+  /var/lib/agent-replay && agent-replay init --dir …`, a mounted volume, any
+  pre-created path. The mode now goes on the file, where the content is, so it
+  holds whoever made the directory. Set at creation only — a store an operator
+  deliberately opened up stays open.
+- **`demo --reset --dir "   "` cleared the store named by `AGENT_REPLAY_DIR`.**
+  The guard that stops a destructive command from inheriting its target from the
+  environment tested the raw `--dir` option for truthiness, while path
+  resolution had already decided a blank value means "not named" and fallen
+  through to the environment. The two disagreed, so the guard printed nothing
+  and the environment's store was cleared. Both now ask the same question.
 
 - **`init` stamped `version: "0.1.0"` into every new `config.json`.** The
   package has been 0.2.0 for a while; the literal was left behind in two places

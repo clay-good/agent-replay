@@ -6,7 +6,7 @@
 
 ## Tech Stack
 
-- TypeScript (ESM), Node.js >= 18
+- TypeScript (ESM), Node.js >= 20.12
 - CLI: commander; terminal UI: blessed/blessed-contrib, boxen, chalk, cli-table3, ora
 - Storage: better-sqlite3 (single local file, `.agent-replay/traces.db`)
 - Build: tsup; Tests: vitest; IDs: nanoid

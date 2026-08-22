@@ -17,6 +17,8 @@ The system SHALL manage guardrail policies via `agent-replay guard add|list|remo
 
 The system SHALL match steps against pattern fields — `step_type` (exact), `name_contains` (case-insensitive substring), `name_regex`, `input_contains`, `output_contains` — combining specified fields with AND logic. An empty pattern SHALL match nothing.
 
+`guard add` SHALL REFUSE, at write time, a pattern that cannot match as written: one with no recognized match key, a `step_type` that is not a real step type, or a `name_regex` that is invalid or unsafe against catastrophic backtracking. A policy stored in a form that silently fails to match is worse than no policy, because the gate reports green.
+
 #### Scenario: AND semantics
 
 - **WHEN** a pattern specifies both `step_type: tool_call` and `name_contains: delete`

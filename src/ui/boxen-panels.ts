@@ -7,6 +7,28 @@ import { effectiveDurationMs, formatDuration } from '../utils/time.js';
 import { effectiveTokens } from '../utils/totals.js';
 
 /**
+ * `boxen`, with a plain-text fallback instead of a crash.
+ *
+ * boxen reads `process.stdout.columns` itself and subtracts its border width,
+ * so at a reported width of 1 or 2 it computes a negative count and throws
+ * `RangeError: Invalid count value: -1` out of `String.repeat`. That took down
+ * `show`, `init`, `ingest` and `replay` — an uncaught exception from a purely
+ * cosmetic concern, and one no caller could reasonably be expected to handle.
+ *
+ * A terminal that narrow is unusual, but `process.stdout.columns` is not always
+ * a real terminal width — it is whatever the environment reports — and a wrong
+ * one must degrade the drawing, never stop the command. The content is what the
+ * user came for; the border is decoration.
+ */
+function box(content: string, options: Parameters<typeof boxen>[1]): string {
+  try {
+    return boxen(content, options);
+  } catch {
+    return content;
+  }
+}
+
+/**
  * Trace metadata header panel (shown at top of `show` command).
  *
  * Every value rendered here is escaped unless it is one this tool generates or
@@ -71,7 +93,7 @@ export function traceHeaderPanel(trace: Trace): string {
     lines.push(`${label('Session:')}   ${chalk.white(safeText(trace.session_id))}`);
   }
 
-  return boxen(lines.join('\n'), {
+  return box(lines.join('\n'), {
     padding: 1,
     borderColor: 'cyan',
     borderStyle: 'round',
@@ -93,7 +115,7 @@ export function welcomePanel(dbPath: string): string {
     `  ${chalk.white('agent-replay --help')}   ${chalk.dim('See all commands')}`,
   ].join('\n');
 
-  return boxen(content, {
+  return box(content, {
     title: 'agent-replay',
     titleAlignment: 'center',
     padding: 1,
@@ -118,7 +140,7 @@ export function summaryPanel(
     ([k, v]) => `${label(k + ':')}  ${chalk.white(safeText(String(v)))}`,
   );
 
-  return boxen(lines.join('\n'), {
+  return box(lines.join('\n'), {
     title,
     titleAlignment: 'center',
     padding: 1,
@@ -232,7 +254,7 @@ export function aiEvalPanel(evalResult: { evaluator_name: string; score: number;
   const title = safeText(evalResult.evaluator_name).replace('ai-', 'AI ').replace(/-/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase());
 
-  return boxen(lines.join('\n'), {
+  return box(lines.join('\n'), {
     title: ` ${title} `,
     titleAlignment: 'center',
     padding: 1,
@@ -269,7 +291,7 @@ export function aiDiffPanel(analysis: {
   lines.push('');
   lines.push(chalk.dim(`Cost: ${analysis.cost.tokens_used} tokens = $${analysis.cost.cost_usd.toFixed(6)}`));
 
-  return boxen(lines.join('\n'), {
+  return box(lines.join('\n'), {
     title: ' AI Diff Analysis ',
     titleAlignment: 'center',
     padding: 1,

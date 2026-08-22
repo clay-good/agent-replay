@@ -238,6 +238,12 @@ agent-replay list --tag production --sort -tokens --limit 10
 agent-replay list --json
 ```
 
+An **empty** value for `--status`, `--agent`, `--tag`, `--session` or `--since` is
+a usage error (exit `2`), not an unfiltered listing — so a filter built from an
+unset shell variable (`list --agent "$AGENT"`) fails loudly instead of quietly
+returning every trace at exit `0`, which reads exactly like a correct narrow
+result.
+
 `--agent` matches by **substring**, so `--agent travel` finds `travel-bot` and
 `travel-assistant` alike; `--session` matches by **prefix**, like a trace id.
 Convenient for browsing, but worth knowing wherever the selection decides a
@@ -538,6 +544,14 @@ agent-replay dashboard --refresh 10
 
 Keyboard: `q` quit, `r` refresh, arrow keys navigate.
 
+The dashboard needs an **interactive terminal**: it takes over the screen and
+exits on a keypress, so with stdout redirected or in CI it refuses with exit `2`
+and writes nothing to stdout, pointing at `stats --json` instead. (Otherwise it
+would hang forever, having already emitted alt-screen and mouse-tracking escape
+sequences into the log.) `--refresh` is capped at `2147483` seconds — above that
+Node's timer overflows and clamps to 1 ms, refreshing about a thousand times a
+second, the inverse of what was asked — also exit `2`.
+
 ### Stats
 
 A non-interactive summary of the store — the same aggregates the dashboard shows, but printable to a log and scriptable in CI (where the full-screen dashboard can't run).
@@ -554,7 +568,7 @@ agent-replay stats --since 2026-08-01
 agent-replay stats --json
 ```
 
-The `--json` shape is `{ since, overall, by_status, by_agent }`, where `by_agent` lists each agent's trace `count` and a `failed_or_timeout` tally, most-active first (named for what it counts, so it can't be read as failures alone alongside `by_status`). `--since` windows every count to traces started at or after the cutoff (steps and evals by their parent trace's start time); the active-policy count is current config and is never windowed. A malformed `--since` is a usage error (exit `2`). **Forks are excluded from every count**, as they are from `check` and `export --format golden` — a fork is a never-executed copy, so counting it would report spend that never happened. `stats` can therefore report fewer traces than `list`, which shows them.
+The `--json` shape is `{ since, overall, by_status, by_agent }`. `overall` carries `traces`, `steps`, `evals`, `policies`, `avgDurationMs`, `avgDurationSample`, `totalTokens` and `totalCost` — **`avgDurationSample` is how many traces the average was actually taken over**, since a trace that is still running, or whose timestamps no format can parse, has no measurable duration and is skipped; read alone, `avgDurationMs` can describe far fewer runs than `traces`. The panel says `(over N of M)` when the two differ. `by_agent` lists each agent's trace `count` and a `failed_or_timeout` tally, most-active first (named for what it counts, so it can't be read as failures alone alongside `by_status`). `--since` windows every count to traces started at or after the cutoff (steps and evals by their parent trace's start time); the active-policy count is current config and is never windowed. A malformed `--since` is a usage error (exit `2`). **Forks are excluded from every count**, as they are from `check` and `export --format golden` — a fork is a never-executed copy, so counting it would report spend that never happened. `stats` can therefore report fewer traces than `list`, which shows them.
 
 ### Configuration
 
@@ -585,6 +599,25 @@ You can also set API keys via environment variables: `ANTHROPIC_API_KEY`, `GOOGL
 
 `ai.max_tokens` caps the judge's reply (default 1024) and is what the `--max-cost` estimate prices, so raising it raises both the ceiling and the quoted cost. `ai.model` is only applied to a provider it belongs to — a `claude-*` model is never sent to OpenAI.
 
+`config set` refuses an **empty** value (exit `2`): a blank key was stored, then
+displayed as `***` by `config get` — looking set — while every check downstream
+treated it as unset, so `test-ai` told you to set the key you had just set. To
+clear a value, re-run `agent-replay init --force`.
+
+A config file that exists but **cannot be parsed** is reported as its own error,
+naming the file and the parse position, rather than as "no configuration found"
+— which used to send you to `init`, which then said the store was already
+initialized. `config set` also writes back only the key you named: a value it
+had to ignore (say a `ai.max_tokens` typed as a string) stays on disk, so it is
+still reported and still fixable.
+
+`traces.db` and `config.json` are created owner-only (`0600`) — a trace holds
+prompts, tool inputs and tool outputs, and the config holds API keys in
+plaintext. A directory `agent-replay` creates for itself is `0700` as well; a
+directory that already exists is left exactly as you set it, since the mode of a
+directory you made is your decision. The file modes are set at creation only, so
+if you deliberately open a store up it stays open.
+
 ## Exit codes
 
 Every command exits non-zero on failure, so it drops cleanly into scripts and CI:
@@ -593,7 +626,7 @@ Every command exits non-zero on failure, so it drops cleanly into scripts and CI
 | ---- | ------- |
 | `0`  | Success — including "no matches" for queries like `list` and empty exports. |
 | `1`  | Runtime failure — trace not found, a malformed ingest, a `record` stream whose every event was rejected, an `import` that found nothing to import (no steps and no prompt), a `check --golden` regression, or an `eval` that fails (a rubric below its threshold or a built-in preset that fails). |
-| `2`  | Usage error — an unknown flag, an unknown command, a missing or bad argument value, or an unexpected extra argument (a typo'd second id or a bare word meant to be a flag is rejected, not silently ignored). Also the **guard block** signal: `guard check` exits `2` when a policy denies a step (the harness "block" convention), as does `hook --enforce --dialect other`. `guard check` fails closed, so it also answers `2` — with a `deny` verdict on stdout — for a step it cannot evaluate at all: unreadable or malformed stdin, a payload that isn't a step object, a missing `step_type`, a store it cannot open, or a store holding no enabled policies (a gate that can never fire; pass `--allow-empty` if that is deliberate). For a detected harness dialect, `hook --enforce` answers with that harness's own JSON on stdout and exits `0` — the block is the JSON, not the code — so don't gate a script on `$?` there. |
+| `2`  | Usage error, or a command refusing an environment it cannot run in (`dashboard` without an interactive terminal) — an unknown flag, an unknown command, a missing, empty or bad argument value, or an unexpected extra argument (a typo'd second id or a bare word meant to be a flag is rejected, not silently ignored). Also the **guard block** signal: `guard check` exits `2` when a policy denies a step (the harness "block" convention), as does `hook --enforce --dialect other`. `guard check` fails closed, so it also answers `2` — with a `deny` verdict on stdout — for a step it cannot evaluate at all: unreadable or malformed stdin, a payload that isn't a step object, a missing `step_type`, a store it cannot open, or a store holding no enabled policies (a gate that can never fire; pass `--allow-empty` if that is deliberate). For a detected harness dialect, `hook --enforce` answers with that harness's own JSON on stdout and exits `0` — the block is the JSON, not the code — so don't gate a script on `$?` there. |
 
 Two commands instead propagate a child's own status: `run` exits with the wrapped command's exit code, and `hook` (capture mode) always exits `0` so it can never interfere with the host agent.
 
@@ -770,7 +803,7 @@ A `decision` block:
 
 `decided_by` is one of `agent` (the model chose), `user` (a human at a permission prompt), or `policy` (a policy engine). `confidence` is between 0 and 1. Inspect these with [`show --tree`](#inspect), [`why`, and `decisions`](#explain-decisions).
 
-> **Schema migration:** these fields arrived in schema v2; the current schema is v4 (v3 and v4 add indexes only, no columns). Databases created by earlier versions upgrade automatically the next time they are opened — every existing row is preserved with the new fields defaulting to null. The upgrade is one-way (there is no down-migration).
+> **Schema migration:** these fields arrived in schema v2; the current schema is v5 (v3, v4 and v5 add indexes only, no columns). Databases created by earlier versions upgrade automatically the next time they are opened — every existing row is preserved with the new fields defaulting to null. The upgrade is one-way (there is no down-migration).
 
 ### Step Types
 

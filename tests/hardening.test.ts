@@ -348,6 +348,50 @@ describe('data directory permissions', () => {
     }
   });
 
+  it('makes the store FILE owner-only, whoever made the directory', () => {
+    // The directory mode alone was never enough: `traces.db` was created 0644
+    // by the umask, so a store in a directory that was not ours to tighten —
+    // `mkdir -p /var/lib/agent-replay && agent-replay init --dir ...`, a mounted
+    // volume — had world-readable prompts, tool inputs and tool outputs. The
+    // content is the secret, so the mode belongs on the file.
+    if (process.platform === 'win32') return;
+    const root = mkdtempSync(join(tmpdir(), 'ar-perm-file-'));
+    try {
+      for (const [name, pre] of [['made-by-us', false], ['made-by-user', true]] as const) {
+        const dir = join(root, name);
+        if (pre) {
+          mkdirSync(dir);
+          chmodSync(dir, 0o755);
+        }
+        ensureDatabase(join(dir, 'traces.db'));
+        resetConnection();
+        expect(statSync(join(dir, 'traces.db')).mode & 0o777, name).toBe(0o600);
+      }
+      // And the user's directory is still the user's.
+      expect(statSync(join(root, 'made-by-user')).mode & 0o777).toBe(0o755);
+    } finally {
+      resetConnection();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not re-tighten a store file an operator deliberately opened up', () => {
+    if (process.platform === 'win32') return;
+    const root = mkdtempSync(join(tmpdir(), 'ar-perm-reopen-'));
+    try {
+      const dbPath = join(root, '.agent-replay', 'traces.db');
+      ensureDatabase(dbPath);
+      resetConnection();
+      chmodSync(dbPath, 0o644);
+
+      ensureDatabase(dbPath).prepare('SELECT 1').get();
+      expect(statSync(dbPath).mode & 0o777).toBe(0o644);
+    } finally {
+      resetConnection();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('leaves a PRE-EXISTING directory\'s permissions alone', () => {
     // The narrowing used to run on every open, against whatever path --dir or
     // AGENT_REPLAY_DIR named. Pointing at a directory that already existed

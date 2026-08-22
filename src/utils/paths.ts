@@ -34,6 +34,21 @@ function expandTilde(dir: string): string {
  * to `./.agent-replay` instead of the store the wrapper had just opened a trace
  * in. An explicit --dir always wins.
  */
+/**
+ * Whether `--dir` actually names a directory.
+ *
+ * The same blank test {@link resolveDataDir} applies, exported so a caller can
+ * ask the question rather than re-derive it. A destructive command must gate on
+ * the DECISION, not on the raw option: `--dir "   "` is truthy, so a plain
+ * `if (!opts.dir)` concluded the user had named a target while `resolveDataDir`
+ * had already fallen through to `AGENT_REPLAY_DIR` — and `demo --reset` then
+ * cleared the store named only by the environment, which is exactly what its
+ * guard exists to prevent.
+ */
+export function dirWasNamed(dir?: string): boolean {
+  return dir != null && dir.trim() !== '';
+}
+
 export function resolveDataDir(dir?: string): string {
   // A BLANK value is not a directory. `resolve('')` is the CWD, so
   // `AGENT_REPLAY_DIR= agent-replay init` wrote the store loose into the working

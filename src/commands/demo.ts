@@ -9,7 +9,7 @@ import { traceTable } from '../ui/table.js';
 import { heading, separator, colors } from '../ui/theme.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage } from '../utils/json.js';
-import { resolveDataDir } from '../utils/paths.js';
+import { resolveDataDir, dirWasNamed } from '../utils/paths.js';
 
 export interface DemoOptions {
   interactive?: boolean;
@@ -34,7 +34,10 @@ export async function runDemo(opts: DemoOptions = {}): Promise<void> {
     // export it), so honoring it here meant `demo --reset` from ANY directory
     // could delete a real store that merely happens to be named .agent-replay.
     // Deleting someone's traces has to be something they typed.
-    if (!opts.dir && process.env.AGENT_REPLAY_DIR != null && process.env.AGENT_REPLAY_DIR !== '') {
+    // `dirWasNamed`, not `!opts.dir`: a blank --dir is not a named target, and
+    // treating it as one skipped this guard while the ENV store was what would
+    // actually be cleared.
+    if (!dirWasNamed(opts.dir) && process.env.AGENT_REPLAY_DIR != null && process.env.AGENT_REPLAY_DIR.trim() !== '') {
       console.error(chalk.red('  Refusing to reset a store named only by AGENT_REPLAY_DIR.'));
       console.error(chalk.dim(`  Pass it explicitly if that is what you mean: --dir ${process.env.AGENT_REPLAY_DIR}`));
       process.exitCode = 1;

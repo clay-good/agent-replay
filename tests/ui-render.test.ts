@@ -719,3 +719,40 @@ describe('the timeline budgets terminal columns, not UTF-16 code units', () => {
     expect(noAnsi(out)).toContain('short and plain');
   });
 });
+
+
+describe('panels degrade rather than crash at an absurd terminal width', () => {
+  // boxen reads `process.stdout.columns` itself and subtracts its border width,
+  // so at a reported width of 1 or 2 it computes a negative count and throws
+  // `RangeError: Invalid count value: -1` out of `String.repeat` — taking down
+  // `show`, `init`, `ingest` and `replay` with an uncaught exception from a
+  // purely cosmetic concern. `process.stdout.columns` is whatever the
+  // environment reports, not necessarily a real terminal width.
+  function atWidth<T>(cols: number, f: () => T): T {
+    const prev = Object.getOwnPropertyDescriptor(process.stdout, 'columns');
+    Object.defineProperty(process.stdout, 'columns', { value: cols, configurable: true });
+    try {
+      return f();
+    } finally {
+      if (prev) Object.defineProperty(process.stdout, 'columns', prev);
+      else delete (process.stdout as unknown as Record<string, unknown>).columns;
+    }
+  }
+
+  const t = trace({ agent_name: 'a' });
+
+  it.each([[1], [2], [3]])('renders the header panel at %i columns', (cols) => {
+    const out = atWidth(cols, () => traceHeaderPanel(t));
+    // The content is what the user came for; the border is decoration.
+    expect(noAnsi(out)).toContain('a');
+  });
+
+  it.each([[1], [2]])('renders the summary panel at %i columns', (cols) => {
+    expect(noAnsi(atWidth(cols, () => summaryPanel('T', { Traces: 1 })))).toContain('Traces');
+  });
+
+  it('still draws a real box once there is room for one', () => {
+    // The fallback must not become the normal path.
+    expect(atWidth(80, () => summaryPanel('T', { Traces: 1 }))).toContain('╭');
+  });
+});
