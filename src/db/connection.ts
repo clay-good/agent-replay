@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { mkdirSync, existsSync, chmodSync, statSync } from 'node:fs';
+import { mkdirSync, existsSync, chmodSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 let instance: DatabaseConnection | null = null;
@@ -23,19 +23,27 @@ export class DatabaseConnection {
     // in one place. Best-effort; a no-op on Windows.
     const dir = dirname(this.dbPath);
     try {
-      if (!existsSync(dir)) {
+      // Only a directory WE create is ours to set permissions on.
+      //
+      // The store holds config.json with API keys in plaintext, so a directory
+      // this tool makes is made private. But the narrowing used to run on every
+      // open, against whatever path `--dir`/AGENT_REPLAY_DIR named — so pointing
+      // at an existing shared directory silently stripped group and other
+      // access from it, and `--dir .` did that to the user's WORKING DIRECTORY.
+      // Even read-only commands did it: `agent-replay list` changed permissions
+      // on a directory it was only reading. A pre-existing directory belongs to
+      // whoever made it; its mode is their decision, not ours.
+      //
+      // (`mkdirSync` mode is masked by the process umask, so the chmod below
+      // sets it exactly rather than trusting the mode argument.)
+      const created = !existsSync(dir);
+      if (created) {
         mkdirSync(dir, { recursive: true, mode: 0o700 });
-      }
-      // NARROW ONLY. This was an unconditional `chmod 0700`, described as a
-      // floor but acting as a set — so opening a store an operator had
-      // deliberately locked down (`chmod 500`) quietly restored owner write on
-      // it. Only tighten permissions that are broader than 0700; never loosen
-      // what someone chose.
-      try {
-        const mode = statSync(dir).mode & 0o777;
-        if ((mode & 0o077) !== 0) chmodSync(dir, mode & 0o700);
-      } catch {
-        // Non-POSIX filesystem — leave as-is rather than fail.
+        try {
+          chmodSync(dir, 0o700);
+        } catch {
+          // Non-POSIX filesystem — leave as-is rather than fail.
+        }
       }
     } catch (err) {
       // Raised BEFORE the try below, so a working directory the user cannot

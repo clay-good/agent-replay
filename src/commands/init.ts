@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import chalk from 'chalk';
 import { ensureDatabase } from '../db/index.js';
@@ -29,12 +29,15 @@ export function runInit(opts: InitOptions = {}): void {
     return;
   }
 
-  // Create directory
-  if (!existsSync(baseDir)) {
-    mkdirSync(baseDir, { recursive: true });
-  }
-
-  // Initialize database (creates file + runs migrations)
+  // Initialize database (creates the directory AND file, then runs migrations).
+  //
+  // The directory is deliberately NOT created here. `ensureDatabase` creates it
+  // too, and it is the only place that knows the store must be private (it
+  // holds config.json with API keys in plaintext). Creating it first here, with
+  // the plain umask mode, meant the store the tool made for itself was
+  // world-readable and only became private again because the connection layer
+  // used to re-chmod every directory it opened — including ones the user merely
+  // pointed at. One creator, one place that sets the mode.
   ensureDatabase(dbPath);
 
   // Write default config

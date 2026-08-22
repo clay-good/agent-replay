@@ -347,6 +347,47 @@ describe('data directory permissions', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it('leaves a PRE-EXISTING directory\'s permissions alone', () => {
+    // The narrowing used to run on every open, against whatever path --dir or
+    // AGENT_REPLAY_DIR named. Pointing at a directory that already existed
+    // silently stripped group and other access from it — and `--dir .` did that
+    // to the user's working directory. A directory someone else made is theirs;
+    // its mode is their decision.
+    if (process.platform === 'win32') return;
+    const root = mkdtempSync(join(tmpdir(), 'ar-perm-existing-'));
+    const shared = join(root, 'shared');
+    try {
+      mkdirSync(shared);
+      chmodSync(shared, 0o755);
+      const d = ensureDatabase(join(shared, 'traces.db'));
+      d.prepare('SELECT 1').get();
+      expect(statSync(shared).mode & 0o777).toBe(0o755);
+    } finally {
+      resetConnection();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not change permissions when only READING an existing store', () => {
+    // `agent-replay list` altered the permissions of a directory it was merely
+    // reading, which is the most surprising form of the same bug.
+    if (process.platform === 'win32') return;
+    const root = mkdtempSync(join(tmpdir(), 'ar-perm-read-'));
+    const dataDir = join(root, '.agent-replay');
+    try {
+      ensureDatabase(join(dataDir, 'traces.db'));
+      resetConnection();
+      chmodSync(dataDir, 0o755); // the operator opens the store up, deliberately
+
+      const again = ensureDatabase(join(dataDir, 'traces.db'));
+      again.prepare('SELECT 1').get();
+      expect(statSync(dataDir).mode & 0o777).toBe(0o755);
+    } finally {
+      resetConnection();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 // ── Bug 4: sequential hook tool calls keep distinct step numbers ───────────

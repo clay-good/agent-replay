@@ -243,6 +243,19 @@ between them, and nothing else.
 
 ### Fixed
 
+- **Opening a store changed the permissions of a directory the tool did not
+  create.** The store is made owner-only because `config.json` holds API keys in
+  plaintext — but the narrowing ran on every open, against whatever path
+  `--dir` or `AGENT_REPLAY_DIR` named. Pointing at an existing shared directory
+  silently stripped group and other access from it, `--dir .` did that to the
+  user's working directory, and even read-only commands did it: `agent-replay
+  list` altered the permissions of a directory it was only reading. Only a
+  directory this tool creates is now given a mode; a pre-existing one belongs to
+  whoever made it. `init` no longer pre-creates the directory either, so
+  creation and its permissions live in exactly one place — previously `init`
+  made it with the plain umask mode and it became private only as a side effect
+  of the blanket re-chmod.
+
 - **A broken `config.json` was reported as a missing one.** Every read failure —
   a stray trailing comma from a hand-edit, an unreadable file, a directory in
   its place — collapsed to `null`, which every config command rendered as *"No
