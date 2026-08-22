@@ -175,6 +175,27 @@ const HALLUCINATION_CHECK: EvalPreset = {
         // weight but must not hard-fail the preset: every imported Claude Code
         // session containing a single failed shell command would otherwise fail
         // outright, while completeness-check called the same trace 100% complete.
+        //
+        // Except when NOTHING succeeded. The weights are 0.4/0.3/0.3 against a
+        // 0.7 threshold, so a lone zeroed 0.3-weight criterion lands on exactly
+        // 0.7 and passes — meaning "costs its weight" costs nothing at all in
+        // verdict terms, and this criterion could not fail the preset on this
+        // branch however bad the run was. A trace whose EVERY step errored
+        // reported "70% PASS" with the Details column naming this very
+        // criterion, which is verbatim the symptom the criticality rule above
+        // was written to end.
+        //
+        // A run where nothing worked is not a recovered error, whatever status
+        // it recorded, so it is critical. Partial failure still passes, by the
+        // design stated above — deliberately, since changing that means
+        // re-weighting a rubric users gate CI on, and every score would move.
+        if (errorSteps.length > 0 && errorSteps.length === ctx.steps.length) {
+          return {
+            score: 0.0,
+            critical: true,
+            details: `every step failed (${errorSteps.length} of ${ctx.steps.length})`,
+          };
+        }
         return {
           score: errorSteps.length === 0 ? 1.0 : 0.0,
           details: errorSteps.length ? `${errorSteps.length} error step(s) found` : 'No error steps',

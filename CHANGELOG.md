@@ -295,6 +295,20 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **`hallucination-check` reported "70% PASS" for a run in which every step
+  failed.** The criticality rule that stops a failed run from passing only
+  covers a trace that ended badly by status or by a trace-level error. A run
+  recorded `completed` took the other branch, where the error criterion scores 0
+  but is not critical — and 0.4 + 0.3 + 0.3·0 is *exactly* the 0.7 threshold, so
+  on that branch the criterion could not fail the preset however bad the run
+  was. The output named the failing criterion in the Details column beside the
+  word PASS, and `eval` exited 0. A run where nothing succeeded is not a
+  recovered error, whatever status it recorded, so it is now critical. Partial
+  failure still passes, deliberately: that is the documented intent (one failed
+  shell command in an imported session must not fail the preset), and narrowing
+  it further would mean re-weighting a rubric users gate CI on, moving every
+  score.
+
 - **`record --format gemini-stream` and `--format codex-exec` dropped lines and
   reported "Warnings: 0".** The native protocol counts and reports every line it
   rejects, precisely so a silent loss is impossible; the translated formats had

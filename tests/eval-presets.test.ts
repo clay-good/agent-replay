@@ -192,6 +192,54 @@ describe('hallucination-check preset', () => {
   });
 });
 
+describe('a run where NOTHING succeeded cannot report PASS', () => {
+  // The criticality rule above covers a run that ended badly by status or by a
+  // trace-level error. A run recorded `completed` took the other branch, where
+  // the criterion scores 0 but is not critical — and 0.4 + 0.3 + 0.3·0 is
+  // exactly the 0.7 threshold, so on that branch it could not fail the preset
+  // however bad the run was. A trace whose EVERY step errored reported
+  // "70% PASS" with the Details column naming that very criterion, and exited
+  // 0: verbatim the symptom the criticality rule was written to end.
+  it('fails when every step errored, despite a completed status', () => {
+    const res = evalTrace(base({
+      status: 'completed',
+      output: { text: 'done' },
+      steps: [1, 2, 3].map((n) => ({
+        step_number: n, step_type: 'tool_call' as const, name: `t${n}`,
+        input: {}, error: `boom ${n}`,
+      })),
+    }), 'hallucination-check');
+
+    expect(res.passed).toBe(false);
+    const criterion = (res.details as { criteria: Array<{ name: string; details: string }> }).criteria
+      .find((c) => c.name === 'no_error_steps');
+    expect(criterion?.details).toMatch(/every step failed/);
+  });
+
+  it('still PASSES a run that recovered from an error, as designed', () => {
+    // The documented intent: one failed shell command in an imported session
+    // costs this criterion's weight but must not hard-fail the preset. Partial
+    // failure deliberately still passes — narrowing that further means
+    // re-weighting a rubric users gate CI on, and every score would move.
+    const res = evalTrace(base({
+      status: 'completed',
+      output: { text: 'done' },
+      steps: [
+        { step_number: 1, step_type: 'tool_call', name: 'ok', input: {}, output: { r: 1 } },
+        { step_number: 2, step_type: 'tool_call', name: 'bad', input: {}, error: 'transient' },
+        { step_number: 3, step_type: 'tool_call', name: 'retry', input: {}, output: { r: 2 } },
+      ],
+    }), 'hallucination-check');
+    expect(res.passed).toBe(true);
+  });
+
+  it('still passes a trace with no steps at all', () => {
+    // Guard the boundary: `0 === 0` must not read as "every step failed".
+    const res = evalTrace(base({ status: 'completed', output: { text: 'done' }, steps: [] }), 'hallucination-check');
+    expect(res.passed).toBe(true);
+  });
+});
+
 describe('a criterion that detects a failed run can fail the preset', () => {
   // The weights are 0.4 / 0.3 / 0.3 against a threshold that used to be exactly
   // 0.7, so a lone zeroed 0.3-weight criterion landed ON the threshold and
