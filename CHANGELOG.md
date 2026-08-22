@@ -246,6 +246,14 @@ between them, and nothing else.
 
 ### Fixed
 
+- **`init` stamped `version: "0.1.0"` into every new `config.json`.** The
+  package has been 0.2.0 for a while; the literal was left behind in two places
+  (that field, and the CLI's `--version` fallback). Nothing reads the config
+  field back, which is the only reason it did no damage — a stored value being
+  false is still a defect. Both now read the shipped `package.json`, resolved
+  once by walking up to the nearest one, and a test fails the next time a
+  literal is left behind.
+
 - **Opening a second store closed the first one's handle.** `ensureDatabase` is
   a documented export, and the connection cache was a single slot keyed on
   nothing: opening a second path closed the connection behind the first, so a

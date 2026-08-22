@@ -1,4 +1,5 @@
 import { existsSync, writeFileSync } from 'node:fs';
+import { VERSION } from '../utils/version.js';
 import { join, resolve } from 'node:path';
 import chalk from 'chalk';
 import { ensureDatabase } from '../db/index.js';
@@ -42,7 +43,7 @@ export function runInit(opts: InitOptions = {}): void {
 
   // Write default config
   const config = {
-    version: '0.1.0',
+    version: VERSION,
     database: dbPath,
     created_at: new Date().toISOString(),
     ai: {

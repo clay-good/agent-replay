@@ -1,23 +1,11 @@
 import { Command } from 'commander';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-let version = '0.1.0';
-try {
-  const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
-  version = pkg.version;
-} catch {
-  // fallback to hardcoded version
-}
+import { VERSION } from './utils/version.js';
 
 const program = new Command();
 
 program
   .name('agent-replay')
-  .version(version)
+  .version(VERSION)
   .description('Agent Flight Data Recorder & Replay Engine — time-travel debugging, auto-eval, and what-if sandboxing for AI agents');
 
 // Map every commander parse error (unknown option, missing/excess argument,
