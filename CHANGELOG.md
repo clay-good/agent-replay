@@ -140,6 +140,14 @@ between them, and nothing else.
 
 ### Changed
 
+- **The JSONL reader's equivalence test no longer trips the suite timeout.** It
+  read a 200 KB line one byte at a time — 200,000 syscalls per chunk size — and
+  took ~110s against a 60s per-test limit, so it failed intermittently on a
+  loaded machine. What it proves is that the carry buffer grows past the chunk,
+  not the size it reaches, so the very long lines now run only at realistic
+  chunk sizes and a 2 KB line (still 2,000x the smallest chunk) covers the tiny
+  ones. Both properties stay covered and the run drops from ~110s to ~2s;
+  verified the trimmed test still catches a broken carry.
 - **The supported Node range is now `>=20.12`, and `better-sqlite3` moved to
   `^12.11.1`.** The old `>=18` floor was a promise the package could not keep:
   `better-sqlite3` v11 does not compile against Node 24 or newer (V8 removed
