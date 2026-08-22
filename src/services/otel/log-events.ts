@@ -51,8 +51,25 @@ function parseArgs(v: unknown): Record<string, unknown> {
 }
 
 /** Map an OTLP/JSON logs payload into one IngestTraceInput per session id. */
+/**
+ * Event names this mapper understands.
+ *
+ * Exported through {@link countRecognizedLogRecords} so the receiver can report
+ * how many records it actually consumed WITHOUT a second copy of this rule —
+ * two copies would drift the moment a family is added, and the whole point of
+ * the count is to be trustworthy.
+ */
+function isRecognizedEventName(eventName: string): boolean {
+  return eventName.startsWith('gemini_cli.') || eventName.startsWith('claude_code.');
+}
+
+/** How many records in this batch are events the mapper understands. */
+export function countRecognizedLogRecords(otlp: Record<string, unknown>): number {
+  return flattenLogs(otlp).filter((l) => isRecognizedEventName(l.eventName)).length;
+}
+
 export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
-  const logs = flattenLogs(otlp).filter((l) => l.eventName.startsWith('gemini_cli.') || l.eventName.startsWith('claude_code.'));
+  const logs = flattenLogs(otlp).filter((l) => isRecognizedEventName(l.eventName));
 
   const bySession = new Map<string, FlatLog[]>();
   logs.forEach((l, i) => {

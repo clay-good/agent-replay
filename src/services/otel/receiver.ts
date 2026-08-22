@@ -4,7 +4,7 @@ import { gunzipSync } from 'node:zlib';
 import { ingestTrace, mergeBatchIntoTrace } from '../trace-service.js';
 import type { IngestTraceInput } from '../../models/types.js';
 import { mapOtlpTraces, type MappedOtelTrace } from './semconv.js';
-import { mapOtlpLogs } from './log-events.js';
+import { mapOtlpLogs, countRecognizedLogRecords} from './log-events.js';
 import { decodeTracesData, decodeLogsData } from './protobuf.js';
 import { julianDayExpr } from '../../utils/time.js';
 
@@ -466,13 +466,26 @@ function ingestOtlpLogs(
   // drift — a CLI version change, a generic OTel logger — got a clean 200
   // forever while the store stayed empty and shutdown printed "Accepted 0
   // trace(s)", with nothing anywhere to debug against.
-  if (traces.length === 0 && totalRecords > 0) {
+  // Report a PARTIAL rejection too, not only a total one.
+  //
+  // The guard used to be `traces.length === 0`, which answers a bare 200
+  // whenever anything at all was recognized — but the drift this exists to
+  // surface is normally partial: a CLI version bump renames some events and
+  // keeps others, and those records were discarded under a clean 200 with
+  // nothing anywhere to debug against. OTLP's `partialSuccess` is exactly the
+  // field for "accepted, minus these", so say how many.
+  const recognized = countRecognizedLogRecords(otlp);
+  const rejected = totalRecords - recognized;
+  if (rejected > 0) {
     return {
       status: 200,
       payload: {
         partialSuccess: {
-          rejectedLogRecords: totalRecords,
-          errorMessage: 'no recognized log events in batch (expected gemini_cli.* or claude_code.*)',
+          rejectedLogRecords: rejected,
+          errorMessage:
+            recognized === 0
+              ? 'no recognized log events in batch (expected gemini_cli.* or claude_code.*)'
+              : `${rejected} of ${totalRecords} log record(s) were not recognized events (expected gemini_cli.* or claude_code.*)`,
         },
       },
     };

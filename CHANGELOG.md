@@ -295,6 +295,17 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **The OTLP logs endpoint reported a rejection only when the WHOLE batch was
+  unrecognized.** The guard was "nothing mapped", so a batch in which anything
+  at all was recognized answered a bare 200 and the rest was discarded silently
+  — and the drift this reporting exists for is normally partial, since a CLI
+  version bump renames some events and keeps others. `partialSuccess` now
+  carries the count whenever any record was not recognized, naming how many of
+  how many. (Scope: this counts records whose event *name* the mapper does not
+  recognize. One carrying a known prefix with an unknown suffix still passes the
+  filter and is not counted; narrowing that needs per-record reporting from the
+  mapper.)
+
 - **A span id repeated inside a single OTLP batch was stored twice.** The merge
   path already refuses a span id it saw in an *earlier* batch — that is what
   makes an exporter's retry safe — but the check compares against what is

@@ -418,6 +418,34 @@ describe('handleLogsExport — an unrecognized batch is reported, not swallowed'
     expect(listTraces(db, {}).total).toBe(0);
   });
 
+  it('reports a PARTIAL rejection, which is what drift actually looks like', () => {
+    // The guard was `traces.length === 0`, so a batch where anything at all was
+    // recognized answered a bare 200 — and the drift this exists to surface is
+    // normally partial: a CLI version bump renames some events and keeps
+    // others. Those records were discarded under a clean 200, with nothing
+    // anywhere to debug against.
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    const res = handleLogsExport(db, JSON.stringify(otlpLogs([
+      logRecord('gemini_cli.tool_call', { 'session.id': 's1', function_name: 'ls' }),
+      logRecord('someone_elses_cli.tool_call', { 'session.id': 's1' }),
+      logRecord('generic.log', {}),
+    ])), stats);
+
+    expect(res.status).toBe(200);
+    expect(res.payload).toMatchObject({ partialSuccess: { rejectedLogRecords: 2 } });
+    // ...and the recognized part really was stored, which is why this is
+    // partial rather than a rejection.
+    expect(listTraces(db, {}).total).toBe(1);
+    const msg = (res.payload as { partialSuccess: { errorMessage: string } }).partialSuccess.errorMessage;
+    expect(msg).toMatch(/2 of 3/);
+
+    // Scope, stated so the next reader does not over-trust the number: this
+    // counts records whose event NAME the mapper does not recognize. A record
+    // carrying a known prefix but an unknown suffix (`gemini_cli.something_new`)
+    // still passes the prefix filter and may yield no step, and is not counted
+    // here — narrowing that needs per-record reporting from the mapper.
+  });
+
   it('answers a bare 200 when the batch did map', () => {
     const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
     const res = handleLogsExport(db, JSON.stringify(otlpLogs([
