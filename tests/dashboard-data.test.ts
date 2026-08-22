@@ -315,3 +315,46 @@ describe('store totals exclude forks', () => {
     expect(agentStats(db)).toEqual([{ agent_name: 'f', count: 1, failed_or_timeout: 0 }]);
   });
 });
+
+
+describe('the average duration says what it measured', () => {
+  /** Insert directly, so an unmeasurable timestamp pair survives to the query. */
+  function raw(id: string, startedAt: string, endedAt: string | null, status = 'completed') {
+    db.prepare(
+      `INSERT INTO agent_traces (id, agent_name, trigger, status, input, started_at, ended_at, tags, metadata, created_at)
+       VALUES (?, ?, 'manual', ?, '{}', ?, ?, '[]', '{}', '2026-01-01T00:00:00.000Z')`,
+    ).run(id, id, status, startedAt, endedAt);
+  }
+
+  it('reports the denominator when the average covers only some traces', () => {
+    // `AVG` skips NULLs, and a duration is NULL whenever it cannot be measured.
+    // So "Avg duration: 5.0s" could describe ONE trace while "Traces: 100" sat
+    // directly above it, with nothing saying so — a measured-sounding number
+    // about a set the reader has no way to identify.
+    raw('measurable', '2026-08-20T10:00:00Z', '2026-08-20T10:00:05Z');
+    raw('still_running', '2026-08-20T10:00:00Z', null, 'running');
+    raw('unparseable', 'not-a-timestamp', 'also-not-a-timestamp');
+
+    const s = dashboardStats(db);
+    expect(s.traces).toBe(3);
+    expect(s.avgDurationMs).toBe(5000);
+    expect(s.avgDurationSample).toBe(1); // the average is over 1 of the 3
+  });
+
+  it('counts every trace when every duration is measurable', () => {
+    raw('a', '2026-08-20T10:00:00Z', '2026-08-20T10:00:02Z');
+    raw('b', '2026-08-20T10:00:00Z', '2026-08-20T10:00:04Z');
+    const s = dashboardStats(db);
+    expect(s.avgDurationSample).toBe(s.traces);
+    expect(s.avgDurationMs).toBe(3000);
+  });
+
+  it('is zero, not null, when nothing can be measured', () => {
+    // A sample of 0 and an average of null must agree — a reader checking
+    // either one gets the same answer.
+    raw('running_only', '2026-08-20T10:00:00Z', null, 'running');
+    const s = dashboardStats(db);
+    expect(s.avgDurationMs).toBeNull();
+    expect(s.avgDurationSample).toBe(0);
+  });
+});

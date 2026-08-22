@@ -62,7 +62,17 @@ export function runStats(opts: StatsOptions = {}): void {
       Steps: overall.steps,
       Evals: overall.evals,
       'Active policies': overall.policies,
-      'Avg duration': overall.avgDurationMs != null ? formatDuration(Math.round(overall.avgDurationMs)) : '-',
+      // Say what the average measured whenever that is not every trace. A
+      // duration is unmeasurable for a trace still running, one with a
+      // clock-skewed ended_at, or one whose timestamps no format parses — so
+      // "Avg duration: 5.0s" could describe a single trace while "Traces: 100"
+      // sat directly above it. The scope is now stated rather than assumed.
+      'Avg duration': overall.avgDurationMs != null
+        ? formatDuration(Math.round(overall.avgDurationMs)) +
+          (overall.avgDurationSample < overall.traces
+            ? ` (over ${overall.avgDurationSample} of ${overall.traces})`
+            : '')
+        : '-',
       'Total tokens': overall.totalTokens != null ? overall.totalTokens.toLocaleString() : '-',
       'Total cost': overall.totalCost != null ? formatCostUsd(overall.totalCost) : '-',
     }),

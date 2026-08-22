@@ -529,33 +529,88 @@ describe('getTrace resolves a canonical id from the primary key index', () => {
     }
   });
 
+  /**
+   * Count how many statement EXECUTIONS full-scan `agent_traces`.
+   *
+   * Deterministic where a stopwatch is not. `exportTraces` calls `getTrace`
+   * once per trace, so if that lookup cannot use the primary key the number of
+   * scanning executions grows with the store — that IS the quadratic behavior,
+   * measured directly instead of inferred from elapsed time.
+   */
+  function scanningExecutions(run: (d: Database.Database) => void): number {
+    const executions = new Map<string, number>();
+    const spy = new Proxy(db, {
+      get(target, prop, receiver) {
+        if (prop === 'prepare') {
+          return (sql: string) => {
+            const stmt = target.prepare(sql);
+            return new Proxy(stmt, {
+              get(st, k, r) {
+                const v = Reflect.get(st, k, r);
+                if ((k === 'get' || k === 'all' || k === 'iterate') && typeof v === 'function') {
+                  return (...args: unknown[]) => {
+                    executions.set(sql, (executions.get(sql) ?? 0) + 1);
+                    return (v as (...a: unknown[]) => unknown).apply(st, args);
+                  };
+                }
+                return typeof v === 'function' ? (v as () => unknown).bind(st) : v;
+              },
+            });
+          };
+        }
+        const v = Reflect.get(target, prop, receiver);
+        return typeof v === 'function' ? v.bind(target) : v;
+      },
+    }) as Database.Database;
+
+    run(spy);
+
+    let scanning = 0;
+    for (const [sql, times] of executions) {
+      if (!/\bFROM\s+agent_traces\b/i.test(sql)) continue;
+      const params = new Array((sql.match(/\?/g) ?? []).length).fill('trc_000000042');
+      const plan = (db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params) as { detail: string }[])
+        .map((r) => r.detail)
+        .join(' | ');
+      if (/SCAN agent_traces/i.test(plan)) scanning += times;
+    }
+    return scanning;
+  }
+
   it('keeps a whole-store export linear instead of quadratic', () => {
-    // The end-to-end guard, as a ratio rather than a deadline. Quadrupling the
-    // store should quadruple a linear export and multiply a quadratic one by
-    // ~16. The bound of 8 sits between those, with enough room that ordinary
-    // scheduling noise does not decide the outcome.
-    const N = 750;
-    seed(N);
-    const t0 = performance.now();
-    expect(JSON.parse(exportTraces(db, {}, 'json')) as unknown[]).toHaveLength(N);
-    const small = performance.now() - t0;
+    // The end-to-end guard. A whole-store export must scan the table a fixed
+    // number of times — once, to list the traces — no matter how many traces
+    // there are. When `getTrace` matched with `id = ? OR id LIKE ?` it scanned
+    // once MORE PER TRACE, so the count tracked the store size and the export
+    // went quadratic (1k 0.4s, 2k 1.2s, 4k 5.5s).
+    //
+    // Counted rather than timed. An earlier version of this test asserted
+    // elapsed milliseconds and then a time RATIO between two store sizes; both
+    // were decided by whatever else the machine was doing, and the ratio form
+    // was additionally defeated by SQLite's page cache once the measurement was
+    // repeated. Counting the work is exact at any size, on any machine.
+    seed(200);
+    const small = scanningExecutions((d) => {
+      expect(JSON.parse(exportTraces(d, {}, 'json')) as unknown[]).toHaveLength(200);
+    });
 
     const ins = db.prepare(
       `INSERT INTO agent_traces (id, agent_name, trigger, status, input, started_at, tags, metadata, created_at)
        VALUES (?, 'bulk', 'manual', 'completed', '{}', '2026-01-01T00:00:00.000Z', '[]', '{}', '2026-01-01T00:00:00.000Z')`,
     );
     db.transaction(() => {
-      for (let i = N; i < N * 4; i++) ins.run(`trc_${String(i).padStart(9, '0')}`);
+      for (let i = 200; i < 800; i++) ins.run(`trc_${String(i).padStart(9, '0')}`);
     })();
 
-    const t1 = performance.now();
-    expect(JSON.parse(exportTraces(db, {}, 'json')) as unknown[]).toHaveLength(N * 4);
-    const large = performance.now() - t1;
+    const large = scanningExecutions((d) => {
+      expect(JSON.parse(exportTraces(d, {}, 'json')) as unknown[]).toHaveLength(800);
+    });
 
-    // Guard against a divide-by-zero verdict if the small run is too fast to time.
-    const ratio = large / Math.max(small, 1);
-    expect(ratio, `4x the traces took ${ratio.toFixed(1)}x the time`).toBeLessThan(8);
-  }, 60_000);
+    // Quadrupling the store must not increase the number of scans at all.
+    expect(large, `${small} scans at 200 traces, ${large} at 800`).toBe(small);
+    // And the fixed number must be small — one pass to list them, not per trace.
+    expect(small).toBeLessThanOrEqual(2);
+  });
 
   it('still prefers an exact id over a longer one it prefixes', () => {
     // The ordering the old single query used (`(id = ?) DESC`) existed so a

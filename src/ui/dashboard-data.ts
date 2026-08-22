@@ -14,6 +14,17 @@ export interface DashboardStats {
   evals: number;
   policies: number;
   avgDurationMs: number | null;
+  /**
+   * How many traces the average duration was actually computed over.
+   *
+   * `AVG` skips NULLs, and a duration is NULL whenever it cannot be measured —
+   * a trace still `running`, a clock-skewed `ended_at`, a timestamp no format
+   * parses. So the average could describe one trace out of a hundred while
+   * `traces` reported a hundred, and nothing said so. This is the denominator,
+   * reported alongside the number, which is what the rest of this tool does
+   * everywhere else: never present a figure without saying what it measured.
+   */
+  avgDurationSample: number;
   totalTokens: number | null;
   totalCost: number | null;
 }
@@ -65,6 +76,10 @@ export function dashboardStats(db: Database.Database, opts: StatsFilter = {}): D
       `SELECT ROUND(AVG(${DURATION_MS_EXPR})) as v FROM agent_traces ${traceWhere}`,
       p,
     ),
+    // COUNT of the same expression AVG used: COUNT(expr) counts non-NULLs, so
+    // this is exactly the set the average was taken over.
+    avgDurationSample:
+      count(`SELECT COUNT(${DURATION_MS_EXPR}) as cnt FROM agent_traces ${traceWhere}`, p),
     // Same fallback the average duration above needs, for the same reason: the
     // trace-level total is only set when the producer sends one (`trace_end`
     // totals, or an ingested `total_tokens`), while `ingest`, `record`, the OTel
