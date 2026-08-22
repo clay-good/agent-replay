@@ -23,9 +23,24 @@ everywhere, must be an identifier before it can be stored at all); and a
 whole-store `export` that no longer costs time quadratic in the size of the
 store.
 
+Two things to know before upgrading:
+
+- **The supported Node range is now `>=20.12`.** Node 18 has been end-of-life
+  since April 2025, and `better-sqlite3` — a native module — no longer builds
+  against it or against current releases at the version previously pinned, so
+  `npm install -g agent-replay` failed at install time on Node 24 and newer.
+  The dependency moved to a version with prebuilt binaries for Node 20 through
+  26, and CI now tests all four.
+- **A few commands now refuse input they used to accept**, always where
+  accepting it produced a silently wrong answer rather than an error: an empty
+  value for a narrowing flag on `list`, `export`, `check` or `config set` (which
+  widened the scope to everything, at exit 0); a `--refresh`/`--interval` larger
+  than a timer can hold (which inverted into a busy loop); and `dashboard`
+  without an interactive terminal (which hung forever). Each exits `2`.
+
 The recorded trace *data* model is unchanged — same tables and columns, so
-existing stores and exports keep working. Schema v3 and v4 add three indexes
-between them, and nothing else.
+existing stores and exports keep working. Schema v3, v4 and v5 add four indexes
+between them, and nothing else. Upgrades are automatic and one-way.
 
 
 ### Added
