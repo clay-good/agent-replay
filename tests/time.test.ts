@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { parseDurationString, parseSinceToIso, formatDuration, effectiveDurationMs, formatRelativeTime, formatTimestamp,
   parseInstant } from '../src/utils/time.js';
 import { traceTable } from '../src/ui/table.js';
+import { SINCE_PREDICATE, sinceParams } from '../src/utils/time.js';
+import Database from 'better-sqlite3';
 
 describe('parseDurationString', () => {
   it('parses units to milliseconds', () => {
@@ -191,6 +193,91 @@ describe('a zone-less timestamp is read the way SQLite reads it', () => {
     } finally {
       if (prev === undefined) delete process.env.TZ;
       else process.env.TZ = prev;
+    }
+  });
+});
+
+// ── SINCE_PREDICATE against real SQLite ───────────────────────────────────
+
+describe('SINCE_PREDICATE windows by instant, not by bytes', () => {
+  /** A store holding every timestamp form a producer is known to write. */
+  function store() {
+    const db = new Database(':memory:');
+    db.exec('CREATE TABLE t (id TEXT, started_at TEXT)');
+    // Schema v4 indexes exactly `julianday(started_at)`. The index is recreated
+    // here so the plan assertion below tests the shape the real store has.
+    db.exec('CREATE INDEX idx_started ON t (julianday(started_at))');
+    const ins = db.prepare('INSERT INTO t VALUES (?,?)');
+    ins.run('basic_plus', '2026-08-20T10:00:00+0200'); // 08:00Z — BEFORE the cutoff
+    ins.run('basic_minus', '2026-08-20T08:00:00-0200'); // 10:00Z — after
+    ins.run('extended_plus', '2026-08-20T11:00:00+02:00'); // 09:00Z — at the cutoff
+    ins.run('zulu', '2026-08-20T09:30:00Z'); // after
+    ins.run('space_form', '2026-08-20 09:45:00'); // after (SQLite's own form)
+    ins.run('unparseable', 'not-a-timestamp');
+    return db;
+  }
+  const CUT = '2026-08-20T09:00:00Z';
+  const idsSince = (db: Database.Database, cut: string) =>
+    (db.prepare(`SELECT id FROM t WHERE ${SINCE_PREDICATE} ORDER BY id`).all(...sinceParams(cut)) as {
+      id: string;
+    }[]).map((r) => r.id);
+
+  it('includes and excludes ISO basic-format offsets by their real instant', () => {
+    // The regression: `julianday()` returns NULL for `+0200`, which dropped
+    // those rows onto the byte comparison — wrong by the whole UTC offset in
+    // BOTH directions. `basic_plus` is an hour before the cutoff and used to be
+    // included; `basic_minus` is an hour after it and used to be excluded.
+    const db = store();
+    try {
+      const got = idsSince(db, CUT);
+      expect(got).not.toContain('basic_plus');
+      expect(got).toContain('basic_minus');
+    } finally {
+      db.close();
+    }
+  });
+
+  it('still handles the forms julianday already parsed, and the boundary', () => {
+    const db = store();
+    try {
+      const got = idsSince(db, CUT);
+      expect(got).toContain('zulu');
+      expect(got).toContain('space_form');
+      expect(got).toContain('extended_plus'); // exactly at the bound: `>=`
+      expect(got).not.toContain('basic_plus');
+    } finally {
+      db.close();
+    }
+  });
+
+  it('still fails open for a timestamp no form can parse', () => {
+    // Deliberate: the predicate must never drop a row it used to return.
+    const db = store();
+    try {
+      expect(idsSince(db, CUT)).toContain('unparseable');
+    } finally {
+      db.close();
+    }
+  });
+
+  it('still uses the expression index rather than scanning', () => {
+    // The repair is confined to the branch that runs when the bare
+    // `julianday(started_at)` is NULL, precisely so the indexed disjunct is
+    // still a literal match for schema v4's index. If a future edit wraps the
+    // whole column expression, every windowed query full-scans and this fails.
+    const db = store();
+    try {
+      const plan = (
+        db
+          .prepare(`EXPLAIN QUERY PLAN SELECT id FROM t WHERE ${SINCE_PREDICATE}`)
+          .all(...sinceParams(CUT)) as { detail: string }[]
+      )
+        .map((r) => r.detail)
+        .join(' | ');
+      expect(plan).toMatch(/USING INDEX idx_started/);
+      expect(plan).not.toMatch(/\bSCAN t\b/);
+    } finally {
+      db.close();
     }
   });
 });

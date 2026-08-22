@@ -13,18 +13,38 @@
  *     `T`-separated timestamp, so it was excluded from EVERY window.
  *
  * A CI gate reading `check --since 1d` therefore skipped traces it should have
- * checked. `julianday()` parses offsets, `Z`, and the space form correctly. It
- * returns NULL for a timestamp it cannot parse at all; those rows fall back to
- * the old byte comparison so this can never drop a row it used to return.
+ * checked. `julianday()` parses offsets, `Z`, and the space form correctly.
  *
- * Takes the bound TWICE — see `sinceParams`.
+ * It does NOT parse an ISO-8601 *basic*-format offset (`+0200`) — the form
+ * `date +%FT%T%z` emits and `ingest` stores verbatim — and returning NULL for
+ * those rows dropped them straight back onto the byte comparison this predicate
+ * exists to replace, off by the whole UTC offset in both directions: a
+ * `+0200` row an hour BEFORE the cutoff was included, and a `-0200` row after
+ * it was excluded. `parseSinceToIso` already normalizes that format on the
+ * BOUND side; the ROW side is handled below by retrying the basic form as the
+ * extended one, the same repair {@link julianDayExpr} makes.
+ *
+ * The structure matters as much as the arithmetic. The first disjunct stays a
+ * bare `julianday(started_at)` so it still matches schema v4's expression index
+ * exactly; the repair is confined to the branch that only runs when that
+ * returned NULL. A timestamp neither form can parse still falls back to the
+ * byte comparison, so this can never drop a row it used to return.
+ *
+ * Takes the bound THREE times — see `sinceParams`.
  */
-export const SINCE_PREDICATE =
-  '(julianday(started_at) >= julianday(?) OR (julianday(started_at) IS NULL AND started_at >= ?))';
+export const SINCE_PREDICATE = `(julianday(started_at) >= julianday(?) OR (
+  julianday(started_at) IS NULL AND CASE
+    WHEN ${'julianday(BASIC_OFFSET_RETRY)'} IS NOT NULL
+      THEN ${'julianday(BASIC_OFFSET_RETRY)'} >= julianday(?)
+    ELSE started_at >= ?
+  END))`.replace(
+  /BASIC_OFFSET_RETRY/g,
+  "substr(started_at, 1, length(started_at) - 2) || ':' || substr(started_at, -2)",
+);
 
-/** Bind values for {@link SINCE_PREDICATE}, which references the bound twice. */
-export function sinceParams(since: string): [string, string] {
-  return [since, since];
+/** Bind values for {@link SINCE_PREDICATE}, which references the bound three times. */
+export function sinceParams(since: string): [string, string, string] {
+  return [since, since, since];
 }
 
 /**

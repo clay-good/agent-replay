@@ -243,6 +243,23 @@ between them, and nothing else.
 
 ### Fixed
 
+- **`--since` included traces before the cutoff and dropped traces after it**,
+  for any trace whose `started_at` carries an ISO-8601 *basic*-format offset
+  (`+0200`) — what `date +%FT%T%z` emits and what `ingest` stores verbatim.
+  `SINCE_PREDICATE` used a bare `julianday()`, which returns NULL for that
+  form, so those rows fell back to the byte comparison the predicate exists to
+  replace: wrong by the whole UTC offset, in both directions. A `+0200` trace
+  an hour before the window was counted in, and a `-0200` trace inside it was
+  counted out. This reached every command that windows by time — including
+  `check --since`, a CI gate that reported "2 trace(s) checked" over the wrong
+  two traces. The row side now retries the basic form as the extended one, the
+  same repair `julianDayExpr` already made for durations and the same one
+  `parseSinceToIso` already made for the *bound*. The repair is confined to the
+  branch that runs only when the bare `julianday()` returned NULL, so the
+  indexed disjunct still matches schema v4's expression index exactly — checked
+  with `EXPLAIN QUERY PLAN`, and asserted in a test. A timestamp no form can
+  parse still fails open, as before.
+
 - An AI provider's 4xx was reported as "Server error". A malformed request, an
   unknown model name or a wrong endpoint therefore read as a provider outage, so
   the natural next step was to wait and retry when the fix is local. Those are
