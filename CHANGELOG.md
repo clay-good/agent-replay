@@ -305,6 +305,26 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **`export --format golden` to stdout suppressed both baseline-trust
+  warnings.** The warning was emitted only for a `--output` file, on the stated
+  reasoning that it "would be noise in the middle of someone's pipeline" — but
+  it is written to **stderr**, so it could never reach a redirected or piped
+  stdout. There was no noise to avoid, and the condition instead re-created the
+  exact false green the warning exists to prevent: `export --format golden >
+  golden.json` is an ordinary idiom, and it produced a baseline built from
+  failed or in-flight runs, or an entirely empty one, with no signal at all.
+  Two byte-identical baselines, one warned about and one not, purely by how the
+  bytes were routed.
+- **`diff` rendered a type-only difference as two identical cells.** The table
+  printed values with `String(v)`, which collapses the very distinction the
+  comparison had just used to decide the traces differ: a step output of the
+  string `"42"` and one of the number `42` both printed `42`, under a header
+  reading "1 difference(s) found" — so the only way to see what changed was to
+  re-run with `--json`. That is the failure the diff renderer's windowing was
+  written to end, arriving by another route. When both sides render to the same
+  text, their JSON form is shown instead, so ordinary values keep their plain
+  rendering.
+
 - **Live capture stored causal references to steps that do not exist, and `why`
   then invented a different antecedent and presented it as fact.** The live
   path checked a `parent_step`/`caused_by_step` for *range* (a positive integer,

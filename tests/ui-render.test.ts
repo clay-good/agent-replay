@@ -821,3 +821,35 @@ describe('the eval Details column never claims a criterion passed when it scored
     expect(out).not.toContain('All criteria passed');
   });
 });
+
+
+describe('renderDiff shows a difference the table would otherwise hide', () => {
+  const result = (left: unknown, right: unknown): TraceDiffResult => ({
+    left_trace_id: 'trc_l', right_trace_id: 'trc_r', divergence_step: 1,
+    left_step_count: 1, right_step_count: 1,
+    diffs: [{ step_number: 1, field: 'output', left_value: left, right_value: right }],
+  } as TraceDiffResult);
+
+  it.each([
+    ['a string and a number', '42', 42],
+    ['a string and a boolean', 'true', true],
+  ])('distinguishes %s', (_label, left, right) => {
+    // `String(v)` collapses the very type distinction the comparison just used
+    // to decide these traces differ, so the table printed two identical cells
+    // under a header reading "1 difference(s) found" — and only `--json`
+    // revealed what changed. That is the failure `windowedAround` was written
+    // to end, arriving by a different route.
+    const out = noAnsi(renderDiff(result(left, right), trace(), trace()));
+    const row = out.split('\n').find((l) => l.includes('output'))!;
+    expect(row).toContain(JSON.stringify(left));
+    expect(row).toContain(JSON.stringify(right));
+  });
+
+  it('does not quote ordinary values, where the plain form is already clear', () => {
+    const out = noAnsi(renderDiff(result('alpha', 'beta'), trace(), trace()));
+    const row = out.split('\n').find((l) => l.includes('output'))!;
+    expect(row).toContain('alpha');
+    expect(row).toContain('beta');
+    expect(row).not.toContain('"alpha"');
+  });
+});

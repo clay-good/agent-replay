@@ -142,10 +142,18 @@ export function runExport(traceId: string | undefined, opts: ExportOptions = {})
       spinner.stop();
       process.stdout.write(output);
     }
-    // Only for a file export: a warning on stdout-piped output is noise in the
-    // middle of someone's pipeline, and the empty/partial baseline it warns
-    // about is a thing you fix by re-running the export that wrote the file.
-    if (format === 'golden' && opts.output) warnAboutBaseline(output);
+    // Every golden export, whether it goes to a file or to stdout.
+    //
+    // This used to be `&& opts.output`, on the reasoning that "a warning on
+    // stdout-piped output is noise in the middle of someone's pipeline". That
+    // reasoning is simply wrong: `warnAboutBaseline` writes to STDERR, so it
+    // could never appear in a redirected or piped stdout — there was no noise
+    // to avoid. What the condition did instead was re-create the exact
+    // false-green the function below exists to prevent, for
+    // `export --format golden > golden.json`, which is an ordinary idiom. Two
+    // byte-identical baselines, one warned about and one not, purely by how the
+    // bytes were routed.
+    if (format === 'golden') warnAboutBaseline(output);
   } catch (err) {
     failSpinner(spinner, `Export failed: ${errorMessage(err)}`);
     process.exitCode = 1;

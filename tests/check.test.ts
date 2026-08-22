@@ -612,8 +612,13 @@ describe('export --format golden warns about a baseline it cannot trust', () => 
       ingestTrace(cdb, baseline);
       ingestTrace(cdb, { ...baseline, agent_name: 'flaky-bot', status: 'failed' });
 
-      // Warned for a file export — where re-running with a filter is the fix.
-      // A piped stdout export stays clean, so it can feed another tool.
+      // Warned for EVERY golden export. It used to be file-only, on the
+      // reasoning that a warning would be noise in a pipeline — but the
+      // warning goes to stderr, so it could never reach a piped stdout, and
+      // the condition only suppressed it for `export --format golden >
+      // golden.json`. That is an ordinary idiom, and it produced a baseline
+      // built from failed runs with no signal at all: the exact false green
+      // this warning exists to prevent.
       const errs: string[] = [];
       const errSpy = vi.spyOn(console, 'error').mockImplementation((m?: unknown) => void errs.push(String(m)));
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -636,6 +641,18 @@ describe('export --format golden warns about a baseline it cannot trust', () => 
         logSpy2.mockRestore();
       }
       expect(clean.join('\n')).not.toMatch(/not from a completed run/);
+
+      // ...and the same baseline written to STDOUT warns identically.
+      const piped: string[] = [];
+      const pipedSpy = vi.spyOn(console, 'error').mockImplementation((m?: unknown) => void piped.push(String(m)));
+      const logSpy3 = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        runExport(undefined, { format: 'golden', dir });
+      } finally {
+        pipedSpy.mockRestore();
+        logSpy3.mockRestore();
+      }
+      expect(piped.join('\n')).toMatch(/1 of 2 baseline entry is not from a completed run/);
     } finally {
       resetConnection();
       rmSync(dir, { recursive: true, force: true });

@@ -135,8 +135,27 @@ function formatDiffValue(val: unknown, field: string, other?: unknown): string {
   // Escaped like every other render path: a step name or error reaches this
   // panel as a bare string (an object is JSON-stringified, which escapes its
   // own controls), and boxen computes its border width from what it is given.
-  const text = typeof val === 'object' ? JSON.stringify(val) : String(val);
-  const otherText = other == null ? '' : typeof other === 'object' ? JSON.stringify(other) : String(other);
+  const plain = (v: unknown) => (typeof v === 'object' ? JSON.stringify(v) : String(v));
+  let text = plain(val);
+  let otherText = other == null ? '' : plain(other);
+
+  // If the two sides render to the SAME text, show their JSON form instead.
+  //
+  // `String(v)` collapses the very type distinction the comparison just used to
+  // decide these traces differ: a step output of the string "42" and one of the
+  // number 42 both print `42`, so the table showed two identical cells under a
+  // header reading "1 difference(s) found" — and only `--json` revealed what
+  // changed. That is exactly the failure `windowedAround` below was written to
+  // end, arriving by a different route. The JSON form quotes a string and does
+  // not quote a number, so the difference becomes visible; it is used ONLY when
+  // the plain form is ambiguous, so ordinary values are not littered with
+  // quotes. (`true` vs `"true"`, and a number-shaped string, are the reachable
+  // cases; the storage layer keeps that distinction, so `diff` should show it.)
+  if (other != null && text === otherText && !Object.is(val, other)) {
+    text = JSON.stringify(val) ?? text;
+    otherText = JSON.stringify(other) ?? otherText;
+  }
+
   return chalk.white(safeText(windowedAround(text, otherText, 34)));
 }
 
