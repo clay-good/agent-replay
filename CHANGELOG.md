@@ -257,6 +257,18 @@ between them, and nothing else.
 
 ### Fixed
 
+- **Five more commands could still be made to forge a line of output.** The
+  first pass converted `show`, `replay` and the tables; `stats`, `decisions`,
+  `why`, `watch` and `guard test` were missed, and they print at column 0 with
+  no gutter at all — so an agent named `evil\nagent-replay: store verified
+  clean` produced, under `stats`' "By agent" heading, a line indistinguishable
+  from this tool's own output. All five now escape single-line fields, and the
+  producer-controlled names they render are bounded, as the trace table and
+  timeline already were. The `show`/`replay` header panel got the same
+  treatment: a newline there inserted an unlabelled line inside the box, and an
+  unbounded agent name turned the header into forty wrapped lines of border
+  before the steps the user asked for.
+
 - **Hook capture wrote steps to the wrong trace**, for any session whose newest
   trace carries an ISO basic-format offset. The same `julianday()` NULL that
   broke `list` ordering also reached the hook adapter, whose own comment cited

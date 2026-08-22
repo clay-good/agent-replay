@@ -2,10 +2,10 @@ import { resolve } from 'node:path';
 import chalk from 'chalk';
 import { listDecisions } from '../services/decision-service.js';
 import { ensureDatabase } from '../db/index.js';
-import { heading, label, safeText } from '../ui/theme.js';
+import { heading, label, safeText, safeLine} from '../ui/theme.js';
 import { resolveDataDir } from '../utils/paths.js';
 import { makeRefuse, openStoreOr } from '../utils/refuse.js';
-import { errorMessage } from '../utils/json.js';
+import { errorMessage, truncate} from '../utils/json.js';
 
 export interface DecisionsOptions {
   json?: boolean;
@@ -67,7 +67,7 @@ export function runDecisions(traceId: string, opts: DecisionsOptions = {}): void
 
   for (const { step, decision } of decisions) {
     console.log(
-      `  ${chalk.whiteBright('◆')} ${chalk.dim(`#${step.step_number}`)} ${chalk.white.bold(`"${safeText(step.name)}"`)}`,
+      `  ${chalk.whiteBright('◆')} ${chalk.dim(`#${step.step_number}`)} ${chalk.white.bold(`"${safeLine(truncate(step.name, 80))}"`)}`,
     );
 
     if (!decision) {
@@ -82,7 +82,7 @@ export function runDecisions(traceId: string, opts: DecisionsOptions = {}): void
     // overwrites the line on a real terminal, so this command — whose entire job
     // is reporting the choice — could DISPLAY a different option than the one
     // stored, contradicting `why` about the same record.
-    console.log(`      ${label('Chose:')} ${chalk.greenBright(safeText(decision.chosen))}${conf}${by}`);
+    console.log(`      ${label('Chose:')} ${chalk.greenBright(safeLine(decision.chosen))}${conf}${by}`);
 
     if (decision.options.length > 0) {
       console.log(`      ${label('Options:')}`);
@@ -90,7 +90,7 @@ export function runDecisions(traceId: string, opts: DecisionsOptions = {}): void
         const chosen = opt.option === decision.chosen;
         const bullet = chosen ? chalk.greenBright('✔') : chalk.dim('•');
         const score = opt.score != null ? chalk.dim(` [${opt.score}]`) : '';
-        const rationale = opt.rationale ? chalk.dim(` — ${safeText(opt.rationale)}`) : '';
+        const rationale = opt.rationale ? chalk.dim(` — ${safeLine(opt.rationale)}`) : '';
         // Defensive for records stored before options were validated at the
         // boundary: a bare string element made this a TypeError that aborted the
         // command and lost every later decision point in the trace.
@@ -98,7 +98,7 @@ export function runDecisions(traceId: string, opts: DecisionsOptions = {}): void
       // without an `option` key — a shape only a hand-written or legacy store
       // has, but rendering it as that string tells the reader nothing about
       // what is actually stored. Fall back to the JSON.
-      const optionText = safeText(
+      const optionText = safeLine(
         typeof opt?.option === 'string'
           ? opt.option
           : opt !== null && typeof opt === 'object'
@@ -110,7 +110,7 @@ export function runDecisions(traceId: string, opts: DecisionsOptions = {}): void
     }
 
     if (decision.rationale) {
-      console.log(`      ${label('Rationale:')} ${chalk.white(safeText(decision.rationale))}`);
+      console.log(`      ${label('Rationale:')} ${chalk.white(safeLine(decision.rationale))}`);
     }
     console.log('');
   }

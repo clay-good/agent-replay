@@ -3,11 +3,11 @@ import chalk from 'chalk';
 import type { CausalHop } from '../services/decision-service.js';
 import { causalWalk } from '../services/decision-service.js';
 import { ensureDatabase } from '../db/index.js';
-import { stepIcon, stepLabel, heading, label, safeText } from '../ui/theme.js';
+import { stepIcon, stepLabel, heading, label, safeText, safeLine} from '../ui/theme.js';
 import type { StepType } from '../models/enums.js';
 import { resolveDataDir } from '../utils/paths.js';
 import { makeRefuse, openStoreOr } from '../utils/refuse.js';
-import { errorMessage } from '../utils/json.js';
+import { errorMessage, truncate} from '../utils/json.js';
 
 export interface WhyOptions {
   step?: string;
@@ -102,14 +102,14 @@ export function runWhy(traceId: string, opts: WhyOptions = {}): void {
     console.log(
       `  ${arrow} ${chalk.dim(`#${hop.step.step_number}`)} ` +
         `${stepIcon(hop.step.step_type as StepType)} ${stepLabel(hop.step.step_type as StepType)} ` +
-        `${chalk.white.bold(`"${safeText(hop.step.name)}"`)}${via}`,
+        `${chalk.white.bold(`"${safeLine(truncate(hop.step.name, 80))}"`)}${via}`,
     );
 
     if (hop.decision) {
       const d = hop.decision;
-      console.log(`      ${label('Chose:')} ${chalk.greenBright(safeText(d.chosen))}` + (d.confidence != null ? chalk.dim(`  (confidence ${d.confidence})`) : ''));
+      console.log(`      ${label('Chose:')} ${chalk.greenBright(safeLine(d.chosen))}` + (d.confidence != null ? chalk.dim(`  (confidence ${d.confidence})`) : ''));
       if (d.rationale) {
-        console.log(`      ${label('Because:')} ${chalk.white(safeText(d.rationale))}`);
+        console.log(`      ${label('Because:')} ${chalk.white(safeLine(d.rationale))}`);
       }
     }
 
@@ -118,6 +118,6 @@ export function runWhy(traceId: string, opts: WhyOptions = {}): void {
 
   console.log('');
   const root = chain[chain.length - 1];
-  console.log(chalk.dim(`  Chain terminates at step ${root.step.step_number} ("${safeText(root.step.name)}").`));
+  console.log(chalk.dim(`  Chain terminates at step ${root.step.step_number} ("${safeLine(truncate(root.step.name, 80))}").`));
   console.log('');
 }

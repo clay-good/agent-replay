@@ -4,10 +4,10 @@ import type { TraceStep } from '../models/types.js';
 import type { StepType, TraceStatus } from '../models/enums.js';
 import { getTrace, getStepsAfter, getMostRecentRunningTrace } from '../services/trace-service.js';
 import { ensureDatabase } from '../db/index.js';
-import { stepIcon, stepLabel, heading, statusBadge, safeText } from '../ui/theme.js';
+import { stepIcon, stepLabel, heading, statusBadge, safeText, safeLine} from '../ui/theme.js';
 import { formatDuration } from '../utils/time.js';
 import { resolveDataDir } from '../utils/paths.js';
-import { escapeForMessage } from '../utils/json.js';
+import { escapeForMessage, truncate} from '../utils/json.js';
 
 export interface WatchOptions {
   interval?: string;
@@ -112,7 +112,7 @@ export function runWatch(traceId: string | undefined, opts: WatchOptions = {}): 
     // the same trace printed the reason.
     const finished = getTrace(db, id);
     if (finished?.error) {
-      console.log(`  ${chalk.dim('error:')} ${chalk.redBright(safeText(finished.error))}`);
+      console.log(`  ${chalk.dim('error:')} ${chalk.redBright(safeLine(finished.error))}`);
     }
     console.log('');
   };
@@ -157,13 +157,13 @@ export function renderStepLine(step: TraceStep, phase: 'full' | 'closed' = 'full
   const num = chalk.dim(`#${step.step_number}`.padStart(4));
   const dur = step.duration_ms != null ? chalk.dim(`  ${formatDuration(step.duration_ms)}`) : '';
   const tokens = step.tokens_used != null ? chalk.dim(`  ${step.tokens_used.toLocaleString()} tok`) : '';
-  const err = step.error ? `  ${chalk.redBright('error:')} ${chalk.red(safeText(step.error))}` : '';
+  const err = step.error ? `  ${chalk.redBright('error:')} ${chalk.red(safeLine(step.error))}` : '';
   if (phase === 'closed') {
     const outcome = step.error ? chalk.redBright('failed') : chalk.dim('done');
     return `  ${num} ${chalk.dim('\u2514')} ${outcome}${dur}${tokens}${err}`;
   }
   const icon = stepIcon(step.step_type as StepType);
   const type = stepLabel(step.step_type as StepType);
-  const name = chalk.white.bold(`"${safeText(step.name)}"`);
+  const name = chalk.white.bold(`"${safeLine(truncate(step.name, 80))}"`);
   return `  ${num} ${icon} ${type}  ${name}${dur}${tokens}${err}`;
 }

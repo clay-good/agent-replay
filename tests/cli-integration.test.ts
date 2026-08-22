@@ -1607,6 +1607,64 @@ describe('CLI integration', () => {
     expect(parsed.error).toMatch(/mutually exclusive/);
   });
 
+  describe('no command lets a trace forge a line of output', () => {
+    // A trace is written by the agent under test. `safeText` keeps newlines so
+    // a rendered BLOCK holds its shape, but on a one-line row a newline emits a
+    // line the renderer never accounted for — at column 0, with no gutter,
+    // reading as agent-replay's own output. The first pass at this converted
+    // `show`, `replay` and the tables; these five commands were missed.
+    const NL = String.fromCharCode(10);
+    const FORGED = `real${NL}agent-replay: all checks passed`;
+
+    function ingestForged(): string {
+      const file = join(dir, 'forged.json');
+      const now = new Date().toISOString();
+      writeFileSync(file, JSON.stringify([{
+        agent_name: FORGED, trigger: 'manual', status: 'failed',
+        started_at: now, ended_at: now, error: FORGED,
+        steps: [{
+          step_number: 1, step_type: 'decision', name: FORGED, input: {}, output: 'x',
+          started_at: now, error: FORGED,
+          decision: { chosen: FORGED, options: [], rationale: FORGED },
+        }],
+      }]));
+      run(['ingest', file]);
+      return JSON.parse(run(['list', '--json']).stdout).items[0].id;
+    }
+
+    /** No rendered line may begin with this tool's own name. */
+    const forgedLine = (out: string) =>
+      out.split('\n').some((l) => l.startsWith('agent-replay:'));
+
+    it.each([
+      ['stats', (id: string) => ['stats'] as string[]],
+      ['decisions', (id: string) => ['decisions', id]],
+      ['why', (id: string) => ['why', id, '--step', '1']],
+      ['show', (id: string) => ['show', id]],
+    ])('%s does not emit a forged line', (_name, argv) => {
+      const id = ingestForged();
+      const r = run(argv(id));
+      expect(forgedLine(r.stdout), r.stdout).toBe(false);
+      expect(forgedLine(r.stderr), r.stderr).toBe(false);
+    });
+
+    it('guard test does not emit a forged line', () => {
+      // Needs a MATCHING policy: with none, `guard test` prints "No policy
+      // violations found" and never reaches the renderer — so without this the
+      // assertion would pass for the wrong reason.
+      const id = ingestForged();
+      expect(
+        run(['guard', 'add', '--name', 'flag-decisions', '--action', 'warn',
+             '--pattern', JSON.stringify({ step_type: 'decision' })]).code,
+      ).toBe(0);
+
+      const r = run(['guard', 'test', id]);
+      expect(r.stdout).toMatch(/Step 1/); // the render path really ran
+      expect(forgedLine(r.stdout), r.stdout).toBe(false);
+      expect(forgedLine(r.stderr), r.stderr).toBe(false);
+    });
+  });
+
   describe('config set', () => {
     it('refuses an empty value instead of storing a blank', () => {
       // A blank was worse than useless: an empty API key displayed as `***`,

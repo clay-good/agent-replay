@@ -2,9 +2,10 @@ import boxen from 'boxen';
 import chalk from 'chalk';
 import type { Trace } from '../models/types.js';
 import type { TraceStatus } from '../models/enums.js';
-import { statusBadge, colors, label, formatScorePct, formatCostUsd, safeText } from './theme.js';
+import { statusBadge, colors, label, formatScorePct, formatCostUsd, safeText, safeLine} from './theme.js';
 import { effectiveDurationMs, formatDuration } from '../utils/time.js';
 import { effectiveTokens } from '../utils/totals.js';
+import { truncate } from '../utils/json.js';
 
 /**
  * `boxen`, with a plain-text fallback instead of a crash.
@@ -45,16 +46,25 @@ function box(content: string, options: Parameters<typeof boxen>[1]): string {
  * This list was wrong three times, each time by fixing the fields that had just
  * been reported and not enumerating the rest. Enumerate before editing it again.
  */
+/**
+ * Panel fields are ONE LINE each, so they use `safeLine` and are bounded.
+ *
+ * A newline in a producer value inserted an unlabelled line inside the box that
+ * the reader has no way to attribute, and an unbounded `agent_name` turned a
+ * header into forty wrapped lines of border before the steps the user actually
+ * asked for. The prose fields further down (an AI evaluator's explanation,
+ * summary, assessment) stay lenient: there a newline is content.
+ */
 export function traceHeaderPanel(trace: Trace): string {
   const lines: string[] = [];
 
   lines.push(
-    `${label('Agent:')}     ${chalk.whiteBright.bold(safeText(trace.agent_name))}${trace.agent_version ? chalk.dim(` v${safeText(trace.agent_version)}`) : ''}`,
+    `${label('Agent:')}     ${chalk.whiteBright.bold(safeLine(truncate(trace.agent_name, 60)))}${trace.agent_version ? chalk.dim(` v${safeLine(truncate(trace.agent_version, 30))}`) : ''}`,
   );
   // The id too: `record`'s native protocol lets the PRODUCER choose it
   // (`trace_start.trace_id` is only checked for being a non-empty string), so it
   // is no more trustworthy than the fields beside it.
-  lines.push(`${label('Trace ID:')}  ${chalk.dim(safeText(trace.id))}`);
+  lines.push(`${label('Trace ID:')}  ${chalk.dim(safeLine(trace.id))}`);
   lines.push(`${label('Status:')}    ${statusBadge(trace.status as TraceStatus)}`);
   lines.push(`${label('Trigger:')}   ${chalk.white(trace.trigger)}`);
 
@@ -74,23 +84,23 @@ export function traceHeaderPanel(trace: Trace): string {
     lines.push(`${label('Cost:')}      ${chalk.white(formatCostUsd(trace.total_cost_usd))}`);
   }
 
-  lines.push(`${label('Started:')}   ${chalk.white(safeText(trace.started_at))}`);
+  lines.push(`${label('Started:')}   ${chalk.white(safeLine(trace.started_at))}`);
   if (trace.ended_at) {
-    lines.push(`${label('Ended:')}     ${chalk.white(safeText(trace.ended_at))}`);
+    lines.push(`${label('Ended:')}     ${chalk.white(safeLine(trace.ended_at))}`);
   }
   if (trace.tags.length > 0) {
     lines.push(
-      `${label('Tags:')}      ${trace.tags.map((t) => colors.info(`[${safeText(t)}]`)).join(' ')}`,
+      `${label('Tags:')}      ${trace.tags.map((t) => colors.info(`[${safeLine(truncate(t, 40))}]`)).join(' ')}`,
     );
   }
   if (trace.error) {
-    lines.push(`${label('Error:')}     ${chalk.redBright(safeText(trace.error))}`);
+    lines.push(`${label('Error:')}     ${chalk.redBright(safeLine(truncate(trace.error, 200)))}`);
   }
   if (trace.parent_trace_id) {
-    lines.push(`${label('Fork of:')}   ${chalk.dim(safeText(trace.parent_trace_id))} ${chalk.dim(`(step ${trace.forked_from_step})`)}`);
+    lines.push(`${label('Fork of:')}   ${chalk.dim(safeLine(trace.parent_trace_id))} ${chalk.dim(`(step ${trace.forked_from_step})`)}`);
   }
   if (trace.session_id) {
-    lines.push(`${label('Session:')}   ${chalk.white(safeText(trace.session_id))}`);
+    lines.push(`${label('Session:')}   ${chalk.white(safeLine(trace.session_id))}`);
   }
 
   return box(lines.join('\n'), {
@@ -137,7 +147,7 @@ export function summaryPanel(
   // own ids is a no-op, so this costs nothing at the call sites that are already
   // safe, and it covers the ones added later.
   const lines = Object.entries(stats).map(
-    ([k, v]) => `${label(k + ':')}  ${chalk.white(safeText(String(v)))}`,
+    ([k, v]) => `${label(k + ':')}  ${chalk.white(safeLine(String(v)))}`,
   );
 
   return box(lines.join('\n'), {

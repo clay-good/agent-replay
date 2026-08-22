@@ -15,13 +15,13 @@ import {
 import type { StepPolicyResult } from '../services/guard-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { policyTable } from '../ui/table.js';
-import { heading, separator, guardActionBadge, stepIcon, colors, safeText } from '../ui/theme.js';
+import { heading, separator, guardActionBadge, stepIcon, colors, safeText, safeLine} from '../ui/theme.js';
 import type { StepType } from '../models/enums.js';
 import type { TraceStep } from '../models/types.js';
 import { isValidStepType } from '../utils/validators.js';
 import { openSync, readSync, closeSync } from 'node:fs';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
-import { errorMessage, safeParseInt } from '../utils/json.js';
+import { errorMessage, safeParseInt, truncate} from '../utils/json.js';
 import { resolveDataDir, storeExists } from '../utils/paths.js';
 
 // ── guard list ───────────────────────────────────────────────────────────
@@ -190,7 +190,7 @@ export function runGuardToggle(policyId: string, enabled: boolean, opts: GuardTo
   try {
     const name = setPolicyEnabled(db, policyId, enabled);
     // The STORED name, read back from the database — not the argv the user typed.
-    console.log(chalk.greenBright(`  Policy "${safeText(name)}" ${enabled ? 'enabled' : 'disabled'}.`));
+    console.log(chalk.greenBright(`  Policy "${safeLine(name)}" ${enabled ? 'enabled' : 'disabled'}.`));
     if (!enabled) console.log(chalk.dim('  It stays in "guard list" and stops matching until re-enabled.'));
     console.log('');
   } catch (err) {
@@ -248,14 +248,14 @@ export function runGuardTest(traceId: string, opts: GuardTestOptions = {}): void
     const icon = stepIcon(result.step.step_type as StepType);
     console.log(
       `  ${icon} ${chalk.white.bold(`Step ${result.step.step_number}`)} — ` +
-        chalk.dim(`"${safeText(result.step.name)}"`) +
+        chalk.dim(`"${safeLine(truncate(result.step.name, 80))}"`) +
         chalk.dim(` (${result.step.step_type})`),
     );
 
     for (const match of result.matches) {
       console.log(
         `     ${guardActionBadge(match.action)} ` +
-          chalk.white(safeText(match.policy.name)) +
+          chalk.white(safeLine(match.policy.name)) +
           chalk.dim(` — ${match.reason}`),
       );
     }
