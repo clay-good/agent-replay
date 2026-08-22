@@ -140,6 +140,16 @@ between them, and nothing else.
 
 ### Changed
 
+- **The export scaling guard no longer races a stopwatch.** It asserted that a
+  3000-trace export finishes in under 5 seconds — an absolute wall-clock bound
+  in a suite that runs files in parallel and spawns real CLI processes, so it
+  failed on a loaded machine for reasons unrelated to the code. The same
+  property is now asserted twice without a deadline: deterministically, by
+  checking the query plan SQLite actually chooses for a canonical-id lookup
+  (a keyed `SEARCH`, never `SCAN agent_traces`), and end-to-end as a ratio —
+  4x the traces must not cost more than 8x the time, where both halves absorb
+  the same machine load. Verified both still catch the original quadratic
+  `id = ? OR id LIKE ?` lookup, which measures 10.8x.
 - **The JSONL reader's equivalence test no longer trips the suite timeout.** It
   read a 200 KB line one byte at a time — 200,000 syscalls per chunk size — and
   took ~110s against a 60s per-test limit, so it failed intermittently on a

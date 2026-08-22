@@ -457,30 +457,104 @@ describe('listTraces session filter', () => {
 });
 
 describe('getTrace resolves a canonical id from the primary key index', () => {
-  it('keeps a whole-store export linear instead of quadratic', () => {
-    // `getTrace` matched with `id = ? OR id LIKE ?`. That disjunction cannot use
-    // the PRIMARY KEY index, so every lookup was `SCAN agent_traces` plus a temp
-    // B-tree for the ORDER BY. `exportTraces` calls getTrace once per trace,
-    // with an ALREADY-CANONICAL id and no limit, so the cost was O(N^2): this
-    // 3000-trace export measured 10.4 s before the fix and 1.1 s after, and the
-    // gap widens with store size. Same class as the `list` full scan that schema
-    // v4's expression index exists to fix, on the path that builds golden
-    // datasets and backups. The bound below has ~4x headroom over the fixed
-    // timing and still fails the quadratic version by 2x.
+  // `getTrace` matched with `id = ? OR id LIKE ?`. That disjunction cannot use
+  // the PRIMARY KEY index, so every lookup was `SCAN agent_traces` plus a temp
+  // B-tree for the ORDER BY. `exportTraces` calls getTrace once per trace, with
+  // an ALREADY-CANONICAL id and no limit, so the cost was O(N^2): a 3000-trace
+  // export measured 10.4 s before the fix and 1.1 s after, and the gap widens
+  // with store size. Same class as the `list` full scan that schema v4's
+  // expression index exists to fix, on the path that builds golden datasets and
+  // backups.
+  //
+  // This was originally guarded by `elapsed < 5000ms` on a 3000-trace export.
+  // An ABSOLUTE wall-clock bound is the wrong instrument in a suite that runs
+  // files in parallel and spawns real CLI processes: it fails on a loaded
+  // machine or a slow shared runner for reasons unrelated to the code, and a
+  // flaky gate is one nobody trusts. The two tests below assert the same
+  // property without a stopwatch race — the first deterministically (the query
+  // plan SQLite actually chooses), the second on a RATIO, where both halves of
+  // the measurement absorb the same machine load.
+
+  function seed(n: number) {
     runMigrations(db);
     const ins = db.prepare(
       `INSERT INTO agent_traces (id, agent_name, trigger, status, input, started_at, tags, metadata, created_at)
        VALUES (?, 'bulk', 'manual', 'completed', '{}', '2026-01-01T00:00:00.000Z', '[]', '{}', '2026-01-01T00:00:00.000Z')`,
     );
     db.transaction(() => {
-      for (let i = 0; i < 3000; i++) ins.run(`trc_${String(i).padStart(9, '0')}`);
+      for (let i = 0; i < n; i++) ins.run(`trc_${String(i).padStart(9, '0')}`);
+    })();
+  }
+
+  /** Record every SQL statement a call prepares, without changing behavior. */
+  function recordSql(run: (d: Database.Database) => void): string[] {
+    const seen: string[] = [];
+    const spy = new Proxy(db, {
+      get(target, prop, receiver) {
+        if (prop === 'prepare') {
+          return (sql: string) => {
+            seen.push(sql);
+            return target.prepare(sql);
+          };
+        }
+        const v = Reflect.get(target, prop, receiver);
+        return typeof v === 'function' ? v.bind(target) : v;
+      },
+    }) as Database.Database;
+    run(spy);
+    return seen;
+  }
+
+  it('never full-scans agent_traces when resolving an already-canonical id', () => {
+    // The deterministic form of the assertion: ask SQLite what plan it picked.
+    // A canonical-id lookup — the only kind `exportTraces` makes — must be a
+    // keyed SEARCH. If the disjunction ever comes back, the plan degrades to
+    // SCAN and this fails instantly, on any machine, at any store size.
+    seed(200);
+    const sql = recordSql((d) => {
+      expect(getTrace(d, 'trc_000000042')).not.toBeNull();
+    }).filter((q) => /\bFROM\s+agent_traces\b/i.test(q));
+
+    expect(sql.length).toBeGreaterThan(0);
+    for (const q of sql) {
+      // EXPLAIN still needs a value per placeholder; the id itself is the
+      // realistic one, and it is what the planner would see in practice.
+      const params = new Array((q.match(/\?/g) ?? []).length).fill('trc_000000042');
+      const plan = (
+        db.prepare(`EXPLAIN QUERY PLAN ${q}`).all(...params) as { detail: string }[]
+      )
+        .map((r) => r.detail)
+        .join(' | ');
+      expect(plan, `plan for: ${q}`).not.toMatch(/SCAN agent_traces/i);
+    }
+  });
+
+  it('keeps a whole-store export linear instead of quadratic', () => {
+    // The end-to-end guard, as a ratio rather than a deadline. Quadrupling the
+    // store should quadruple a linear export and multiply a quadratic one by
+    // ~16. The bound of 8 sits between those, with enough room that ordinary
+    // scheduling noise does not decide the outcome.
+    const N = 750;
+    seed(N);
+    const t0 = performance.now();
+    expect(JSON.parse(exportTraces(db, {}, 'json')) as unknown[]).toHaveLength(N);
+    const small = performance.now() - t0;
+
+    const ins = db.prepare(
+      `INSERT INTO agent_traces (id, agent_name, trigger, status, input, started_at, tags, metadata, created_at)
+       VALUES (?, 'bulk', 'manual', 'completed', '{}', '2026-01-01T00:00:00.000Z', '[]', '{}', '2026-01-01T00:00:00.000Z')`,
+    );
+    db.transaction(() => {
+      for (let i = N; i < N * 4; i++) ins.run(`trc_${String(i).padStart(9, '0')}`);
     })();
 
-    const started = performance.now();
-    const out = JSON.parse(exportTraces(db, {}, 'json')) as unknown[];
-    const elapsed = performance.now() - started;
-    expect(out).toHaveLength(3000);
-    expect(elapsed).toBeLessThan(5000);
+    const t1 = performance.now();
+    expect(JSON.parse(exportTraces(db, {}, 'json')) as unknown[]).toHaveLength(N * 4);
+    const large = performance.now() - t1;
+
+    // Guard against a divide-by-zero verdict if the small run is too fast to time.
+    const ratio = large / Math.max(small, 1);
+    expect(ratio, `4x the traces took ${ratio.toFixed(1)}x the time`).toBeLessThan(8);
   }, 60_000);
 
   it('still prefers an exact id over a longer one it prefixes', () => {
