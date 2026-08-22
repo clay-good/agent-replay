@@ -31,6 +31,26 @@ export function runList(opts: ListOptions = {}): void {
   const db = openStoreOr(refuse, () => ensureDatabase(dbPath), dbPath);
   if (!db) return;
 
+  // An EMPTY value is a usage error, not "no filter". `--agent "$AGENT"` with an
+  // unset shell variable would otherwise silently widen the query from one agent
+  // to every trace in the store and exit 0 — the same silent scope-widening
+  // `check` refuses for `--agent`/`--agent-exact` and for an empty `--fields`
+  // list, and `stats` already refuses for `--since`. `list` is where a script
+  // most often builds a filter from a variable, so it is the likeliest place for
+  // the mistake, and a widened list reads exactly like a correct one.
+  for (const [flag, value] of [
+    ['--status', opts.status],
+    ['--agent', opts.agent],
+    ['--tag', opts.tag],
+    ['--session', opts.session],
+    ['--since', opts.since],
+  ] as const) {
+    if (value != null && value.trim() === '') {
+      refuse(2, `${flag} was given an empty value.`, [`Pass a value, or omit ${flag} to list every trace.`]);
+      return;
+    }
+  }
+
   const filter: ListTracesFilter = {};
 
   if (opts.status) filter.status = opts.status;

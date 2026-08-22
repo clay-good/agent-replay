@@ -243,6 +243,15 @@ between them, and nothing else.
 
 ### Fixed
 
+- **`list` widened to the whole store when a filter flag was given an empty
+  value.** `list --agent "$AGENT"` with `$AGENT` unset returned every trace at
+  exit 0, which reads exactly like a correct narrow result — the same silent
+  scope-widening already refused by `check` for `--agent`/`--agent-exact` and an
+  empty `--fields` list, and by `stats` for `--since`. `list` is where a script
+  is most likely to build a filter from a shell variable, and its own comment
+  claimed it mirrored `stats`. An empty `--status`, `--agent`, `--tag`,
+  `--session`, or `--since` is now a usage error at exit 2.
+
 - **`--since` included traces before the cutoff and dropped traces after it**,
   for any trace whose `started_at` carries an ISO-8601 *basic*-format offset
   (`+0200`) — what `date +%FT%T%z` emits and what `ingest` stores verbatim.

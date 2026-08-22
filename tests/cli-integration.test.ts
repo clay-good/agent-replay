@@ -1607,6 +1607,28 @@ describe('CLI integration', () => {
     expect(parsed.error).toMatch(/mutually exclusive/);
   });
 
+  it.each([['--status'], ['--agent'], ['--tag'], ['--session'], ['--since']])(
+    'list rejects an empty %s value rather than listing every trace',
+    (flag) => {
+      // Same class as the `check` guard below, on the command where a script is
+      // most likely to build a filter from a shell variable. `list --agent
+      // "$AGENT"` with $AGENT unset used to return the WHOLE store at exit 0,
+      // which reads exactly like a correct narrow result. `stats` already
+      // refused an empty `--since`; `list` did not, despite its own comment
+      // claiming the two mirror each other.
+      run(['ingest', '-'], JSON.stringify({ agent_name: 'alpha', input: {}, steps: [] }));
+      run(['ingest', '-'], JSON.stringify({ agent_name: 'beta', input: {}, steps: [] }));
+
+      const r = run(['list', flag, '', '--json']);
+      expect(r.code).toBe(2);
+      const parsed = JSON.parse(r.stdout);
+      expect(parsed.ok).toBe(false);
+      expect(parsed.error).toMatch(/empty value/);
+      // The point of the guard: it must not have silently returned everything.
+      expect(parsed.items).toBeUndefined();
+    },
+  );
+
   it.each([['--agent'], ['--agent-exact']])('rejects an empty %s value rather than widening the gate', (flag) => {
     // `--agent-exact "$AGENT"` with an unset shell variable would otherwise
     // silently widen a gate from one agent to EVERY agent and report green —
