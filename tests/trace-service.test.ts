@@ -1033,3 +1033,51 @@ describe('the programmatic API answers for its own arguments', () => {
     expect(getTrace(db, t.id)!.steps[0].decision!.confidence).toBe(0.75);
   });
 });
+
+
+describe('a producer string is not re-typed by what it happens to say', () => {
+  // The storage layer stores a string as-is when it parses as JSON, so the TYPE
+  // a value came back as depended on its content: `"42"` returned the number
+  // 42, `"true"` the boolean, and — the damaging one — a tool that returned the
+  // four-letter text `null` was stored as JSON null and became
+  // indistinguishable from a step that produced nothing (`show` renders no
+  // Output line at all for it).
+  //
+  // Pre-serialized STRUCTURE still passes through: that is what the behavior
+  // was written for (OTel attributes and harness payloads carrying JSON text),
+  // and every reader of these columns expects an object or array.
+  it.each([
+    ['null', 'null'],
+    ['a number', '42'],
+    ['a boolean', 'true'],
+    ['a quoted string', '"already quoted"'],
+    ['plain prose', 'hello world'],
+  ])('keeps %s as the string it was', (_label, text) => {
+    const trace = ingestTrace(db, {
+      agent_name: 'a',
+      steps: [{ step_number: 1, step_type: 'tool_call', name: 's', input: {}, output: text }],
+    } as never);
+    const stored = getTrace(db, trace.id)!;
+    expect(typeof stored.steps[0].output).toBe('string');
+    expect(stored.steps[0].output).toBe(text);
+  });
+
+  it.each([
+    ['an object', '{"a":1}', { a: 1 }],
+    ['an array', '[1,2]', [1, 2]],
+  ])('still passes %s through as structure', (_label, text, expected) => {
+    const trace = ingestTrace(db, {
+      agent_name: 'a',
+      steps: [{ step_number: 1, step_type: 'tool_call', name: 's', input: {}, output: text }],
+    } as never);
+    expect(getTrace(db, trace.id)!.steps[0].output).toEqual(expected);
+  });
+
+  it('leaves a real object alone', () => {
+    const trace = ingestTrace(db, {
+      agent_name: 'a',
+      steps: [{ step_number: 1, step_type: 'tool_call', name: 's', input: {}, output: { b: 2 } }],
+    } as never);
+    expect(getTrace(db, trace.id)!.steps[0].output).toEqual({ b: 2 });
+  });
+});

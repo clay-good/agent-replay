@@ -56,10 +56,29 @@ function now(): string {
  * `input`/`output` — so `ingest` and live `record`/`hook` capture all took a
  * plain-string prompt and silently dropped it, exit 0, no warning.
  */
+/**
+ * Whether a producer string is PRE-SERIALIZED STRUCTURE, to be stored as-is.
+ *
+ * Only an object or an array counts. Any parseable JSON used to qualify, which
+ * silently re-typed the producer's value: a tool that returned the four-letter
+ * text `null` was stored as JSON null and became indistinguishable from a step
+ * that produced nothing — `hasRenderableContent` says no, and `show` renders no
+ * Output line at all. `"42"` came back the number 42, `"true"` the boolean.
+ * The type a value came back as depended on what the value happened to say.
+ *
+ * A producer sending pre-serialized structure sends `{...}` or `[...]`; nobody
+ * writes the text `null` meaning "nothing". Restricting the pass-through to
+ * those two keeps the documented behavior for the case it was written for —
+ * OTel attributes and harness payloads that carry JSON text — and stops a
+ * scalar-looking string from being re-typed. Every reader of these columns
+ * expects an object or array anyway.
+ */
 function isJsonText(val: string): boolean {
+  const trimmed = val.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return false;
   try {
-    JSON.parse(val);
-    return true;
+    const parsed: unknown = JSON.parse(trimmed);
+    return typeof parsed === 'object' && parsed !== null;
   } catch {
     return false;
   }

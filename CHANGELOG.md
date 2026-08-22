@@ -295,6 +295,17 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **A producer's string was re-typed by what it happened to say.** `input` and
+  `output` stored a string as-is whenever it parsed as JSON, so the type a value
+  came back as depended on its content: `"42"` returned the number 42, `"true"`
+  the boolean, and — the damaging one — a tool that returned the four-letter
+  text `null` was stored as JSON null and became **indistinguishable from a step
+  that produced nothing**, with `show` rendering no Output line at all for it.
+  Pass-through is now restricted to a string that is genuinely an object or an
+  array, which is what the behavior was written for (OTel attributes and harness
+  payloads carrying JSON text) and what every reader of those columns expects.
+  A scalar-looking string stays the string it was.
+
 - **Live capture dropped a forward causal reference in silence.** A
   `parent_step` or `caused_by_step` that does not point strictly earlier is
   already refused at write time — `causalWalk` depends on the graph being
