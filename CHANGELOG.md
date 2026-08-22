@@ -295,6 +295,20 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **A guardrail policy with an empty `*_contains` needle blocked every step.**
+  `''` is a substring of every string, so `guard add --pattern
+  '{"name_contains":""}' --action deny` was stored without complaint and then
+  denied `read_file`, every LLM call, and everything else — a fail-closed that
+  is really fail-broken, and reachable from an ordinary authoring slip
+  (`--pattern "{\"name_contains\":\"$TOOL\"}"` with `$TOOL` unset in CI kills
+  every tool call in the session). It also falsified the warning `guard add`
+  prints for `output_contains` policies, which says they cannot block live: this
+  one could. The fold-away sibling — a needle of only zero-width characters —
+  was already rejected for exactly this reason, and the literal empty string had
+  been explicitly excluded from that check. It is now refused at write time,
+  and a policy already stored fails closed with a reason that says the pattern
+  is unusable rather than claiming the step's name matched.
+
 - **A store in a read-only directory now says why it cannot be opened.** The
   message was "check file and directory permissions", which does not convey the
   surprising part: the database runs in WAL mode, and WAL keeps its index in a

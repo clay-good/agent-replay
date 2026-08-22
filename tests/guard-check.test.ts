@@ -586,3 +586,61 @@ describe('a needle that folds away is unusable, not a match-anything', () => {
     expect(v.reason).not.toMatch(/unusable/);
   });
 });
+
+
+describe('an empty *_contains needle is a universal match, not a filter', () => {
+  // `''` is a substring of every string, so a deny policy written this way
+  // blocks EVERY step in the session — a fail-closed that is really
+  // fail-broken. It arrives through an ordinary authoring slip:
+  // `--pattern "{\"name_contains\":\"$TOOL\"}"` with `$TOOL` unset in CI.
+  //
+  // The fold-away sibling (a needle of only zero-width characters) was already
+  // rejected for exactly this reason; the LITERAL empty string was explicitly
+  // excluded from that check, as though anyone writes it on purpose.
+  it.each([['name_contains'], ['input_contains'], ['output_contains']])(
+    'is refused at write time for %s',
+    (key) => {
+      const problem = validateMatchPattern({ [key]: '' });
+      expect(problem).toMatch(/empty value/);
+      expect(problem).toMatch(/every step/);
+    },
+  );
+
+  it('still accepts a needle that is merely short, or whitespace', () => {
+    // Only the EMPTY string is a universal match. A single space is a real
+    // needle and must keep working.
+    expect(validateMatchPattern({ name_contains: 'a' })).toBeNull();
+    expect(validateMatchPattern({ name_contains: ' ' })).toBeNull();
+  });
+
+  it('fails a stored empty-needle policy closed, with a usable reason', () => {
+    // A policy written before the refusal, or inserted outside the CLI, must
+    // not silently match everything. Deny still blocks — that is the
+    // fail-closed rule — but the reason must say the pattern is unusable
+    // rather than report the nonsense "name contains ''". Inserted directly,
+    // since `addPolicy` now refuses to create one.
+    db.prepare(
+      `INSERT INTO guardrail_policies (id, name, description, action, priority, enabled, match_pattern, action_params, tags, created_at, updated_at)
+       VALUES ('p_legacy', 'legacy-empty', NULL, 'deny', 0, 1, '{"name_contains":""}', NULL, '[]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+    ).run();
+
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'read_file' })));
+    expect(v.action).toBe('deny'); // still blocks
+    expect(v.reason).toMatch(/unusable/i);
+    // It must not read as a genuine match. The reason names the key and its
+    // empty value, which is the useful part — what it must not say is that the
+    // step's name matched something, since nothing did.
+    expect(v.reason).not.toMatch(/^name contains/);
+  });
+
+  it('does not fire a WARN policy with an unusable needle', () => {
+    // Only blocking actions fail closed; a warn that cannot match must stay
+    // quiet rather than warn on every step.
+    db.prepare(
+      `INSERT INTO guardrail_policies (id, name, description, action, priority, enabled, match_pattern, action_params, tags, created_at, updated_at)
+       VALUES ('p_legacy_warn', 'legacy-warn', NULL, 'warn', 0, 1, '{"name_contains":""}', NULL, '[]', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+    ).run();
+    const v = verdictForMatches(evaluateStep(db, makeStep({ step_type: 'tool_call', name: 'read_file' })));
+    expect(v.action).toBe('allow');
+  });
+});

@@ -314,6 +314,19 @@ export function validateMatchPattern(pattern: Record<string, unknown>): string |
   if (pattern.step_type != null && !(STEP_TYPES as readonly string[]).includes(pattern.step_type as string)) {
     return `step_type must be one of: ${STEP_TYPES.join(', ')}`;
   }
+  // An EMPTY `*_contains` needle is a universal match, not a filter: `''` is a
+  // substring of every string, so a deny policy written this way blocks every
+  // step in the session. That is a fail-closed that is really fail-broken, and
+  // it arrives through an ordinary authoring slip — `--pattern
+  // "{\"name_contains\":\"$TOOL\"}"` with `$TOOL` unset in CI. The same
+  // reasoning already rejects a fold-away needle at evaluation time and an
+  // out-of-enum `step_type` here; the literal empty string was the untested
+  // sibling of both. Refuse it at WRITE time, where the mistake is still cheap.
+  for (const key of ['name_contains', 'input_contains', 'output_contains'] as const) {
+    if (pattern[key] === '') {
+      return `${key} was given an empty value, which matches every step — pass text to match on, or omit the key`;
+    }
+  }
   if (pattern.name_regex != null) {
     if (typeof pattern.name_regex !== 'string') {
       return 'name_regex must be a string';
@@ -406,7 +419,14 @@ function containsNeedle(value: unknown): string | null {
   // contains ''". Returning null routes it to the same "unusable — failing
   // closed" path a non-string needle takes, which still blocks for a deny
   // policy but says WHY.
-  return folded === '' && String(value) !== '' ? null : folded;
+  // Note the literal empty string is unusable too, and for the SAME reason —
+  // it was excluded here (`String(value) !== ''`) as though it were a
+  // deliberate match-anything, which no one writes on purpose. `guard add` now
+  // refuses it, so this branch is for a policy stored before that or inserted
+  // outside the CLI: it routes to the "unusable — failing closed" path, which
+  // still blocks for a deny policy but says WHY rather than reporting the
+  // nonsense reason "name contains ''".
+  return folded === '' ? null : folded;
 }
 
 function matchesPolicy(step: TraceStep, policy: GuardrailPolicy): string | null {
