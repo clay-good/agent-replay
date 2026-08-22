@@ -1607,6 +1607,45 @@ describe('CLI integration', () => {
     expect(parsed.error).toMatch(/mutually exclusive/);
   });
 
+  describe('narrowing flags refuse an empty value in every command', () => {
+    // `list` was fixed first; its siblings were not. `export` matters MOST of
+    // the three, because it WRITES: a widened `--agent ""` silently dumps the
+    // whole store into a file the caller believes holds one agent's traces, and
+    // a golden baseline built that way then gates on runs it never covered.
+    it.each([['--status'], ['--agent'], ['--tag'], ['--since']])(
+      'export refuses an empty %s rather than exporting the whole store',
+      (flag) => {
+        run(['ingest', '-'], JSON.stringify({ agent_name: 'alpha', input: {}, steps: [] }));
+        run(['ingest', '-'], JSON.stringify({ agent_name: 'beta', input: {}, steps: [] }));
+
+        const r = run(['export', flag, '', '--format', 'json']);
+        expect(r.code).toBe(2);
+        expect(r.stderr).toMatch(/empty value/);
+        expect(r.stdout).not.toContain('"agent_name"'); // nothing was written out
+      },
+    );
+
+    it('check refuses an empty --since rather than gating over everything', () => {
+      const golden = join(dir, 'g-empty-since.json');
+      writeFileSync(golden, JSON.stringify([{
+        id: 'g1', agent_name: 'a', input: { t: 1 }, expected_output: null,
+        steps_summary: [], eval_criteria: [], metadata: { status: 'completed' },
+      }]));
+      const r = run(['check', '--golden', golden, '--since', '', '--json']);
+      expect(r.code).toBe(2);
+      expect(JSON.parse(r.stdout).error).toMatch(/empty value/);
+    });
+
+    it('watch refuses an --interval that overflows the timer into a poll loop', () => {
+      // Node clamps a >32-bit timer delay to 1 ms, so "poll almost never"
+      // became "poll a thousand times a second" against SQLite. `dashboard
+      // --refresh` was capped for this; `watch` checked only that n > 0.
+      const r = run(['watch', '--interval', '999999999999']);
+      expect(r.code).toBe(2);
+      expect(r.stderr).toMatch(/maximum is 2147483647 ms/);
+    });
+  });
+
   describe('no command lets a trace forge a line of output', () => {
     // A trace is written by the agent under test. `safeText` keeps newlines so
     // a rendered BLOCK holds its shape, but on a one-line row a newline emits a

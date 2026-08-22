@@ -257,6 +257,19 @@ between them, and nothing else.
 
 ### Fixed
 
+- **`export` and `check --since` still widened on an empty value.** `list` was
+  fixed for this; its siblings were not. It matters most in `export`, which
+  WRITES: `export --agent "$AGENT"` with the variable unset silently dumped the
+  whole store into a file the caller believed held one agent's traces — and a
+  golden baseline built that way then gates on runs it was never meant to cover.
+  `check --since "$WINDOW"` unset gated over the entire store instead of the
+  window, green for the same reason. Both now refuse at exit 2.
+- **`watch --interval` had the same 32-bit timer overflow `dashboard --refresh`
+  was just capped for.** It validated only that the number was positive, so
+  `--interval 999999999999` — plainly "poll almost never" — was clamped by Node
+  to 1 ms and polled SQLite about a thousand times a second. Now refused, with
+  the same reasoning: a value that inverts the request is not clamped quietly.
+
 - **Five more commands could still be made to forge a line of output.** The
   first pass converted `show`, `replay` and the tables; `stats`, `decisions`,
   `why`, `watch` and `guard test` were missed, and they print at column 0 with

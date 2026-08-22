@@ -16,6 +16,9 @@ export interface WatchOptions {
 
 const DEFAULT_POLL_MS = 500;
 
+/** The largest delay `setInterval` stores; above this Node clamps to 1 ms. */
+const MAX_POLL_MS = 2_147_483_647;
+
 /**
  * `agent-replay watch [trace-id]` — live-tail a running trace, printing new
  * steps as they are written and announcing the final status on completion.
@@ -34,6 +37,17 @@ export function runWatch(traceId: string | undefined, opts: WatchOptions = {}): 
     const n = Number(opts.interval);
     if (!Number.isFinite(n) || n <= 0) {
       console.error(chalk.red(`  Invalid --interval: ${opts.interval} (must be a positive number of milliseconds).`));
+      process.exitCode = 2;
+      return;
+    }
+    // Node stores a timer delay in a 32-bit signed int and CLAMPS anything
+    // larger to 1 ms — so `--interval 999999999999`, which plainly asks to poll
+    // almost never, polls SQLite about a thousand times a second instead: the
+    // exact inverse of the request. `dashboard --refresh` refuses this for the
+    // same reason; `watch` validated only that the number was positive.
+    if (n > MAX_POLL_MS) {
+      console.error(chalk.red(`  Invalid --interval: ${opts.interval} (maximum is ${MAX_POLL_MS} ms).`));
+      console.error(chalk.dim('  A larger value overflows the timer and polls every millisecond instead.'));
       process.exitCode = 2;
       return;
     }

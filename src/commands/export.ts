@@ -74,6 +74,25 @@ export function runExport(traceId: string | undefined, opts: ExportOptions = {})
     }
     filter.status = opts.status;
   }
+  // An EMPTY value is a usage error, not "no filter" — the same refusal `list`
+  // and `check` make. It matters MORE here: `export` writes data out, and a
+  // widened `--agent ""` silently dumps the whole store into a file the caller
+  // believed held one agent's traces. A golden baseline built that way gates on
+  // runs it was never meant to cover.
+  for (const [flag, value] of [
+    ['--status', opts.status],
+    ['--agent', opts.agent],
+    ['--tag', opts.tag],
+    ['--since', opts.since],
+  ] as const) {
+    if (value != null && String(value).trim() === '') {
+      console.error(chalk.red(`  ${flag} was given an empty value.`));
+      console.error(chalk.dim(`  Pass a value, or omit ${flag} to export every trace.`));
+      process.exitCode = 2;
+      return;
+    }
+  }
+
   if (opts.agent) filter.agent_name = opts.agent;
   if (opts.tag) filter.tag = opts.tag;
   if (opts.since) {

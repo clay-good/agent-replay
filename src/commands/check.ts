@@ -73,6 +73,13 @@ export function runCheck(opts: CheckOptions = {}): void {
       return;
     }
   }
+  // `--since` narrows the same way and was left out of the loop above, so
+  // `check --since "$WINDOW"` with the variable unset gated over the whole
+  // store instead of the window — green for the same reason.
+  if (opts.since != null && opts.since.trim() === '') {
+    fail(2, '--since was given an empty value.', 'Pass a window, or omit the flag to check every trace.');
+    return;
+  }
 
   // Validate --fields BEFORE reading the baseline or touching the store. It was
   // checked inside checkGolden, after every candidate had been fetched, so a
