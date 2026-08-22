@@ -246,6 +246,15 @@ between them, and nothing else.
 
 ### Fixed
 
+- **Opening a second store closed the first one's handle.** `ensureDatabase` is
+  a documented export, and the connection cache was a single slot keyed on
+  nothing: opening a second path closed the connection behind the first, so a
+  library caller's first handle began throwing *"The database connection is not
+  open"* from code that had done nothing wrong. The CLI opens one store per
+  invocation, which is why nothing noticed. Connections are now keyed by
+  resolved store path, so two stores can be open at once and the same path still
+  returns the same connection.
+
 - **`stats` reported an average duration without saying what it averaged.** A
   duration is unmeasurable for a trace that is still running, one whose
   `ended_at` precedes its `started_at`, or one whose timestamps no format

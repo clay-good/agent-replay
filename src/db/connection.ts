@@ -2,7 +2,18 @@ import Database from 'better-sqlite3';
 import { mkdirSync, existsSync, chmodSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-let instance: DatabaseConnection | null = null;
+/**
+ * One live connection PER STORE PATH, not one per process.
+ *
+ * This used to be a single slot: opening a second path closed the first, which
+ * is fine for the CLI (it opens exactly one store per invocation) but wrong for
+ * the library, where `ensureDatabase` is a documented export. A caller that
+ * opened two stores had its FIRST handle silently killed — every later query on
+ * it threw "The database connection is not open", pointing at code that had
+ * done nothing wrong. Keying by resolved path costs nothing in the CLI, where
+ * the map only ever holds one entry.
+ */
+const instances = new Map<string, DatabaseConnection>();
 
 export class DatabaseConnection {
   private db: Database.Database | null = null;
@@ -142,29 +153,20 @@ export class DatabaseConnection {
   }
 }
 
-/** Get or create the shared DatabaseConnection singleton. */
+/** Get or create the shared DatabaseConnection for a store path. */
 export function getConnection(dbPath?: string): DatabaseConnection {
-  if (instance) {
-    // If a specific dbPath was requested, verify it matches the existing instance
-    if (dbPath != null) {
-      const resolvedPath = resolve(dbPath);
-      const existingPath = resolve(instance.getPath());
-      if (resolvedPath !== existingPath) {
-        // Path mismatch — close old connection and create a new one
-        instance.close();
-        instance = new DatabaseConnection(dbPath);
-      }
-    }
-    return instance;
-  }
-  instance = new DatabaseConnection(dbPath);
-  return instance;
+  // Key on the same default the constructor applies, so `getConnection()` and
+  // `getConnection(<that path>)` are the same connection rather than two.
+  const key = resolve(dbPath ?? resolve(process.cwd(), '.agent-replay', 'traces.db'));
+  const existing = instances.get(key);
+  if (existing) return existing;
+  const conn = new DatabaseConnection(key);
+  instances.set(key, conn);
+  return conn;
 }
 
-/** Reset the singleton (useful for tests). */
+/** Close every connection and forget them (useful for tests). */
 export function resetConnection(): void {
-  if (instance) {
-    instance.close();
-    instance = null;
-  }
+  for (const conn of instances.values()) conn.close();
+  instances.clear();
 }

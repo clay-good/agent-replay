@@ -390,6 +390,47 @@ describe('data directory permissions', () => {
   });
 });
 
+describe('two stores can be open at once (library API)', () => {
+  it('does not close the first handle when a second path is opened', () => {
+    // `ensureDatabase` is a documented export, and the connection cache was a
+    // single slot: opening a second path CLOSED the first, so a caller's first
+    // handle started throwing "The database connection is not open" from code
+    // that had done nothing wrong. Harmless for the CLI, which opens one store
+    // per invocation, and invisible to it for the same reason.
+    const root = mkdtempSync(join(tmpdir(), 'ar-two-stores-'));
+    try {
+      const a = ensureDatabase(join(root, 'a', 'traces.db'));
+      const b = ensureDatabase(join(root, 'b', 'traces.db'));
+
+      // Both usable, and they are genuinely different stores.
+      expect(() => a.prepare('SELECT COUNT(*) AS c FROM agent_traces').get()).not.toThrow();
+      expect(() => b.prepare('SELECT COUNT(*) AS c FROM agent_traces').get()).not.toThrow();
+      expect(a).not.toBe(b);
+
+      a.prepare(
+        `INSERT INTO agent_traces (id, agent_name, trigger, status, input, started_at, tags, metadata, created_at)
+         VALUES ('trc_a', 'a', 'manual', 'completed', '{}', '2026-01-01T00:00:00.000Z', '[]', '{}', '2026-01-01T00:00:00.000Z')`,
+      ).run();
+      expect((a.prepare('SELECT COUNT(*) AS c FROM agent_traces').get() as { c: number }).c).toBe(1);
+      expect((b.prepare('SELECT COUNT(*) AS c FROM agent_traces').get() as { c: number }).c).toBe(0);
+    } finally {
+      resetConnection();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('returns the same connection for the same path', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ar-same-store-'));
+    try {
+      const p = join(root, 'traces.db');
+      expect(ensureDatabase(p)).toBe(ensureDatabase(p));
+    } finally {
+      resetConnection();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 // ── Bug 4: sequential hook tool calls keep distinct step numbers ───────────
 
 describe('hook step numbering', () => {
