@@ -4,6 +4,7 @@ import { evaluateStep, verdictForMatches } from './guard-service.js';
 import type { TraceStep } from '../models/types.js';
 import type { GuardAction } from '../models/enums.js';
 import { escapeForMessage } from '../utils/json.js';
+import { julianDayExpr } from '../utils/time.js';
 
 /**
  * Stateless adapter for the stdin-JSON hook convention shared by Claude Code,
@@ -216,7 +217,7 @@ const OPEN_SESSION_TRACE_SQL =
   // By parsed instant, not byte order — see getMostRecentRunningTrace. One
   // session normally has one open trace, but a resumed session can hold traces
   // written in different timestamp forms.
-  ' ORDER BY julianday(started_at) DESC, started_at DESC LIMIT 1';
+  ` ORDER BY ${julianDayExpr('started_at')} DESC, started_at DESC LIMIT 1`;
 
 /**
  * The trace a CLOSING event belongs to: the session's newest non-fork trace,
@@ -241,7 +242,7 @@ const OPEN_SESSION_TRACE_SQL =
  */
 const SESSION_TRACE_SQL =
   'SELECT id FROM agent_traces WHERE session_id = ? AND parent_trace_id IS NULL' +
-  ' ORDER BY julianday(started_at) DESC, started_at DESC LIMIT 1';
+  ` ORDER BY ${julianDayExpr('started_at')} DESC, started_at DESC LIMIT 1`;
 
 /**
  * The trace holding an OPEN step this closing event could actually close,
@@ -260,7 +261,7 @@ const SESSION_TRACE_WITH_OPEN_STEP_SQL =
     WHERE t.session_id = ? AND t.parent_trace_id IS NULL
       AND s.step_type = 'tool_call' AND s.ended_at IS NULL
       AND (? IS NULL OR s.name = ?)
-    ORDER BY julianday(t.started_at) DESC, t.started_at DESC LIMIT 1`;
+    ORDER BY ${julianDayExpr('t.started_at')} DESC, t.started_at DESC LIMIT 1`;
 
 /** Actions that finish earlier work and must never create a trace. */
 const CLOSING_ACTIONS: ReadonlySet<string> = new Set(['post_tool', 'post_tool_fail', 'subagent_stop']);

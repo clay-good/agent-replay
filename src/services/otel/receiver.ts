@@ -6,6 +6,7 @@ import type { IngestTraceInput } from '../../models/types.js';
 import { mapOtlpTraces, type MappedOtelTrace } from './semconv.js';
 import { mapOtlpLogs } from './log-events.js';
 import { decodeTracesData, decodeLogsData } from './protobuf.js';
+import { julianDayExpr } from '../../utils/time.js';
 
 /**
  * Local OTLP/HTTP receiver. Accepts `POST /v1/traces` and `POST /v1/logs` in
@@ -169,7 +170,7 @@ function findMergeTarget(db: Database.Database, input: IngestTraceInput): string
     const row = db
       .prepare(
         `SELECT id FROM agent_traces WHERE json_extract(metadata, '$.otel_trace_id') = ?
-           AND parent_trace_id IS NULL ORDER BY julianday(started_at) ASC, started_at ASC LIMIT 1`,
+           AND parent_trace_id IS NULL ORDER BY ${julianDayExpr('started_at')} ASC, started_at ASC LIMIT 1`,
       )
       .get(otelTraceId) as { id: string } | undefined;
     return row?.id;
@@ -179,7 +180,7 @@ function findMergeTarget(db: Database.Database, input: IngestTraceInput): string
     const row = db
       .prepare(
         `SELECT id FROM agent_traces WHERE session_id = ? AND json_extract(metadata, '$.source_format') = ?
-           AND parent_trace_id IS NULL ORDER BY julianday(started_at) ASC, started_at ASC LIMIT 1`,
+           AND parent_trace_id IS NULL ORDER BY ${julianDayExpr('started_at')} ASC, started_at ASC LIMIT 1`,
       )
       .get(input.session_id, sourceFormat) as { id: string } | undefined;
     return row?.id;

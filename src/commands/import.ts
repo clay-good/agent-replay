@@ -6,6 +6,7 @@ import { importClaudeTranscript } from '../services/importers/claude-transcript.
 import { importCodexRollout } from '../services/importers/codex-rollout.js';
 import { summaryPanel } from '../ui/boxen-panels.js';
 import { errorMessage } from '../utils/json.js';
+import { julianDayExpr } from '../utils/time.js';
 import { resolveDataDir } from '../utils/paths.js';
 
 export interface ImportOptions {
@@ -92,7 +93,7 @@ export function runImport(filePath: string, opts: ImportOptions = {}): void {
               AND id != ?
               AND json_extract(metadata, '$.source_format') IS ?
               AND json_extract(metadata, '$.source_file') IS ?
-            ORDER BY started_at ASC`,
+            ORDER BY ${julianDayExpr('started_at')} ASC, started_at ASC`,
         )
         .all(sessionId, report.trace.id, sourceFormat ?? null, sourceFile ?? null) as Array<{ id: string }>)
     : [];

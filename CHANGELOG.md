@@ -257,6 +257,20 @@ between them, and nothing else.
 
 ### Fixed
 
+- **Hook capture wrote steps to the wrong trace**, for any session whose newest
+  trace carries an ISO basic-format offset. The same `julianday()` NULL that
+  broke `list` ordering also reached the hook adapter, whose own comment cited
+  `getMostRecentRunningTrace` as the reason to rank by parsed instant — but which
+  still used the bare form. Here it is not a display bug: the hook WRITES. A tool
+  call landed on an older run, and because the closing-event lookup does not
+  filter on status, the tool RESULT could land on an unrelated trace while the
+  real step stayed open forever — and `hook` disagreed with what `list` and
+  `watch` showed. The OTel receiver's cross-batch merge lookup had the same
+  defect in the ASC direction (NULLs sort first there, so a basic-offset trace
+  always won "oldest merge target"), and `import`'s prior-trace ordering still
+  compared raw bytes, having never had the earlier fix at all. All four now use
+  the repaired expression.
+
 - **`show`, `init`, `ingest` and `replay` crashed at a terminal width of 1 or 2
   columns.** `boxen` reads `process.stdout.columns` itself and subtracts its
   border width, computing a negative count and throwing `RangeError: Invalid

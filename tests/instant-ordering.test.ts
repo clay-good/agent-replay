@@ -22,6 +22,7 @@ import { SCHEMA_VERSION, getSchemaVersion, applySchemaV1, applySchemaV2, applySc
 import { listTraces, getMostRecentRunningTrace } from '../src/services/trace-service.js';
 import { recentTraces } from '../src/ui/dashboard-data.js';
 import { julianDayExpr } from '../src/utils/time.js';
+import { applyHookPayload } from '../src/services/hook-adapter.js';
 
 let db: Database.Database;
 beforeEach(() => {
@@ -131,5 +132,61 @@ describe('schema v5 keeps the corrected ordering indexed', () => {
     } finally {
       old.close();
     }
+  });
+});
+
+
+describe('the same repair applies to every path that ranks by time', () => {
+  // The first pass fixed `list`, `watch` and the dashboard. Three more callers
+  // ordered by a bare `julianday(started_at)` and one by raw bytes — including
+  // the hook adapter, whose own comment pointed at `getMostRecentRunningTrace`
+  // as the reason to parse rather than compare bytes. A miss there is worse
+  // than a display bug: the hook WRITES, so a step lands on the wrong run.
+  it('the hook adapter resolves a session to its newest trace by instant', () => {
+    trace('old_ext', '2026-08-20T11:00:00Z', 'running');
+    trace('new_basic', '2026-08-20T14:00:00+0200', 'running'); // 12:00Z — newer
+    db.prepare("UPDATE agent_traces SET session_id = 'sess-mix'").run();
+
+    applyHookPayload(db, {
+      hook_event_name: 'PreToolUse',
+      session_id: 'sess-mix',
+      tool_name: 'Bash',
+      tool_input: { command: 'ls' },
+    });
+
+    const landed = db
+      .prepare('SELECT DISTINCT trace_id FROM agent_trace_steps')
+      .all() as { trace_id: string }[];
+    expect(landed.map((r) => r.trace_id)).toEqual(['new_basic']);
+  });
+
+  it('a closing hook event resolves to the same trace the opening one did', () => {
+    // `SESSION_TRACE_SQL` has no status filter, so a mis-ranked closing event
+    // writes the tool RESULT onto an unrelated run and leaves the real step
+    // open forever.
+    trace('old_ext', '2026-08-20T11:00:00Z', 'running');
+    trace('new_basic', '2026-08-20T14:00:00+0200', 'running');
+    db.prepare("UPDATE agent_traces SET session_id = 'sess-mix'").run();
+
+    applyHookPayload(db, {
+      hook_event_name: 'PreToolUse',
+      session_id: 'sess-mix',
+      tool_name: 'Bash',
+      tool_input: { command: 'ls' },
+    });
+    applyHookPayload(db, {
+      hook_event_name: 'PostToolUse',
+      session_id: 'sess-mix',
+      tool_name: 'Bash',
+      tool_input: { command: 'ls' },
+      tool_response: { stdout: 'a b c' },
+    });
+
+    const rows = db
+      .prepare('SELECT trace_id, output FROM agent_trace_steps')
+      .all() as { trace_id: string; output: string | null }[];
+    expect(new Set(rows.map((r) => r.trace_id))).toEqual(new Set(['new_basic']));
+    // The result landed on the step it belongs to, rather than opening a second.
+    expect(rows.some((r) => r.output != null)).toBe(true);
   });
 });
