@@ -140,16 +140,19 @@ between them, and nothing else.
 
 ### Changed
 
-- **The export scaling guard no longer races a stopwatch.** It asserted that a
-  3000-trace export finishes in under 5 seconds — an absolute wall-clock bound
-  in a suite that runs files in parallel and spawns real CLI processes, so it
-  failed on a loaded machine for reasons unrelated to the code. The same
-  property is now asserted twice without a deadline: deterministically, by
-  checking the query plan SQLite actually chooses for a canonical-id lookup
-  (a keyed `SEARCH`, never `SCAN agent_traces`), and end-to-end as a ratio —
-  4x the traces must not cost more than 8x the time, where both halves absorb
-  the same machine load. Verified both still catch the original quadratic
-  `id = ? OR id LIKE ?` lookup, which measures 10.8x.
+- **The export scaling guard no longer measures time at all.** It asserted that
+  a 3000-trace export finishes in under 5 seconds — an absolute wall-clock
+  bound in a suite that runs files in parallel and spawns real CLI processes, so
+  it failed on a loaded machine for reasons unrelated to the code. A time RATIO
+  between two store sizes was tried next and still failed under load, and
+  averaging that over repeated runs let SQLite's page cache defeat it — the
+  quadratic version then passed, which is worse than flaky. The property is now
+  asserted two ways, both exact: the query plan SQLite chooses for a
+  canonical-id lookup (a keyed `SEARCH`, never `SCAN agent_traces`), and a count
+  of how many statement executions full-scan the table during a whole-store
+  export, which must not grow with the store. Against the original quadratic
+  lookup that count is 202 scans at 200 traces and 802 at 800 — the quadratic
+  signature itself.
 - **The JSONL reader's equivalence test no longer trips the suite timeout.** It
   read a 200 KB line one byte at a time — 200,000 syscalls per chunk size — and
   took ~110s against a 60s per-test limit, so it failed intermittently on a
@@ -242,6 +245,15 @@ between them, and nothing else.
   trace in. An explicit `--dir` still wins.
 
 ### Fixed
+
+- **`stats` reported an average duration without saying what it averaged.** A
+  duration is unmeasurable for a trace that is still running, one whose
+  `ended_at` precedes its `started_at`, or one whose timestamps no format
+  parses — and `AVG` skips those. So `Avg duration: 5.0s` could describe a
+  single trace while `Traces: 100` sat directly above it, in the panel and in
+  the `--json` a CI job reads. The denominator is now reported: the human panel
+  appends `(over N of M)` when the two differ, and the JSON carries
+  `avgDurationSample` alongside `avgDurationMs`.
 
 - **Non-Latin text rendered wrongly in two different ways.** The timeline
   budgeted its width in UTF-16 code units while the budget itself came from
