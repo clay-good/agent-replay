@@ -140,6 +140,19 @@ between them, and nothing else.
 
 ### Changed
 
+- **Two capabilities that had no spec at all now have one.** `openspec validate`
+  checks document structure, not truth, so a whole area can change while the
+  specs stay silent and green — which is what happened here: nothing described
+  where the store lives, who may read it, how configuration is loaded, or how
+  producer-controlled text reaches the terminal, and every one of those areas
+  had a defect this release fixes. `local-store` covers path resolution
+  (including blank values and `~`), store confidentiality, configuration
+  loading, and independent store handles. `terminal-output` covers control-character
+  escaping, the single-line forgery rule, bounding and column-based width, the
+  non-interactive refusal, and degrading rather than crashing on a drawing
+  problem. Each requirement states the rule and why it exists, so the next fix in
+  the area has something to be complete against.
+
 - **Documentation now matches the binary.** `openspec/specs/trace-inspection`
   claimed an ambiguous trace-id prefix returns "the first match — there is no
   ambiguity error", which is the exact inverse of what the code does and would
