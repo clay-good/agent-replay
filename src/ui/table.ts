@@ -203,7 +203,14 @@ function summarizeDetails(details: Record<string, unknown>): string {
   const criteria = details.criteria as Array<{ name: string; score: number }> | undefined;
   if (criteria && Array.isArray(criteria)) {
     const threshold = typeof details.threshold === 'number' ? details.threshold : 0.7;
-    const failed = criteria.filter((c) => c.score < threshold);
+    // A criterion that scored ZERO has plainly not passed, whatever the
+    // threshold — and `score < threshold` cannot express that when the
+    // threshold is 0, since nothing is below it. A rubric written with
+    // `threshold: 0` therefore reported "All criteria passed" at 0%, with
+    // every criterion having failed: the same false summary this line was
+    // first written to fix for the hardcoded 0.7, reappearing at the other
+    // end of the range.
+    const failed = criteria.filter((c) => c.score <= 0 || c.score < threshold);
     if (failed.length === 0) return 'All criteria passed';
     return failed.map((c) => c.name).join(', ');
   }

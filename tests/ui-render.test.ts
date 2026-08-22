@@ -791,3 +791,33 @@ describe('table and diff cells are budgeted in columns too', () => {
     expect(noAnsi(traceTable([trace({ agent_name: 'travel-bot' })]))).toContain('travel-bot');
   });
 });
+
+
+describe('the eval Details column never claims a criterion passed when it scored nothing', () => {
+  const row = (threshold: number, score: number): EvalResult => ({
+    id: 'e1', trace_id: 't1', evaluator_name: 'r', evaluator_type: 'rubric',
+    score, passed: score >= threshold, details: { threshold, criteria: [{ name: 'needs_source', score }] },
+    evaluated_at: '',
+  });
+
+  it('names the criterion when the rubric threshold is 0', () => {
+    // `score < threshold` cannot express "did not pass" when the threshold is
+    // 0, since nothing is below it — so a rubric written with `threshold: 0`
+    // reported "All criteria passed" at 0% with every criterion having failed.
+    // That is the same false summary this line was first written to fix for a
+    // hardcoded 0.7, reappearing at the other end of the range.
+    const out = noAnsi(evalTable([row(0, 0)]));
+    expect(out).toContain('needs_source');
+    expect(out).not.toContain('All criteria passed');
+  });
+
+  it('still says so when the criteria genuinely passed', () => {
+    expect(noAnsi(evalTable([row(0.7, 1)]))).toContain('All criteria passed');
+  });
+
+  it('still names a criterion below an ordinary threshold', () => {
+    const out = noAnsi(evalTable([row(0.7, 0.4)]));
+    expect(out).toContain('needs_source');
+    expect(out).not.toContain('All criteria passed');
+  });
+});

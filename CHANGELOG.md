@@ -295,6 +295,16 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **A rubric with `threshold: 0` reported "All criteria passed" at 0%.** The
+  Details column selects failing criteria with `score < threshold`, which cannot
+  express "did not pass" when the threshold is 0 — nothing is below it — so
+  every criterion that scored zero was folded into a claim that they had all
+  passed. That is the same false summary the line was first written to fix for a
+  hardcoded 0.7, reappearing at the other end of the range. A criterion that
+  scored zero is now always named. (The overall PASS at 0% follows from the
+  author's own `threshold: 0`; a rubric whose gate can never fail is worth a
+  refusal of its own, which this does not add.)
+
 - **`hallucination-check` reported "70% PASS" for a run in which every step
   failed.** The criticality rule that stops a failed run from passing only
   covers a trace that ended badly by status or by a trace-level error. A run
