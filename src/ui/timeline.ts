@@ -1,8 +1,8 @@
 import chalk from 'chalk';
 import type { TraceStep } from '../models/types.js';
 import type { StepType } from '../models/enums.js';
-import { stepIcon, stepLabel, colors, label, separator, safeText, safeLine} from './theme.js';
-import { hasRenderableContent } from '../utils/json.js';
+import { stepIcon, stepLabel, colors, label, separator, safeText, safeLine } from './theme.js';
+import { hasRenderableContent, truncate } from '../utils/json.js';
 import { formatDuration } from '../utils/time.js';
 
 export interface TimelineOptions {
@@ -23,6 +23,14 @@ export interface TimelineOptions {
  *   │      ...
  *   └─ 3  ➡ Output  "final_answer"                         50ms
  */
+/**
+ * A step name is producer-controlled and unbounded, while every other field on
+ * the row is windowed. A 500 KB tool name therefore emitted a single line of
+ * 500,031 columns, which no terminal can wrap usefully — the step's actual
+ * input and output, which ARE bounded, scrolled away above it.
+ */
+const STEP_NAME_MAX = 80;
+
 export function renderTimeline(
   steps: TraceStep[],
   options: TimelineOptions = {},
@@ -56,7 +64,7 @@ export function renderTimeline(
     const num = chalk.dim(String(step.step_number).padStart(2));
     const icon = stepIcon(step.step_type as StepType);
     const typeLabel = stepLabel(step.step_type as StepType);
-    const name = chalk.white.bold(`"${safeLine(step.name)}"`);
+    const name = chalk.white.bold(`"${safeLine(truncate(step.name, STEP_NAME_MAX))}"`);
     const dur = step.duration_ms != null
       ? chalk.dim(formatDuration(step.duration_ms))
       : '';
@@ -185,7 +193,7 @@ export function renderTree(steps: TraceStep[], options: TimelineOptions = {}): s
   const emit = (step: TraceStep, indent: string, cappedDepth?: number): void => {
     const icon = stepIcon(step.step_type as StepType);
     const typeLabel = stepLabel(step.step_type as StepType);
-    const name = chalk.white.bold(`"${safeLine(step.name)}"`);
+    const name = chalk.white.bold(`"${safeLine(truncate(step.name, STEP_NAME_MAX))}"`);
     const causal =
       step.caused_by_step_number != null
         ? chalk.dim(` ⟵ caused by #${step.caused_by_step_number}`)

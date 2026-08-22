@@ -129,3 +129,36 @@ describe('safeParseFloat', () => {
     expect(safeParseFloat('1e2', 0)).toBe(100);
   });
 });
+
+
+describe('truncate never splits a surrogate pair', () => {
+  // A plain `slice` can land between the halves of an astral character, leaving
+  // a lone surrogate the terminal renders as U+FFFD. Whether that happened
+  // depended on the exact cut offset — so the same emoji rendered fine at one
+  // terminal width and as mojibake at the next. The windowing helper already
+  // had a surrogate-safe cut; `truncate`, which many more call sites use, did
+  // not.
+  const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+  it('leaves no lone surrogate at any cut point', () => {
+    // Sweep every offset in a window, so the pair is straddled at some of them.
+    const s = 'a'.repeat(8) + '😀'.repeat(30);
+    for (let max = 4; max <= 40; max++) {
+      const out = truncate(s, max);
+      expect(LONE_SURROGATE.test(out), `max=${max} produced ${JSON.stringify(out)}`).toBe(false);
+    }
+  });
+
+  it('still truncates, and still marks that it did', () => {
+    expect(truncate('😀'.repeat(30), 10)).toMatch(/\.\.\.$/);
+    // At most one UTF-16 unit over `max`: when the cut would land inside a
+    // pair, the whole pair is kept rather than half of it dropped. Keeping the
+    // character is the right trade against a bound that is already approximate
+    // (a `length` bound is not a display-width bound either way).
+    expect(truncate('😀'.repeat(30), 10).length).toBeLessThanOrEqual(11);
+  });
+
+  it('leaves a string that fits completely alone', () => {
+    expect(truncate('😀ok', 50)).toBe('😀ok');
+  });
+});

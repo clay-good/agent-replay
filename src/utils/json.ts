@@ -23,10 +23,18 @@ export function safeParseJson(raw: string | null): unknown {
 
 /**
  * Truncate a string to a maximum length, appending '...' if truncated.
+ *
+ * The cut never splits a surrogate pair. A plain `slice` can land between the
+ * halves of an astral character (an emoji, most CJK extension blocks), leaving
+ * a lone surrogate that the terminal renders as U+FFFD — so whether the output
+ * was mojibake depended on the exact byte offset, i.e. on the terminal width or
+ * the length of an unrelated key earlier in the JSON. The windowing helper
+ * below already had a surrogate-safe cut for exactly this reason; the plain
+ * truncate, which far more call sites use, did not.
  */
 export function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
-  return s.slice(0, max - 3) + '...';
+  return s.slice(0, safeCutIndex(s, max - 3)) + '...';
 }
 
 /**
@@ -233,8 +241,8 @@ export function windowedAround(text: string, other: string, max: number): string
   // `length - (max - 3)`; clamping to `length - max` instead left the differing
   // tail cut off again, defeating the point of windowing.
   const start = safeCutIndex(text, Math.min(Math.max(0, i - lead), Math.max(0, text.length - (max - 3))));
-  if (start === 0) return truncateSurrogateSafe(text, max);
-  return `...${truncateSurrogateSafe(text.slice(start), max - 3)}`;
+  if (start === 0) return truncate(text, max);
+  return `...${truncate(text.slice(start), max - 3)}`;
 }
 
 /**
@@ -247,12 +255,6 @@ function safeCutIndex(s: string, index: number): number {
   if (index <= 0 || index >= s.length) return Math.max(0, Math.min(index, s.length));
   const code = s.charCodeAt(index);
   return code >= 0xdc00 && code <= 0xdfff ? index + 1 : index;
-}
-
-/** `truncate`'s surrogate-safe form — the plain one can slice a pair in half. */
-function truncateSurrogateSafe(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, safeCutIndex(s, max - 3)) + '...';
 }
 
 /**

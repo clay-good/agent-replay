@@ -243,6 +243,23 @@ between them, and nothing else.
 
 ### Fixed
 
+- **One trace could make the whole listing unreadable.** `agent_name` and a
+  step's `name` are producer-controlled and were rendered unbounded, while every
+  neighbouring field was windowed. cli-table3 sizes a column to its widest cell,
+  so a single trace with a 5,000-character agent name widened **every** row of
+  `list` to over 15,000 columns — the traces the user was looking for became
+  unreadable because of a neighbour — and a 500 KB step name emitted one line of
+  500,031 columns in `show`, scrolling the step's real input and output away
+  above it. Both are now bounded (40 and 80 characters), matching the limits the
+  dashboard and `policyTable` already applied.
+- **Truncation could cut an emoji in half.** `truncate` sliced at a fixed
+  offset, which can land between the halves of a surrogate pair and leave a lone
+  surrogate the terminal shows as `�`. Whether it happened depended on the exact
+  cut point, so the same value rendered correctly at one terminal width and as
+  mojibake at the next. The JSON windowing helper already had a surrogate-safe
+  cut for this reason; `truncate`, used by far more call sites, did not. It now
+  shares that cut, and the duplicate helper is gone.
+
 - **Opening a store changed the permissions of a directory the tool did not
   create.** The store is made owner-only because `config.json` holds API keys in
   plaintext — but the narrowing ran on every open, against whatever path

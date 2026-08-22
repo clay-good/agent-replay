@@ -645,3 +645,33 @@ describe('a producer cannot forge a line on a single-line row', () => {
     expect(safeLine(other)).toBe(safeText(other));
   });
 });
+
+
+describe('one hostile trace cannot destroy the view', () => {
+  it('bounds an agent name so it does not widen every row of the table', () => {
+    // cli-table3 sizes a column to its WIDEST cell, so a single trace with a
+    // 5,000-character agent name widened every other row to over 15,000
+    // columns — the traces the user was actually looking for became unreadable
+    // because of a neighbour. The dashboard already bound this at 18 chars and
+    // policyTable bound its pattern at 40; the main listing did not.
+    const rows = [trace({ agent_name: 'normal' }), trace({ agent_name: 'A'.repeat(5000) })];
+    const widest = Math.max(...noAnsi(traceTable(rows)).split('\n').map((l) => l.length));
+    expect(widest).toBeLessThan(200);
+    // The normal row must still be fully legible.
+    expect(noAnsi(traceTable(rows))).toContain('normal');
+  });
+
+  it('bounds a step name, which was the only unwindowed field on the row', () => {
+    // Input and output are windowed; the name was not, so a 500 KB tool name
+    // emitted one line of 500,031 columns and scrolled the step's real content
+    // away above it.
+    const out = noAnsi(renderTimeline([step({ step_type: 'tool_call', name: 'B'.repeat(200000) })]));
+    expect(Math.max(...out.split('\n').map((l) => l.length))).toBeLessThan(200);
+    expect(out).toContain('...'); // and says it was cut
+  });
+
+  it('bounds it in the compact tree view as well', () => {
+    const out = noAnsi(renderTree([step({ step_type: 'tool_call', name: 'B'.repeat(200000) })]));
+    expect(Math.max(...out.split('\n').map((l) => l.length))).toBeLessThan(200);
+  });
+});

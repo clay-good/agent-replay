@@ -6,7 +6,7 @@ import { getTrace } from '../services/trace-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { traceHeaderPanel } from '../ui/boxen-panels.js';
 import { stepSpinner, successSpinner, failSpinner, warnSpinner } from '../ui/spinner.js';
-import { stepIcon, stepLabel, heading, separator, colors, safeText, safeLine} from '../ui/theme.js';
+import { stepIcon, stepLabel, heading, separator, colors, safeText, safeLine } from '../ui/theme.js';
 
 import { errorMessage, truncate, hasRenderableContent } from '../utils/json.js';
 import { formatDuration } from '../utils/time.js';
@@ -148,7 +148,7 @@ export async function runReplay(
 async function replayStep(step: TraceStep, speed: number): Promise<void> {
   const icon = stepIcon(step.step_type as StepType);
   const typeLabel = stepLabel(step.step_type as StepType);
-  const name = chalk.white.bold(`"${safeLine(step.name)}"`);
+  const name = chalk.white.bold(`"${safeLine(truncate(step.name, 80))}"`);
   const num = chalk.dim(String(step.step_number).padStart(2));
 
   // Calculate simulated delay

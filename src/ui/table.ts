@@ -2,7 +2,7 @@ import Table from 'cli-table3';
 import chalk from 'chalk';
 import type { Trace, EvalResult, GuardrailPolicy } from '../models/types.js';
 import type { TraceStatus } from '../models/enums.js';
-import { statusBadge, scoreBadge, passBadge, guardActionBadge, colors, safeText, safeLine} from './theme.js';
+import { statusBadge, scoreBadge, passBadge, guardActionBadge, colors, safeText, safeLine } from './theme.js';
 import { formatRelativeTime } from '../utils/time.js';
 import { isPossiblyAbandoned } from '../services/trace-service.js';
 import { effectiveDurationMs, formatDuration } from '../utils/time.js';
@@ -39,13 +39,21 @@ export function traceTable(traces: Trace[]): string {
     style: { head: [], border: ['dim'] },
   });
 
+  // An agent name is producer-controlled and unbounded. cli-table3 sizes a
+  // column to its widest cell, so ONE trace with a 5,000-character name widened
+  // EVERY row to over 15,000 columns and made the whole listing unreadable —
+  // including the traces the user was actually looking for. The neighbouring
+  // renderers already bound this (the dashboard at 18 chars, policyTable's
+  // pattern at 40); the main listing did not.
+  const AGENT_NAME_MAX = 40;
+
   for (const t of traces) {
     const status = isPossiblyAbandoned(t)
       ? `${statusBadge(t.status as TraceStatus)} ${chalk.yellow('⚠ abandoned?')}`
       : statusBadge(t.status as TraceStatus);
     table.push([
       chalk.dim(safeText(t.id.slice(0, 12))),
-      chalk.white(safeLine(t.agent_name)),
+      chalk.white(safeLine(truncate(t.agent_name, AGENT_NAME_MAX))),
       status,
       chalk.white(stepCountStr(t)),
       formatDurationShort(effectiveDurationMs(t)),
