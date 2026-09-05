@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { execFile, execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
 import Database from 'better-sqlite3';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -78,11 +78,11 @@ const SEED = {
 
 describe('hooks, an OTLP receiver, forks and readers all writing at once', () => {
   it('every writer lands its data, and the store stays consistent', async () => {
-    // Seed a trace to fork from.
-    execFileSync(process.execPath, [CLI, 'ingest', '/dev/stdin', '--dir', dir], {
-      input: JSON.stringify(SEED),
-      encoding: 'utf8',
-    });
+    // Seed a trace to fork from. Written to a real file rather than piped
+    // through `/dev/stdin`, which is not reliably readable that way on Linux.
+    const seedFile = join(dir, '..', 'seed.json');
+    writeFileSync(seedFile, JSON.stringify(SEED));
+    execFileSync(process.execPath, [CLI, 'ingest', seedFile, '--dir', dir], { encoding: 'utf8' });
     const seedId = (JSON.parse(
       execFileSync(process.execPath, [CLI, 'list', '--json', '--dir', dir], { encoding: 'utf8' }),
     ) as { items: { id: string }[] }).items[0].id;
