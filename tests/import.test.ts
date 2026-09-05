@@ -206,6 +206,67 @@ describe('importClaudeTranscript — an empty session is a failed import', () =>
   });
 });
 
+describe('importClaudeTranscript — the model each message ran on', () => {
+  // Every assistant record in a real transcript carries `message.model`, and it
+  // was read by nobody: an imported session recorded which tools ran and what
+  // they cost, but not the model that produced any of it. Every other capture
+  // path keeps it -- the live recorder, the hook adapter and the OTel mapper
+  // all set a step's `model` -- and `check --golden --fields model` can only
+  // compare a field the baseline actually carries, so an imported trace could
+  // never be gated on the one thing a model upgrade changes.
+
+  it('records the model on an assistant step, in both content shapes', () => {
+    // Real transcripts use the block form; the string form is the older shape
+    // the importer still accepts. Fixing one and not the other is the mistake
+    // this file has already made once, for the empty-prompt tally.
+    const path = fixture([
+      { type: 'user', sessionId: 'm1', timestamp: '2026-07-01T00:00:00Z', message: { role: 'user', content: 'hi' } },
+      { type: 'assistant', sessionId: 'm1', message: { role: 'assistant', model: 'claude-opus-4-5', content: [{ type: 'text', text: 'block form' }] } },
+      { type: 'assistant', sessionId: 'm1', message: { role: 'assistant', model: 'claude-haiku-4-5', content: 'string form' } },
+    ]);
+    const trace = getTrace(db, importClaudeTranscript(db, path).trace!.id)!;
+    const models = trace.steps.filter((s) => s.name === 'assistant_message').map((s) => s.model);
+    expect(models).toEqual(['claude-opus-4-5', 'claude-haiku-4-5']);
+  });
+
+  it('leaves the model null when the record carries none, rather than inventing one', () => {
+    // An older transcript, or a record that simply has no model, must not
+    // inherit a neighbour's -- a wrong model reads exactly like a right one.
+    const path = fixture([
+      { type: 'user', sessionId: 'm2', message: { role: 'user', content: 'hi' } },
+      { type: 'assistant', sessionId: 'm2', message: { role: 'assistant', model: 'claude-opus-4-5', content: [{ type: 'text', text: 'first' }] } },
+      { type: 'assistant', sessionId: 'm2', message: { role: 'assistant', content: [{ type: 'text', text: 'second' }] } },
+      { type: 'assistant', sessionId: 'm2', message: { role: 'assistant', model: '', content: [{ type: 'text', text: 'third' }] } },
+    ]);
+    const trace = getTrace(db, importClaudeTranscript(db, path).trace!.id)!;
+    const models = trace.steps.filter((s) => s.name === 'assistant_message').map((s) => s.model);
+    expect(models).toEqual(['claude-opus-4-5', null, null]);
+  });
+
+  it('records the model on a SUBAGENT step too', () => {
+    // A subagent may well run a different model from the session that spawned
+    // it, which is most of the point of looking. The subagent importer is a
+    // separate loop, so it needed the same read -- the twin this repo keeps
+    // leaving behind.
+    const path = fixture([
+      { type: 'user', sessionId: 'sess-model', message: { role: 'user', content: 'research this' } },
+      { type: 'assistant', sessionId: 'sess-model', message: { role: 'assistant', model: 'claude-opus-4-5', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Task', input: { agent: 'Explore' } }] } },
+      { type: 'user', sessionId: 'sess-model', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'done' }] } },
+    ]);
+    const subDir = join(dir, 'transcript', 'subagents');
+    mkdirSync(subDir, { recursive: true });
+    writeFileSync(
+      join(subDir, 'agent-a1.jsonl'),
+      [
+        { type: 'assistant', message: { role: 'assistant', model: 'claude-haiku-4-5', content: [{ type: 'text', text: 'sub says' }] } },
+      ].map((r) => JSON.stringify(r)).join('\n'),
+    );
+    const trace = getTrace(db, importClaudeTranscript(db, path).trace!.id)!;
+    const sub = trace.steps.find((s) => s.name === 'assistant_message' && s.model === 'claude-haiku-4-5');
+    expect(sub, 'the subagent step kept its own model').toBeTruthy();
+  });
+});
+
 describe('importClaudeTranscript — subagents', () => {
   it('counts a content-less user/assistant record as skipped (every record accounted for)', () => {
     const path = fixture([

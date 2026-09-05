@@ -226,9 +226,23 @@ export function importClaudeTranscript(
       continue;
     }
 
-    const message = rec.message as { content?: unknown; usage?: Record<string, unknown> } | undefined;
+    const message = rec.message as
+      { content?: unknown; usage?: Record<string, unknown>; model?: unknown } | undefined;
     const content = message?.content;
     if (message?.usage) totalTokens += usageTokens(message.usage);
+    // Every assistant record in a real transcript carries `message.model`, and
+    // it was read by nobody, so an imported session recorded which tools ran and
+    // how many tokens they cost but not the model that produced any of it. The
+    // other capture paths all keep it — the live recorder, the hook adapter and
+    // the OTel mapper each set a step's `model` — and `check --golden --fields
+    // model`, which the README documents, can only compare a field the baseline
+    // actually carries. So an imported trace could never be gated on the one
+    // thing a model upgrade changes.
+    //
+    // Guarded as a non-empty string rather than cast: `model` comes from a file
+    // on disk, and the sibling `usage` handling right above documents what
+    // trusting that shape costs (a single string value poisons every later `+=`).
+    const model = typeof message?.model === 'string' && message.model ? message.model : undefined;
 
     let contributed = false;
 
@@ -248,7 +262,7 @@ export function importClaudeTranscript(
         contributed = content.trim().length > 0;
       } else if (type === 'assistant') {
         lastAssistantText = content;
-        steps.push({ step_number: stepNumber++, step_type: 'output', name: 'assistant_message', output: { text: content } });
+        steps.push({ step_number: stepNumber++, step_type: 'output', name: 'assistant_message', output: { text: content }, model });
         contributed = true;
       }
     } else if (Array.isArray(content)) {
@@ -266,7 +280,7 @@ export function importClaudeTranscript(
               contributed = (block.text ?? '').trim().length > 0;
             } else if (type === 'assistant' && block.text) {
               lastAssistantText = block.text;
-              steps.push({ step_number: stepNumber++, step_type: 'output', name: 'assistant_message', output: { text: block.text } });
+              steps.push({ step_number: stepNumber++, step_type: 'output', name: 'assistant_message', output: { text: block.text }, model });
               contributed = true;
             }
             // A follow-up user turn or an empty-text block yields no step; leave
@@ -485,19 +499,25 @@ function buildSubagentSteps(
     let contributedResult = false;
     const type = rec.type as string | undefined;
     if (type === 'user' || type === 'assistant') {
-      const message = rec.message as { content?: unknown; usage?: Record<string, unknown> } | undefined;
+      const message = rec.message as
+        { content?: unknown; usage?: Record<string, unknown>; model?: unknown } | undefined;
       if (message?.usage) tokens += usageTokens(message.usage);
+      // A subagent's records carry `message.model` exactly as the main
+      // transcript's do, and a subagent may well run a different model from the
+      // session that spawned it — which is most of the point of looking. Fixing
+      // only the main loop would have left the twin behind.
+      const model = typeof message?.model === 'string' && message.model ? message.model : undefined;
       const content = message?.content;
       if (!Array.isArray(content)) {
         if (typeof content === 'string' && type === 'assistant') {
-          steps.push({ step_number: n++, step_type: 'output', name: 'assistant_message', output: { text: content }, parent_step: parentStep });
+          steps.push({ step_number: n++, step_type: 'output', name: 'assistant_message', output: { text: content }, model, parent_step: parentStep });
         }
       } else {
         for (const block of content as Block[]) {
           if (block?.type === 'thinking') {
             steps.push({ step_number: n++, step_type: 'thought', name: 'thinking', output: { text: block.thinking ?? block.text ?? '' }, parent_step: parentStep });
           } else if (block?.type === 'text' && type === 'assistant' && block.text) {
-            steps.push({ step_number: n++, step_type: 'output', name: 'assistant_message', output: { text: block.text }, parent_step: parentStep });
+            steps.push({ step_number: n++, step_type: 'output', name: 'assistant_message', output: { text: block.text }, model, parent_step: parentStep });
           } else if (block?.type === 'tool_use') {
             const result = block.id ? toolResults.get(block.id) : undefined;
             const failed = block.id ? toolErrors.has(block.id) : false;

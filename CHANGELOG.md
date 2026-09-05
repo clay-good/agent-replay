@@ -328,6 +328,20 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **An imported Claude Code session recorded no model.** Every assistant record
+  in a real transcript carries `message.model`, and it was read by nobody — so
+  an imported session recorded which tools ran and what they cost, but not the
+  model that produced any of it. Every other capture path keeps it: the live
+  recorder, the hook adapter and the OpenTelemetry mapper each set a step's
+  `model`. It also made `check --golden --fields model` — which the README
+  documents, and which refuses a baseline that cannot exercise the field —
+  unusable for imported traces, so the one thing a model upgrade changes could
+  never be gated on. Each assistant message now records its model, in both the
+  block and string content shapes, and **a subagent keeps its own**: a subagent
+  often runs a different model from the session that spawned it, and it is
+  imported by a separate loop that needed the same read. A record carrying no
+  model stays `null` rather than inheriting a neighbour's.
+
 - **A single-span agent trace recorded no model.** A model attribute is read by
   the STEP mapping, into the step's `model` column, but the root span is not a
   step — so on the root nothing read it and every spelling was dropped. That
