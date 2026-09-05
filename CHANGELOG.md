@@ -736,6 +736,16 @@ between them, and nothing else. Upgrades are automatic and one-way.
   empty *numeric* value means 0 where 0 is legal — `guard add --priority ""`,
   `eval --max-cost ""`, `replay --speed ""`. These four name a thing, and
   nothing is named by the empty string.)
+- **`replay` reported success for a step window it could not replay.** It
+  printed "No steps in the specified range" on stderr and then exited `0`, so
+  `replay <id> --from-step "$N"` in a script was told the run succeeded having
+  replayed nothing — the one outcome the command exists to rule out. `fork`,
+  the sibling taking the same `--from-step` against the same trace, has always
+  refused this at exit `1`. `replay` now does too, and names the range that
+  does exist ("this trace has steps 1-8") the way `fork` names its max step, so
+  the line is enough to correct the command. An empty `list` is unchanged at
+  exit `0`: that is a filter over a corpus legitimately matching nothing, not a
+  request that could never be served.
 - **`watch --interval` had the same 32-bit timer overflow `dashboard --refresh`
   was just capped for.** It validated only that the number was positive, so
   `--interval 999999999999` — plainly "poll almost never" — was clamped by Node

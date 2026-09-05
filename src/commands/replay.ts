@@ -98,8 +98,26 @@ export async function runReplay(
     (s) => s.step_number >= fromStep && s.step_number <= toStep,
   );
 
+  // A window that matched nothing is a failure, not a quiet success.
+  //
+  // This said so on stderr and then exited 0, so `replay <id> --from-step $N`
+  // in a script reported success having replayed NOTHING — the one outcome the
+  // command exists to rule out. `fork`, the sibling that takes the same
+  // `--from-step` against the same trace, has always refused this at exit 1,
+  // and for the same reason: the caller named steps of a specific trace that do
+  // not exist. (An empty `list` stays exit 0 — that is a filter over a corpus
+  // legitimately matching nothing, not a request that could never be served.)
+  //
+  // Name the range that DOES exist, as `fork` names its max step, so the caller
+  // can correct the command from this line alone. step_number can have gaps, so
+  // report the real endpoints rather than 1..length.
   if (steps.length === 0) {
-    console.error(chalk.yellow('  No steps in the specified range.'));
+    const numbers = trace.steps.map((s) => s.step_number);
+    const have = numbers.length
+      ? `this trace has steps ${Math.min(...numbers)}-${Math.max(...numbers)}`
+      : 'this trace has no steps';
+    console.error(chalk.red(`  No steps in the specified range (${have}).`));
+    process.exitCode = 1;
     return;
   }
 

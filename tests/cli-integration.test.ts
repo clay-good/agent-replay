@@ -55,6 +55,27 @@ function firstTraceId(): string {
   return JSON.parse(out).items[0].id;
 }
 
+/**
+ * Ingest one trace and return its id.
+ *
+ * Seeds from a REAL FILE. Several empty-value tests seeded with
+ * `run(['ingest', '-'], json)`, but `-` is not a stdin form here — it is taken
+ * as a filename, so the ingest failed and the store stayed empty. Their
+ * "it must not have returned everything" assertions were then passing against
+ * nothing at all, which is exactly the regression they exist to catch.
+ */
+function seedTrace(agentName: string): string {
+  const file = join(dir, `seed-${agentName}.json`);
+  const now = new Date().toISOString();
+  writeFileSync(file, JSON.stringify({
+    agent_name: agentName, trigger: 'manual', status: 'completed',
+    started_at: now, ended_at: now, input: {},
+    steps: [{ step_number: 1, step_type: 'llm_call', name: 's', input: {}, output: 'x', started_at: now }],
+  }));
+  run(['ingest', file]);
+  return firstTraceId();
+}
+
 beforeAll(() => {
   if (!existsSync(CLI)) throw new Error(`built CLI not found at ${CLI}; run "npm run build" first`);
 });
@@ -1636,8 +1657,8 @@ describe('CLI integration', () => {
     it.each([['--status'], ['--agent'], ['--tag'], ['--since']])(
       'export refuses an empty %s rather than exporting the whole store',
       (flag) => {
-        run(['ingest', '-'], JSON.stringify({ agent_name: 'alpha', input: {}, steps: [] }));
-        run(['ingest', '-'], JSON.stringify({ agent_name: 'beta', input: {}, steps: [] }));
+        seedTrace('alpha');
+        seedTrace('beta');
 
         const r = run(['export', flag, '', '--format', 'json']);
         expect(r.code).toBe(2);
@@ -1660,23 +1681,10 @@ describe('CLI integration', () => {
     // The four flags left behind by the pass above. Each is read with a bare
     // truthiness test, so `""` did not widen the request — it made the flag
     // VANISH, and the command quietly did something else and called it success.
-    /** Ingest one trace from a real file and return its id. */
-    function ingestOne(agentName: string): string {
-      const file = join(dir, `${agentName}.json`);
-      const now = new Date().toISOString();
-      writeFileSync(file, JSON.stringify({
-        agent_name: agentName, trigger: 'manual', status: 'completed',
-        started_at: now, ended_at: now, input: {},
-        steps: [{ step_number: 1, step_type: 'llm_call', name: 's', input: {}, output: 'x', started_at: now }],
-      }));
-      run(['ingest', file]);
-      return JSON.parse(run(['list', '--json']).stdout).items[0].id as string;
-    }
-
     it.each([['--rubric'], ['--preset']])(
       'eval refuses an empty %s rather than scoring with the built-in presets',
       (flag) => {
-        const id = ingestOne('ev');
+        const id = seedTrace('ev');
 
         const r = run(['eval', id, flag, '', '--json']);
         expect(r.code).toBe(2);
@@ -1689,7 +1697,7 @@ describe('CLI integration', () => {
     );
 
     it('export refuses an empty --output rather than writing to stdout', () => {
-      ingestOne('outy');
+      seedTrace('outy');
       // The store really does hold an exportable trace, so the assertion below
       // is about the refusal and not about an empty store.
       expect(run(['export', '--format', 'json']).stdout).toContain('"agent_name"');
@@ -1870,8 +1878,8 @@ describe('CLI integration', () => {
       // which reads exactly like a correct narrow result. `stats` already
       // refused an empty `--since`; `list` did not, despite its own comment
       // claiming the two mirror each other.
-      run(['ingest', '-'], JSON.stringify({ agent_name: 'alpha', input: {}, steps: [] }));
-      run(['ingest', '-'], JSON.stringify({ agent_name: 'beta', input: {}, steps: [] }));
+      seedTrace('alpha');
+      seedTrace('beta');
 
       const r = run(['list', flag, '', '--json']);
       expect(r.code).toBe(2);

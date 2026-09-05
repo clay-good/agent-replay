@@ -201,6 +201,13 @@ describe('replay', () => {
   it('says a range holds no steps rather than replaying nothing silently', async () => {
     await runReplay(id, { dir, speed: '0', fromStep: '90' });
     expect(stderr()).toMatch(/No steps in the specified range/);
+    // And FAILS. It said this and then exited 0, so a script asking to replay
+    // steps that do not exist was told the run succeeded. `fork --from-step`
+    // has always refused the same mistake at exit 1.
+    expect(process.exitCode).toBe(1);
+    // Naming the range that does exist is what makes the line actionable,
+    // exactly as `fork` names its max step.
+    expect(stderr()).toMatch(/this trace has steps 1-\d+/);
   });
 
   it.each([
