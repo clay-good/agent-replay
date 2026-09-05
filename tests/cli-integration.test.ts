@@ -1185,7 +1185,7 @@ describe('CLI integration', () => {
     run(['ingest', f]);
 
     const human = run(['stats']);
-    expect(human.code).toBe(0);
+    expect(human.code, human.stderr).toBe(0);
     expect(human.stdout).toContain('Store Summary');
     expect(human.stdout).toContain('solo-bot');
 
@@ -1219,8 +1219,13 @@ describe('CLI integration', () => {
     // No traces ingested — AVG/SUM come back null and by_agent is empty. The
     // human view must show "-" rather than "null"/NaN, and --json must carry the
     // nulls through.
+    // stderr is passed as the assertion message: a bare "expected 1 to be 0"
+    // says nothing about WHY. Both store-level failures exit 2 here (no store,
+    // unopenable store), so a 1 means something threw inside the action and
+    // only stderr names it -- the same reason run() reports a kill as its own
+    // code rather than as a plain failure.
     const human = run(['stats']);
-    expect(human.code).toBe(0);
+    expect(human.code, human.stderr).toBe(0);
     expect(human.stdout).toContain('Traces:');
     expect(human.stdout).not.toContain('NaN');
     expect(human.stdout).not.toContain('null');
@@ -1928,9 +1933,17 @@ describe('an empty --dir names no store', () => {
   const spawn = (args: string[], payload?: unknown, cwd?: string) => {
     const r = spawnSync(process.execPath, [CLI, ...args], {
       encoding: 'utf8', input: payload === undefined ? '' : JSON.stringify(payload),
-      cwd, timeout: 20000,
+      cwd, timeout: 60000,
     });
-    return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', code: r.status ?? 1 };
+    // A null status means the process never exited on its own -- killed by the
+    // timeout or a signal under parallel load. run() reports that as its own
+    // code for a reason: mapping it to 1 makes an infrastructure kill
+    // indistinguishable from a real runtime failure, and sends the reader
+    // hunting a bug in the command. Same treatment here.
+    if (r.status == null) {
+      return { stdout: r.stdout ?? '', stderr: `${r.stderr ?? ''}\n[killed by ${r.signal ?? 'unknown signal'}]`, code: -1 };
+    }
+    return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', code: r.status };
   };
 
   it('refuses on a top-level command and a nested subcommand alike', () => {
@@ -2123,5 +2136,77 @@ describe('token totals agree across every path that reports them', () => {
     const overall = JSON.parse(run(['stats', '--json']).stdout).overall;
     expect(overall.totalTokens).toBeNull();
     expect(overall.totalTokensSample).toBe(0);
+  });
+});
+
+describe('export says how many traces it wrote', () => {
+  // `export` reported only a destination, so the one number that reveals a
+  // filter typo was the one number missing: `export --agent no-such-agent
+  // --output backup.json` announced success at exit 0 over a file holding
+  // `[]`, and the caller believed they had a backup until they needed it.
+  // `list` and `ingest` both report a count; this brings export in line.
+  //
+  // spawnSync, not the run() helper: every assertion here is about stderr on a
+  // run that EXITS 0, and run() returns stderr only for a failing exit -- so
+  // these would all pass vacuously through it.
+  const ex = (args: string[]) => {
+    const r = spawnSync(process.execPath, [CLI, ...args, '--dir', dir], {
+      encoding: 'utf8', timeout: 60000,
+    });
+    // See the note on the spawn helper above: a kill is reported as its own
+    // code rather than as 1, so an overloaded machine cannot masquerade as a
+    // command that failed.
+    if (r.status == null) {
+      return { stdout: r.stdout ?? '', stderr: `${r.stderr ?? ''}\n[killed by ${r.signal ?? 'unknown signal'}]`, code: -1 };
+    }
+    return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', code: r.status };
+  };
+
+  beforeEach(() => {
+    seedTrace('exp-a');
+    seedTrace('exp-b');
+  });
+
+  it('names the count, not just the path', () => {
+    const out = join(dir, 'b.json');
+    const r = ex(['export', '--output', out]);
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain('Exported 2 trace(s)');
+    expect(JSON.parse(readFileSync(out, 'utf8'))).toHaveLength(2);
+  });
+
+  it('counts JSONL by line, not by parsing an array', () => {
+    const out = join(dir, 'b.jsonl');
+    const r = ex(['export', '--format', 'jsonl', '--output', out]);
+    expect(r.stderr).toContain('Exported 2 trace(s)');
+    expect(readFileSync(out, 'utf8').trim().split('\n')).toHaveLength(2);
+  });
+
+  it('warns when a filter matched nothing, instead of reporting a bare success', () => {
+    const out = join(dir, 'empty.json');
+    const r = ex(['export', '--agent', 'no-such-agent', '--output', out]);
+    expect(r.code).toBe(0); // an empty match is not itself an error
+    expect(r.stderr).toContain('Exported 0 trace(s)');
+    expect(r.stderr).toContain('No traces matched');
+    expect(readFileSync(out, 'utf8').trim()).toBe('[]');
+  });
+
+  it('warns the same way when the export goes to stdout', () => {
+    // Routing must not decide whether a warning appears. The golden warning in
+    // this file was once conditional on --output, which made two
+    // byte-identical exports differ only in whether they were warned about;
+    // the warning goes to stderr and so cannot pollute a piped stdout anyway.
+    const r = ex(['export', '--agent', 'no-such-agent']);
+    expect(r.code).toBe(0);
+    expect(r.stdout.trim()).toBe('[]');
+    expect(r.stderr).toContain('No traces matched');
+  });
+
+  it('leaves the golden baseline warning as the only one for golden', () => {
+    // golden has its own wording, specific to a gate that cannot detect a
+    // regression. The generic warning must not double up on it.
+    const r = ex(['export', '--agent', 'no-such-agent', '--format', 'golden']);
+    expect(r.stderr).toContain('this golden baseline is empty');
+    expect(r.stderr).not.toContain('the export is empty');
   });
 });

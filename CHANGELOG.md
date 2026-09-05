@@ -328,6 +328,22 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **`export` reported where it wrote, never how much.** The one number that
+  reveals a filter typo was the one number missing: `export --agent
+  no-such-agent --output backup.json` announced `Exported to
+  /path/backup.json` at exit `0` over a file holding `[]`, and the caller
+  believed they had a backup until they needed it. Its siblings already report
+  a count — `list` says "N trace(s) found", `ingest` says "Ingested N
+  trace(s)". The success line now names the count too (`Exported 3 trace(s) to
+  …`, counted from the bytes just written, so the number reported is
+  necessarily the number in the file), and an export that matched nothing warns
+  in every format. `--format golden` already warned that an empty baseline
+  cannot detect a regression and keeps its own wording. The warning does not
+  depend on `--output`: it goes to stderr, so it cannot pollute a piped stdout,
+  and making it conditional would mean two byte-identical exports differing
+  only in whether they were warned about — the mistake this file already
+  corrected once for the golden warning.
+
 - **`ingest --format ""` silently parsed the file as JSONL.** The refusal that
   rejects an unknown `--format` is guarded by a bare truthiness test, and the
   auto-detection below it uses `??`, which catches only null/undefined — so an

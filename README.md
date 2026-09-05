@@ -573,6 +573,16 @@ writes: a widened `--agent ""` would dump the whole store into a file you
 believed held one agent's traces, and a golden baseline built that way then
 gates CI on runs it was never meant to cover.
 
+`export` reports **how many** traces it wrote, not just where — `Exported 3
+trace(s) to …`, counted from the bytes actually written — and warns when a
+filter matched nothing, in every format. An empty export is a false green:
+`--agent no-such-agent --output backup.json` otherwise announces success at
+exit `0` over a file holding `[]`, and you find out when you need the backup.
+The warning goes to stderr, so it never pollutes `export … > file.json`, and it
+does not depend on whether you used `--output`. `--format golden` says instead
+that the baseline cannot detect a regression, which is the same fact in the
+terms that matter for a gate.
+
 A trace id and the filter flags (`--status`, `--agent`, `--tag`, `--since`) are
 mutually exclusive: pass an id to export exactly one trace, or filters to export a
 set. Combining them is a usage error rather than silently ignoring the filters.

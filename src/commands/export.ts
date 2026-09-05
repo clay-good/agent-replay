@@ -159,13 +159,34 @@ export function runExport(traceId: string | undefined, opts: ExportOptions = {})
       withSnapshots: opts.withSnapshots,
     });
 
+    // Say HOW MANY, not just where. `list` reports "N trace(s) found" and
+    // `ingest` reports "Ingested N trace(s)"; `export` reported only a path, so
+    // the one number that reveals a filter typo was the one number missing.
+    // `export --agent no-such-agent --output backup.json` announced
+    // "Exported to /path/backup.json" at exit 0 over a file holding `[]`, and
+    // the caller believed they had a backup until they needed it.
+    const count = countExported(output, format);
+
     if (opts.output) {
       const outPath = resolve(opts.output);
       writeFileSync(outPath, output);
-      successSpinner(spinner, `Exported to ${outPath}`);
+      successSpinner(spinner, `Exported ${count} trace(s) to ${outPath}`);
     } else {
       spinner.stop();
       process.stdout.write(output);
+    }
+
+    // An empty export is a false green whatever the format. `golden` already
+    // says so below, in words specific to a gate, so this covers the others.
+    //
+    // Warned on BOTH routes deliberately, for the reason spelled out below
+    // about the golden warning: it goes to stderr, so it cannot pollute a
+    // redirected or piped stdout, and making it conditional on `--output`
+    // would mean two byte-identical exports, one warned about and one not,
+    // purely by how the bytes were routed.
+    if (count === 0 && format !== 'golden') {
+      console.error(chalk.yellow('  ⚠ No traces matched — the export is empty.'));
+      console.error(chalk.dim('    Check the filter flags; an empty file is not a backup.'));
     }
     // Every golden export, whether it goes to a file or to stdout.
     //
@@ -182,6 +203,32 @@ export function runExport(traceId: string | undefined, opts: ExportOptions = {})
   } catch (err) {
     failSpinner(spinner, `Export failed: ${errorMessage(err)}`);
     process.exitCode = 1;
+  }
+}
+
+/**
+ * How many traces an export actually carries.
+ *
+ * Counted from the bytes just produced rather than from a second query, so the
+ * number reported is necessarily the number written — the same approach
+ * `warnAboutBaseline` already takes below.
+ *
+ * Output that will not parse counts as 0, which reads as "nothing was
+ * exported" and warns. That cannot happen for a document this command just
+ * serialized, and `warnAboutBaseline` makes the opposite choice (it returns
+ * without reporting) for the same impossible case. The difference is
+ * deliberate: this number goes in a SUCCESS line, so the safe direction is the
+ * one that under-claims.
+ */
+function countExported(output: string, format: ExportFormat): number {
+  if (format === 'jsonl') {
+    return output.split('\n').filter((line) => line.trim() !== '').length;
+  }
+  try {
+    const parsed: unknown = JSON.parse(output);
+    return Array.isArray(parsed) ? parsed.length : 0;
+  } catch {
+    return 0;
   }
 }
 
