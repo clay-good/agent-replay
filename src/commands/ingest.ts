@@ -42,7 +42,18 @@ export function runIngest(filePath: string, opts: IngestOptions = {}): void {
 
   // Reject an unknown --format rather than silently parsing as JSONL (which
   // surfaces as a confusing "validation failed" instead of naming the problem).
-  if (opts.format && opts.format !== 'json' && opts.format !== 'jsonl') {
+  //
+  // `!= null`, not truthiness: `""` is not a format, but a bare truthiness test
+  // let it skip this check AND the `??` auto-detection below (which catches
+  // only null/undefined), so `--format ""` did the exact silent parse-as-JSONL
+  // this refusal exists to prevent. `ingest traces.json --format ""` — what
+  // `--format "$FMT"` produces with FMT unset — then failed with "No traces
+  // could be parsed from file", naming the file rather than the flag, while the
+  // same file with the flag omitted ingested fine. The sibling commands get
+  // this right already: `record` and `import` test membership with no
+  // truthiness guard in front, so "" reaches their refusal. `ingest` needs the
+  // guard at all only because an OMITTED format means auto-detect here.
+  if (opts.format != null && opts.format !== 'json' && opts.format !== 'jsonl') {
     failSpinner(spinner, `Invalid --format "${opts.format}". Valid: json, jsonl.`);
     process.exitCode = 2;
     return;

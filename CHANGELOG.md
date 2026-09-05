@@ -328,6 +328,18 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **`ingest --format ""` silently parsed the file as JSONL.** The refusal that
+  rejects an unknown `--format` is guarded by a bare truthiness test, and the
+  auto-detection below it uses `??`, which catches only null/undefined — so an
+  empty value slipped past both and did the exact silent parse-as-JSONL the
+  refusal exists to prevent. `ingest traces.json --format "$FMT"` with `FMT`
+  unset then failed with "No traces could be parsed from file", naming the file
+  rather than the flag, while the same file with the flag omitted ingested
+  fine. It is now a usage error (exit `2`) that names the flag, matching the
+  sibling commands: `record` and `import` test format membership with no
+  truthiness guard in front, so `""` already reached their refusals. `ingest`
+  needs the guard at all only because an omitted format means auto-detect.
+
 - **`run --agent-name ""` recorded a trace the store could not read back in.**
   The fallback to the command name was written `opts.agentName ?? opts.command`,
   and `??` catches only null/undefined — so a blank name, which is what

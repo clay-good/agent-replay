@@ -2004,3 +2004,47 @@ describe('an empty --dir names no store', () => {
     expect(r.stderr).toContain('--dir was given an empty value');
   });
 });
+
+describe('ingest --format is refused when empty, not silently parsed as JSONL', () => {
+  // The refusal above it in ingest.ts exists so an unknown format names the
+  // flag rather than surfacing as a confusing parse failure. A bare truthiness
+  // test let `""` skip it, and the `??` auto-detection below catches only
+  // null/undefined, so `--format ""` did exactly the silent parse-as-JSONL the
+  // refusal exists to prevent.
+  function writeArray(name: string, count: number): string {
+    const now = new Date().toISOString();
+    const file = join(dir, name);
+    writeFileSync(file, JSON.stringify(
+      Array.from({ length: count }, (_, i) => ({
+        agent_name: `arr${i}`, trigger: 'manual', status: 'completed',
+        started_at: now, ended_at: now, input: {},
+        steps: [{ step_number: 1, step_type: 'llm_call', name: 's', input: {}, output: 'x', started_at: now }],
+      })), null, 2));
+    return file;
+  }
+
+  it('refuses an empty --format, naming the flag', () => {
+    const file = writeArray('empty-format.json', 3);
+    const r = run(['ingest', file, '--format', '']);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('Invalid --format');
+  });
+
+  it('still auto-detects a JSON array when --format is omitted', () => {
+    // The pair that shows what the empty value did: the SAME file loads fine
+    // with the flag left off, and used to fail "No traces could be parsed from
+    // file" — naming the file, not the flag — when the flag was empty.
+    const file = writeArray('detect-format.json', 3);
+    // Asserted against the STORE, not the success line: run() reports stderr
+    // only on a failing exit, so a stderr assertion would pass vacuously here.
+    const r = run(['ingest', file]);
+    expect(r.code).toBe(0);
+    const listed = JSON.parse(run(['list', '--json', '--limit', '100']).stdout);
+    expect(listed.items.filter((t: { agent_name: string }) => /^arr\d$/.test(t.agent_name))).toHaveLength(3);
+  });
+
+  it('still honours an explicit --format', () => {
+    const file = writeArray('explicit-format.json', 2);
+    expect(run(['ingest', file, '--format', 'json']).code).toBe(0);
+  });
+});
