@@ -26,7 +26,20 @@ export interface DashboardStats {
    */
   avgDurationSample: number;
   totalTokens: number | null;
+  /**
+   * How many traces contributed to `totalTokens` — and, below, to `totalCost`.
+   *
+   * The same reasoning as `avgDurationSample`, for the two figures beside it.
+   * Both are SUMs over whatever subset happens to record the value, and neither
+   * said so: a store of 100 traces where 3 carry a cost reported "Total cost:
+   * $0.19" as if it were the store's spend, directly under a "Traces: 100" and
+   * directly *below* an average that does state its scope. A partial sum
+   * presented as a total is the same defect the denominator above was added to
+   * fix; these are its twins.
+   */
+  totalTokensSample: number;
   totalCost: number | null;
+  totalCostSample: number;
 }
 
 /**
@@ -93,7 +106,17 @@ export function dashboardStats(db: Database.Database, opts: StatsFilter = {}): D
        )) as v FROM agent_traces ${traceWhere}`,
       p,
     ),
+    // COUNT of the same expression the SUM used, exactly as the duration
+    // denominator above does: COUNT skips NULLs, so this is the set summed.
+    totalTokensSample: count(
+      `SELECT COUNT(COALESCE(
+         total_tokens,
+         (SELECT SUM(s.tokens_used) FROM agent_trace_steps s WHERE s.trace_id = agent_traces.id)
+       )) as cnt FROM agent_traces ${traceWhere}`,
+      p,
+    ),
     totalCost: scalar(`SELECT SUM(total_cost_usd) as v FROM agent_traces WHERE total_cost_usd IS NOT NULL ${traceAnd}`, p),
+    totalCostSample: count(`SELECT COUNT(total_cost_usd) as cnt FROM agent_traces ${traceWhere}`, p),
   };
 }
 

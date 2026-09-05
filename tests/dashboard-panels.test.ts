@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ensureDatabase, resetConnection } from '../src/db/index.js';
 import { runMigrations } from '../src/db/migrations.js';
 import { ingestTrace, createEval } from '../src/services/trace-service.js';
 import { renderStatusBars, renderScoreSparkline } from '../src/ui/dashboard-panels.js';
@@ -141,5 +145,87 @@ describe('the dashboard shows what is stored', () => {
       view.stop();
       db.close();
     }
+  });
+});
+
+describe('the stats panel never presents a partial sum as a total', () => {
+  // `Avg duration` already said "(over N of M)"; `Total tokens` and `Total
+  // cost` sat directly beneath it saying nothing, though both are sums over
+  // whatever subset records the value.
+  let dir: string;
+  let out: string[];
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let prevExit: typeof process.exitCode;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ar-statspanel-'));
+    out = [];
+    logSpy = vi.spyOn(console, 'log').mockImplementation((m?: unknown) => { out.push(String(m)); });
+    prevExit = process.exitCode;
+    process.exitCode = 0;
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+    process.exitCode = prevExit;
+    resetConnection();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const noAnsi = (s: string) => s.replace(/\x1B\[[0-9;]*m/g, '');
+
+  it('names the scope of the token and cost totals when they cover only some traces', async () => {
+    const db = ensureDatabase(join(dir, 'traces.db'));
+    ingestTrace(db, {
+      agent_name: 'priced', status: 'completed', input: {},
+      total_tokens: 100, total_cost_usd: 0.5,
+      steps: [{ step_number: 1, step_type: 'output', name: 'done' }],
+    } as Parameters<typeof ingestTrace>[1]);
+    ingestTrace(db, {
+      agent_name: 'unpriced', status: 'completed', input: {},
+      steps: [{ step_number: 1, step_type: 'output', name: 'done' }],
+    } as Parameters<typeof ingestTrace>[1]);
+
+    const { runStats } = await import('../src/commands/stats.js');
+    runStats({ dir });
+    const text = noAnsi(out.join('\n'));
+    expect(text).toMatch(/Total tokens:\s+100 \(over 1 of 2\)/);
+    expect(text).toMatch(/Total cost:.*\(over 1 of 2\)/);
+  });
+
+  it('says nothing extra when the totals cover every trace', async () => {
+    const db = ensureDatabase(join(dir, 'traces.db'));
+    for (const n of ['a', 'b']) {
+      ingestTrace(db, {
+        agent_name: n, status: 'completed', input: {},
+        total_tokens: 10, total_cost_usd: 0.1,
+        steps: [{ step_number: 1, step_type: 'output', name: 'done' }],
+      } as Parameters<typeof ingestTrace>[1]);
+    }
+    const { runStats } = await import('../src/commands/stats.js');
+    runStats({ dir });
+    const text = noAnsi(out.join('\n'));
+    expect(text).toMatch(/Total tokens:\s+20/);
+    expect(text).not.toMatch(/over \d+ of \d+/);
+  });
+
+  it('exposes both denominators in --json, so a script can check the scope too', async () => {
+    const db = ensureDatabase(join(dir, 'traces.db'));
+    ingestTrace(db, {
+      agent_name: 'priced', status: 'completed', input: {},
+      total_tokens: 7, total_cost_usd: 0.25,
+      steps: [{ step_number: 1, step_type: 'output', name: 'done' }],
+    } as Parameters<typeof ingestTrace>[1]);
+    ingestTrace(db, {
+      agent_name: 'unpriced', status: 'completed', input: {},
+      steps: [{ step_number: 1, step_type: 'output', name: 'done' }],
+    } as Parameters<typeof ingestTrace>[1]);
+
+    const { runStats } = await import('../src/commands/stats.js');
+    runStats({ dir, json: true });
+    const d = JSON.parse(noAnsi(out.join('\n')));
+    expect(d.overall).toMatchObject({
+      traces: 2, totalTokens: 7, totalTokensSample: 1, totalCostSample: 1,
+    });
   });
 });

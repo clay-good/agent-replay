@@ -358,3 +358,61 @@ describe('the average duration says what it measured', () => {
     expect(s.avgDurationSample).toBe(0);
   });
 });
+
+describe('the token and cost totals say what they measured', () => {
+  // The same defect as the average above, on the two figures printed directly
+  // beneath it: both are SUMs over whatever subset happens to record the value,
+  // and neither carried a denominator — so a store of 100 traces where 3 carry
+  // a cost reported the store's spend as those 3, under a "Traces: 100" and
+  // *below* an average that does state its scope.
+  function trace(id: string, over: Record<string, unknown> = {}) {
+    db.prepare(
+      `INSERT INTO agent_traces (id, agent_name, trigger, status, input, started_at, tags, metadata, created_at, total_tokens, total_cost_usd)
+       VALUES (?, ?, 'manual', 'completed', '{}', '2026-08-20T10:00:00Z', '[]', '{}', '2026-01-01T00:00:00.000Z', ?, ?)`,
+    ).run(id, id, over.total_tokens ?? null, over.total_cost_usd ?? null);
+  }
+
+  it('reports the denominator when only some traces carry the figure', () => {
+    trace('priced', { total_tokens: 100, total_cost_usd: 0.5 });
+    trace('unpriced_a');
+    trace('unpriced_b');
+
+    const s = dashboardStats(db);
+    expect(s.traces).toBe(3);
+    expect(s.totalTokens).toBe(100);
+    expect(s.totalTokensSample).toBe(1);
+    expect(s.totalCost).toBe(0.5);
+    expect(s.totalCostSample).toBe(1);
+  });
+
+  it('counts every trace when every one carries the figure', () => {
+    trace('a', { total_tokens: 10, total_cost_usd: 0.1 });
+    trace('b', { total_tokens: 20, total_cost_usd: 0.2 });
+    const s = dashboardStats(db);
+    expect(s.totalTokensSample).toBe(s.traces);
+    expect(s.totalCostSample).toBe(s.traces);
+  });
+
+  it('is zero, not null, when nothing carries it', () => {
+    // A sample of 0 and a total of null must agree, as they do for duration.
+    trace('bare');
+    const s = dashboardStats(db);
+    expect(s.totalTokens).toBeNull();
+    expect(s.totalTokensSample).toBe(0);
+    expect(s.totalCost).toBeNull();
+    expect(s.totalCostSample).toBe(0);
+  });
+
+  it('counts a trace whose tokens live only on its steps', () => {
+    // `totalTokens` falls back to the per-step sum, so the denominator must
+    // count that trace too — the COUNT is over the same expression the SUM is.
+    trace('step_tokens');
+    db.prepare(
+      `INSERT INTO agent_trace_steps (id, trace_id, step_number, step_type, name, input, started_at, metadata, tokens_used)
+       VALUES ('stp_1', 'step_tokens', 1, 'llm_call', 'call', '{}', '2026-08-20T10:00:00Z', '{}', 42)`,
+    ).run();
+    const s = dashboardStats(db);
+    expect(s.totalTokens).toBe(42);
+    expect(s.totalTokensSample).toBe(1);
+  });
+});

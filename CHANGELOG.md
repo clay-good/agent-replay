@@ -328,6 +328,16 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **`stats` presented a partial token and cost sum as a store total.** Both
+  are sums over whatever subset of traces happens to record the value, and
+  neither said so — a store of 100 traces where 3 carry a cost printed "Total
+  cost: $0.19" as if it were the store's spend, under a "Traces: 100" and
+  directly *below* an "Avg duration" that does state its scope. That
+  denominator (`avgDurationSample`) was added for exactly this reason and its
+  two neighbours were left behind. `overall` now also carries
+  `totalTokensSample` and `totalCostSample`, and the panel says `(over N of M)`
+  on each figure that covers fewer traces than the store holds.
+
 - **`diff --json` did not say what it had compared.** The document carried a
   `diffs` array and nothing about scope, so `--fields model --json` reporting
   three differences was byte-for-byte the shape of an *unfiltered* comparison

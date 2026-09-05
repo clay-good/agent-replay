@@ -20,6 +20,11 @@ export interface StatsOptions {
  * store (the same aggregates the dashboard TUI shows, but printable to a log or
  * consumable as `--json` in CI, where the full-screen dashboard can't run).
  */
+/** " (over N of M)" when a figure covers fewer traces than the store holds. */
+function scopeNote(sample: number, total: number): string {
+  return sample < total ? ` (over ${sample} of ${total})` : '';
+}
+
 export function runStats(opts: StatsOptions = {}): void {
   const refuse = makeRefuse(opts.json);
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
@@ -69,12 +74,18 @@ export function runStats(opts: StatsOptions = {}): void {
       // sat directly above it. The scope is now stated rather than assumed.
       'Avg duration': overall.avgDurationMs != null
         ? formatDuration(Math.round(overall.avgDurationMs)) +
-          (overall.avgDurationSample < overall.traces
-            ? ` (over ${overall.avgDurationSample} of ${overall.traces})`
-            : '')
+          scopeNote(overall.avgDurationSample, overall.traces)
         : '-',
-      'Total tokens': overall.totalTokens != null ? overall.totalTokens.toLocaleString() : '-',
-      'Total cost': overall.totalCost != null ? formatCostUsd(overall.totalCost) : '-',
+      // ...and the same for the two sums beside it. Both are taken over
+      // whatever subset records the value, so "Total cost: $0.19" over a store
+      // of 100 traces where 3 carry a cost is not the store's spend — while the
+      // average one row up already states its scope. Say it here too.
+      'Total tokens': overall.totalTokens != null
+        ? overall.totalTokens.toLocaleString() + scopeNote(overall.totalTokensSample, overall.traces)
+        : '-',
+      'Total cost': overall.totalCost != null
+        ? formatCostUsd(overall.totalCost) + scopeNote(overall.totalCostSample, overall.traces)
+        : '-',
     }),
   );
 
