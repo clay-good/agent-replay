@@ -2048,3 +2048,80 @@ describe('ingest --format is refused when empty, not silently parsed as JSONL', 
     expect(run(['ingest', file, '--format', 'json']).code).toBe(0);
   });
 });
+
+describe('token totals agree across every path that reports them', () => {
+  // The README states the precedence: trace-level totals are taken at face
+  // value and never reconciled against the steps, and "only when a total is
+  // absent do the per-step counts fill in". Three paths report that number --
+  // `list --json` (total_tokens/effective_tokens), the rendered `list` table,
+  // and `stats` -- and nothing pinned that they agree.
+  //
+  // The table is the path at risk. `tokensCell` reads
+  // `effective_tokens ?? total_tokens`, i.e. it prefers the filled-in value,
+  // which is the OPPOSITE precedence to the one documented. It agrees today
+  // only because `listTraces` computes `effective_tokens` as
+  // COALESCE(total_tokens, sum(steps)) -- so when a trace-level total exists,
+  // effective_tokens already IS that total. That makes the inversion latent
+  // rather than wrong, and latent is exactly what a test is for: change the
+  // SQL to always sum the steps and the human-facing table would quietly
+  // disagree with every machine-readable path over the same store.
+  function seedTokens(agent: string, stepTokens: number[], traceTotal?: number): void {
+    const now = new Date().toISOString();
+    const file = join(dir, `tok-${agent}.json`);
+    writeFileSync(file, JSON.stringify([{
+      agent_name: agent, trigger: 'manual', status: 'completed', input: {},
+      started_at: now, ended_at: now,
+      ...(traceTotal === undefined ? {} : { total_tokens: traceTotal }),
+      steps: stepTokens.map((tk, i) => ({
+        step_number: i + 1, step_type: 'llm_call', name: `s${i + 1}`,
+        input: {}, output: 'x', started_at: now, duration_ms: 500, tokens_used: tk,
+      })),
+    }]));
+    expect(run(['ingest', file]).code).toBe(0);
+  }
+
+  const listed = (agent: string) => {
+    const items = JSON.parse(run(['list', '--json', '--limit', '100']).stdout).items;
+    return items.find((t: { agent_name: string }) => t.agent_name === agent);
+  };
+  // The table renders with toLocaleString(), so the assertion uses the same
+  // formatting rather than a bare number that would miss a grouped thousand.
+  const tableShows = (agent: string, n: number) => {
+    const row = run(['list', '--limit', '100']).stdout
+      .split('\n').find((l) => l.includes(agent));
+    expect(row, `no table row for ${agent}`).toBeDefined();
+    expect(row).toContain(n.toLocaleString());
+  };
+
+  it('fills in from the steps when the trace carries no total', () => {
+    seedTokens('fillin', [300, 100, 16]); // 416, no trace-level total
+    const t = listed('fillin');
+    expect(t.total_tokens).toBeNull();
+    expect(t.effective_tokens).toBe(416);
+    tableShows('fillin', 416);
+    const overall = JSON.parse(run(['stats', '--json']).stdout).overall;
+    expect(overall.totalTokens).toBe(416);
+    expect(overall.totalTokensSample).toBe(1);
+  });
+
+  it('takes a trace-level total at face value, even against its own steps', () => {
+    // The disagreeing case is the whole point: steps sum to 416, the producer
+    // declared 999, and the documented answer is 999 on every path.
+    seedTokens('facevalue', [300, 100, 16], 999);
+    const t = listed('facevalue');
+    expect(t.total_tokens).toBe(999);
+    expect(t.effective_tokens).toBe(999);
+    tableShows('facevalue', 999);
+    expect(JSON.parse(run(['stats', '--json']).stdout).overall.totalTokens).toBe(999);
+  });
+
+  it('reports no total, not a zero, when nothing carries one', () => {
+    // A missing number and a measured zero are different facts; `stats` pairs
+    // the total with a sample count so a partial sum cannot read as a full one.
+    seedTokens('untokened', [], undefined);
+    expect(listed('untokened').effective_tokens).toBeNull();
+    const overall = JSON.parse(run(['stats', '--json']).stdout).overall;
+    expect(overall.totalTokens).toBeNull();
+    expect(overall.totalTokensSample).toBe(0);
+  });
+});
