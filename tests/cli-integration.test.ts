@@ -2254,6 +2254,34 @@ describe('an imported session can be gated on the model it ran on', () => {
     expect(checked.stdout).toMatch(/model @step 1/); // the TOOL CALL step, not only the reply
   });
 
+  it('catches a model change between two imported CODEX sessions too', () => {
+    // The sibling importer delivers the same capability by a different route --
+    // the model comes from a `turn_context` record rather than each message --
+    // so the chain is pinned for both. Leaving the twin unpinned is the exact
+    // mistake this codebase keeps paying for.
+    const rollout = (name: string, id: string, model: string): string => {
+      const file = join(dir, name);
+      writeFileSync(file, [
+        { type: 'session_meta', timestamp: '2026-07-02T00:00:00Z', payload: { id, timestamp: '2026-07-02T00:00:00Z' } },
+        { type: 'turn_context', timestamp: '2026-07-02T00:00:01Z', payload: { model } },
+        { type: 'response_item', timestamp: '2026-07-02T00:00:02Z', payload: { type: 'message', role: 'user', content: 'same q' } },
+        { type: 'response_item', timestamp: '2026-07-02T00:00:03Z', payload: { type: 'function_call', call_id: 'c1', name: 'shell', arguments: '{}' } },
+        { type: 'response_item', timestamp: '2026-07-02T00:00:04Z', payload: { type: 'message', role: 'assistant', content: 'done' } },
+      ].map((r) => JSON.stringify(r)).join('\n'));
+      return file;
+    };
+    expect(run(['import', rollout('ra.jsonl', 'ra', 'gpt-5.6-sol'), '--format', 'codex-rollout']).code).toBe(0);
+    const baseId = JSON.parse(run(['list', '--json']).stdout).items[0].id;
+    const golden = join(dir, 'codex-golden.json');
+    expect(run(['export', baseId, '--format', 'golden', '--output', golden]).code).toBe(0);
+    expect(run(['import', rollout('rb.jsonl', 'rb', 'gpt-5.6-mini'), '--format', 'codex-rollout']).code).toBe(0);
+
+    const checked = run(['check', '--golden', golden, '--fields', 'model']);
+    expect(checked.code, checked.stderr).toBe(1);
+    expect(checked.stdout).toContain('REGRESSED');
+    expect(checked.stdout).toMatch(/model @step 1/); // the function_call step
+  });
+
   it('passes when the model is unchanged', () => {
     // The other half: the gate must not cry wolf on an identical rerun, which
     // is what a baseline carrying no model at all would have done once the
