@@ -334,9 +334,10 @@ between them, and nothing else. Upgrades are automatic and one-way.
   step as having happened in September: after the trace's own `ended_at`, and
   so outside the window of the trace they belong to. The trace's start and end
   were already read from these very record timestamps; only the steps were left
-  out. A wrong timestamp reads exactly like a right one, so `show` drew the
-  whole timeline at the import moment and `replay` had no real pacing to work
-  from. Both importers now stamp each step from the record that produced it,
+  out. A wrong timestamp reads exactly like a right one: `show --json` reported
+  them, a `json`/`jsonl` export carried them into the backup, and anything
+  reading the store saw a run whose steps happened after it ended. Both
+  importers now stamp each step from the record that produced it,
   including a Claude Code subagent's own records — which the OpenTelemetry
   mapper has always done, from each span's start.
 
