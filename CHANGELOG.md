@@ -328,6 +328,24 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **"No candidate matched the baseline" suggested a remedy that cannot work
+  for the commonest cause.** The refusal listed a renamed agent, a changed
+  input template, or `hook --no-input`, and then advised re-exporting the
+  baseline from current runs. That is right for the first two and wrong for the
+  third: a trace with an empty input is *never* matched, deliberately — an
+  empty input is the absence of an identity, not one that happens to be blank,
+  so every input-less capture hashed to the same key and unrelated sessions
+  compared as the same scenario. Re-exporting changes nothing, because neither
+  side has an identity to pair on. A reader who followed the advice re-exported,
+  saw the identical refusal, and had nothing left to try. The check now counts
+  those candidates separately and says which case it is looking at: that they
+  recorded no input, that re-exporting will not change it, that the capture has
+  to record an input, and where that usually comes from (`hook --no-input`, the
+  `codex-exec` / `gemini-stream` translators, which record no input at all, or
+  OpenTelemetry spans carrying no prompt attribute). A mixed run reports how
+  many of each. When every candidate has a real input the original wording is
+  unchanged, minus the `hook --no-input` guess that now has its own branch.
+
 - **Imported steps were stamped with the import time, not when they happened.**
   The storage layer defaults a step with no `started_at` to *now*, and neither
   importer passed one — so importing a July session in September recorded every

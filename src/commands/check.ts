@@ -327,10 +327,22 @@ export function runCheck(opts: CheckOptions = {}): void {
     !opts.strict &&
     !opts.trace
   ) {
+    // When the candidates recorded no input at all, say so instead of listing
+    // guesses. An empty input is never matched, deliberately (see
+    // `isMatchable`), and the generic advice below is actively wrong for it:
+    // re-exporting the baseline cannot help, because neither side has an
+    // identity to pair on. The capture has to start recording an input.
+    const noInput = report.unmatched_no_input;
+    const hint =
+      noInput === candidates.length
+        ? `All ${candidates.length} recorded no input, and an empty input is never matched — it is the absence of an identity, not one that happens to be blank, so every input-less run would otherwise pair with every other. Re-exporting the baseline will not change this; the capture has to record an input. Common causes: \`hook --no-input\`, \`record --format codex-exec\`/\`gemini-stream\` (those translators record no input), or OpenTelemetry spans carrying no prompt attribute. Pass --allow-empty if this is expected.`
+        : noInput > 0
+          ? `${noInput} of ${candidates.length} recorded no input, which is never matched (an empty input is the absence of an identity). For those, the capture has to record an input — re-exporting the baseline will not help. The rest are matched by agent name and a hash of the input, so check for a renamed agent or a changed input template. Pass --allow-empty if this is expected.`
+          : 'A check that matches nothing cannot detect a regression. Candidates are matched by agent name and a hash of the trace input, so this usually means the agent was renamed or the input template changed. Re-export the baseline from current runs, or pass --allow-empty if this is expected.';
     fail(
       2,
       `No candidate matched the baseline — ${candidates.length} trace(s) checked, none compared.`,
-      'A check that matches nothing cannot detect a regression. Candidates are matched by agent name and a hash of the trace input, so this usually means the agent was renamed, the input template changed, or capture stopped recording the input (`hook --no-input`). Re-export the baseline from current runs, or pass --allow-empty if this is expected.',
+      hint,
     );
     return;
   }

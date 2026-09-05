@@ -60,6 +60,15 @@ export interface GoldenCheckReport {
    * that not every trace shape has.
    */
   uncompared: string[];
+  /**
+   * Candidates that could not be matched because they recorded NO INPUT, a
+   * subset of `unmatched`. Kept apart because the two have different remedies
+   * and only one of them is the obvious guess: a renamed agent or a changed
+   * input template is fixed by re-exporting the baseline, and this is not —
+   * the capture has to start recording an input before any baseline can pair
+   * with it. See `isMatchable` for why an empty input is never matched.
+   */
+  unmatched_no_input: number;
   /** Overall CI verdict: no failures (and, in strict mode, no unmatched or uncovered). */
   ok: boolean;
 }
@@ -134,6 +143,7 @@ export function checkGolden(
   let passed = 0;
   let failed = 0;
   let unmatched = 0;
+  let unmatchedNoInput = 0;
 
   const covered = new Set<string>();
   // Per MATCHED CANDIDATE, the baseline entries it was diffed against.
@@ -151,6 +161,7 @@ export function checkGolden(
     const bucket = key != null ? index.get(key) : undefined;
     if (!bucket || bucket.length === 0) {
       unmatched++;
+      if (key == null) unmatchedNoInput++;
       results.push({ trace_id: trace.id, agent_name: trace.agent_name, matched: false, passed: !opts.strict, divergences: [] });
       continue;
     }
@@ -213,6 +224,7 @@ export function checkGolden(
     passed,
     failed,
     unmatched,
+    unmatched_no_input: unmatchedNoInput,
     uncovered,
     uncompared,
     ok: failed === 0 && uncompared.length === 0 && (!opts.strict || (unmatched === 0 && uncovered === 0)),

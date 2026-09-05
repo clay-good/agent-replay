@@ -2296,3 +2296,53 @@ describe('an imported session can be gated on the model it ran on', () => {
     expect(checked.stdout).toContain('1 passed');
   });
 });
+
+describe('the unmatched refusal names the remedy that actually works', () => {
+  // "No candidate matched the baseline" has two quite different causes, and the
+  // generic advice -- re-export the baseline -- is actively wrong for one of
+  // them. A trace with an empty input is NEVER matched (an empty input is the
+  // absence of an identity, so every input-less run would otherwise pair with
+  // every other), and no amount of re-exporting changes that: the capture has
+  // to start recording an input. A reader who followed the old advice would
+  // re-export, see the identical refusal, and have nothing left to try.
+  function ingestOne(file: string, agent: string, input: unknown): void {
+    writeFileSync(join(dir, file), JSON.stringify([{
+      agent_name: agent, trigger: 'manual', status: 'completed', input,
+      started_at: '2026-01-01T00:00:00Z', ended_at: '2026-01-01T00:00:05Z',
+      steps: [{ step_number: 1, step_type: 'llm_call', name: 's', input: {}, output: 'x', started_at: '2026-01-01T00:00:01Z' }],
+    }]));
+    expect(run(['ingest', join(dir, file)]).code).toBe(0);
+  }
+
+  it('says so, and what to do, when every candidate recorded no input', () => {
+    ingestOne('blank.json', 'blankbot', {});
+    const golden = join(dir, 'blank-golden.json');
+    expect(run(['export', '--format', 'golden', '--output', golden]).code).toBe(0);
+
+    // Checked against a baseline exported from that very trace: it still cannot
+    // match, which is the behaviour that makes the old advice misleading.
+    const r = run(['check', '--golden', golden]);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('recorded no input');
+    expect(r.stderr).toContain('will not change this');
+    expect(r.stderr).not.toContain('Re-export the baseline from current runs');
+  });
+
+  it('keeps the ordinary advice when the inputs are fine', () => {
+    // The other branch must not regress into blaming a missing input for what
+    // is really a renamed agent.
+    ingestOne('named.json', 'oldname', { q: 'hi' });
+    const golden = join(dir, 'named-golden.json');
+    expect(run(['export', '--format', 'golden', '--output', golden]).code).toBe(0);
+    expect(run(['ingest', join(dir, 'named.json')]).code).toBe(0); // same trace again
+    // Rewrite the baseline to name an agent no candidate uses.
+    const entries = JSON.parse(readFileSync(golden, 'utf8'));
+    entries[0].agent_name = 'renamed-bot';
+    writeFileSync(golden, JSON.stringify(entries));
+
+    const r = run(['check', '--golden', golden]);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('the agent was renamed');
+    expect(r.stderr).not.toContain('recorded no input');
+  });
+});

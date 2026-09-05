@@ -234,6 +234,26 @@ describe('checkGolden', () => {
     expect(checkGolden(golden, [other], { strict: true }).ok).toBe(false);
   });
 
+  it('counts an input-less candidate separately from an ordinary unmatch', () => {
+    // Both are unmatched, but they have DIFFERENT remedies and only one of them
+    // is the obvious guess. A renamed agent or a changed input template is
+    // fixed by re-exporting the baseline; an empty input is not -- it is never
+    // matched at all (an empty input is the absence of an identity, so every
+    // input-less run would otherwise pair with every other), and the capture
+    // has to start recording an input before any baseline can pair with it.
+    // The refusal reads this field to say which case it is looking at.
+    const golden = makeGolden();
+    const renamed = candidate({ ...baseline, agent_name: 'renamed-bot' });
+    const blank = candidate({ ...baseline, input: {} });
+
+    const both = checkGolden(golden, [renamed, blank]);
+    expect(both.unmatched).toBe(2);
+    expect(both.unmatched_no_input).toBe(1);
+
+    expect(checkGolden(golden, [renamed]).unmatched_no_input).toBe(0);
+    expect(checkGolden(golden, [blank]).unmatched_no_input).toBe(1);
+  });
+
   it('honors a --fields allowlist (ignoring status when excluded)', () => {
     const golden = makeGolden();
     const failed = candidate({ ...baseline, status: 'failed' });
