@@ -316,6 +316,27 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **Bounded display fields were measured in code units, not terminal
+  columns.** `truncateToWidth` was introduced because every bound in the
+  renderers is a *width* — a boxen border, a table column, the timeline gutter
+  — but four call sites were still cut with the code-unit `truncate`. A CJK
+  character is one code unit and **two** columns, so a name cut to "60" drew
+  120 columns: the `show`/`replay` trace header wrapped inside its own box and
+  grew extra unlabelled lines of border (the failure the bound was added to
+  prevent), a wide step name pushed the timeline and tree gutters out of
+  alignment, and a wide agent name overflowed its column in the `dashboard`
+  trace list. The trace header (agent name, version, tags, error), the timeline
+  and tree step names, and the dashboard agent column now all measure columns.
+
+- **`truncateJson` could leave a lone surrogate.** Its twin `truncate` cuts at
+  a surrogate-safe index; this one sliced at a bare offset, so a cut landing
+  between the halves of an astral character (an emoji, most CJK extension
+  blocks) produced half a character. Whether that happened depended on the
+  exact offset — on the length of an unrelated key earlier in the JSON. It
+  matters most where the output is not for a terminal at all: `truncateJson`
+  builds the step payloads in the evaluator prompt, where a lone surrogate is
+  not valid UTF-8 and reaches the provider as U+FFFD.
+
 - **Four smaller `check` contract defects.** A baseline whose `steps_summary`
   holds a `null` or a bare string died inside the comparison with *"Cannot read
   properties of null"*, naming neither the file nor the entry — the same

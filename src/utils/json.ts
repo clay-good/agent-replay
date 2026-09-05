@@ -61,7 +61,12 @@ export function truncateJson(value: unknown, maxLength = 200): string {
     str = String(value);
   }
   if (str.length <= maxLength) return str;
-  return str.slice(0, maxLength - 3) + '...';
+  // `safeCutIndex`, not a bare slice: cutting at an arbitrary code-unit index
+  // can land between the halves of a surrogate pair, leaving a lone surrogate.
+  // `truncate` above has always guarded this; this twin did not, and its output
+  // goes into the evaluator prompts built by trace-summarizer, where a lone
+  // surrogate is not valid UTF-8 and reaches the provider as U+FFFD.
+  return str.slice(0, safeCutIndex(str, maxLength - 3)) + '...';
 }
 
 /**

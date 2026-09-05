@@ -2,7 +2,7 @@ import chalk from 'chalk';
 import type { TraceStep } from '../models/types.js';
 import type { StepType } from '../models/enums.js';
 import { stepIcon, stepLabel, colors, label, separator, safeText, safeLine } from './theme.js';
-import { hasRenderableContent, truncate } from '../utils/json.js';
+import { hasRenderableContent } from '../utils/json.js';
 import { truncateToWidth } from './width.js';
 import { formatDuration } from '../utils/time.js';
 
@@ -65,7 +65,7 @@ export function renderTimeline(
     const num = chalk.dim(String(step.step_number).padStart(2));
     const icon = stepIcon(step.step_type as StepType);
     const typeLabel = stepLabel(step.step_type as StepType);
-    const name = chalk.white.bold(`"${safeLine(truncate(step.name, STEP_NAME_MAX))}"`);
+    const name = chalk.white.bold(`"${safeLine(truncateToWidth(step.name, STEP_NAME_MAX))}"`);
     const dur = step.duration_ms != null
       ? chalk.dim(formatDuration(step.duration_ms))
       : '';
@@ -194,7 +194,7 @@ export function renderTree(steps: TraceStep[], options: TimelineOptions = {}): s
   const emit = (step: TraceStep, indent: string, cappedDepth?: number): void => {
     const icon = stepIcon(step.step_type as StepType);
     const typeLabel = stepLabel(step.step_type as StepType);
-    const name = chalk.white.bold(`"${safeLine(truncate(step.name, STEP_NAME_MAX))}"`);
+    const name = chalk.white.bold(`"${safeLine(truncateToWidth(step.name, STEP_NAME_MAX))}"`);
     const causal =
       step.caused_by_step_number != null
         ? chalk.dim(` ⟵ caused by #${step.caused_by_step_number}`)

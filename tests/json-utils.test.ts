@@ -162,3 +162,25 @@ describe('truncate never splits a surrogate pair', () => {
     expect(truncate('😀ok', 50)).toBe('😀ok');
   });
 });
+
+describe('truncateJson never splits a surrogate pair either', () => {
+  // `truncate` was made surrogate-safe; its twin was left on a bare `slice`.
+  // The gap mattered more, not less: `truncateJson` output is what
+  // trace-summarizer puts into the evaluator prompt, where a lone surrogate is
+  // not valid UTF-8 and reaches the provider as U+FFFD.
+  const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+  it('leaves no lone surrogate at any cut point', () => {
+    const s = 'a'.repeat(8) + '😀'.repeat(30);
+    for (let max = 4; max <= 40; max++) {
+      const out = truncateJson(s, max);
+      expect(LONE_SURROGATE.test(out), `max=${max} produced ${JSON.stringify(out)}`).toBe(false);
+    }
+  });
+
+  it('still truncates, and still marks that it did', () => {
+    const out = truncateJson('😀'.repeat(30), 10);
+    expect(out).toMatch(/\.\.\.$/);
+    expect(out.length).toBeLessThanOrEqual(11);
+  });
+});

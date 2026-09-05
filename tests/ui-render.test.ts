@@ -853,3 +853,40 @@ describe('renderDiff shows a difference the table would otherwise hide', () => {
     expect(row).not.toContain('"alpha"');
   });
 });
+
+describe('render budgets are columns, not UTF-16 code units', () => {
+  // `truncateToWidth` exists because every bound in `src/ui` is a terminal
+  // WIDTH — a boxen border, a table column, the timeline gutter. Several call
+  // sites were still measuring with `.length`, and a CJK character is one code
+  // unit and TWO columns: a name cut to "60" rendered 120 columns wide, wrapped
+  // the box it was bounded to fit inside, and broke the very border the bound
+  // was added to protect.
+  const WIDE = '実'.repeat(200); // 200 code units, 400 columns
+  const widest = (s: string) => Math.max(...noAnsi(s).split('\n').map(stringWidth));
+
+  it('bounds a wide agent name in the trace header', () => {
+    // The panel is one line per field. Measured in columns the bound holds and
+    // the Agent line stays a line; measured in code units it is twice as wide
+    // as the box, so boxen wraps it and the header grows extra unlabelled
+    // lines of border — the exact failure the bound was added to prevent.
+    const lines = (s: string) => noAnsi(s).split('\n').length;
+    expect(lines(traceHeaderPanel(trace({ agent_name: WIDE })))).toBe(
+      lines(traceHeaderPanel(trace({ agent_name: 'a' }))),
+    );
+  });
+
+  it('bounds a wide tag in the trace header', () => {
+    expect(widest(traceHeaderPanel(trace({ tags: [WIDE] })))).toBeLessThanOrEqual(40 + 30);
+  });
+
+  it('bounds a wide step name in the timeline', () => {
+    // Budget 80 columns, plus the connector, number, icon and type label.
+    const out = renderTimeline([step({ step_type: 'tool_call', name: WIDE })]);
+    expect(widest(out)).toBeLessThanOrEqual(80 + 40);
+  });
+
+  it('bounds a wide step name in the tree', () => {
+    const out = renderTree([step({ step_type: 'tool_call', name: WIDE })]);
+    expect(widest(out)).toBeLessThanOrEqual(80 + 40);
+  });
+});

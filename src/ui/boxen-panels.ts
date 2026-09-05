@@ -5,7 +5,7 @@ import type { TraceStatus } from '../models/enums.js';
 import { statusBadge, colors, label, formatScorePct, formatCostUsd, safeText, safeLine} from './theme.js';
 import { effectiveDurationMs, formatDuration } from '../utils/time.js';
 import { effectiveTokens } from '../utils/totals.js';
-import { truncate } from '../utils/json.js';
+import { truncateToWidth } from './width.js';
 
 /**
  * `boxen`, with a plain-text fallback instead of a crash.
@@ -59,7 +59,7 @@ export function traceHeaderPanel(trace: Trace): string {
   const lines: string[] = [];
 
   lines.push(
-    `${label('Agent:')}     ${chalk.whiteBright.bold(safeLine(truncate(trace.agent_name, 60)))}${trace.agent_version ? chalk.dim(` v${safeLine(truncate(trace.agent_version, 30))}`) : ''}`,
+    `${label('Agent:')}     ${chalk.whiteBright.bold(safeLine(truncateToWidth(trace.agent_name, 60)))}${trace.agent_version ? chalk.dim(` v${safeLine(truncateToWidth(trace.agent_version, 30))}`) : ''}`,
   );
   // The id too: `record`'s native protocol lets the PRODUCER choose it
   // (`trace_start.trace_id` is only checked for being a non-empty string), so it
@@ -90,11 +90,11 @@ export function traceHeaderPanel(trace: Trace): string {
   }
   if (trace.tags.length > 0) {
     lines.push(
-      `${label('Tags:')}      ${trace.tags.map((t) => colors.info(`[${safeLine(truncate(t, 40))}]`)).join(' ')}`,
+      `${label('Tags:')}      ${trace.tags.map((t) => colors.info(`[${safeLine(truncateToWidth(t, 40))}]`)).join(' ')}`,
     );
   }
   if (trace.error) {
-    lines.push(`${label('Error:')}     ${chalk.redBright(safeLine(truncate(trace.error, 200)))}`);
+    lines.push(`${label('Error:')}     ${chalk.redBright(safeLine(truncateToWidth(trace.error, 200)))}`);
   }
   if (trace.parent_trace_id) {
     lines.push(`${label('Fork of:')}   ${chalk.dim(safeLine(trace.parent_trace_id))} ${chalk.dim(`(step ${trace.forked_from_step})`)}`);

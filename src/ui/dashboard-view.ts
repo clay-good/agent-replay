@@ -3,7 +3,7 @@ import type Database from 'better-sqlite3';
 import type { Trace, EvalResult } from '../models/types.js';
 import type { TraceStatus } from '../models/enums.js';
 import { formatDuration, formatRelativeTime, parseInstant } from '../utils/time.js';
-import { truncate } from '../utils/json.js';
+import { truncateToWidth } from './width.js';
 import { formatCostUsd, safeText } from './theme.js';
 import { dashboardStats, statusCounts, recentTraces, recentEvalScores } from './dashboard-data.js';
 import { renderStatusBars, renderScoreSparkline } from './dashboard-panels.js';
@@ -220,7 +220,7 @@ export class DashboardView {
     const cell = (v: string): string => blessed.escape(safeText(v));
     const data = rows.map((r) => [
       cell(r.id.slice(0, 12)),
-      cell(truncate(r.agent_name, 18)),
+      cell(truncateToWidth(r.agent_name, 18)),
       r.status,
       formatRelativeTime(r.started_at),
     ]);
