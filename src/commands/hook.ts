@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { ensureDatabase } from '../db/index.js';
 import { applyHookPayload, formatEnforcementResponse, resolveHookRouting, enforcementEventName} from '../services/hook-adapter.js';
 import type { HookDialect } from '../services/hook-adapter.js';
-import { listPolicies } from '../services/guard-service.js';
+import { listPolicies, noEnabledPolicyReason } from '../services/guard-service.js';
 import { errorMessage } from '../utils/json.js';
 import { resolveDataDir, storeExists } from '../utils/paths.js';
 
@@ -181,11 +181,9 @@ export async function runHook(eventArg: string | undefined, opts: HookOptions = 
     // rather than passing green, and the refusal gets an opt-out for the case
     // where emptiness is deliberate (`--allow-empty`, as on `check`).
     if (opts.enforce && !opts.allowEmpty && resolveHookRouting(payload, eventArg).action === 'pre_tool') {
-      const enabled = listPolicies(db).filter((p) => p.enabled).length;
-      if (enabled === 0) {
-        throw new Error(
-          `no enabled guardrail policies in ${dbPath} — add one with "agent-replay guard add", point the hook at the right store with --dir, or pass --allow-empty to run unguarded`,
-        );
+      const policies = listPolicies(db);
+      if (policies.filter((p) => p.enabled).length === 0) {
+        throw new Error(noEnabledPolicyReason(dbPath, policies, 'hook'));
       }
     }
     const result = applyHookPayload(db, payload, { noInput: opts.noInput, enforce: opts.enforce, eventArg });

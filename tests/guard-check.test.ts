@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Readable } from 'node:stream';
 import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
-import { addPolicy, evaluateStep, verdictForMatches, resolveGuardExit, testPolicies, removePolicy, validateMatchPattern, listPolicies } from '../src/services/guard-service.js';
+import { addPolicy, evaluateStep, verdictForMatches, resolveGuardExit, testPolicies, removePolicy, validateMatchPattern, listPolicies, noEnabledPolicyReason, setPolicyEnabled } from '../src/services/guard-service.js';
 import { startTrace, ingestTrace } from '../src/services/trace-service.js';
 import type { TraceStep } from '../src/models/types.js';
 import type { StepType } from '../src/models/enums.js';
@@ -914,5 +914,52 @@ describe('the guard commands', () => {
     runGuardList({ dir });
     expect(stdout()).toMatch(/no-delete/);
     expect(stdout()).toMatch(/1 guardrail policy/);
+  });
+});
+
+describe('the fail-closed refusal names the remedy that fits the store', () => {
+  // "no enabled guardrail policies" has two quite different causes and the old
+  // wording only served one: "add one with `guard add`". That is right for an
+  // empty store and misleading for a store whose policies are all DISABLED --
+  // someone who turned one off to unblock themselves and forgot would follow
+  // it, end up with a duplicate, and leave the policy they meant to use off.
+  it('points at `guard enable`, and names the policies, when all are disabled', () => {
+    const db = new Database(':memory:');
+    db.pragma('foreign_keys = ON');
+    runMigrations(db);
+    addPolicy(db, { name: 'no-deletes', match_pattern: { step_type: 'tool_call' }, action: 'deny' });
+    for (const p of listPolicies(db)) setPolicyEnabled(db, p.id, false);
+
+    const reason = noEnabledPolicyReason('/tmp/x/traces.db', listPolicies(db), 'check');
+    expect(reason).toContain('present but disabled');
+    expect(reason).toContain('no-deletes'); // name it, so the user knows what to enable
+    expect(reason).toContain('guard enable');
+    expect(reason).toContain('--allow-empty');
+    db.close();
+  });
+
+  it('keeps the original advice when the store holds no policies at all', () => {
+    // `guard enable` would be nonsense here, and `--dir` (the wrong-store
+    // guess) is only worth raising when there is nothing to enable.
+    const reason = noEnabledPolicyReason('/tmp/x/traces.db', [], 'check');
+    expect(reason).toContain('guard add');
+    expect(reason).toContain('--dir');
+    expect(reason).not.toContain('present but disabled');
+    expect(reason).not.toContain('guard enable');
+  });
+
+  it('addresses the hook by name, since the same dead end is reached both ways', () => {
+    expect(noEnabledPolicyReason('/tmp/x/traces.db', [], 'hook')).toContain('point the hook at');
+    expect(noEnabledPolicyReason('/tmp/x/traces.db', [], 'check')).toContain('point the check at');
+  });
+
+  it('summarizes rather than listing every disabled policy', () => {
+    // A store with dozens of disabled policies must not print all of them into
+    // a hook decision reason, which the harness shows to the model.
+    const many = Array.from({ length: 9 }, (_, i) => ({ enabled: false, name: `p${i}` }));
+    const reason = noEnabledPolicyReason('/tmp/x/traces.db', many, 'check');
+    expect(reason).toContain('9 policies are present but disabled');
+    expect(reason).toContain('+6 more');
+    expect(reason).not.toContain('p8');
   });
 });

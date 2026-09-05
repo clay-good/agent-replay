@@ -328,6 +328,23 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **The fail-closed guardrail refusal told you to add a policy when you already
+  had one.** `guard check` and `hook --enforce` both refuse a store with no
+  *enabled* policy — a gate that cannot fire — and both said "add one with
+  `agent-replay guard add`". That is right for an empty store and misleading
+  for the other way to get there: a policy that exists and is **disabled**.
+  Someone who turns one off to unblock themselves and forgets would follow the
+  advice, end up with a duplicate, and leave the policy they meant to use
+  switched off. The refusal now distinguishes the two — it says how many
+  policies are present but disabled, **names them** so you know what to turn
+  back on, and points at `guard enable`. An empty store keeps the original
+  wording, including the wrong-store `--dir` guess, which is only worth raising
+  when there is nothing to enable. A long list is summarized (three names plus
+  a count) rather than printed in full, because this reason travels into a hook
+  decision the harness shows to the model. Both commands now build the sentence
+  from one place instead of the two copies that had already drifted apart in
+  their wording.
+
 - **"No candidate matched the baseline" suggested a remedy that cannot work
   for the commonest cause.** The refusal listed a renamed agent, a changed
   input template, or `hook --no-input`, and then advised re-exporting the

@@ -10,8 +10,7 @@ import {
   evaluateStep,
   verdictForMatches,
   resolveGuardExit,
-  validateMatchPattern,
-} from '../services/guard-service.js';
+  validateMatchPattern, noEnabledPolicyReason } from '../services/guard-service.js';
 import type { StepPolicyResult } from '../services/guard-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { policyTable } from '../ui/table.js';
@@ -416,11 +415,9 @@ export async function runGuardCheck(opts: GuardCheckOptions = {}): Promise<void>
     // scenario survived the missing-store check above through that door — in the
     // command the README documents as the gate for harnesses without hooks.
     // Same rule and same opt-out as `hook --enforce`.
-    if (!opts.allowEmpty && listPolicies(db).filter((p) => p.enabled).length === 0) {
-      denied(
-        `no enabled guardrail policies in ${dbPath} — add one with "agent-replay guard add", ` +
-        'point the check at the right store with --dir, or pass --allow-empty to run unguarded',
-      );
+    const policies = listPolicies(db);
+    if (!opts.allowEmpty && policies.filter((p) => p.enabled).length === 0) {
+      denied(noEnabledPolicyReason(dbPath, policies, 'check'));
       return;
     }
     verdict = verdictForMatches(evaluateStep(db, step));

@@ -540,3 +540,40 @@ function matchesPolicy(step: TraceStep, policy: GuardrailPolicy): string | null 
   return reasons.join(', ');
 }
 
+
+/**
+ * Why an enforcing gate cannot fire, and what to do about it.
+ *
+ * Shared by `guard check` and `hook --enforce`, which reach the same dead end
+ * — a store with no ENABLED policy — and used to write the sentence twice.
+ *
+ * The remedy depends on a distinction the caller can already see and the old
+ * wording ignored: whether the store holds no policies at all, or holds some
+ * that are all DISABLED. "Add one with `guard add`" is right for the first and
+ * misleading for the second — someone who disabled a policy to unblock
+ * themselves and forgot would follow it and end up with a duplicate, while the
+ * one they meant to use stayed off. Naming `guard enable` when that is the
+ * actual situation is the difference between a message that describes the
+ * state and one that resolves it.
+ */
+export function noEnabledPolicyReason(
+  dbPath: string,
+  policies: { enabled: boolean; name: string }[],
+  pointAt: 'check' | 'hook',
+): string {
+  const target = pointAt === 'check' ? 'the check' : 'the hook';
+  if (policies.length > 0) {
+    const names = policies.slice(0, 3).map((p) => p.name).join(', ');
+    const more = policies.length > 3 ? `, +${policies.length - 3} more` : '';
+    return (
+      `no enabled guardrail policies in ${dbPath} — ${policies.length} ` +
+      `${policies.length === 1 ? 'policy is' : 'policies are'} present but disabled (${names}${more}); ` +
+      `re-enable one with "agent-replay guard enable <name>", add another with ` +
+      `"agent-replay guard add", or pass --allow-empty to run unguarded`
+    );
+  }
+  return (
+    `no enabled guardrail policies in ${dbPath} — add one with "agent-replay guard add", ` +
+    `point ${target} at the right store with --dir, or pass --allow-empty to run unguarded`
+  );
+}
