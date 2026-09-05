@@ -28,6 +28,52 @@ program.exitOverride((err) => {
   process.exit(2);
 });
 
+// `--dir` NAMES a store, so an empty value is a usage error — the rule the
+// exit-code table already states for "every flag that names something", and the
+// one place it was not enforced. `resolveDataDir` deliberately treats a blank
+// as UNSET, because an exported-but-empty `AGENT_REPLAY_DIR` is a normal shell
+// accident and resolving it to the CWD once let `demo --reset` rm -r a working
+// tree. That reading is right for the environment and wrong for an explicit
+// flag: `--dir "$STORE"` with STORE unset does not mean "use the default", it
+// means the caller named a store and got a different one. Reads then answer
+// from the wrong store (`list` → "No traces found", exit 0) and writes land in
+// it — the same concealed-wrong-store failure `openStoreOr` exists to prevent,
+// arriving through the flag instead of the working directory.
+//
+// One hook rather than a check per command: `--dir` is on every command, this
+// is the only place all of them pass through, and a per-site copy is what the
+// shared refusal helper was extracted to stop.
+program.hook('preAction', async (_thisCommand, actionCommand) => {
+  const dir: unknown = actionCommand.opts().dir;
+  // Whitespace-only too: `resolveDataDir` already treats "   " as unset, so it
+  // reaches the same wrong store while looking like a path in a shell history.
+  if (typeof dir !== 'string' || dir.trim() !== '') return;
+
+  // Capture-mode `hook` is exempt, for the reason the exit override above is:
+  // in every supported harness a non-zero hook exit blocks the pending tool
+  // call, and a capture-only hook must never affect the host agent. Refusing
+  // would also DROP the event, which is worse than recording it in the default
+  // store — so warn on stderr (never stdout, which is the harness's channel)
+  // and continue. `--enforce` is excluded, as it is there: a gate pointed at
+  // the wrong store has no policies and would allow everything, so blocking is
+  // the fail-closed answer.
+  const argv = process.argv.slice(2);
+  if (argv[0] === 'hook' && !argv.includes('--enforce')) {
+    process.stderr.write('  agent-replay: --dir was given an empty value; using the default store.\n');
+    return;
+  }
+
+  // Imported here, not at the top, so the refusal path costs nothing on the
+  // startup of every other invocation — the same reason the command modules
+  // below are loaded lazily. It answers in the caller's shape, so a `--json`
+  // pipeline still gets the documented `{ ok: false }` document.
+  const { makeRefuse } = await import('./utils/refuse.js');
+  makeRefuse(actionCommand.opts().json as boolean | undefined)(2, '--dir was given an empty value.', [
+    'Pass a directory path, or omit --dir to use $AGENT_REPLAY_DIR or ./.agent-replay.',
+  ]);
+  process.exit(2);
+});
+
 // --- init ---
 program
   .command('init')

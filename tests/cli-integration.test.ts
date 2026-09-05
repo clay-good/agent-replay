@@ -1909,3 +1909,98 @@ describe('CLI integration', () => {
     expect(parsed.error).toMatch(/empty value/);
   });
 });
+
+describe('an empty --dir names no store', () => {
+  // `--dir` is the flag that chooses WHICH STORE, and it was the one flag that
+  // *names* something the empty-value rule never reached. `resolveDataDir`
+  // deliberately reads a blank as UNSET — right for `AGENT_REPLAY_DIR`, which
+  // is blank by ordinary shell accident, and wrong for an explicit flag:
+  // `--dir "$STORE"` with STORE unset does not mean "use the default", it means
+  // the caller named a store and silently got a different one. A read then
+  // answers from the wrong store at exit 0 and a write lands in it.
+  //
+  // Spawned directly rather than through run(), which appends its own --dir:
+  // commander takes the last occurrence, so these would all have passed against
+  // the seeded store without ever exercising the empty value.
+  // spawnSync, not execFileSync: the capture-hook case asserts on a warning
+  // written to stderr on a SUCCESSFUL run, and execFileSync returns only stdout
+  // when the command exits 0 — the warning would read as absent.
+  const spawn = (args: string[], payload?: unknown, cwd?: string) => {
+    const r = spawnSync(process.execPath, [CLI, ...args], {
+      encoding: 'utf8', input: payload === undefined ? '' : JSON.stringify(payload),
+      cwd, timeout: 20000,
+    });
+    return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', code: r.status ?? 1 };
+  };
+
+  it('refuses on a top-level command and a nested subcommand alike', () => {
+    // One preAction hook covers all of them; nested subcommands (`guard`,
+    // `config`, `otel`) inherit it, which a per-command check would have to
+    // remember to reach.
+    for (const args of [['list'], ['stats'], ['export'], ['guard', 'list'], ['config', 'list']]) {
+      const r = spawn([...args, '--dir', '']);
+      expect(r.code, args.join(' ')).toBe(2);
+      expect(r.stderr, args.join(' ')).toContain('--dir was given an empty value');
+    }
+  });
+
+  it('refuses a whitespace-only value too', () => {
+    // `resolveDataDir` already reads "   " as unset, so it reaches the same
+    // wrong store while looking like a real path in a shell history.
+    for (const value of ['   ', '\t']) {
+      const r = spawn(['list', '--dir', value]);
+      expect(r.code).toBe(2);
+      expect(r.stderr).toContain('--dir was given an empty value');
+    }
+  });
+
+  it('answers a --json caller in the documented failure shape', () => {
+    // The `{ ok: false }` contract holds on every refusal, including one raised
+    // before the command action ever runs.
+    const r = spawn(['list', '--json', '--dir', '']);
+    expect(r.code).toBe(2);
+    expect(JSON.parse(r.stdout)).toMatchObject({ ok: false, error: expect.stringContaining('--dir') });
+    expect(r.stderr).toBe('');
+  });
+
+  it('still accepts a real directory', () => {
+    const r = spawn(['list', '--json', '--dir', dir]);
+    expect(r.code).toBe(0);
+  });
+
+  it('warns but never blocks a capture hook, and still records the event', () => {
+    // A non-zero exit from a capture hook blocks the pending tool call in every
+    // supported harness, and refusing would DROP the event outright — worse
+    // than recording it in the default store. So this one path warns and
+    // continues. The warning goes to stderr: stdout is the harness's channel.
+    const home = mkdtempSync(join(tmpdir(), 'ar-emptydir-'));
+    try {
+      expect(spawn(['init'], undefined, home).code).toBe(0);
+      const r = spawn(['hook', '--dir', ''], {
+        hook_event_name: 'PreToolUse', session_id: 'sess-empty-dir',
+        tool_name: 'Bash', tool_input: { command: 'ls' },
+      }, home);
+      expect(r.code).toBe(0);
+      expect(r.stdout).toBe('');
+      expect(r.stderr).toContain('using the default store');
+
+      const listed = spawn(['list', '--json', '--session', 'sess-empty-dir',
+        '--dir', join(home, '.agent-replay')]);
+      expect(JSON.parse(listed.stdout).items.length).toBeGreaterThan(0);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks hook --enforce, which must fail closed', () => {
+    // A gate pointed at the wrong store finds no policies and allows
+    // everything, so the exemption above deliberately stops at --enforce —
+    // the same split the CLI's exit override already draws.
+    const r = spawn(['hook', 'PreToolUse', '--enforce', '--dir', ''], {
+      hook_event_name: 'PreToolUse', session_id: 's1',
+      tool_name: 'Bash', tool_input: { command: 'rm -rf /' },
+    });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('--dir was given an empty value');
+  });
+});

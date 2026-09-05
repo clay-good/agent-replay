@@ -328,6 +328,26 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **`--dir ""` silently used a different store than the one named.** `--dir` is
+  the flag that chooses *which store*, and it was the only flag that *names*
+  something the empty-value rule never reached — the rule the exit-code table
+  already stated. `resolveDataDir` deliberately reads a blank as UNSET, which is
+  right for `AGENT_REPLAY_DIR` (blank by ordinary shell accident, and resolving
+  it to the working directory once let `demo --reset` delete a working tree) and
+  wrong for an explicit flag: `--dir "$STORE"` with `STORE` unset does not mean
+  "use the default", it means the caller named a store and got a different one.
+  Reads then answered from the wrong store — `list` printing "No traces found"
+  at exit `0` — and writes landed in it, the same concealed-wrong-store failure
+  `openStoreOr` exists to prevent, arriving through the flag instead of the
+  working directory. Now a usage error (exit `2`), in the caller's shape, for
+  every command including nested subcommands, and for a whitespace-only value
+  too. Two deliberate exceptions: a blank `AGENT_REPLAY_DIR` still means unset,
+  and a capture-mode `hook` warns on stderr and records to the default store
+  rather than refusing, because a non-zero hook exit blocks the pending tool
+  call in every supported harness and refusing would drop the event outright.
+  `hook --enforce` is not exempt — a gate pointed at a store with no policies
+  allows everything, so it fails closed.
+
 - **Assembling a long OpenTelemetry session cost time quadratic in its
   length.** A `BatchSpanProcessor` flushes many batches into one trace — the
   pattern cross-batch assembly exists to serve — and every merge read *every*
