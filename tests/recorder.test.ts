@@ -675,13 +675,30 @@ describe('a producer-chosen trace id cannot carry control characters', () => {
     // The same drift the options rule was unified to prevent, one field over:
     // the live path stored any number while ingest refuses anything outside
     // [0, 1], so `record` wrote traces that failed their own re-ingest.
+    //
+    // The field is DROPPED, not the step. This asserted the step was skipped —
+    // but the goal above is round-trip safety, and `null` is a legal
+    // confidence, so dropping reaches it without throwing away the decision
+    // itself: the chosen option, the options and the rationale, the very record
+    // `why` and `decisions` exist to show. That is the rule this validator
+    // applies to every other unusable field (the trace_end status repair, the
+    // five numeric fields, the four causal references), it is how the sibling
+    // `decided_by` is already treated on this same path, and it is what the
+    // persistence layer does one layer down — "one unusable field should not
+    // cost the whole decision".
     const mk = (confidence: unknown) => ({
       v: 1, type: 'step', trace_id: 'trc_conf', step_number: 1,
       step_type: 'decision', name: 'p',
       decision: { chosen: 'A', options: [{ option: 'A' }], confidence },
     });
     for (const bad of [-1, 1.5, 5, Number.NaN, 'high']) {
-      expect(validateEvent(mk(bad)).event, String(bad)).toBeNull();
+      const { event, warning } = validateEvent(mk(bad));
+      // The step survives, without the field, and the drop is reported.
+      expect(event, String(bad)).not.toBeNull();
+      expect((event as { decision?: Record<string, unknown> }).decision, String(bad))
+        .not.toHaveProperty('confidence');
+      expect((event as { decision?: { chosen?: string } }).decision?.chosen, String(bad)).toBe('A');
+      expect(warning, String(bad)).toMatch(/ignored decision.confidence/);
     }
     for (const ok of [0, 0.5, 1]) {
       expect(validateEvent(mk(ok)).event, String(ok)).not.toBeNull();
@@ -752,7 +769,9 @@ describe('the SDK is held to the same rules as the JSONL stream', () => {
     r.startTrace({ agent_name: 'sdk', trigger: 'manual', input: {} });
 
     const bad: [string, Record<string, unknown>][] = [
-      ['confidence out of range', { chosen: 'x', confidence: 5, options: [{ option: 'a' }] }],
+      // `confidence out of range` is deliberately NOT here: it is dropped with
+      // a warning rather than rejected, so the decision survives. See the
+      // validator test above.
       ['bare-string options', { chosen: 'x', options: ['a', 'b'] }],
       ['empty chosen', { chosen: '', options: [{ option: 'a' }] }],
     ];
@@ -774,6 +793,17 @@ describe('the SDK is held to the same rules as the JSONL stream', () => {
         decision: { chosen: 'x', confidence: 0.9, options: [{ option: 'a', score: 0 }] },
       } as never),
     ).not.toThrow();
+
+    // ...and one with an unusable confidence is recorded, minus that field.
+    expect(() =>
+      r.step({
+        step_number: 4, step_type: 'decision', name: 'kept', input: {},
+        decision: { chosen: 'x', confidence: 5, options: [{ option: 'a' }] },
+      } as never),
+    ).not.toThrow();
+    const kept = getTrace(db, r.traceId!)!.steps.find((s) => s.step_number === 4)!;
+    expect(kept.decision?.chosen).toBe('x');
+    expect(kept.decision?.confidence).toBeNull();
   });
 });
 
@@ -943,5 +973,56 @@ describe('a causal reference that is not strictly earlier is dropped WITH a warn
     const { warning } = step({ parent_step: 9, tokens_used: -1 });
     expect(warning).toMatch(/non-negative finite number/);
     expect(warning).toMatch(/strictly earlier/);
+  });
+});
+
+describe('a trace written through the SDK re-ingests from its own export', () => {
+  // The invariant the README states for the programmatic API, end to end
+  // through the two documented entry points. It used to be reached by
+  // REJECTING a decision whose confidence was out of range, which cost the
+  // whole step — the chosen option, the options and the rationale went with
+  // it. Dropping the one unusable field reaches the same invariant and keeps
+  // the record, and this is the test that says so: it exports what the SDK
+  // wrote and feeds it back to `ingestTrace`, the stricter of the two paths.
+  it('survives a decision field the stricter path would refuse', async () => {
+    const { exportTraces } = await import('../src/services/export-service.js');
+
+    const rec = new TraceRecorder(db);
+    rec.startTrace({ agent_name: 'rt-bot', session_id: 's1', input: { task: 't' }, tags: ['x'] });
+    rec.step({
+      step_number: 1, step_type: 'decision', name: 'pick',
+      decision: {
+        chosen: 'route_a',
+        options: [{ option: 'route_a' }, { option: 'route_b' }],
+        confidence: 7,          // out of [0, 1]
+        decided_by: 'nonsense', // not a recognized value
+        rationale: 'cheaper',
+      },
+    } as never);
+    rec.step({ step_number: 2, step_type: 'output', name: 'done', output: { text: 'ok' } } as never);
+    rec.endTrace({ status: 'completed', output: { text: 'ok' } });
+
+    const exported = JSON.parse(exportTraces(db, {}, 'json')) as IngestTraceInput[];
+    expect(exported).toHaveLength(1);
+    // The decision survived; only the two unusable fields were normalized away.
+    const decisionStep = exported[0].steps!.find((s) => s.step_number === 1)!;
+    expect(decisionStep.decision).toMatchObject({
+      chosen: 'route_a', rationale: 'cheaper', confidence: null, decided_by: 'agent',
+    });
+
+    // ...and the export is accepted by `ingestTrace`, which refuses both of the
+    // original values outright. That is the whole point of normalizing them.
+    const fresh = new Database(':memory:');
+    try {
+      fresh.pragma('foreign_keys = ON');
+      runMigrations(fresh);
+      const back = ingestTrace(fresh, exported[0]);
+      const full = getTrace(fresh, back.id)!;
+      expect(full.steps).toHaveLength(2);
+      expect(full.steps[0].decision?.chosen).toBe('route_a');
+      expect(full.tags).toEqual(['x']);
+    } finally {
+      fresh.close();
+    }
   });
 });

@@ -962,7 +962,9 @@ rec.endStep(1, { output: results, tokens_used: 120 });
 rec.endTrace({ status: 'completed', output: answer, total_tokens: 120 });
 ```
 
-These functions validate their own arguments: an invalid `status` or `step_type` throws an error naming the value and the valid set, rather than surfacing a database constraint. A decision `confidence` outside `[0, 1]` is dropped (like an unrecognized `decided_by`), so a trace written through the SDK can always be re-ingested from its own export.
+These functions validate their own arguments: an invalid `status` or `step_type` throws an error naming the value and the valid set, rather than surfacing a database constraint.
+
+The two entry points differ on purpose, and in one direction only. `ingestTrace` is a **batch** import, so it refuses a malformed trace outright and names the field. `TraceRecorder` is **live capture**, where one bad field must never cost you the step: a decision `confidence` outside `[0, 1]` and an unrecognized `decided_by` are normalized away (to `null` and `agent`) and the decision is kept, exactly as an unusable `tokens_used` or a forward causal reference already are. Both rules exist for the same reason — **a trace written through the SDK can always be re-ingested from its own export**, which is what the golden-regression gate depends on.
 
 ## Development
 

@@ -328,6 +328,21 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **One unusable decision field cost the whole step on the live path.** A
+  `confidence` outside `[0, 1]` made `record` and the `TraceRecorder` SDK skip
+  the entire event, so a producer sending `confidence: 99` lost the decision
+  itself — the chosen option, its options and its rationale, the record `why`
+  and `decisions` exist to show — over a single number. That is not the rule
+  this validator applies anywhere else: the `trace_end` status is repaired,
+  five numeric fields and four causal references are dropped with a warning,
+  and the sibling `decided_by` is normalized on this very path. The check was
+  added to keep a recorded trace re-ingestable from its own export, and
+  dropping the field reaches that just as well, since `null` is a legal
+  confidence. It is now dropped, with the warning naming it, and the round-trip
+  is pinned by a test that exports what the SDK wrote and feeds it back to
+  `ingestTrace`. The README described the dropping behavior already; only the
+  lower-level `attachDecision` actually did it.
+
 - **`stats` presented a partial token and cost sum as a store total.** Both
   are sums over whatever subset of traces happens to record the value, and
   neither said so — a store of 100 traces where 3 carry a cost printed "Total

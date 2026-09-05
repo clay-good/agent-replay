@@ -330,8 +330,21 @@ export function validateEvent(obj: unknown): ParseResult {
   // not be restored from their own export.
   const decisionOf = type === 'decision' ? e : (e.decision as Record<string, unknown> | null | undefined);
   const confidence = decisionOf?.confidence;
+  let droppedConfidence = false;
   if (confidence != null && !isValidConfidence(confidence)) {
-    return { event: null, warning: `skipped: ${type} decision confidence must be a number between 0 and 1` };
+    // DROPPED, not rejected — the rule this function applies to every other
+    // unusable field (the status repair above, the five numeric fields and the
+    // four causal references below): one bad field must not cost the event.
+    // This one skipped the whole step, so a producer sending `confidence: 99`
+    // lost the decision itself — the chosen option, its options and rationale,
+    // the very record the tool exists to explain — over a single number. Its
+    // sibling `decided_by` is normalized on this same path rather than
+    // rejected, and the persistence layer drops an out-of-range confidence to
+    // null for exactly this reason ("one unusable field should not cost the
+    // whole decision"). Dropping still satisfies what the check was added for:
+    // `null` is a legal confidence, so the trace re-ingests from its own export.
+    delete decisionOf!.confidence;
+    droppedConfidence = true;
   }
   if (opts != null) {
     if (!Array.isArray(opts)) {
@@ -397,7 +410,7 @@ export function validateEvent(obj: unknown): ParseResult {
     }
   }
 
-  if (dropped.length > 0 || droppedRefs.length > 0) {
+  if (dropped.length > 0 || droppedRefs.length > 0 || droppedConfidence) {
     return {
       event: obj as CaptureEvent,
       // Joined with a status repair when both happened: an early return here
@@ -414,6 +427,9 @@ export function validateEvent(obj: unknown): ParseResult {
           : null,
         droppedRefs.length > 0
           ? `ignored ${droppedRefs.join(', ')}: must reference a strictly earlier step`
+          : null,
+        droppedConfidence
+          ? 'ignored decision.confidence: must be a number between 0 and 1'
           : null,
       ].filter(Boolean).join('; '),
       ...(unusableStatus != null ? { repaired: 'status' as const } : {}),
