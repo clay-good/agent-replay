@@ -3,6 +3,8 @@ import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
 import { getTrace } from '../src/services/trace-service.js';
 import { runWrapped } from '../src/services/harness-service.js';
+import { exportTraces } from '../src/services/export-service.js';
+import { validateTraceInput } from '../src/utils/validators.js';
 import { resolveDataDir } from '../src/utils/paths.js';
 import { homedir } from 'node:os';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -30,6 +32,35 @@ fs.appendFileSync(f, JSON.stringify({ v: 1, type: 'step', trace_id: t, step_numb
 `;
 
 describe('runWrapped', () => {
+  it('falls back to the command name when --agent-name is blank', async () => {
+    // `agent_name: opts.agentName ?? opts.command` catches only null/undefined,
+    // so a blank name slipped past the fallback and was stored as-is --
+    // `run --agent-name "$NAME"` with NAME unset. It falls back rather than
+    // refusing because the child process is the user's real work, and losing
+    // the run is worse than labelling it with the command that produced it.
+    for (const blank of ['', '   ', '\t']) {
+      const res = await runWrapped(db, { command: process.execPath, args: ['-e', ''], agentName: blank });
+      expect(getTrace(db, res.traceId)!.agent_name).toBe(process.execPath);
+    }
+    // A real name is still stored untrimmed: only the "is this set at all?"
+    // decision uses the trimmed form, the rule resolveDataDir already follows.
+    const named = await runWrapped(db, { command: process.execPath, args: ['-e', ''], agentName: ' spaced ' });
+    expect(getTrace(db, named.traceId)!.agent_name).toBe(' spaced ');
+  }, 20000);
+
+  it('records a run the store can export and read back in', async () => {
+    // Why the blank mattered: `agent_name` is required and non-empty
+    // everywhere else -- `validateTraceInput` refuses "" on ingest -- so a
+    // blank one wrote a trace this store's own export -> ingest round-trip
+    // could not reproduce. The backup failed to restore, at restore time, far
+    // from the cause that produced it.
+    const res = await runWrapped(db, { command: process.execPath, args: ['-e', ''], agentName: '' });
+    const exported = JSON.parse(exportTraces(db, {}, 'json')) as unknown[];
+    const entry = exported.find((t) => (t as { id: string }).id === res.traceId);
+    expect(entry).toBeDefined();
+    expect(validateTraceInput(entry).valid).toBe(true);
+  }, 20000);
+
   it('records an instrumented run as a full trace and completes on exit 0', async () => {
     const res = await runWrapped(db, { command: process.execPath, args: ['-e', INSTRUMENTED], agentName: 'my-bot' });
     expect(res.exitCode).toBe(0);

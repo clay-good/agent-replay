@@ -22,6 +22,15 @@ export async function runRun(parts: string[] = [], opts: RunOptions = {}): Promi
     return;
   }
 
+  // A blank --agent-name is not refused, because refusing would mean not
+  // running the child at all — the user's real work — over a label. It falls
+  // back to the command name (see harness-service), which is the same value an
+  // omitted flag gets, so say that happened rather than let the trace quietly
+  // carry a name nobody chose.
+  if (opts.agentName != null && opts.agentName.trim() === '') {
+    console.error(chalk.yellow(`  --agent-name was given an empty value; using "${parts[0]}".`));
+  }
+
   const [command, ...args] = parts;
   const dbDir = resolve(resolveDataDir(opts.dir));
   const db = ensureDatabase(resolve(dbDir, 'traces.db'));

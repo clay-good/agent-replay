@@ -44,7 +44,22 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
   let trace;
   try {
     trace = startTrace(db, {
-      agent_name: opts.agentName ?? opts.command,
+      // `?? opts.command` catches only null/undefined, so a BLANK name slipped
+      // past the fallback and was stored as-is. `agent_name` is required and
+      // non-empty everywhere else: `validateTraceInput` refuses `""` on ingest,
+      // so `run --agent-name ""` wrote a trace this store's own `export` →
+      // `ingest` round-trip cannot reproduce — the backup fails to restore, at
+      // restore time, far from the cause. It also renders as a blank column in
+      // `list` and cannot be filtered for by name.
+      //
+      // Blank falls back rather than throwing, for the reason capture-mode
+      // `hook` warns instead of refusing an empty `--dir`: the child process is
+      // the user's real work, and losing the run is worse than labelling it
+      // with the command that produced it. `run` says so on stderr.
+      //
+      // Trimmed for the "is this set at all?" test only, and the value itself
+      // passed through untrimmed — the rule `resolveDataDir` already follows.
+      agent_name: opts.agentName != null && opts.agentName.trim() !== '' ? opts.agentName : opts.command,
       trigger: 'manual',
       tags: opts.tags,
       input: { command: opts.command, args: opts.args },

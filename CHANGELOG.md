@@ -328,6 +328,22 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **`run --agent-name ""` recorded a trace the store could not read back in.**
+  The fallback to the command name was written `opts.agentName ?? opts.command`,
+  and `??` catches only null/undefined — so a blank name, which is what
+  `run --agent-name "$NAME"` produces when `NAME` is unset, slipped past it and
+  was stored as-is. `agent_name` is required and non-empty everywhere else:
+  `validateTraceInput` refuses `""` on ingest, so such a run wrote a trace this
+  store's own `export` → `ingest` round-trip cannot reproduce. The backup failed
+  to restore, at restore time, far from the cause. It also drew a blank agent
+  column in `list` and could not be filtered for by name. A blank name now falls
+  back to the command name, as an omitted flag already did, and `run` says so on
+  stderr. It falls back rather than refusing for the reason a capture-mode
+  `hook` warns rather than refusing an empty `--dir`: the child process is the
+  user's real work, and losing the run is worse than labelling it. Only the "is
+  this set at all?" test is trimmed; a name that is genuinely spaced is stored
+  untrimmed, the rule `resolveDataDir` already follows.
+
 - **`--dir ""` silently used a different store than the one named.** `--dir` is
   the flag that chooses *which store*, and it was the only flag that *names*
   something the empty-value rule never reached — the rule the exit-code table
