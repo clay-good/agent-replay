@@ -508,3 +508,20 @@ describe('importCodexRollout — when each step happened', () => {
     }
   });
 });
+
+describe('importCodexRollout — the turn model applies to every step of the turn', () => {
+  it('stamps reasoning and tool_call steps, not just the reply', () => {
+    // A tool_call is the model's decision to call a tool and reasoning is its
+    // reasoning; both belong to the turn whose `turn_context` named the model.
+    const path = fixture([
+      { type: 'session_meta', payload: { id: 'roll-all', timestamp: '2026-07-02T00:00:00Z' } },
+      { type: 'turn_context', payload: { model: 'gpt-5.6-sol' } },
+      { type: 'response_item', payload: { type: 'reasoning', summary: 'plan' } },
+      { type: 'response_item', payload: { type: 'function_call', call_id: 'c1', name: 'shell', arguments: '{}' } },
+      { type: 'response_item', payload: { type: 'message', role: 'assistant', content: 'done' } },
+    ]);
+    const trace = getTrace(db, importCodexRollout(db, path).trace!.id)!;
+    expect(trace.steps.every((s) => s.model === 'gpt-5.6-sol'), 'every step carries the turn model').toBe(true);
+    expect(trace.steps.length).toBeGreaterThanOrEqual(3);
+  });
+});

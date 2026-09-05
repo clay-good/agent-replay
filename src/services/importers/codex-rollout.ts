@@ -284,7 +284,7 @@ export function importCodexRollout(
           contributed = text.trim().length > 0;
         } else if (role === 'assistant' && text) {
           lastAssistantText = text;
-          steps.push({ step_number: stepNumber++, step_type: 'output', name: 'assistant_message', output: { text }, model: currentModel });
+          steps.push({ step_number: stepNumber++, step_type: 'output', name: 'assistant_message', output: { text } });
           contributed = true;
         } else {
           // An empty or non-user/assistant message has no home in the current
@@ -319,6 +319,13 @@ export function importCodexRollout(
     // claude-transcript importer.
     if (stamp) {
       for (let i = stepsBefore; i < steps.length; i++) steps[i].started_at ??= stamp;
+    }
+    // The turn's model applies to every step the turn produced, not only its
+    // text reply: a `tool_call` step is the model's decision to call a tool and
+    // a `reasoning` step is its reasoning. Same rule as the sibling importer,
+    // and the one the OTel mapper already applies to every step of a span.
+    if (currentModel) {
+      for (let i = stepsBefore; i < steps.length; i++) steps[i].model ??= currentModel;
     }
 
     if (contributed) imported++;

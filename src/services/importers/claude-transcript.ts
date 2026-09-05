@@ -268,7 +268,7 @@ export function importClaudeTranscript(
         contributed = content.trim().length > 0;
       } else if (type === 'assistant') {
         lastAssistantText = content;
-        steps.push({ step_number: stepNumber++, step_type: 'output', name: 'assistant_message', output: { text: content }, model });
+        steps.push({ step_number: stepNumber++, step_type: 'output', name: 'assistant_message', output: { text: content } });
         contributed = true;
       }
     } else if (Array.isArray(content)) {
@@ -286,7 +286,7 @@ export function importClaudeTranscript(
               contributed = (block.text ?? '').trim().length > 0;
             } else if (type === 'assistant' && block.text) {
               lastAssistantText = block.text;
-              steps.push({ step_number: stepNumber++, step_type: 'output', name: 'assistant_message', output: { text: block.text }, model });
+              steps.push({ step_number: stepNumber++, step_type: 'output', name: 'assistant_message', output: { text: block.text } });
               contributed = true;
             }
             // A follow-up user turn or an empty-text block yields no step; leave
@@ -342,6 +342,16 @@ export function importClaudeTranscript(
     // lines above. Only the steps were left out.
     if (stamp) {
       for (let i = stepsBefore; i < steps.length; i++) steps[i].started_at ??= stamp;
+    }
+    // The model that produced this record's steps — ALL of them, not just the
+    // assistant message. A `tool_call` step is the model's decision to call a
+    // tool and a `thinking` step is its reasoning; both come from the same
+    // assistant record and were produced by the same model, which is how the
+    // OTel mapper already treats every step of a span. Stamping the range keeps
+    // that true for whatever step types this record yields, and `--fields model`
+    // then compares them all rather than only the text replies.
+    if (type === 'assistant' && model) {
+      for (let i = stepsBefore; i < steps.length; i++) steps[i].model ??= model;
     }
 
     // A user/assistant record that yielded no step (e.g. an empty or
@@ -522,26 +532,27 @@ function buildSubagentSteps(
     // skipped, disagreeing with the main transcript loop on the same record.
     let contributedResult = false;
     const type = rec.type as string | undefined;
+    const subMessage = rec.message as
+      { content?: unknown; usage?: Record<string, unknown>; model?: unknown } | undefined;
+    // A subagent's records carry `message.model` exactly as the main
+    // transcript's do, and a subagent may well run a different model from the
+    // session that spawned it — which is most of the point of looking. Read at
+    // loop scope so the stamping below can see it, as in the main loop.
+    const model = typeof subMessage?.model === 'string' && subMessage.model ? subMessage.model : undefined;
     if (type === 'user' || type === 'assistant') {
-      const message = rec.message as
-        { content?: unknown; usage?: Record<string, unknown>; model?: unknown } | undefined;
+      const message = subMessage;
       if (message?.usage) tokens += usageTokens(message.usage);
-      // A subagent's records carry `message.model` exactly as the main
-      // transcript's do, and a subagent may well run a different model from the
-      // session that spawned it — which is most of the point of looking. Fixing
-      // only the main loop would have left the twin behind.
-      const model = typeof message?.model === 'string' && message.model ? message.model : undefined;
       const content = message?.content;
       if (!Array.isArray(content)) {
         if (typeof content === 'string' && type === 'assistant') {
-          steps.push({ step_number: n++, step_type: 'output', name: 'assistant_message', output: { text: content }, model, parent_step: parentStep });
+          steps.push({ step_number: n++, step_type: 'output', name: 'assistant_message', output: { text: content }, parent_step: parentStep });
         }
       } else {
         for (const block of content as Block[]) {
           if (block?.type === 'thinking') {
             steps.push({ step_number: n++, step_type: 'thought', name: 'thinking', output: { text: block.thinking ?? block.text ?? '' }, parent_step: parentStep });
           } else if (block?.type === 'text' && type === 'assistant' && block.text) {
-            steps.push({ step_number: n++, step_type: 'output', name: 'assistant_message', output: { text: block.text }, model, parent_step: parentStep });
+            steps.push({ step_number: n++, step_type: 'output', name: 'assistant_message', output: { text: block.text }, parent_step: parentStep });
           } else if (block?.type === 'tool_use') {
             const result = block.id ? toolResults.get(block.id) : undefined;
             const failed = block.id ? toolErrors.has(block.id) : false;
@@ -568,6 +579,9 @@ function buildSubagentSteps(
     }
     if (stamp) {
       for (let i = before; i < steps.length; i++) steps[i].started_at ??= stamp;
+    }
+    if (type === 'assistant' && model) {
+      for (let i = before; i < steps.length; i++) steps[i].model ??= model;
     }
 
     if (steps.length > before || contributedResult) imported++;

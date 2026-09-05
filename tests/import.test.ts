@@ -297,6 +297,29 @@ describe('importClaudeTranscript — the model each message ran on', () => {
     expect(models).toEqual(['claude-opus-4-5', null, null]);
   });
 
+  it('stamps EVERY step the record produced, not just the text reply', () => {
+    // A `tool_call` step is the model's decision to call a tool and a
+    // `thinking` step is its reasoning; both come from the same assistant
+    // record and were produced by the same model. The OTel mapper already
+    // treats every step of a span this way, and `--fields model` compares
+    // steps -- so stopping at assistant_message would have compared the text
+    // replies and silently skipped the tool calls.
+    const path = fixture([
+      { type: 'user', sessionId: 'all', message: { role: 'user', content: 'go' } },
+      { type: 'assistant', sessionId: 'all', message: { role: 'assistant', model: 'claude-opus-4-5', content: [
+        { type: 'thinking', thinking: 'I should run ls' },
+        { type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'ls' } },
+        { type: 'text', text: 'listing' },
+      ] } },
+    ]);
+    const trace = getTrace(db, importClaudeTranscript(db, path).trace!.id)!;
+    expect(trace.steps.map((s) => [s.name, s.model])).toEqual([
+      ['thinking', 'claude-opus-4-5'],
+      ['Bash', 'claude-opus-4-5'],
+      ['assistant_message', 'claude-opus-4-5'],
+    ]);
+  });
+
   it('records the model on a SUBAGENT step too', () => {
     // A subagent may well run a different model from the session that spawned
     // it, which is most of the point of looking. The subagent importer is a
