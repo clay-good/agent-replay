@@ -316,6 +316,23 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **`guard check` read "is a human present?" from the wrong channel.** It
+  tested `process.stdout.isTTY` — but stdout is the command's *machine*
+  channel, carrying the JSON verdict this README documents capturing "so it
+  scripts cleanly". Any wrapper that captured it (`v=$(… | guard check)`, a
+  pipe into `jq`) therefore made stdout a pipe, so an operator sitting at a
+  live terminal was reported as "no TTY" and every `require_review` failed
+  closed without ever prompting — the interactive review path was unreachable
+  in the command's own documented usage. The prompt is written to stderr and
+  the answer read from `/dev/tty`, so stderr is now the signal.
+
+- **`guard test` did not count `require_review` in its summary.**
+  `require_review` fails closed without an approval, so it blocks, but the
+  closing summary counted only `deny` and `warn`. A trace whose matches were
+  all `require_review` listed them step by step and then printed a summary that
+  said nothing at all — reporting zero for matches that stop the run, on the
+  one line a reader scans to answer "would this have been blocked?".
+
 - **Bounded display fields were measured in code units, not terminal
   columns.** `truncateToWidth` was introduced because every bound in the
   renderers is a *width* — a boxen border, a table column, the timeline gutter

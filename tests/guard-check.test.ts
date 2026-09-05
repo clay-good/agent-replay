@@ -644,3 +644,275 @@ describe('an empty *_contains needle is a universal match, not a filter', () => 
     expect(v.action).toBe('allow');
   });
 });
+
+// ── the guard commands themselves ───────────────────────────────────────────
+
+describe('the guard commands', () => {
+  let dir: string;
+  let out: string[];
+  let err: string[];
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let errSpy: ReturnType<typeof vi.spyOn>;
+  let prevExit: typeof process.exitCode;
+
+  beforeEach(async () => {
+    const { mkdtempSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    dir = mkdtempSync(join(tmpdir(), 'ar-guard-'));
+    // `guard` resolves <dir>/traces.db, and every entry point requires the
+    // store to already exist (an absent one is itself a block).
+    const store = new Database(join(dir, 'traces.db'));
+    store.pragma('foreign_keys = ON');
+    runMigrations(store);
+    store.close();
+
+    out = []; err = [];
+    logSpy = vi.spyOn(console, 'log').mockImplementation((m?: unknown) => { out.push(String(m)); });
+    errSpy = vi.spyOn(console, 'error').mockImplementation((m?: unknown) => { err.push(String(m)); });
+    prevExit = process.exitCode;
+    process.exitCode = 0;
+  });
+
+  afterEach(async () => {
+    logSpy.mockRestore();
+    errSpy.mockRestore();
+    process.exitCode = prevExit;
+    const { rmSync } = await import('node:fs');
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const noAnsi = (s: string) => s.replace(/\x1B\[[0-9;]*m/g, '');
+  const stdout = () => noAnsi(out.join('\n'));
+  const stderr = () => noAnsi(err.join('\n'));
+
+  /** Feed one step object to `guard check` on stdin. */
+  async function check(step: unknown, opts: Record<string, unknown> = {}): Promise<void> {
+    const { runGuardCheck } = await import('../src/commands/guard.js');
+    const body = typeof step === 'string' ? step : JSON.stringify(step);
+    const stdinSpy = vi
+      .spyOn(process, 'stdin', 'get')
+      .mockReturnValue(Readable.from([body]) as typeof process.stdin);
+    try {
+      await runGuardCheck({ dir, ...opts });
+    } finally {
+      stdinSpy.mockRestore();
+    }
+  }
+
+  // ── guard add ────────────────────────────────────────────────────────────
+
+  it('refuses a pattern that is not JSON, an unknown action, and a bad priority', async () => {
+    const { runGuardAdd } = await import('../src/commands/guard.js');
+    const base = { name: 'p', pattern: '{"step_type":"tool_call"}', action: 'deny', dir };
+
+    runGuardAdd({ ...base, pattern: 'not json' });
+    expect(process.exitCode).toBe(2);
+    expect(stderr()).toMatch(/Invalid JSON/);
+
+    process.exitCode = 0; err.length = 0;
+    runGuardAdd({ ...base, action: 'block' });
+    expect(process.exitCode).toBe(2);
+    expect(stderr()).toMatch(/Invalid action/);
+
+    process.exitCode = 0; err.length = 0;
+    // `safeParseInt` is a parser, so "high" used to store 0 and rank the policy
+    // last instead of failing — priority decides which policy is cited.
+    runGuardAdd({ ...base, priority: 'high' });
+    expect(process.exitCode).toBe(2);
+    expect(stderr()).toMatch(/Invalid --priority/);
+
+    // Nothing was stored by any of the three.
+    const db2 = new Database(`${dir}/traces.db`);
+    try { expect(listPolicies(db2)).toHaveLength(0); } finally { db2.close(); }
+  });
+
+  it('warns that a blocking policy keyed on output cannot fire live', async () => {
+    const { runGuardAdd } = await import('../src/commands/guard.js');
+    runGuardAdd({ name: 'audit', pattern: '{"output_contains":"ssn"}', action: 'deny', dir });
+    expect(process.exitCode).toBe(0);
+    expect(stdout()).toMatch(/cannot block live/);
+
+    // ...and not for a warn, which was never going to block anything anyway.
+    out.length = 0;
+    runGuardAdd({ name: 'audit2', pattern: '{"output_contains":"ssn"}', action: 'warn', dir });
+    expect(stdout()).not.toMatch(/cannot block live/);
+  });
+
+  // ── guard test ───────────────────────────────────────────────────────────
+
+  it('counts require_review in the summary of what would block', async () => {
+    // Regression: the summary counted `deny` and `warn` only. `require_review`
+    // fails closed without an approval (resolveGuardExit), so a trace whose
+    // matches were all require_review listed them step by step and then printed
+    // a summary that said nothing — zero, for matches that stop the run.
+    const { runGuardTest } = await import('../src/commands/guard.js');
+    const db2 = new Database(`${dir}/traces.db`);
+    try {
+      db2.pragma('foreign_keys = ON');
+      addPolicy(db2, { name: 'ask-first', action: 'require_review', match_pattern: { name_contains: 'deploy' } });
+      ingestTrace(db2, {
+        agent_name: 'a', input: {},
+        steps: [{ step_number: 1, step_type: 'tool_call', name: 'deploy_prod' }],
+      } as Parameters<typeof ingestTrace>[1]);
+    } finally { db2.close(); }
+
+    const db3 = new Database(`${dir}/traces.db`);
+    const traceId = (db3.prepare('SELECT id FROM agent_traces').get() as { id: string }).id;
+    db3.close();
+
+    runGuardTest(traceId, { dir });
+    expect(stdout()).toMatch(/1 REQUIRE_REVIEW action\(s\) would block without an approval/);
+  });
+
+  it('reports a missing trace as an error, not as a clean run', async () => {
+    const { runGuardTest } = await import('../src/commands/guard.js');
+    runGuardTest('trc_nope', { dir });
+    expect(process.exitCode).toBe(1);
+    expect(stderr()).toMatch(/Trace not found/);
+  });
+
+  // ── guard check ──────────────────────────────────────────────────────────
+
+  it.each([
+    ['not json at all', 'nope', /invalid JSON/i],
+    ['a JSON array', [1, 2], /expected a single step object/i],
+    ['a bare null', 'null', /expected a single step object/i],
+    ['a step with no name', { step_type: 'tool_call' }, /non-empty "name"/i],
+    ['a step with an unknown type', { step_type: 'toolcall', name: 'x' }, /valid "step_type"/i],
+  ])('blocks on %s rather than failing open', async (_label, body, pattern) => {
+    const db2 = new Database(`${dir}/traces.db`);
+    try { addPolicy(db2, { name: 'p', action: 'deny', match_pattern: { name_contains: 'delete' } }); }
+    finally { db2.close(); }
+
+    await check(body);
+    // Exit 2 is the block signal; exit 1 reads to a wrapper as a non-blocking
+    // error, which runs the tool.
+    expect(process.exitCode).toBe(2);
+    expect(JSON.parse(stdout()).action).toBe('deny');
+    expect(stderr()).toMatch(pattern);
+  });
+
+  it('blocks when the store holds no enabled policy, unless told to run unguarded', async () => {
+    await check({ step_type: 'tool_call', name: 'delete_user' });
+    expect(process.exitCode).toBe(2);
+    expect(stderr()).toMatch(/no enabled guardrail policies/);
+
+    process.exitCode = 0; out.length = 0; err.length = 0;
+    await check({ step_type: 'tool_call', name: 'delete_user' }, { allowEmpty: true });
+    expect(process.exitCode).toBe(0);
+    expect(JSON.parse(stdout()).action).toBe('allow');
+  });
+
+  it('allows, warns and denies by exit code', async () => {
+    const db2 = new Database(`${dir}/traces.db`);
+    try {
+      addPolicy(db2, { name: 'no-delete', action: 'deny', match_pattern: { name_contains: 'delete' } });
+      addPolicy(db2, { name: 'noisy', action: 'warn', match_pattern: { name_contains: 'curl' } });
+    } finally { db2.close(); }
+
+    await check({ step_type: 'tool_call', name: 'read_file' });
+    expect(process.exitCode).toBe(0);
+    expect(JSON.parse(stdout())).toMatchObject({ action: 'allow', policy: null });
+
+    process.exitCode = 0; out.length = 0; err.length = 0;
+    await check({ step_type: 'tool_call', name: 'curl_site' });
+    expect(process.exitCode).toBe(0); // warn never blocks
+    expect(JSON.parse(stdout())).toMatchObject({ action: 'warn', policy: 'noisy' });
+    expect(stderr()).toMatch(/WARN \[noisy\]/);
+
+    process.exitCode = 0; out.length = 0; err.length = 0;
+    await check({ step_type: 'tool_call', name: 'delete_user' });
+    expect(process.exitCode).toBe(2);
+    expect(JSON.parse(stdout())).toMatchObject({ action: 'deny', policy: 'no-delete' });
+    expect(stderr()).toMatch(/DENY \[no-delete\]/);
+  });
+
+  it('reads whether a human is present from stderr, not from the captured stdout', async () => {
+    // Regression: interactivity was read from `process.stdout.isTTY`. stdout is
+    // this command's MACHINE channel — it carries the JSON verdict the README
+    // documents capturing — so any wrapper that captured it (`v=$(... | guard
+    // check)`, a pipe into jq) reported an operator at a live terminal as "no
+    // TTY", and every require_review failed closed without ever prompting. The
+    // prompt goes to stderr and the answer is read from /dev/tty.
+    const db2 = new Database(`${dir}/traces.db`);
+    try { addPolicy(db2, { name: 'ask', action: 'require_review', match_pattern: { name_contains: 'deploy' } }); }
+    finally { db2.close(); }
+
+    // `isTTY` is a plain data property (absent entirely when not a TTY), not a
+    // getter, so it is set and restored rather than spied on.
+    const prevOut = process.stdout.isTTY;
+    const prevErr = process.stderr.isTTY;
+    process.stdout.isTTY = false;
+    process.stderr.isTTY = true;
+    try {
+      // stderr is a TTY, so the command prompts. /dev/tty is not readable under
+      // the test runner, so the prompt declines — but "declined" is the
+      // interactive answer, not the "(no TTY)" one, which is what this pins.
+      await check({ step_type: 'tool_call', name: 'deploy_prod' });
+      expect(stderr()).toMatch(/\(declined\)/);
+      expect(stderr()).not.toMatch(/no TTY/);
+      expect(process.exitCode).toBe(2);
+    } finally {
+      process.stdout.isTTY = prevOut;
+      process.stderr.isTTY = prevErr;
+    }
+  });
+
+  it('fails a require_review closed when nothing is interactive', async () => {
+    const db2 = new Database(`${dir}/traces.db`);
+    try { addPolicy(db2, { name: 'ask', action: 'require_review', match_pattern: { name_contains: 'deploy' } }); }
+    finally { db2.close(); }
+
+    const prevErr = process.stderr.isTTY;
+    process.stderr.isTTY = false;
+    try {
+      await check({ step_type: 'tool_call', name: 'deploy_prod' });
+      expect(process.exitCode).toBe(2);
+      expect(stderr()).toMatch(/no TTY — failed closed/);
+    } finally { process.stderr.isTTY = prevErr; }
+  });
+
+  // ── guard enable / disable / remove, through the commands ─────────────────
+
+  it('disables a policy by id and reports the STORED name', async () => {
+    const { runGuardToggle } = await import('../src/commands/guard.js');
+    const db2 = new Database(`${dir}/traces.db`);
+    let id: string;
+    try { id = addPolicy(db2, { name: 'no-delete', action: 'deny', match_pattern: { name_contains: 'delete' } }).id; }
+    finally { db2.close(); }
+
+    runGuardToggle(id, false, { dir });
+    expect(process.exitCode).toBe(0);
+    expect(stdout()).toMatch(/Policy "no-delete" disabled/);
+
+    // A disabled policy is skipped by every evaluation path — so the check that
+    // would have blocked now has no enabled policy left at all, and blocks for
+    // that reason instead.
+    await check({ step_type: 'tool_call', name: 'delete_user' });
+    expect(stderr()).toMatch(/no enabled guardrail policies/);
+  });
+
+  it('reports an unknown id on remove and toggle as an error', async () => {
+    const { runGuardToggle, runGuardRemove } = await import('../src/commands/guard.js');
+    runGuardRemove('gp_nope', { dir });
+    expect(process.exitCode).toBe(1);
+
+    process.exitCode = 0; err.length = 0;
+    runGuardToggle('gp_nope', true, { dir });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('lists policies, and says how to add one when there are none', async () => {
+    const { runGuardList, runGuardAdd } = await import('../src/commands/guard.js');
+    runGuardList({ dir });
+    expect(stdout()).toMatch(/No guardrail policies found/);
+
+    out.length = 0;
+    runGuardAdd({ name: 'no-delete', pattern: '{"name_contains":"delete"}', action: 'deny', dir });
+    out.length = 0;
+    runGuardList({ dir });
+    expect(stdout()).toMatch(/no-delete/);
+    expect(stdout()).toMatch(/1 guardrail policy/);
+  });
+});

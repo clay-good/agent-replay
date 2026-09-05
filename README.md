@@ -219,6 +219,9 @@ It prints a machine-readable verdict on stdout — `{"action", "policy", "reason
 `{"action":"allow","policy":null,"reason":null}` otherwise. Standalone,
 `require_review` prompts when a TTY is present and otherwise fails closed,
 reporting `deny` with a "review required (no TTY — failed closed)" reason.
+Whether a human is present is read from **stderr**, where the prompt is written
+— not from stdout — so capturing the verdict does not silently turn every
+review into a block.
 
 > **Guardrail, not a boundary.** Hook-level enforcement is a guardrail, not a complete security boundary — the harness vendors say so themselves (a determined agent can often reach equivalent effects through another tool path). For hard isolation, use OS-level sandboxing: Claude Code's sandbox, Codex `sandbox_mode`, or Gemini CLI's sandbox.
 
@@ -479,6 +482,10 @@ agent-replay guard enable no-deletes
 # Remove a policy
 agent-replay guard remove <policy-id>
 ```
+
+`guard test` summarizes what a recorded run would have hit: how many matches
+would have blocked it (`deny`, and `require_review`, which fails closed unless
+someone approves it) and how many would only have warned.
 
 A disabled policy stays in `guard list` (with `Enabled: No`) and is skipped by
 every evaluation path — `hook --enforce`, `guard check`, and `guard test` — so

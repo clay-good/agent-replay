@@ -266,15 +266,24 @@ export function runGuardTest(traceId: string, opts: GuardTestOptions = {}): void
   console.log(separator());
   console.log('');
 
-  const denies = results
-    .flatMap((r) => r.matches)
-    .filter((m) => m.action === 'deny').length;
-  const warns = results
-    .flatMap((r) => r.matches)
-    .filter((m) => m.action === 'warn').length;
+  const all = results.flatMap((r) => r.matches);
+  const denies = all.filter((m) => m.action === 'deny').length;
+  const reviews = all.filter((m) => m.action === 'require_review').length;
+  const warns = all.filter((m) => m.action === 'warn').length;
 
   if (denies > 0) {
     console.log(chalk.redBright(`  ${denies} DENY action(s) would block execution.`));
+  }
+  // `require_review` blocks too — `resolveGuardExit` fails it closed without an
+  // approval, which is every non-interactive run. The summary counted only deny
+  // and warn, so a trace whose matches were all `require_review` listed them
+  // step by step and then printed a summary that said nothing at all: the one
+  // line a reader scans to answer "would this run have been stopped?" reported
+  // zero for matches that stop it.
+  if (reviews > 0) {
+    console.log(
+      chalk.redBright(`  ${reviews} REQUIRE_REVIEW action(s) would block without an approval.`),
+    );
   }
   if (warns > 0) {
     console.log(chalk.yellow(`  ${warns} WARN action(s) would generate alerts.`));
@@ -423,8 +432,16 @@ export async function runGuardCheck(opts: GuardCheckOptions = {}): Promise<void>
     return;
   }
 
-  // require_review needs a human; prompt via /dev/tty when interactive.
-  const isTty = process.stdout.isTTY === true;
+  // require_review needs a human, so ask the channel the human is actually on.
+  // This read `process.stdout.isTTY` — but stdout is this command's MACHINE
+  // channel: it carries the JSON verdict, and the README documents capturing it
+  // ("so it scripts cleanly"). Any wrapper that does so — `v=$(... | guard
+  // check)`, a pipe into `jq` — made stdout a pipe, so an operator sitting at an
+  // interactive terminal was reported as "no TTY" and every `require_review`
+  // failed closed without ever prompting. The prompt is written to stderr and
+  // the answer read from /dev/tty, so stderr is the signal that matches where
+  // the interaction happens.
+  const isTty = process.stderr.isTTY === true;
   let confirmed: boolean | undefined;
   if (verdict.action === 'require_review' && isTty) {
     confirmed = confirmReviewViaTty(verdict.reason ?? 'review required');
