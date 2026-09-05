@@ -46,13 +46,21 @@ Three things to know before upgrading:
 - **A few commands now refuse input they used to accept**, always where
   accepting it produced a silently wrong answer rather than an error: an empty
   value for a narrowing flag on `list`, `export`, `check` or `config set` (which
-  widened the scope to everything, at exit 0); a `--refresh`/`--interval` larger
-  than a timer can hold (which inverted into a busy loop); and `dashboard`
-  without an interactive terminal (which hung forever). Each exits `2`.
+  widened the scope to everything, at exit 0); an empty `--dir` on **any**
+  command (which silently used a *different store* than the one named — the
+  likeliest of these to appear in an existing script, as `--dir "$STORE"` with
+  the variable unset); an empty `ingest --format` (which skipped both the
+  format check and auto-detection and parsed the file as JSONL); a
+  `--refresh`/`--interval` larger than a timer can hold (which inverted into a
+  busy loop); and `dashboard` without an interactive terminal (which hung
+  forever). Each exits `2`. Two deliberate exceptions to the `--dir` rule: a
+  blank `AGENT_REPLAY_DIR` still means "unset", and a capture-mode `hook` warns
+  and carries on rather than dropping the event.
 
 The recorded trace *data* model is unchanged — same tables and columns, so
-existing stores and exports keep working. Schema v3, v4 and v5 add four indexes
-between them, and nothing else. Upgrades are automatic and one-way.
+existing stores and exports keep working. Schema v3 through v6 add six indexes
+between them (two, one, one and two), and nothing else. Upgrades are automatic
+and one-way.
 
 
 ### Added
