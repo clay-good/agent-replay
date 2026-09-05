@@ -17,6 +17,20 @@ The system SHALL list traces via `agent-replay list` with filters (`--status` ex
 
 The system SHALL show a full trace via `agent-replay show <trace-id>` including metadata, the step timeline, and optionally eval results (`--evals`) and snapshot data (`--snapshots`). Trace lookup SHALL match by exact ID or ID prefix (IDs are `trc_`-prefixed, so a usable prefix starts with `trc_`); a prefix matching more than one trace SHALL be an error naming the candidates, never a silent pick — `show`/`why`/`decisions` answer about a trace the user did not name, and `fork`, which WRITES, would derive a new trace from one.
 
+A `--json` document SHALL be the whole trace, in document order, whatever the view flags say. `--snapshots` SHALL add a `snapshots` array — one entry per step that has one, tagged with its `step_number` (the stored row carries only a `step_id`), scoped by the same step window as `steps`, and absent rather than null for a step with no snapshot; the key SHALL be written ONLY when the flag is passed, so a `show --json` without it is unchanged. `--evals` needs no such handling because evaluations are always in the payload. The flags that shape the HUMAN view alone — `--steps-only` and `--tree` — cannot be honoured by a document, so passing either with `--json` SHALL say the flag did nothing, on stderr, leaving stdout a clean document; the tree it would have drawn is rebuildable from the `parent_step_number` and `caused_by_step_number` carried on each step.
+
+#### Scenario: Snapshots in machine-readable form
+
+- **WHEN** a user runs `agent-replay show <id> --json --snapshots` on a trace whose steps 1 and 3 have snapshots and step 2 does not
+- **THEN** the document carries a `snapshots` array of two entries, tagged `step_number` 1 and 3
+- **WHEN** the same command runs without `--snapshots`
+- **THEN** the document has no `snapshots` key at all
+
+#### Scenario: A view flag a document cannot honour
+
+- **WHEN** a user runs `agent-replay show <id> --json --tree`
+- **THEN** stderr says `--tree` has no effect with `--json`, and stdout is the same document the command would print without it
+
 #### Scenario: Prefix lookup
 
 - **WHEN** a user runs `agent-replay show trc_ab3` and a trace ID starts with `trc_ab3`
@@ -62,10 +76,24 @@ The system SHALL render the step hierarchy via `agent-replay show <trace-id> --t
 
 The system SHALL live-tail a running trace via `agent-replay watch [trace-id]`, rendering new steps as they are written; with no trace ID given, it SHALL follow the most recently started `running` trace, and it SHALL announce final status when the trace completes.
 
+The poll interval SHALL be settable with `--interval <ms>`. Because Node stores a timer delay in a 32-bit signed integer and CLAMPS anything larger to 1 ms, a value above that range SHALL be refused (exit 2) rather than polled: it plainly asks to poll almost never and would instead poll about a thousand times a second, the inverse of the request. `--interval` SHALL be validated BEFORE the trace is resolved, so a typo is a usage error even when there is nothing to watch. A trace named explicitly that does not exist SHALL be an error (exit 1); finding nothing running in the auto case is a normal empty state and SHALL stay at exit 0.
+
 #### Scenario: Tail a running trace
 
 - **WHEN** a user runs `agent-replay watch` while an agent records steps
 - **THEN** each new step appears in order shortly after it is written, and the watch reports the trace's final status on completion
+
+#### Scenario: An interval that would overflow the timer
+
+- **WHEN** a user runs `agent-replay watch --interval 999999999999`
+- **THEN** the command refuses with exit 2, naming the maximum, instead of polling every millisecond
+
+#### Scenario: Nothing to watch
+
+- **WHEN** a user runs `agent-replay watch trc_missing` for a trace that does not exist
+- **THEN** the command errors with exit 1
+- **WHEN** a user runs `agent-replay watch` with no trace running
+- **THEN** it reports the empty state at exit 0
 
 ### Requirement: Abandoned trace flagging
 

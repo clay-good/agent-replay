@@ -8,7 +8,7 @@ Understand behavioral change between runs: side-by-side diffing of two traces an
 
 ### Requirement: Trace diff
 
-The system SHALL compare two traces via `agent-replay diff <a> <b>`, pairing steps by `step_number` (a merge-join, so gaps and differing numbering never misalign the comparison) and comparing the fields `step_type`, `name`, `input`, `output`, `model`, `error`, and `decision`, plus the trace-level `trace_input`, `status`, `trace_error`, and `trace_output`. Input and output are compared as NORMALIZED JSON, so key order and whitespace never register as a difference. A step present on only one side is reported as `missing_left`/`missing_right`. `--fields` narrows the comparison to a named subset; a list naming no field at all is a usage error. The first step with any difference is the divergence step. Output modes: `--compact`, `--fields`, `--json`.
+The system SHALL compare two traces via `agent-replay diff <a> <b>`, pairing steps by `step_number` (a merge-join, so gaps and differing numbering never misalign the comparison) and comparing the fields `step_type`, `name`, `input`, `output`, `model`, `error`, and `decision`, plus the trace-level `trace_input`, `status`, `trace_error`, and `trace_output`. Input and output are compared as NORMALIZED JSON, so key order and whitespace never register as a difference. A step present on only one side is reported as `missing_left`/`missing_right`. `--fields` narrows the comparison to a named subset; a list naming no field at all is a usage error. The first step with any difference is the divergence step. Output modes: `--compact`, `--fields`, `--json`. The `--json` document SHALL record what was compared in a `compared_fields` key — written on every run, `null` when unnarrowed — so a narrowed result is never byte-for-byte the shape of a full one. `--compact` selects a summary panel over the full rendered comparison and so shapes the human view alone; passing it with `--json` SHALL say it did nothing, on stderr, leaving the document on stdout untouched.
 
 #### Scenario: Diverging traces
 
@@ -19,10 +19,14 @@ The system SHALL compare two traces via `agent-replay diff <a> <b>`, pairing ste
 
 The system SHALL, when `--ai` is passed and an API key is configured, produce an AI-generated explanation of why the two traces diverged.
 
+The analysis SHALL be resolved before a `--json` document is written, so `--ai --json` answers in the requested shape rather than dropping the flag: the document carries an `ai_analysis` key, and a misconfiguration that exits 1 interactively SHALL exit 1 in automation too, as a refusal document, rather than exiting 0 with a null analysis.
+
 #### Scenario: No API key
 
 - **WHEN** `diff --ai` runs without any configured provider key
-- **THEN** the deterministic diff still prints and a clear message explains how to configure a key
+- **THEN** the deterministic diff still prints and a clear message explains how to configure a key, at exit 1
+- **WHEN** the same command runs with `--json`
+- **THEN** stdout is a single `{ ok: false, error, hints }` refusal document at exit 1, not a diff document with a null analysis
 
 ### Requirement: Trace forking
 
