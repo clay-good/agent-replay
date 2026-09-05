@@ -328,6 +328,18 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **Imported steps were stamped with the import time, not when they happened.**
+  The storage layer defaults a step with no `started_at` to *now*, and neither
+  importer passed one — so importing a July session in September recorded every
+  step as having happened in September: after the trace's own `ended_at`, and
+  so outside the window of the trace they belong to. The trace's start and end
+  were already read from these very record timestamps; only the steps were left
+  out. A wrong timestamp reads exactly like a right one, so `show` drew the
+  whole timeline at the import moment and `replay` had no real pacing to work
+  from. Both importers now stamp each step from the record that produced it,
+  including a Claude Code subagent's own records — which the OpenTelemetry
+  mapper has always done, from each span's start.
+
 - **An imported Codex session recorded no model.** The same gap as the Claude
   Code one below, in the sibling importer. A rollout states the model on a
   `turn_context` record — verified against a real rollout on disk, at

@@ -175,7 +175,7 @@ Then watch a live session with [`agent-replay watch`](#watch-a-live-run).
 
 #### Import existing session logs
 
-To pull in history that already exists on disk, `import` converts a Claude Code transcript or a Codex CLI rollout into a trace. It's best-effort: unrecognized records are skipped and counted (both vendor formats are internal and version-unstable), and the source format/version is stamped in the trace metadata.
+To pull in history that already exists on disk, `import` converts a Claude Code transcript or a Codex CLI rollout into a trace. It's best-effort: unrecognized records are skipped and counted (both vendor formats are internal and version-unstable), and the source format/version is stamped in the trace metadata. Each step keeps the timestamp of the record that produced it, so an imported session's timeline is when it actually ran, not when you imported it.
 
 ```bash
 agent-replay import ~/.claude/projects/my-project/<session-uuid>.jsonl --format claude-transcript

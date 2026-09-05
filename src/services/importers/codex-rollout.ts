@@ -165,6 +165,10 @@ export function importCodexRollout(
     const it = itemOf(rec);
     const stamp = str(rec.timestamp) ?? str(it.timestamp);
     if (stamp) endedAt = stamp;
+    // Where this record's steps begin, so each can be stamped below without
+    // touching every `steps.push` site — missing one is the mistake this file
+    // already documents having made with the imported/skipped tally.
+    const stepsBefore = steps.length;
     let contributed = false;
 
     switch (type) {
@@ -307,6 +311,16 @@ export function importCodexRollout(
     // invariant this file's own comments appeal to three times over, and it did
     // not hold: a rollout with a blank user turn reported fewer records than it
     // read, with no indication which. Deciding once cannot miss a branch.
+    // Stamp this record's steps with the moment it was written. The storage
+    // layer defaults a step with no `started_at` to NOW, so an imported
+    // session's steps claimed to have happened at import time — outside the
+    // window of the trace they belong to, whose own start and end are read
+    // from these very timestamps. Same fix, same reason, as the sibling
+    // claude-transcript importer.
+    if (stamp) {
+      for (let i = stepsBefore; i < steps.length; i++) steps[i].started_at ??= stamp;
+    }
+
     if (contributed) imported++;
     else skipped++;
   }

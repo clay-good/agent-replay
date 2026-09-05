@@ -484,3 +484,27 @@ describe('importCodexRollout — the model each turn ran on', () => {
     expect(report.skipped).toBe(1); // it supplied nothing, so it is still skipped
   });
 });
+
+describe('importCodexRollout — when each step happened', () => {
+  // Same defect, same fix, as the sibling claude-transcript importer: a step
+  // with no `started_at` defaults to NOW, so an imported session's steps
+  // claimed to have happened at import time -- outside the window of the trace
+  // they belong to, whose own start and end are read from these very stamps.
+  it('stamps each step from its own record, inside the trace window', () => {
+    const path = fixture([
+      { type: 'session_meta', payload: { id: 'roll-t', timestamp: '2026-07-02T00:00:00Z' } },
+      { type: 'response_item', timestamp: '2026-07-02T00:00:03Z', payload: { type: 'message', role: 'user', content: 'do it' } },
+      { type: 'response_item', timestamp: '2026-07-02T00:00:08Z', payload: { type: 'reasoning', summary: 'thinking' } },
+      { type: 'response_item', timestamp: '2026-07-02T00:00:11Z', payload: { type: 'message', role: 'assistant', content: 'done' } },
+    ]);
+    const trace = getTrace(db, importCodexRollout(db, path).trace!.id)!;
+    expect(trace.steps.map((s) => s.started_at)).toEqual([
+      '2026-07-02T00:00:08Z',
+      '2026-07-02T00:00:11Z',
+    ]);
+    for (const s of trace.steps) {
+      expect(s.started_at! >= trace.started_at).toBe(true);
+      expect(s.started_at! <= trace.ended_at!).toBe(true);
+    }
+  });
+});

@@ -206,6 +206,60 @@ describe('importClaudeTranscript — an empty session is a failed import', () =>
   });
 });
 
+describe('importClaudeTranscript — when each step happened', () => {
+  // The storage layer defaults a step with no `started_at` to NOW, so an
+  // imported session's steps claimed to have happened at IMPORT time -- months
+  // after the trace's own started_at, and after its ended_at, i.e. outside the
+  // window of the trace they belong to. A wrong timestamp reads exactly like a
+  // right one: `show` drew the whole timeline at the import moment, and
+  // `replay` had no real pacing to work from. The trace's own start and end
+  // were already read from these very timestamps; only the steps were left out.
+  // The OTel mapper has always stamped each step from its span's start.
+  const timed = () => fixture([
+    { type: 'user', sessionId: 'tt', timestamp: '2026-07-01T00:00:00Z', message: { role: 'user', content: 'go' } },
+    { type: 'assistant', sessionId: 'tt', timestamp: '2026-07-01T00:00:05Z', message: { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }] } },
+    { type: 'user', sessionId: 'tt', timestamp: '2026-07-01T00:00:09Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] } },
+    { type: 'assistant', sessionId: 'tt', timestamp: '2026-07-01T00:00:12Z', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } },
+  ]);
+
+  it('stamps each step with the moment its record was written', () => {
+    const trace = getTrace(db, importClaudeTranscript(db, timed()).trace!.id)!;
+    expect(trace.steps.map((s) => s.started_at)).toEqual([
+      '2026-07-01T00:00:05Z', // the tool_use record
+      '2026-07-01T00:00:12Z', // the final assistant message
+    ]);
+  });
+
+  it('leaves no step outside the window of its own trace', () => {
+    // The property that made the old behaviour obviously wrong rather than
+    // merely missing, and the one worth guarding: an import months later put
+    // every step after the trace had already ended.
+    const trace = getTrace(db, importClaudeTranscript(db, timed()).trace!.id)!;
+    for (const s of trace.steps) {
+      expect(s.started_at! >= trace.started_at, `step ${s.step_number} starts before its trace`).toBe(true);
+      expect(s.started_at! <= trace.ended_at!, `step ${s.step_number} starts after its trace ended`).toBe(true);
+    }
+  });
+
+  it('stamps a subagent step from its own record, not the parent import', () => {
+    const path = fixture([
+      { type: 'user', sessionId: 'sub-t', timestamp: '2026-07-01T00:00:00Z', message: { role: 'user', content: 'research' } },
+      { type: 'assistant', sessionId: 'sub-t', timestamp: '2026-07-01T00:00:01Z', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Task', input: { agent: 'Explore' } }] } },
+      { type: 'user', sessionId: 'sub-t', timestamp: '2026-07-01T00:00:20Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'done' }] } },
+    ]);
+    const subDir = join(dir, 'transcript', 'subagents');
+    mkdirSync(subDir, { recursive: true });
+    writeFileSync(
+      join(subDir, 'agent-a1.jsonl'),
+      [{ type: 'assistant', timestamp: '2026-07-01T00:00:07Z', message: { role: 'assistant', content: [{ type: 'text', text: 'sub says' }] } }]
+        .map((r) => JSON.stringify(r)).join('\n'),
+    );
+    const trace = getTrace(db, importClaudeTranscript(db, path).trace!.id)!;
+    const sub = trace.steps.find((s) => s.name === 'assistant_message')!;
+    expect(sub.started_at).toBe('2026-07-01T00:00:07Z');
+  });
+});
+
 describe('importClaudeTranscript — the model each message ran on', () => {
   // Every assistant record in a real transcript carries `message.model`, and it
   // was read by nobody: an imported session recorded which tools ran and what

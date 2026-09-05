@@ -226,6 +226,12 @@ export function importClaudeTranscript(
       continue;
     }
 
+    // Where this record's steps begin, so every step it produces can be stamped
+    // below without touching each `steps.push` site. Missing one of those sites
+    // is the exact mistake this file has made before (the empty-prompt tally,
+    // fixed in one content branch and not the other).
+    const stepsBefore = steps.length;
+    const stamp = typeof rec.timestamp === 'string' && rec.timestamp ? rec.timestamp : undefined;
     const message = rec.message as
       { content?: unknown; usage?: Record<string, unknown>; model?: unknown } | undefined;
     const content = message?.content;
@@ -321,6 +327,21 @@ export function importClaudeTranscript(
             break;
         }
       }
+    }
+
+    // Stamp this record's steps with the moment the record was written.
+    //
+    // Without this the storage layer defaults a step with no `started_at` to
+    // NOW, so an imported session's steps claimed to have happened at import
+    // time — months after the trace's own `started_at`, and after its
+    // `ended_at`, i.e. outside the window of the trace they belong to. A wrong
+    // timestamp reads exactly like a right one: `show` drew the whole timeline
+    // at the import moment and `replay` had no real pacing to work from. The
+    // OTel mapper already stamps every step from its span's start; the trace's
+    // own start and end were already read from these very timestamps, three
+    // lines above. Only the steps were left out.
+    if (stamp) {
+      for (let i = stepsBefore; i < steps.length; i++) steps[i].started_at ??= stamp;
     }
 
     // A user/assistant record that yielded no step (e.g. an empty or
@@ -490,6 +511,9 @@ function buildSubagentSteps(
 
   for (const rec of records) {
     const before = steps.length;
+    // Subagent records carry timestamps exactly as the main transcript's do,
+    // and the same default-to-now applies. See the note in the main loop.
+    const stamp = typeof rec.timestamp === 'string' && rec.timestamp ? rec.timestamp : undefined;
     // A tool_result block yields no step of its own — it was indexed above and
     // attached to the paired tool_use step's output — but it DID contribute
     // retained data, so the record counts as imported (mirroring the main loop's
@@ -542,6 +566,10 @@ function buildSubagentSteps(
         }
       }
     }
+    if (stamp) {
+      for (let i = before; i < steps.length; i++) steps[i].started_at ??= stamp;
+    }
+
     if (steps.length > before || contributedResult) imported++;
     else skipped++;
   }
