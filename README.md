@@ -41,7 +41,9 @@ npm install -g agent-replay
 agent-replay init                  # creates .agent-replay/ with SQLite database
                                    #   (--force overwrites an existing config)
 agent-replay demo                  # loads 5 sample traces + 3 guardrail policies
-                                   #   (--reset clears the store first)
+                                   #   (--reset clears the store first;
+                                   #    --no-interactive just loads the data,
+                                   #    which is what you want in a script)
 agent-replay list                  # see everything
 agent-replay show <trace-id>       # inspect a trace step-by-step
 agent-replay replay <trace-id>     # animated terminal replay
@@ -455,6 +457,10 @@ A gate that cannot do its job fails loudly (exit `2`) instead of passing green. 
 # Run all built-in deterministic checks
 agent-replay eval <trace-id>
 
+# The same set, asked for explicitly: no "no evaluator specified" notice, and
+# unlike the bare form it COMBINES with the flags below (e.g. --all --ai)
+agent-replay eval <trace-id> --all
+
 # Run a specific preset
 agent-replay eval <trace-id> --preset hallucination-check
 agent-replay eval <trace-id> --preset safety-check
@@ -494,7 +500,8 @@ agent-replay guard list
 # Add a policy that blocks delete operations
 agent-replay guard add --name no-deletes \
   --pattern '{"step_type":"tool_call","name_contains":"delete"}' \
-  --action deny
+  --action deny \
+  --description "Blocks any tool call whose name contains 'delete'"
 
 # Test all policies against a trace
 agent-replay guard test <trace-id>
