@@ -1167,3 +1167,62 @@ describe('a nested agent span keeps its own gen_ai.agent.name', () => {
     expect(trace.session_id).toBe('conv-1');
   });
 });
+
+describe('a root span keeps the attributes only a step would have consumed', () => {
+  // The mirror image of the sub-agent case above. `gen_ai.request.model` and
+  // `gen_ai.tool.name` are read by the STEP mapping -- model becomes the step's
+  // column, the tool's name becomes the step's name. The root is not a step, so
+  // on the root nothing reads them, yet they were excluded from metadata
+  // anyway.
+  //
+  // That contradicted the intent stated on the trace's own metadata: "carry the
+  // root's own attributes (model, provider, and any unmapped gen_ai.* keys) ...
+  // they were dropped entirely, so a single-span trace recorded no model or
+  // provider at all." The provider half worked -- it is written explicitly. The
+  // model half did not.
+  const soloAgent = () => otlp([
+    span({
+      traceId: '4af7651916cd43dd8448eb211c80319c', spanId: 'f7ad6b7169203331',
+      name: 'invoke_agent', start: 1767225700000000000, end: 1767225706000000000,
+      attrs: {
+        'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'solo',
+        'gen_ai.request.model': 'claude-opus-5', 'gen_ai.provider.name': 'anthropic',
+        'gen_ai.usage.input_tokens': 10,
+      },
+    }),
+  ]);
+
+  it('records the model of a single-span agent trace', () => {
+    // One root span and no children: there are no steps at all, so a step's
+    // `model` column can never hold this. Metadata is the only home it has, and
+    // without it the run recorded its agent, tokens and provider but not the
+    // model it actually ran on.
+    const [trace] = mapOtlpTraces(soloAgent());
+    expect(trace.steps).toHaveLength(0);
+    expect(trace.agent_name).toBe('solo');
+    expect(trace.metadata).toMatchObject({
+      provider: 'anthropic',
+      'gen_ai.request.model': 'claude-opus-5',
+    });
+  });
+
+  it('still keeps the model out of a step\'s metadata, where the column holds it', () => {
+    // The narrowness guard: on a step the model IS consumed, into `model`, so
+    // duplicating it in the bag is exactly what the exclusion list is for.
+    const [trace] = mapOtlpTraces(otlp([
+      span({
+        traceId: '5af7651916cd43dd8448eb211c80319c', spanId: 'a1ad6b7169203331',
+        name: 'invoke_agent', start: 1767225700000000000, end: 1767225706000000000,
+        attrs: { 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'solo' },
+      }),
+      span({
+        traceId: '5af7651916cd43dd8448eb211c80319c', spanId: 'a1ad6b7169203332',
+        parentSpanId: 'a1ad6b7169203331', name: 'chat',
+        start: 1767225701000000000, end: 1767225704000000000,
+        attrs: { 'gen_ai.operation.name': 'chat', 'gen_ai.request.model': 'claude-opus-5' },
+      }),
+    ]));
+    expect(trace.steps[0].model).toBe('claude-opus-5');
+    expect(trace.steps[0].metadata).not.toHaveProperty('gen_ai.request.model');
+  });
+});

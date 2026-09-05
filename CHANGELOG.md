@@ -328,6 +328,21 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **A single-span agent trace recorded no model.** The mirror of the nested-agent
+  case below: `gen_ai.request.model` / `gen_ai.response.model` (and
+  `gen_ai.tool.name`) are read by the STEP mapping — the model becomes the
+  step's column, the tool's name becomes the step's name — but the root span is
+  not a step, so on the root nothing reads them, and they were excluded from
+  metadata anyway. That contradicted the intent stated on the trace's own
+  metadata, which set out to "carry the root's own attributes (model, provider,
+  and any unmapped `gen_ai.*` keys) … they were dropped entirely, so a
+  single-span trace recorded no model or provider at all". The provider half
+  worked, because it is written explicitly; the model half did not. A one-span
+  agent run (root only, no children) therefore recorded its agent, its tokens
+  and its provider, and lost the model it ran on — and with no steps, a step's
+  `model` column could never hold it either. The root now keeps these in its
+  metadata; a step still does not, since there the column holds them.
+
 - **A nested agent span lost its own `gen_ai.agent.name`.** In a multi-agent
   trace each `invoke_agent` span names its own sub-agent, and the OTel mapper
   deliberately keeps those nested spans as steps so nothing is dropped. But
