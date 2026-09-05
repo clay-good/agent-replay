@@ -736,6 +736,14 @@ between them, and nothing else. Upgrades are automatic and one-way.
   empty *numeric* value means 0 where 0 is legal — `guard add --priority ""`,
   `eval --max-cost ""`, `replay --speed ""`. These four name a thing, and
   nothing is named by the empty string.)
+- **`replay --pause` was accepted and silently ignored off a terminal.** The
+  pause returns immediately when stdin is not a TTY — correctly, since there is
+  no one to press a key and blocking would hang a pipeline — but it said
+  nothing, so `replay <id> --pause | less`, or a `--pause` left in a CI script,
+  replayed straight through at full speed and reported exactly the success a
+  paused run reports. It now says the flag has no effect, the same one-line
+  warning `export` prints for `--with-snapshots --format golden`. The replay
+  itself is unchanged; this is a warning, not a refusal.
 - **`replay` reported success for a step window it could not replay.** It
   printed "No steps in the specified range" on stderr and then exited `0`, so
   `replay <id> --from-step "$N"` in a script was told the run succeeded having

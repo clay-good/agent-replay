@@ -210,6 +210,67 @@ describe('replay', () => {
     expect(stderr()).toMatch(/this trace has steps 1-\d+/);
   });
 
+  // The --pause path had no coverage at all, in either direction.
+  describe('--pause', () => {
+    // `process.stdout/stdin.isTTY` is a plain DATA property, not a getter:
+    // set and restore it directly (vi.spyOn(..., 'get') throws here).
+    const realIsTTY = process.stdin.isTTY;
+    afterEach(() => {
+      process.stdin.isTTY = realIsTTY;
+    });
+
+    it('says the flag has no effect when stdin is not a terminal', async () => {
+      process.stdin.isTTY = undefined;
+      await runReplay(id, { dir, speed: '0', pause: true });
+      // It replayed straight through — correctly, since blocking off a TTY
+      // would hang a pipeline — but used to do so in complete silence, so a
+      // --pause left in a script looked exactly like a paused run.
+      expect(stderr()).toMatch(/--pause has no effect without an interactive terminal/);
+      expect(stdout()).toMatch(/Replay complete: 4 steps/);
+      expect(process.exitCode).toBe(0);
+    });
+
+    it('stays silent about --pause when it is not passed', async () => {
+      process.stdin.isTTY = undefined;
+      await runReplay(id, { dir, speed: '0' });
+      expect(stderr()).not.toMatch(/--pause/);
+    });
+
+    it('waits for a keypress between steps on a terminal, and not after the last', async () => {
+      process.stdin.isTTY = true;
+      // Stand in for the terminal. `setRawMode`/`isRaw` exist only on a real
+      // tty.ReadStream, so they are DEFINED here rather than spied on, and
+      // deleted again afterwards.
+      const stdin = process.stdin as unknown as Record<string, unknown>;
+      const saved = { once: stdin.once, resume: stdin.resume, pause: stdin.pause };
+      const onceFn = vi.fn((event: string, cb: (d: Buffer) => void) => {
+        // Answer on the next tick, so the replay advances without a real key.
+        if (event === 'data') setImmediate(() => cb(Buffer.from([0x20])));
+        return process.stdin;
+      });
+      const rawFn = vi.fn(() => process.stdin);
+      const resumeFn = vi.fn(() => process.stdin);
+      const pauseFn = vi.fn(() => process.stdin);
+      stdin.once = onceFn; stdin.resume = resumeFn; stdin.pause = pauseFn;
+      stdin.setRawMode = rawFn; stdin.isRaw = false;
+      try {
+        await runReplay(id, { dir, speed: '0', pause: true });
+        // Four steps means three gaps: it must not pause after the last one.
+        expect(onceFn).toHaveBeenCalledTimes(3);
+        expect(stdout()).toMatch(/Press any key to continue/);
+        // Raw mode is entered and restored for each pause, never left on.
+        expect(rawFn).toHaveBeenCalledWith(true);
+        expect(rawFn).toHaveBeenLastCalledWith(false);
+        expect(resumeFn).toHaveBeenCalledTimes(3);
+        expect(pauseFn).toHaveBeenCalledTimes(3);
+        expect(stderr()).not.toMatch(/no effect/);
+      } finally {
+        stdin.once = saved.once; stdin.resume = saved.resume; stdin.pause = saved.pause;
+        delete stdin.setRawMode; delete stdin.isRaw;
+      }
+    });
+  });
+
   it.each([
     ['a negative --speed', { speed: '-1' }, /Invalid --speed/],
     ['a non-finite --speed', { speed: 'Infinity' }, /Invalid --speed/],

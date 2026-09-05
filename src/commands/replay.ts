@@ -121,6 +121,23 @@ export async function runReplay(
     return;
   }
 
+  // Say when --pause cannot do anything, rather than accepting it and ignoring
+  // it. `waitForKeypress` returns immediately when stdin is not a TTY (there is
+  // no one to press a key, and blocking would hang a pipeline), so
+  // `replay <id> --pause | less`, or a --pause left in a CI script, replayed
+  // straight through at full speed and reported the same success as a paused
+  // run — the flag silently did nothing. This is the warning `export` already
+  // prints for `--with-snapshots --format golden`: a flag that cannot take
+  // effect is worth one line on stderr, not silence. Not a refusal — the replay
+  // itself is still exactly what was asked for.
+  //
+  // stdin, not stdout: "is a human present to press a key?" is a question about
+  // the INPUT channel. Reading it from stdout is the bug `guard check` had.
+  if (opts.pause && !process.stdin.isTTY) {
+    console.error(chalk.yellow('  ⚠ --pause has no effect without an interactive terminal.'));
+    console.error(chalk.dim('    stdin is not a TTY, so there is no keypress to wait for; replaying straight through.'));
+  }
+
   // Header
   console.log('');
   console.log(traceHeaderPanel(trace));

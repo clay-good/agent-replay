@@ -341,9 +341,14 @@ agent-replay replay <trace-id> --speed 0
 # Replay only steps 3 through 7
 agent-replay replay <trace-id> --from-step 3 --to-step 7
 
-# Wait for a keypress after each step
+# Wait for a keypress after each step (needs an interactive terminal;
+# off one, replay says so and plays straight through)
 agent-replay replay <trace-id> --pause
 ```
+
+A step window that matches no step is a failure, not an empty replay: `replay
+<trace-id> --from-step 900` on an 8-step trace exits `1` and names the range
+that does exist, so a script cannot report success having replayed nothing.
 
 ### Compare
 

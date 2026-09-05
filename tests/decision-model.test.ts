@@ -765,13 +765,34 @@ describe('the causal walk does not rescan the trace at every hop', () => {
     causalWalk(db, small, 500); // warm the query path
     causalWalk(db, large, 10_000);
 
-    const t1 = performance.now();
-    expect(causalWalk(db, small, 500)!.chain).toHaveLength(500);
-    const perStepSmall = (performance.now() - t1) / 500;
-
-    const t2 = performance.now();
-    expect(causalWalk(db, large, 10_000)!.chain).toHaveLength(10_000);
-    const perStepLarge = (performance.now() - t2) / 10_000;
+    // The MINIMUM of several runs, not a single timed one.
+    //
+    // vitest runs test files in parallel workers, so a walk can be descheduled
+    // mid-measurement. With one sample each, an unlucky large run (or a lucky
+    // small one) inverted a ratio that has 3x of headroom, and this failed
+    // roughly half the time in a full-suite run while passing in isolation —
+    // a red CI that measured the machine's load rather than the code.
+    // Scheduler noise only ever ADDS time, so the floor of a few runs is the
+    // honest estimate of per-step cost. The guard itself is unweakened: a
+    // quadratic walk's floor is still ~10x the small one's.
+    //
+    // The export guard above solved its version of this by COUNTING the work
+    // instead of timing it, which is exact on any machine and the better answer
+    // where it applies. It does not apply here: the rescan this test exists to
+    // catch was a pure-JS loop over the step array, not extra SQL, so there is
+    // no statement execution to count. Timing is the only measure available;
+    // taking its floor is what makes it trustworthy.
+    const perStep = (traceId: string, steps: number): number => {
+      let best = Infinity;
+      for (let i = 0; i < 5; i++) {
+        const t = performance.now();
+        expect(causalWalk(db, traceId, steps)!.chain).toHaveLength(steps);
+        best = Math.min(best, (performance.now() - t) / steps);
+      }
+      return best;
+    };
+    const perStepSmall = perStep(small, 500);
+    const perStepLarge = perStep(large, 10_000);
 
     expect(perStepLarge).toBeLessThan(perStepSmall * 3);
   }, 120_000);
