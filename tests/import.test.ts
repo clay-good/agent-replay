@@ -379,6 +379,23 @@ describe('importClaudeTranscript — the model each message ran on', () => {
     ]);
   });
 
+  it('ignores a model that is not a string', () => {
+    // `message.model` comes from a file on disk, so its shape is not
+    // guaranteed. The sibling `usage` handling in this importer documents what
+    // trusting that costs there (one string value poisons every later `+=`),
+    // so this is read as a non-empty string rather than cast — an object, a
+    // number or a null all leave the step's model unset rather than storing
+    // something no consumer can compare.
+    const path = fixture([
+      { type: 'user', sessionId: 'e1', message: { role: 'user', content: 'go' } },
+      { type: 'assistant', sessionId: 'e1', message: { role: 'assistant', model: { weird: 'object' }, content: [{ type: 'text', text: 'a' }] } },
+      { type: 'assistant', sessionId: 'e1', message: { role: 'assistant', model: 123, content: [{ type: 'text', text: 'b' }] } },
+      { type: 'assistant', sessionId: 'e1', message: { role: 'assistant', model: null, content: [{ type: 'text', text: 'c' }] } },
+    ]);
+    const trace = getTrace(db, importClaudeTranscript(db, path).trace!.id)!;
+    expect(trace.steps.map((s) => s.model)).toEqual([null, null, null]);
+  });
+
   it('records the model on a SUBAGENT step too', () => {
     // A subagent may well run a different model from the session that spawned
     // it, which is most of the point of looking. The subagent importer is a
