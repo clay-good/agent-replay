@@ -520,10 +520,20 @@ export function startOtelReceiver(db: Database.Database, port: number, stats: Ot
       if (isProtobuf) {
         // Over protobuf: decode, then respond with an empty ExportServiceResponse
         // (zero bytes) on success per the spec, in the encoding received.
-        const { status } = isLogs
+        const { status, payload } = isLogs
           ? handleLogsExportProtobuf(db, raw, stats)
           : handleTracesExportProtobuf(db, raw, stats);
-        res.writeHead(status, { 'content-type': 'application/x-protobuf' }).end(status === 200 ? Buffer.alloc(0) : undefined);
+        if (status === 200) {
+          res.writeHead(200, { 'content-type': 'application/x-protobuf' }).end(Buffer.alloc(0));
+          return;
+        }
+        // A failure says why. This destructured `status` alone and answered a
+        // 400 with ZERO BYTES — the handler had already computed "invalid
+        // protobuf body", and it was thrown away, so an exporter got a bare 400
+        // and its operator had nothing to go on. The JSON path returns the
+        // reason, and the catch below already answers a protobuf request with a
+        // JSON error body; this was the one failure path that said nothing.
+        res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(payload));
         return;
       }
       const body = raw.toString('utf-8');

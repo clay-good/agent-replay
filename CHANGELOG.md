@@ -328,6 +328,15 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **`otel serve` rejected a bad protobuf body with no reason at all.** The
+  request handler took only the status from the protobuf path and answered a
+  failure with zero bytes — the reason ("invalid protobuf body") had already
+  been computed and was discarded. An exporter got a bare `400` and whoever was
+  debugging it had nothing to go on, while the OTLP/JSON path returns the
+  message and the handler's own error branch already answers a protobuf request
+  with a JSON error body. Failures now say why, on `/v1/traces` and `/v1/logs`
+  alike; a success is still an empty protobuf response per the spec.
+
 - **`import` of a Codex rollout could report fewer records than it read.**
   The importer decided `imported++` in one place at the bottom of its loop but
   wrote `skipped++` into the individual branches, and one branch was missed: a

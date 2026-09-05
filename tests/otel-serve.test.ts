@@ -229,6 +229,32 @@ describe('otel serve (end-to-end)', () => {
     }
   }, 20000);
 
+  it('says why it rejected a protobuf body, instead of a bare 400', async () => {
+    // Regression: `handle` destructured `status` alone from the protobuf
+    // handlers and answered a failure with ZERO BYTES. The reason — "invalid
+    // protobuf body" — had already been computed and was thrown away, so an
+    // exporter got a bare 400 and its operator had nothing to go on. Every
+    // sibling path explains itself, including the catch three lines below,
+    // which already answers a protobuf request with a JSON error body.
+    const url = await startReceiver();
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-protobuf' },
+      body: Buffer.from([0xff, 0xff, 0xff, 0xff]),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid protobuf body' });
+
+    // The logs endpoint answers the same way.
+    const logsRes = await fetch(url.replace('/v1/traces', '/v1/logs'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-protobuf' },
+      body: Buffer.from([0xff, 0xff, 0xff, 0xff]),
+    });
+    expect(logsRes.status).toBe(400);
+    expect(await logsRes.json()).toEqual({ error: 'invalid protobuf body' });
+  }, 20000);
+
   it('accepts an OTLP/protobuf logs export over HTTP', async () => {
     const url = await startReceiver();
     const logsUrl = url.replace('/v1/traces', '/v1/logs');
