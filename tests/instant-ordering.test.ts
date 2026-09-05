@@ -120,7 +120,10 @@ describe('schema v5 keeps the corrected ordering indexed', () => {
       expect(getSchemaVersion(old)).toBe(4);
 
       expect(runMigrations(old)).toBe(SCHEMA_VERSION);
-      expect(getSchemaVersion(old)).toBe(5);
+      // Tracks the constant rather than a literal: this test is about the v5
+      // INDEXES surviving the upgrade, not about which version is current, and
+      // hard-coding the number made every later migration fail it spuriously.
+      expect(getSchemaVersion(old)).toBe(SCHEMA_VERSION);
       const idx = old
         .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_agent_traces_started_instant%'")
         .all() as { name: string }[];

@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { SCHEMA_VERSION, getSchemaVersion, applySchemaV1, applySchemaV2, applySchemaV3, applySchemaV4, applySchemaV5 } from './schema.js';
+import { SCHEMA_VERSION, getSchemaVersion, applySchemaV1, applySchemaV2, applySchemaV3, applySchemaV4, applySchemaV5, applySchemaV6 } from './schema.js';
 
 /**
  * Run any pending migrations, upgrading the database to the latest schema.
@@ -57,6 +57,10 @@ export function runMigrations(db: Database.Database): number {
     // parses ISO basic-format offsets, so the parsed-instant ordering is correct
     // for those rows AND still served by an index. Additive only.
     if (current < 5) applySchemaV5(db);
+
+    // v5 → v6: the two indexes the cross-batch OTLP merge looks up on every
+    // batch (span id, and unparented steps). Additive only.
+    if (current < 6) applySchemaV6(db);
   }).immediate();
 
   return SCHEMA_VERSION;

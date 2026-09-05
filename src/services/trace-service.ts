@@ -561,7 +561,67 @@ export function ingestTrace(
  * is left alone. The renumber runs inside the merge transaction; it is a no-op
  * when the order is already correct, which is the common case.
  */
-function renumberByStartTime(db: Database.Database, traceId: string): void {
+/**
+ * Renumbering rewrites every row of the trace twice, so it is bounded. A
+ * long-running receiver assembling a very large trace would otherwise pay an
+ * O(N) rewrite per batch — seconds, while holding the write lock — and the
+ * reordering batch is the normal case here, so this is not a rare path. Above
+ * the bound the trace keeps arrival order; the forward-reference sweep still
+ * runs, so the data stays valid either way.
+ */
+const RENUMBER_MAX_STEPS = 2_000;
+
+/**
+ * The forward-reference sweep, done entirely in SQL.
+ *
+ * Above the renumber bound this is all that has to happen, and it is a
+ * predicate SQLite can evaluate over the rows itself — so it costs one
+ * statement instead of pulling every step of the trace into JS to test two
+ * numbers per row.
+ */
+function dropForwardRefsSql(db: Database.Database, traceId: string, touched?: TouchedSteps): void {
+  // Scoped to the rows this batch could have changed, when the caller knows
+  // them. Above the renumber bound nothing else moves, so a forward reference
+  // can only have been created by a step this batch inserted or by an orphan it
+  // re-linked — and sweeping the whole trace to find them is the last of the
+  // per-batch O(trace) costs that made assembling a long session quadratic.
+  const scope = touched
+    ? { sql: ' AND (step_number > ? OR step_number IN (' + touched.relinked.map(() => '?').join(',') + '))',
+        params: [touched.fromStep, ...touched.relinked] }
+    : { sql: '', params: [] as unknown[] };
+  db.prepare(
+    `UPDATE agent_trace_steps
+        SET parent_step_number = CASE WHEN parent_step_number >= step_number THEN NULL ELSE parent_step_number END,
+            caused_by_step_number = CASE WHEN caused_by_step_number >= step_number THEN NULL ELSE caused_by_step_number END
+      WHERE trace_id = ?
+        AND (parent_step_number >= step_number OR caused_by_step_number >= step_number)${scope.sql}`,
+  ).run(traceId, ...scope.params);
+}
+
+/**
+ * The rows a single merge touched: everything it appended (above `fromStep`)
+ * and the orphans it re-linked. Nothing else in the trace can have gained a
+ * forward reference from that merge.
+ */
+interface TouchedSteps {
+  fromStep: number;
+  relinked: number[];
+}
+
+function renumberByStartTime(db: Database.Database, traceId: string, touched?: TouchedSteps): void {
+  // Count before materializing. Above the bound below this function does not
+  // renumber at all, so pulling every row first was reading the whole trace on
+  // every batch only to throw it away — the same per-batch O(trace) cost the
+  // bound exists to avoid, just spent on the read instead of the write.
+  const total = (db
+    .prepare('SELECT COUNT(*) AS n FROM agent_trace_steps WHERE trace_id = ?')
+    .get(traceId) as { n: number }).n;
+  if (total < 2) return;
+  if (total > RENUMBER_MAX_STEPS) {
+    dropForwardRefsSql(db, traceId, touched);
+    return;
+  }
+
   const steps = db
     .prepare(
       `SELECT step_number, started_at, parent_step_number, caused_by_step_number
@@ -573,19 +633,6 @@ function renumberByStartTime(db: Database.Database, traceId: string): void {
     parent_step_number: number | null;
     caused_by_step_number: number | null;
   }[];
-  if (steps.length < 2) return;
-
-  // Renumbering rewrites every row of the trace twice, so it is bounded. A
-  // long-running receiver assembling a very large trace would otherwise pay an
-  // O(N) rewrite per batch — seconds, while holding the write lock — and the
-  // reordering batch is the normal case here, so this is not a rare path. Above
-  // the bound the trace keeps arrival order; the forward-reference sweep below
-  // still runs, so the data stays valid either way.
-  const RENUMBER_MAX_STEPS = 2_000;
-  if (steps.length > RENUMBER_MAX_STEPS) {
-    dropForwardRefs(db, traceId, steps);
-    return;
-  }
 
   const ordered = [...steps].sort((a, b) => {
     const ta = a.started_at ? Date.parse(a.started_at) : NaN;
@@ -680,24 +727,54 @@ export function mergeBatchIntoTrace(
       db.prepare('SELECT * FROM agent_traces WHERE id = ?').get(traceId) as Record<string, unknown>,
     );
 
-    const existingSteps = db
-      .prepare('SELECT step_number, parent_step_number, metadata FROM agent_trace_steps WHERE trace_id = ?')
-      .all(traceId) as { step_number: number; parent_step_number: number | null; metadata: string | null }[];
+    // Read what this batch actually needs, not the whole trace.
+    //
+    // This used to SELECT every existing step and `JSON.parse` each one's
+    // metadata, to get three things: the highest step number, a span-id -> step
+    // map, and the orphans. That is O(trace) work on EVERY batch, and a
+    // `BatchSpanProcessor` flushes many batches into one trace — so the cost of
+    // assembling a session grew with the square of its length. Measured against
+    // a live receiver: 2.6 ms per batch at 2,000 spans, 10.7 ms at 10,000, and
+    // 6.5 s of receiver time to assemble 10,000 spans. Each of the three is
+    // available without reading the trace.
+    const maxStep =
+      (db
+        .prepare('SELECT COALESCE(MAX(step_number), 0) AS n FROM agent_trace_steps WHERE trace_id = ?')
+        .get(traceId) as { n: number }).n;
 
-    let maxStep = 0;
-    const stepBySpan = new Map<string, number>();
-    // Existing steps still missing a parent whose OTel parent span had not yet
-    // arrived when they were stored — candidates for the backward re-link below.
+    // Only steps that are actually unparented can be orphans, and there are
+    // few — the root, plus any child whose parent span has not arrived yet.
     const orphans: { step_number: number; parentSpan: string }[] = [];
-    for (const s of existingSteps) {
-      if (s.step_number > maxStep) maxStep = s.step_number;
-      const meta = parseJson(s.metadata);
-      const spanId = meta?.otel_span_id;
-      if (typeof spanId === 'string') stepBySpan.set(spanId, s.step_number);
-      const parentSpan = meta?.otel_parent_span_id;
-      if (s.parent_step_number == null && typeof parentSpan === 'string') {
-        orphans.push({ step_number: s.step_number, parentSpan });
-      }
+    for (const s of db
+      .prepare('SELECT step_number, metadata FROM agent_trace_steps WHERE trace_id = ? AND parent_step_number IS NULL')
+      .all(traceId) as { step_number: number; metadata: string | null }[]) {
+      const parentSpan = parseJson(s.metadata)?.otel_parent_span_id;
+      if (typeof parentSpan === 'string') orphans.push({ step_number: s.step_number, parentSpan });
+    }
+
+    // The span ids this batch can possibly need: the parents its own steps
+    // name, and the parents its orphans are still waiting for. Everything else
+    // in the trace is irrelevant to this merge. `json_extract` in SQL, so the
+    // extraction happens in C over the rows rather than by parsing every
+    // metadata blob into JS.
+    const wanted = new Set<string>();
+    for (const step of input.steps ?? []) {
+      const p = (step.metadata ?? {}).otel_parent_span_id;
+      if (typeof p === 'string') wanted.add(p);
+    }
+    for (const o of orphans) wanted.add(o.parentSpan);
+
+    const stepBySpan = new Map<string, number>();
+    if (wanted.size > 0) {
+      const ids = [...wanted];
+      const rows = db
+        .prepare(
+          `SELECT step_number, json_extract(metadata, '$.otel_span_id') AS span
+             FROM agent_trace_steps
+            WHERE trace_id = ? AND json_extract(metadata, '$.otel_span_id') IN (${ids.map(() => '?').join(',')})`,
+        )
+        .all(traceId, ...ids) as { step_number: number; span: string | null }[];
+      for (const r of rows) if (typeof r.span === 'string') stepBySpan.set(r.span, r.step_number);
     }
 
     for (const step of input.steps ?? []) {
@@ -763,14 +840,16 @@ export function mergeBatchIntoTrace(
     const relink = db.prepare(
       'UPDATE agent_trace_steps SET parent_step_number = ? WHERE trace_id = ? AND step_number = ?',
     );
+    const relinked: number[] = [];
     for (const orphan of orphans) {
       const parent = stepBySpan.get(orphan.parentSpan);
       if (parent != null && parent !== orphan.step_number) {
         relink.run(parent, traceId, orphan.step_number);
+        relinked.push(orphan.step_number);
       }
     }
 
-    renumberByStartTime(db, traceId);
+    renumberByStartTime(db, traceId, { fromStep: maxStep, relinked });
 
     // Recompute trace-level aggregates over both the existing trace and the
     // incoming batch: widest time window, summed tokens, failure-dominant status.

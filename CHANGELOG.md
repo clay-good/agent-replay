@@ -328,6 +328,21 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **Assembling a long OpenTelemetry session cost time quadratic in its
+  length.** A `BatchSpanProcessor` flushes many batches into one trace — the
+  pattern cross-batch assembly exists to serve — and every merge read *every*
+  step the trace had so far, `JSON.parse`-ing each one's metadata, to recover
+  three things it can get directly: the highest step number, the span-id map,
+  and the steps still waiting for a parent. Above the renumber bound it then
+  read them all again for the forward-reference sweep. Measured over 1,000
+  ten-span batches: 2.32 ms per batch at 4,000 steps, 6.68 ms at 10,000, 4.47s
+  in total. Each merge now reads only what the batch needs — the maximum step
+  number, the unparented steps, and just the span ids this batch names — and
+  **schema v6** adds the two indexes those lookups want. Same measurement: 0.40
+  and 0.81 ms per batch, 1.44s in total, and the per-batch cost no longer grows
+  with the session. The migration is additive (two indexes) and the assembled
+  trace is unchanged.
+
 - **`why` rescanned the whole trace at every hop.** The causal walk falls back
   to "the nearest earlier decision point" when a step carries no `caused_by` or
   `parent`, and it found that by scanning every step — once per hop. That never

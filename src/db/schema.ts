@@ -15,7 +15,7 @@ import { julianDayExpr } from '../utils/time.js';
  *   - Added guardrail_policies table (adapted from 002_policies.sql policy_rules)
  */
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 const SCHEMA_V1 = `
 -- ============================================================================
@@ -276,6 +276,25 @@ export function applySchemaV5(db: Database.Database): void {
 }
 
 /** Get the current schema version, or 0 if no schema exists. */
+// v6: the two lookups `mergeBatchIntoTrace` makes on every OTLP batch. A
+// `BatchSpanProcessor` flushes many batches into one trace, and without these
+// each merge scanned every step the trace had so far — so assembling a session
+// cost time quadratic in its length (measured against a live receiver: 2.6 ms
+// per batch at 2,000 spans, 10.7 ms at 10,000). Additive, index-only.
+const SCHEMA_V6_OBJECTS = `
+CREATE INDEX IF NOT EXISTS idx_agent_trace_steps_otel_span
+    ON agent_trace_steps(trace_id, json_extract(metadata, '$.otel_span_id'));
+
+CREATE INDEX IF NOT EXISTS idx_agent_trace_steps_unparented
+    ON agent_trace_steps(trace_id, parent_step_number);
+`;
+
+/** Migrate a v5 database in place to v6 (records schema version 6). */
+export function applySchemaV6(db: Database.Database): void {
+  db.exec(SCHEMA_V6_OBJECTS);
+  db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(6);
+}
+
 export function getSchemaVersion(db: Database.Database): number {
   const tableExists = db
     .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'")

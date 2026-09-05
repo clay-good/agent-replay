@@ -864,7 +864,7 @@ A `decision` block:
 >   OpenTelemetry receiver's cross-batch merge, which recomputes as it
 >   assembles.)
 
-> **Schema migration:** these fields arrived in schema v2; the current schema is v5 (v3, v4 and v5 add indexes only, no columns). Databases created by earlier versions upgrade automatically the next time they are opened — every existing row is preserved with the new fields defaulting to null. The upgrade is one-way (there is no down-migration).
+> **Schema migration:** these fields arrived in schema v2; the current schema is v6 (v3 through v6 add indexes only, no columns). Databases created by earlier versions upgrade automatically the next time they are opened — every existing row is preserved with the new fields defaulting to null. The upgrade is one-way (there is no down-migration).
 
 ### Step Types
 
