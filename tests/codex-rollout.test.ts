@@ -408,3 +408,79 @@ describe('every record lands in exactly one side of the tally', () => {
     expect(report.skipped).toBe(2);
   });
 });
+
+describe('importCodexRollout — the model each turn ran on', () => {
+  // Real rollouts state the model on a `turn_context` record and nothing read
+  // it, so an imported Codex session recorded no model at all -- the same gap
+  // the claude-transcript importer had, and the reason `check --golden --fields
+  // model` could not gate an imported session on the one thing a model upgrade
+  // changes. Verified against a real rollout on disk, where the model appears
+  // at `turn_context.payload.model`.
+  it('records the model in force on the assistant step', () => {
+    const path = fixture([
+      { type: 'session_meta', payload: { id: 'roll-m', timestamp: '2026-07-02T00:00:00Z' } },
+      { type: 'turn_context', payload: { model: 'gpt-5.6-sol' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: 'do it' } },
+      { type: 'response_item', payload: { type: 'message', role: 'assistant', content: 'done' } },
+    ]);
+    const trace = getTrace(db, importCodexRollout(db, path).trace!.id)!;
+    const msg = trace.steps.find((s) => s.name === 'assistant_message')!;
+    expect(msg.model).toBe('gpt-5.6-sol');
+  });
+
+  it('follows a model switch mid-session', () => {
+    // The model is PER TURN, not per session: a rollout that switches models
+    // says so on a later turn_context. Reading it once from the session would
+    // label every step with the first model, which is worse than labelling
+    // none -- a wrong model reads exactly like a right one.
+    const path = fixture([
+      { type: 'session_meta', payload: { id: 'roll-sw', timestamp: '2026-07-02T00:00:00Z' } },
+      { type: 'turn_context', payload: { model: 'gpt-5.6-sol' } },
+      { type: 'response_item', payload: { type: 'message', role: 'assistant', content: 'first' } },
+      { type: 'turn_context', payload: { model: 'gpt-5.6-mini' } },
+      { type: 'response_item', payload: { type: 'message', role: 'assistant', content: 'second' } },
+    ]);
+    const trace = getTrace(db, importCodexRollout(db, path).trace!.id)!;
+    const models = trace.steps.filter((s) => s.name === 'assistant_message').map((s) => s.model);
+    expect(models).toEqual(['gpt-5.6-sol', 'gpt-5.6-mini']);
+  });
+
+  it('leaves the model null before any turn_context, rather than backfilling', () => {
+    const path = fixture([
+      { type: 'session_meta', payload: { id: 'roll-none', timestamp: '2026-07-02T00:00:00Z' } },
+      { type: 'response_item', payload: { type: 'message', role: 'assistant', content: 'early' } },
+      { type: 'turn_context', payload: { model: 'gpt-5.6-sol' } },
+      { type: 'response_item', payload: { type: 'message', role: 'assistant', content: 'later' } },
+    ]);
+    const trace = getTrace(db, importCodexRollout(db, path).trace!.id)!;
+    const models = trace.steps.filter((s) => s.name === 'assistant_message').map((s) => s.model);
+    expect(models).toEqual([null, 'gpt-5.6-sol']);
+  });
+
+  it('counts a turn_context as imported, not skipped', () => {
+    // It supplies retained metadata rather than a step, which is exactly what
+    // `session_meta` does, and that is counted as imported. Tallying it as
+    // skipped would say the importer ignored a record it now uses, and the
+    // imported + skipped = records invariant has to keep holding.
+    const path = fixture([
+      { type: 'session_meta', payload: { id: 'roll-tally', timestamp: '2026-07-02T00:00:00Z' } },
+      { type: 'turn_context', payload: { model: 'gpt-5.6-sol' } },
+      { type: 'response_item', payload: { type: 'message', role: 'assistant', content: 'hi' } },
+    ]);
+    const report = importCodexRollout(db, path);
+    expect(report.imported + report.skipped).toBe(3);
+    expect(report.skipped).toBe(0);
+  });
+
+  it('ignores a turn_context that names no model', () => {
+    const path = fixture([
+      { type: 'session_meta', payload: { id: 'roll-empty', timestamp: '2026-07-02T00:00:00Z' } },
+      { type: 'turn_context', payload: { model: '' } },
+      { type: 'response_item', payload: { type: 'message', role: 'assistant', content: 'hi' } },
+    ]);
+    const report = importCodexRollout(db, path);
+    const trace = getTrace(db, report.trace!.id)!;
+    expect(trace.steps.find((s) => s.name === 'assistant_message')!.model).toBeNull();
+    expect(report.skipped).toBe(1); // it supplied nothing, so it is still skipped
+  });
+});

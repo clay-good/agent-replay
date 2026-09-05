@@ -328,6 +328,19 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **An imported Codex session recorded no model.** The same gap as the Claude
+  Code one below, in the sibling importer. A rollout states the model on a
+  `turn_context` record — verified against a real rollout on disk, at
+  `turn_context.payload.model` — and nothing read it, so the record was tallied
+  as skipped and the model was lost. It is read **per turn**, not once from the
+  session: a rollout that switches models mid-run says so on a later
+  `turn_context`, and labelling every step with the first model would be worse
+  than labelling none, since a wrong model reads exactly like a right one. A
+  step before any `turn_context` keeps a `null` model rather than backfilling.
+  A `turn_context` that supplies a model now counts as imported rather than
+  skipped, following `session_meta`, which also supplies retained metadata
+  rather than a step; one naming no model is still skipped.
+
 - **An imported Claude Code session recorded no model.** Every assistant record
   in a real transcript carries `message.model`, and it was read by nobody — so
   an imported session recorded which tools ran and what they cost, but not the

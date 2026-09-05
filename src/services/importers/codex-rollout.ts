@@ -154,6 +154,11 @@ export function importCodexRollout(
   };
   const steps: IngestStepInput[] = [];
   let stepNumber = 1;
+  // The model in force for the steps that follow. A rollout states it on a
+  // `turn_context` record rather than on each item, and it is PER TURN — a
+  // session that switches models mid-run says so here — so it is tracked as the
+  // loop advances rather than read once from the session.
+  let currentModel: string | undefined;
 
   for (const rec of records) {
     const type = recordType(rec);
@@ -169,6 +174,25 @@ export function importCodexRollout(
         if (it.cwd != null) metadata.cwd = it.cwd;
         if (it.git != null) metadata.git = it.git;
         contributed = true;
+        break;
+      }
+      case 'turn_context': {
+        // Real rollouts carry this and nothing read it, so an imported Codex
+        // session recorded no model at all — the same gap the claude-transcript
+        // importer had, and the reason `check --golden --fields model` could
+        // not gate an imported session on the one thing a model upgrade
+        // changes. Guarded as a non-empty string, not cast: this comes from a
+        // file on disk.
+        //
+        // Counted as imported, following `session_meta` directly above: a
+        // record that supplies retained metadata rather than a step is still a
+        // record this importer used. It was previously tallied as skipped,
+        // which said the importer had ignored it — and it now has not.
+        const m = str(it.model);
+        if (m) {
+          currentModel = m;
+          contributed = true;
+        }
         break;
       }
       case 'function_call':
@@ -256,7 +280,7 @@ export function importCodexRollout(
           contributed = text.trim().length > 0;
         } else if (role === 'assistant' && text) {
           lastAssistantText = text;
-          steps.push({ step_number: stepNumber++, step_type: 'output', name: 'assistant_message', output: { text } });
+          steps.push({ step_number: stepNumber++, step_type: 'output', name: 'assistant_message', output: { text }, model: currentModel });
           contributed = true;
         } else {
           // An empty or non-user/assistant message has no home in the current
