@@ -1902,11 +1902,6 @@ and one-way.
   `failed_critical` with no flag on the criterion itself. Every criterion that
   can fail a preset on its own now says so.
 
-- `ingest --dry-run` did not mention the eval results the real run reports it
-  cannot restore. `--dry-run` is the documented preview of the real run, so a
-  preview that omits the one thing the real run warns about is the surprise it
-  exists to prevent.
-
 - An import that captured nothing exited 0 and stored an empty trace. The
   "nothing importable" guard in both importers keyed on `!input`, but an empty
   first user record still sets the input to `{prompt: ''}`, which is truthy —
@@ -1926,13 +1921,6 @@ and one-way.
   `Number('')` is 0, which is an integer, so the blank string was the one input
   this check accepted where every sibling numeric option rejects it — so
   `--priority "$UNSET_VAR"` ranked a policy 0 rather than failing.
-
-- `ingest` now reports eval results it cannot restore. `export --with-evals`
-  writes an `evals` array that `ingest` has no field for, so on the documented
-  backup/restore path — for data the user explicitly opted in to keeping — the
-  evals were dropped with an exit 0 and no mention. Restoring them is a schema
-  change; saying they were dropped is not, and the traces themselves round-trip
-  faithfully.
 
 - `eval --json` now answers in JSON when a rubric or a deterministic preset
   throws while running. Both paths returned before the empty-results JSON
