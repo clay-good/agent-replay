@@ -328,6 +328,19 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **`why` rescanned the whole trace at every hop.** The causal walk falls back
+  to "the nearest earlier decision point" when a step carries no `caused_by` or
+  `parent`, and it found that by scanning every step — once per hop. That never
+  shows while a producer sets `caused_by`, since the walk then never reaches
+  the fallback, and it is quadratic the moment one does not: on a trace whose
+  steps all carry decisions and no causal links (the shape a hook-captured
+  session with `attachDecision` produces), the per-step cost doubled every time
+  the trace did — 4.5µs at 500 steps, 49.6µs at 10,000 — and the whole walk went
+  from 2.3ms to 495.7ms. The nearest earlier decision for every step is now
+  computed once, in a single pass, so the cost is flat at about 2µs per step at
+  any size; the same 10,000-step walk takes 21.9ms. The chain itself is
+  unchanged.
+
 - **`list` took about seven seconds to draw a large listing.** The query is
   flat — `--json --limit 10000` returns in roughly 0.13s — but the terminal
   table renderer costs time quadratic in its row count (measured on a bare

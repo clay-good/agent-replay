@@ -712,3 +712,67 @@ describe('a causal reference to a step that does not exist is not stored', () =>
     expect(dropped.join(' ')).toMatch(/parent_step -> step 1/);
   });
 });
+
+describe('the causal walk does not rescan the trace at every hop', () => {
+  // `resolveAntecedent`'s fallback — "the nearest earlier decision point" —
+  // scanned every step to find it, once per HOP. That is fine while a producer
+  // sets `caused_by`, since the walk never reaches the fallback, and quadratic
+  // the moment one does not. On a trace whose steps all carry decisions and no
+  // causal links (the shape a hook-captured session with `attachDecision`
+  // produces), the walk visits every step and rescanned every step at each one:
+  // measured through the CLI, 1,000 steps took 0.02s and 10,000 took 1.07s —
+  // ten times the data for fifty times the work, on the command whose whole job
+  // is explaining a step.
+  beforeEach(() => runMigrations(db));
+
+  function allDecisions(target: Database.Database, n: number): string {
+    const steps = Array.from({ length: n }, (_, i) => ({
+      step_number: i + 1,
+      step_type: 'decision' as const,
+      name: `d${i + 1}`,
+      decision: { chosen: 'a', options: [{ option: 'a' }, { option: 'b' }], decided_by: 'agent' as const },
+    }));
+    return ingestTrace(target, {
+      agent_name: 'walker', status: 'completed', input: {}, steps,
+    } as Parameters<typeof ingestTrace>[1]).id;
+  }
+
+  it('walks a long unlinked chain correctly', () => {
+    const id = allDecisions(db, 500);
+    const { chain } = causalWalk(db, id, 500)!;
+    // Every step is a decision point, so the walk steps back one at a time,
+    // all the way to the first.
+    expect(chain).toHaveLength(500);
+    expect(chain[0]).toMatchObject({ link: 'origin' });
+    expect(chain[0].step.step_number).toBe(500);
+    expect(chain[1]).toMatchObject({ link: 'prior_decision' });
+    expect(chain[1].step.step_number).toBe(499);
+    expect(chain[chain.length - 1].step.step_number).toBe(1);
+    // The decision on each hop is carried, which is what `why` renders.
+    expect(chain[0].decision?.chosen).toBe('a');
+  });
+
+  it('costs the same per step at twenty times the size', () => {
+    // A per-step RATIO, not a wall-clock budget, so the assertion means the
+    // same thing on any machine. Measured here: with the map, per-step cost is
+    // flat at ~2us from 500 to 10,000 steps; with the old rescan it doubled
+    // every time n doubled — 4.5us at 500, 49.6us at 10,000, and the whole walk
+    // went from 2.3ms to 495.7ms. So linear lands near 1x and the old
+    // quadratic near 10x; 3x separates them with room on both sides.
+    const small = allDecisions(db, 500);
+    const large = allDecisions(db, 10_000);
+
+    causalWalk(db, small, 500); // warm the query path
+    causalWalk(db, large, 10_000);
+
+    const t1 = performance.now();
+    expect(causalWalk(db, small, 500)!.chain).toHaveLength(500);
+    const perStepSmall = (performance.now() - t1) / 500;
+
+    const t2 = performance.now();
+    expect(causalWalk(db, large, 10_000)!.chain).toHaveLength(10_000);
+    const perStepLarge = (performance.now() - t2) / 10_000;
+
+    expect(perStepLarge).toBeLessThan(perStepSmall * 3);
+  }, 120_000);
+});

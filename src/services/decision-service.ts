@@ -63,6 +63,7 @@ export function causalWalk(
 
   const byNumber = new Map<number, TraceStep>();
   for (const step of trace.steps) byNumber.set(step.step_number, step);
+  const prevDecision = nearestEarlierDecisions(trace.steps);
 
   const start = byNumber.get(stepNumber);
   if (!start) {
@@ -78,7 +79,7 @@ export function causalWalk(
     visited.add(current.step_number);
     chain.push({ step: current, link, decision: current.decision ?? null });
 
-    const next = resolveAntecedent(current, byNumber);
+    const next = resolveAntecedent(current, byNumber, prevDecision);
     if (!next) break;
     current = next.step;
     link = next.link;
@@ -87,10 +88,38 @@ export function causalWalk(
   return { trace, chain };
 }
 
+/**
+ * For each step number, the nearest decision point strictly before it.
+ *
+ * Built once, in one ascending pass, because the walk below needs it once per
+ * HOP. Scanning every step to find it each time made `why` cost O(steps x hops)
+ * — fine while a producer sets `caused_by`, since the walk then never reaches
+ * the fallback, and quadratic the moment one does not. On a trace whose steps
+ * all carry decisions and no causal links (the shape a hook-captured session
+ * with `attachDecision` produces), the walk visits every step and rescanned
+ * every step at each one: 1,000 steps took 0.02s, 10,000 took 1.07s — 10x the
+ * data for 50x the work, on a command whose whole job is explaining a step.
+ *
+ * A decision point is a `decision`-type step OR any step carrying a decision
+ * record — the live recorder attaches records to steps of any type — mirroring
+ * listDecisions, so the walk doesn't skip past a real decision on a tool step.
+ */
+function nearestEarlierDecisions(steps: TraceStep[]): Map<number, TraceStep> {
+  const ascending = [...steps].sort((a, b) => a.step_number - b.step_number);
+  const nearest = new Map<number, TraceStep>();
+  let last: TraceStep | null = null;
+  for (const s of ascending) {
+    if (last) nearest.set(s.step_number, last);
+    if (s.step_type === 'decision' || s.decision != null) last = s;
+  }
+  return nearest;
+}
+
 /** Resolve the single antecedent of a step per the causal-walk rules. */
 function resolveAntecedent(
   step: TraceStep,
   byNumber: Map<number, TraceStep>,
+  prevDecision: Map<number, TraceStep>,
 ): { step: TraceStep; link: CausalLink } | null {
   if (step.caused_by_step_number != null) {
     const s = byNumber.get(step.caused_by_step_number);
@@ -100,15 +129,7 @@ function resolveAntecedent(
     const s = byNumber.get(step.parent_step_number);
     if (s) return { step: s, link: 'parent' };
   }
-  // Fallback: nearest earlier decision point. A decision point is a
-  // `decision`-type step OR any step carrying a decision record (the live
-  // recorder attaches records to steps of any type) — mirroring listDecisions,
-  // so the causal walk doesn't skip past a real decision on a tool/llm step.
-  let best: TraceStep | null = null;
-  for (const s of byNumber.values()) {
-    if ((s.step_type === 'decision' || s.decision != null) && s.step_number < step.step_number) {
-      if (!best || s.step_number > best.step_number) best = s;
-    }
-  }
+  // Fallback: the nearest earlier decision point, precomputed above.
+  const best = prevDecision.get(step.step_number) ?? null;
   return best ? { step: best, link: 'prior_decision' } : null;
 }
