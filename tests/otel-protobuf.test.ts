@@ -246,3 +246,64 @@ describe('Span.events decoding', () => {
     expect(traces[0].steps![0].error).toBeNull();
   });
 });
+
+describe('the decoder is safe on bytes it did not write', () => {
+  /**
+   * `/v1/traces` and `/v1/logs` accept `application/x-protobuf`, so this
+   * hand-written decoder is the first thing to touch a request body. A parser
+   * fed a length prefix it believes can allocate wildly or loop; one that
+   * throws something other than an Error escapes the receiver's catch and
+   * takes the server down instead of answering 400.
+   *
+   * The contract asserted here is the one the receiver relies on: for ANY
+   * bytes, the decoder either returns a plain object or throws an Error, and
+   * returns promptly either way.
+   */
+  function decodeSafely(fn: (b: Buffer) => unknown, buf: Buffer): 'returned' | 'threw' {
+    try {
+      const out = fn(buf);
+      expect(out === null || typeof out !== 'object' || Array.isArray(out)).toBe(false);
+      return 'returned';
+    } catch (err) {
+      // An Error, so `handleTracesExportProtobuf` turns it into a 400 rather
+      // than letting it reach the top-level handler.
+      expect(err).toBeInstanceOf(Error);
+      return 'threw';
+    }
+  }
+
+  it('handles four thousand random bodies without hanging or escaping', () => {
+    // Deterministic PRNG, so a failure is reproducible.
+    let seed = 12345;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed; };
+
+    const started = Date.now();
+    for (let i = 0; i < 4000; i++) {
+      const len = rnd() % 400;
+      const b = Buffer.alloc(len);
+      for (let j = 0; j < len; j++) b[j] = rnd() % 256;
+      decodeSafely(decodeTracesData, b);
+      decodeSafely(decodeLogsData, b);
+    }
+    // Measured at ~14 ms for these 8,000 decodes; a parser that started
+    // scanning on a bogus length would not come close.
+    expect(Date.now() - started).toBeLessThan(30_000);
+  }, 120_000);
+
+  it.each([
+    // A length prefix claiming more than the buffer holds, in several shapes —
+    // the classic way to make a hand-rolled parser allocate or run away.
+    ['a varint length near the 32-bit ceiling', Buffer.from([0x0a, 0xff, 0xff, 0xff, 0xff, 0x7f])],
+    ['a length that runs past the end', Buffer.from([0x0a, 0x64, 0x01])],
+    ['a truncated varint', Buffer.from([0x0a, 0xff])],
+    ['a zero-length field', Buffer.from([0x0a, 0x00])],
+    ['two hundred nested length prefixes', Buffer.concat(Array.from({ length: 200 }, () => Buffer.from([0x0a, 0x02])))],
+    ['five hundred 0xff bytes', Buffer.alloc(500, 0xff)],
+    ['an empty body', Buffer.alloc(0)],
+  ])('answers promptly on %s', (_label, buf) => {
+    const started = Date.now();
+    decodeSafely(decodeTracesData, buf);
+    decodeSafely(decodeLogsData, buf);
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+});
