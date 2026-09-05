@@ -245,6 +245,29 @@ describe('formatEnforcementResponse', () => {
     expect(r.exitCode).toBe(0);
     expect((r.stdout as any).systemMessage).toContain('heads up');
   });
+
+  // "warn never blocks" has to hold on EVERY dialect, not just the one that can
+  // carry the message. Where a harness has no non-blocking channel — Gemini's
+  // hooks are allow/deny only, and `other` is answered by exit code alone —
+  // warn must still be silent and still exit 0. A stray `decision` or a
+  // non-zero code here would turn an advisory policy into a block, which is
+  // exactly the difference between `warn` and `deny`.
+  it.each(['codex', 'gemini', 'other'] as const)('warn never blocks on %s either', (dialect) => {
+    const r = formatEnforcementResponse(dialect, warn, 'PreToolUse');
+    expect(r.exitCode).toBe(0);
+    // Nothing that any of these harnesses reads as a block.
+    const out = r.stdout as Record<string, unknown> | null;
+    expect(out?.decision).toBeUndefined();
+    expect((out?.hookSpecificOutput as { permissionDecision?: string } | undefined)?.permissionDecision)
+      .toBeUndefined();
+    if (dialect === 'codex') {
+      // Codex reads a systemMessage, so the operator still hears about it.
+      expect((out as { systemMessage?: string } | null)?.systemMessage).toContain('heads up');
+    } else {
+      // Gemini and `other` have no non-blocking channel; silence is the answer.
+      expect(out).toBeNull();
+    }
+  });
 });
 
 
