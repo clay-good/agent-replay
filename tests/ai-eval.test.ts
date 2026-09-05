@@ -1076,3 +1076,38 @@ describe('the AI eval surface holds up against a hostile or sloppy model reply',
   });
 });
 
+
+describe('diff --ai honors the configured output ceiling', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('sends the caller max_tokens, not a hardcoded 1024', async () => {
+    // Regression: `aiDiffAnalysis` passed a REQUEST-level `max_tokens: 1024`,
+    // and a request-level value overrides `opts.max_tokens` in callLlm — so
+    // `config set ai.max_tokens`, which is validated, stored, and honored by
+    // `eval --ai`, did nothing at all for `diff --ai`. A comparison with many
+    // differences then got a truncated reply, `extractJson` threw, and the
+    // fallback substituted `better_trace: "neither"` / "Could not parse
+    // structured response": a verdict the model never gave, billed in full,
+    // with no supported way to raise the ceiling.
+    const { aiDiffAnalysis } = await import('../src/services/diff-service.js');
+    const db = createTestDb();
+    const left = ingestTrace(db, makeTrace());
+    const right = ingestTrace(db, makeTrace({ status: 'completed', error: undefined }));
+
+    const fetchMock = vi.fn().mockResolvedValue(llmText(JSON.stringify({
+      explanation: 'e', better_trace: 'right', reasoning: 'r', key_differences: ['d'],
+    })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const opts = { provider: 'anthropic' as const, api_key: 'k', model: 'claude-haiku-4-5-20251001' };
+    await aiDiffAnalysis(db, left.id, right.id, { ...opts, max_tokens: 8192 });
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
+    expect(body.max_tokens).toBe(8192);
+
+    // With nothing configured, the historical ceiling still applies.
+    fetchMock.mockClear();
+    await aiDiffAnalysis(db, left.id, right.id, opts);
+    const plain = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body);
+    expect(plain.max_tokens).toBe(1024);
+  });
+});

@@ -316,6 +316,16 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **`diff --ai` ignored `ai.max_tokens`.** The setting is validated, stored,
+  priced by the cost estimate, and honored by `eval --ai` — but the diff path
+  sent a hard-coded `max_tokens: 1024` at the *request* level, which overrides
+  the client option, and the command never read the config value in the first
+  place. A comparison with many differences therefore got a truncated reply,
+  JSON extraction failed, and the fallback reported `better_trace: "neither"`
+  with "Could not parse structured response" — a verdict the model never gave,
+  billed in full, with no supported way to raise the ceiling. Both AI paths now
+  honor the configured value and share the same 1024 default.
+
 - **`export <trace-id> --format golden` silently exported nothing for a
   fork.** The golden path drops forks so that one stray fork on a shared store
   cannot poison a baseline gathered in bulk — but it applied that rule to a

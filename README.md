@@ -622,7 +622,7 @@ agent-replay config get ai.provider
 
 You can also set API keys via environment variables: `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `OPENAI_API_KEY`. Environment variables take priority over config file values.
 
-`ai.max_tokens` caps the judge's reply (default 1024) and is what the `--max-cost` estimate prices, so raising it raises both the ceiling and the quoted cost. `ai.model` is only applied to a provider it belongs to — a `claude-*` model is never sent to OpenAI.
+`ai.max_tokens` caps the model's reply on every AI path — `eval --ai` and `diff --ai` alike (default 1024) — and is what the `--max-cost` estimate prices, so raising it raises both the ceiling and the quoted cost. `ai.model` is only applied to a provider it belongs to — a `claude-*` model is never sent to OpenAI.
 
 `config set` refuses an **empty** value (exit `2`): a blank key was stored, then
 displayed as `***` by `config get` — looking set — while every check downstream

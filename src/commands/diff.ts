@@ -140,6 +140,10 @@ export async function runDiff(
         provider: resolved.provider,
         api_key: resolved.apiKey,
         model: resolved.model,
+        // Read the configured ceiling, as `eval` does. Without it this command
+        // never even looked at `ai.max_tokens`, so the setting was inert here
+        // whatever the service did with it.
+        max_tokens: config?.ai?.max_tokens,
       });
       successSpinner(spinner, 'AI analysis complete');
       return true;

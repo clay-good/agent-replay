@@ -4,7 +4,7 @@ import type { LlmClientOptions } from './llm-client.js';
 import { callLlm } from './llm-client.js';
 import { getTrace } from './trace-service.js';
 import { summarizeDiffForLlm } from './trace-summarizer.js';
-import { extractJson, fenceTraceContent, INJECTION_GUARD } from './eval-service.js';
+import { extractJson, fenceTraceContent, INJECTION_GUARD, DEFAULT_EVAL_MAX_TOKENS } from './eval-service.js';
 import { stableStringify } from './check-service.js';
 import { safeParseJson } from '../utils/json.js';
 
@@ -321,7 +321,15 @@ export async function aiDiffAnalysis(
     // reading "ignore previous instructions…" otherwise landed in instruction
     // position, and its answer was printed as this tool's verdict.
     prompt: `Analyze this trace comparison:\n\n${fenceTraceContent(summary.text)}`,
-    max_tokens: 1024,
+    // The caller's configured ceiling wins, exactly as on the eval path. A
+    // request-level `max_tokens` OVERRIDES `opts.max_tokens` in callLlm, so the
+    // hard 1024 here made `config set ai.max_tokens` — validated, stored, and
+    // honored by `eval --ai` — do nothing at all for `diff --ai`. A comparison
+    // with many differences then returned a truncated reply, `extractJson`
+    // threw, and the catch below substituted `better_trace: "neither"` with
+    // "Could not parse structured response": a verdict the model never gave,
+    // billed in full, with no supported way to raise the ceiling.
+    max_tokens: llmOpts.max_tokens ?? DEFAULT_EVAL_MAX_TOKENS,
   });
 
   let parsed: Record<string, unknown>;
