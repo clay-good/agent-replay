@@ -519,7 +519,7 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): MappedOtelTrace[] 
       // entirely, so a single-span trace recorded no model or provider at all.
       // The source keys are written last so they can't be shadowed.
       metadata: {
-        ...(root ? stepMetadata(root.attrs, root.spanId, root.parentSpanId) : {}),
+        ...(root ? stepMetadata(root.attrs, root.spanId, root.parentSpanId, true) : {}),
         source_format: 'otel-genai',
         otel_trace_id: group[0].traceId,
         ...(root ? {} : { synthetic_trace: true }),
@@ -566,7 +566,12 @@ function messageContent(a: Record<string, unknown>, dir: 'input' | 'output'): Re
   return out;
 }
 
-function stepMetadata(a: Record<string, unknown>, spanId: string, parentSpanId?: string): Record<string, unknown> {
+function stepMetadata(
+  a: Record<string, unknown>,
+  spanId: string,
+  parentSpanId?: string,
+  isRoot = false,
+): Record<string, unknown> {
   const meta: Record<string, unknown> = { otel_span_id: spanId };
   // The span's own spend, kept per step so a batch's contribution can be
   // recomputed from the steps actually retained. The trace-level total is the
@@ -584,13 +589,29 @@ function stepMetadata(a: Record<string, unknown>, spanId: string, parentSpanId?:
   if (provider) meta.provider = provider;
   // Preserve any gen_ai.* attributes we didn't explicitly map.
   for (const [k, v] of Object.entries(a)) {
-    if (k.startsWith('gen_ai.') && !CONSUMED.has(k)) meta[k] = v;
+    if (!k.startsWith('gen_ai.') || CONSUMED.has(k)) continue;
+    // `gen_ai.agent.name` is consumed only from the ROOT span, where it becomes
+    // the trace's `agent_name`. On any other span it is consumed by nobody, and
+    // listing it in CONSUMED dropped it there entirely — neither used nor kept.
+    //
+    // That is a real loss in exactly the case this mapper goes out of its way
+    // to support. A multi-agent trace has nested `invoke_agent` spans, each
+    // naming its own sub-agent, and the grouping above deliberately keeps them
+    // ("every other span — including nested agent/workflow roots — becomes a
+    // step, so nothing is dropped"). The sub-agent's NAME was the one thing
+    // dropped, so a step recorded no record of which agent ran it. It survived
+    // only when the producer happened to repeat the name in the span name
+    // ("invoke_agent researcher"); a span named plainly "invoke_agent" lost it.
+    if (k === 'gen_ai.agent.name' && isRoot) continue;
+    meta[k] = v;
   }
   return meta;
 }
 
 const CONSUMED = new Set([
-  'gen_ai.operation.name', 'gen_ai.agent.name', 'gen_ai.conversation.id', 'gen_ai.tool.name',
+  // `gen_ai.agent.name` is deliberately NOT here: it is consumed only on the
+  // root span, and stepMetadata skips it there via its `isRoot` flag.
+  'gen_ai.operation.name', 'gen_ai.conversation.id', 'gen_ai.tool.name',
   'gen_ai.request.model', 'gen_ai.response.model', 'gen_ai.provider.name', 'gen_ai.system',
   'gen_ai.usage.input_tokens', 'gen_ai.usage.output_tokens', 'gen_ai.usage.prompt_tokens',
   'gen_ai.usage.completion_tokens', 'gen_ai.input.messages', 'gen_ai.output.messages',

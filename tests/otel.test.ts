@@ -1097,3 +1097,73 @@ describe('a span id repeated inside one batch is a redelivery too', () => {
     expect(t.steps).toHaveLength(2);
   });
 });
+
+describe('a nested agent span keeps its own gen_ai.agent.name', () => {
+  // A multi-agent trace has nested `invoke_agent` spans, each naming its own
+  // sub-agent. The grouping deliberately keeps them -- "every other span,
+  // including nested agent/workflow roots, becomes a step, so nothing is
+  // dropped" -- but `gen_ai.agent.name` sat in the CONSUMED list, which exists
+  // to stop metadata duplicating what a column already holds. It is consumed
+  // only from the ROOT span, where it becomes the trace's `agent_name`. On any
+  // other span nobody consumed it and CONSUMED still dropped it, so a step
+  // carried no record of which agent ran it.
+  const T = '3af7651916cd43dd8448eb211c80319c';
+  const multiAgent = () => otlp([
+    span({
+      traceId: T, spanId: 'e7ad6b7169203331', name: 'invoke_agent',
+      start: 1767225700000000000, end: 1767225706000000000,
+      attrs: { 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'orchestrator' },
+    }),
+    span({
+      traceId: T, spanId: 'e7ad6b7169203332', parentSpanId: 'e7ad6b7169203331',
+      name: 'invoke_agent', // deliberately NOT "invoke_agent researcher"
+      start: 1767225701000000000, end: 1767225704000000000,
+      attrs: { 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'researcher' },
+    }),
+  ]);
+
+  it('preserves the sub-agent name on the step', () => {
+    // The span NAME is deliberately the bare operation here. A producer that
+    // repeats the agent in the span name ("invoke_agent researcher") kept the
+    // value incidentally, through the step name -- which is what made the loss
+    // easy to miss.
+    const [trace] = mapOtlpTraces(multiAgent());
+    expect(trace.steps).toHaveLength(1);
+    expect(trace.steps[0].metadata).toMatchObject({ 'gen_ai.agent.name': 'researcher' });
+  });
+
+  it('still names the trace from the root, and does not duplicate it in metadata', () => {
+    // The root's copy IS consumed -- it becomes agent_name -- so it must stay
+    // out of the metadata bag, which is the rule CONSUMED exists to enforce.
+    const [trace] = mapOtlpTraces(multiAgent());
+    expect(trace.agent_name).toBe('orchestrator');
+    expect(trace.metadata).not.toHaveProperty('gen_ai.agent.name');
+  });
+
+  it('keeps every other consumed key out of step metadata', () => {
+    // Guards the narrowness of the change: only agent.name moved, and only for
+    // non-root spans. A model or conversation id is consumed on EVERY span, so
+    // neither should appear in the bag.
+    const [trace] = mapOtlpTraces(otlp([
+      span({
+        traceId: T, spanId: 'e7ad6b7169203341', name: 'invoke_agent',
+        start: 1767225700000000000, end: 1767225706000000000,
+        attrs: { 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'orchestrator' },
+      }),
+      span({
+        traceId: T, spanId: 'e7ad6b7169203342', parentSpanId: 'e7ad6b7169203341', name: 'chat',
+        start: 1767225701000000000, end: 1767225704000000000,
+        attrs: {
+          'gen_ai.operation.name': 'chat', 'gen_ai.request.model': 'claude-opus-5',
+          'gen_ai.conversation.id': 'conv-1', 'gen_ai.custom.thing': 'kept',
+        },
+      }),
+    ]));
+    const meta = trace.steps[0].metadata as Record<string, unknown>;
+    expect(meta).not.toHaveProperty('gen_ai.request.model');
+    expect(meta).not.toHaveProperty('gen_ai.conversation.id');
+    expect(meta).toMatchObject({ 'gen_ai.custom.thing': 'kept' }); // unmapped keys still kept
+    expect(trace.steps[0].model).toBe('claude-opus-5');
+    expect(trace.session_id).toBe('conv-1');
+  });
+});

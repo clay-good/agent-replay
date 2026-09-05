@@ -328,6 +328,19 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **A nested agent span lost its own `gen_ai.agent.name`.** In a multi-agent
+  trace each `invoke_agent` span names its own sub-agent, and the OTel mapper
+  deliberately keeps those nested spans as steps so nothing is dropped. But
+  `gen_ai.agent.name` sat in the list of attributes excluded from step metadata
+  — a list that exists to stop metadata duplicating what a column already holds.
+  It is consumed only from the ROOT span, where it becomes the trace's
+  `agent_name`; on any other span nobody consumed it and it was dropped anyway,
+  so a step carried no record of which agent ran it. It survived only when the
+  producer happened to repeat the name in the span name (`invoke_agent
+  researcher`), which is what made the loss easy to miss — a span named plainly
+  `invoke_agent` lost it outright. A non-root span now keeps the attribute in
+  its metadata; the root still does not, since there it is the agent name.
+
 - **`export` reported where it wrote, never how much.** The one number that
   reveals a filter typo was the one number missing: `export --agent
   no-such-agent --output backup.json` announced `Exported to
