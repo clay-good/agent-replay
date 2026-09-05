@@ -330,6 +330,8 @@ agent-replay list --session <session-id>
 
 `why` follows each step's `caused_by_step`, falling back to `parent_step` and then to the nearest earlier decision, printing the chosen option and rationale at each decision hop. Both commands accept `--json`.
 
+A chain is only as deep as the causal links the producer actually recorded, so a short one is an honest answer rather than a broken command. `caused_by_step` is the strongest link and has to be set deliberately: the SDK and the native `record` protocol both accept it, and `hook --enforce` sets it on the `guard_check` step it writes, pointing at the tool call that step evaluated. Otherwise each source contributes what it has. An **imported** transcript carries tool pairing and subagent nesting, so `why` on a subagent's step steps back to the subagent that ran it, while a step with no parent reports a chain of one — imported sessions carry no decisions at all, so there is nothing to fall back to. A **hook-captured** session gets its depth from decisions you attach with `attachDecision`. An **OpenTelemetry** trace gets it from span parentage. If you want deep chains out of your own agent, set `caused_by_step` when you emit each step.
+
 ### Replay
 
 ```bash
