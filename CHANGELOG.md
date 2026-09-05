@@ -336,6 +336,18 @@ and one-way.
 
 ### Fixed
 
+- **`--json` silently ignored the flags that only shape the human view.**
+  `show --json --steps-only`, `show --json --tree` and `diff --json --compact`
+  each produced a document byte-for-byte identical to one without the flag, and
+  said nothing — so a caller who asked for just the steps, a hierarchy, or a
+  smaller payload got the full document and no way to tell. Nothing a JSON
+  document could do would honour them, unlike `--evals` and `--snapshots`,
+  which name data the payload carries (and neither is flagged, since the data
+  is there). Each now says which flag did nothing, on stderr, so the document
+  on stdout is untouched. `show` also points at `parent_step_number` and
+  `caused_by_step_number`, which are in `steps` and let a consumer rebuild the
+  tree `--tree` would have drawn.
+
 - **`show --json --snapshots` returned no snapshots.** `--snapshots` reached
   the human path only, so the JSON document had no `snapshots` key at all —
   exit `0`, no warning, and `jq .snapshots` null forever, while the very same

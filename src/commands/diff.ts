@@ -157,6 +157,17 @@ export async function runDiff(
 
   // Raw JSON output
   if (opts.json) {
+    // `--compact` selects a summary PANEL over the full rendered comparison; it
+    // shapes the human view alone, and the JSON document is the same either
+    // way. Passing both was silently identical to passing neither, so a caller
+    // asking for a smaller payload got the full one with no word of it. The
+    // same rule `--with-evals --format golden` and `--steps-only --evals`
+    // already follow: name the flag that did nothing. On stderr, so the
+    // document on stdout is untouched.
+    if (opts.compact) {
+      console.error(chalk.yellow('  ⚠ --compact has no effect with --json.'));
+      console.error(chalk.dim('    --json always writes the full document; --compact only shapes the human view.'));
+    }
     if (opts.ai && !(await analyzeWithAi())) return;
     // Say what was compared. The document carried a `diffs` array and a count
     // with no record of the scope, so `--fields model --json` reporting three

@@ -398,3 +398,38 @@ describe('show --json carries the snapshots it was asked for', () => {
     expect(snapshots.map((s) => s.step_number)).toEqual([3]);
   });
 });
+
+describe('show says when a render flag does nothing under --json', () => {
+  // `--steps-only` and `--tree` shape the human view only: the JSON document is
+  // the whole trace either way, so passing them with `--json` produced a payload
+  // identical to one without them, silently. Unlike `--evals`/`--snapshots`,
+  // which name data the payload can carry, nothing in a JSON document could
+  // honour these two -- so the honest answer is to say the flag did nothing.
+  it('warns for --steps-only and --tree, with plural agreement', async () => {
+    await runShow(id, { dir, json: true, stepsOnly: true, tree: true });
+    expect(stderr()).toMatch(/--steps-only and --tree have no effect with --json/);
+    err.length = 0;
+    await runShow(id, { dir, json: true, tree: true });
+    expect(stderr()).toMatch(/--tree has no effect with --json/);
+  });
+
+  it('says nothing when --json is used on its own', async () => {
+    // The cry-wolf guard: the warning must key off the flags actually given.
+    await runShow(id, { dir, json: true });
+    expect(stderr()).not.toMatch(/no effect/);
+  });
+
+  it('does not warn for the flags --json genuinely honours', async () => {
+    // `--snapshots` is carried in the payload and `evals` is always present, so
+    // neither is inert -- flagging them would send the reader looking for data
+    // that is right there.
+    await runShow(id, { dir, json: true, snapshots: true, evals: true });
+    expect(stderr()).not.toMatch(/no effect/);
+  });
+
+  it('keeps the warning off stdout, so the document still parses', async () => {
+    await runShow(id, { dir, json: true, tree: true });
+    expect(stdout()).not.toMatch(/no effect/);
+    expect(() => JSON.parse(out.join('\n'))).not.toThrow();
+  });
+});

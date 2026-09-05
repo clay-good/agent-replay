@@ -91,6 +91,20 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
   // silently a subset, indistinguishable from a trace that really has that many
   // steps. Additive: an unwindowed `show --json` is byte-for-byte unchanged.
   if (opts.json) {
+    // `--steps-only` and `--tree` shape the HUMAN view only — the JSON document
+    // is the whole trace, in document order, either way — so passing them with
+    // `--json` got a payload identical to one without them, silently. Unlike
+    // `--evals` and `--snapshots`, which name DATA the payload can carry (and
+    // now does), there is nothing a JSON document could do to honour these two,
+    // so the honest answer is to say the flag did nothing rather than let the
+    // caller believe the output was narrowed or re-ordered on their behalf.
+    // On stderr, so a `--json` stdout stays a clean document.
+    const inertFlags = [opts.stepsOnly && '--steps-only', opts.tree && '--tree'].filter(Boolean) as string[];
+    if (inertFlags.length > 0) {
+      const inert = inertFlags.join(' and ');
+      console.error(chalk.yellow(`  ⚠ ${inert} ${inertFlags.length === 1 ? 'has' : 'have'} no effect with --json.`));
+      console.error(chalk.dim('    --json prints the whole trace; `steps` carries parent_step_number and caused_by_step_number to rebuild the tree.'));
+    }
     const base = omitted > 0
       ? { ...trace, steps: windowed, step_window: { from: fromStep ?? null, to: toStep ?? null, shown: windowed.length, omitted } }
       : trace;

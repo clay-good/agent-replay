@@ -134,3 +134,33 @@ describe('diff renders for a human', () => {
     expect(process.exitCode).toBe(0);
   });
 });
+
+describe('diff says when --compact does nothing under --json', () => {
+  // `--compact` selects a summary panel over the full rendered comparison: it
+  // shapes the human view alone, and the JSON document is the same either way.
+  // Passing both was silently identical to passing neither, so a caller asking
+  // for a smaller payload got the full one with no word of it.
+  it('warns that --compact has no effect with --json', async () => {
+    await runDiff(a, b, { dir, json: true, compact: true });
+    expect(noAnsi(err.join('\n'))).toMatch(/--compact has no effect with --json/);
+  });
+
+  it('says nothing for --json or --compact on their own', async () => {
+    // The cry-wolf guard, on both sides: --compact is the whole point of the
+    // human summary view, and must not warn there.
+    await runDiff(a, b, { dir, json: true });
+    expect(noAnsi(err.join('\n'))).not.toMatch(/no effect/);
+    err.length = 0;
+    await runDiff(a, b, { dir, compact: true });
+    expect(noAnsi(err.join('\n'))).not.toMatch(/no effect/);
+  });
+
+  it('keeps the warning off stdout and the document intact', async () => {
+    await runDiff(a, b, { dir, json: true, compact: true });
+    expect(noAnsi(out.join('\n'))).not.toMatch(/no effect/);
+        // The document is the full one, unchanged by --compact -- which is exactly
+    // why the warning is warranted.
+    expect(doc()).toHaveProperty('diffs');
+    expect(doc()).toHaveProperty('left_step_count', 2);
+  });
+});
