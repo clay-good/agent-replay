@@ -10,7 +10,7 @@ import { stepIcon, stepLabel, heading, separator, colors, safeText, safeLine } f
 
 import { errorMessage, truncate, hasRenderableContent } from '../utils/json.js';
 import { formatDuration } from '../utils/time.js';
-import { resolveDataDir } from '../utils/paths.js';
+import { resolveDataDir, storeExists } from '../utils/paths.js';
 
 export interface ReplayOptions {
   speed?: string;
@@ -29,6 +29,17 @@ export async function runReplay(
   opts: ReplayOptions = {},
 ): Promise<void> {
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
+  // Refused, not created: `ensureDatabase` CREATES what it does not find, so
+  // this wrote an empty store nobody asked for and then reported "Trace not
+  // found" — naming the wrong problem, since the real one is a wrong working
+  // directory or a missing --dir. Same rule as the read commands that share
+  // `openStoreOr`, and as `guard check`.
+  if (!storeExists(resolveDataDir(opts.dir))) {
+    console.error(chalk.red(`  No trace store at ${dbPath}.`));
+    console.error(chalk.dim('  Run "agent-replay init" in the project directory, or pass --dir <path>.'));
+    process.exitCode = 2;
+    return;
+  }
   const db = ensureDatabase(dbPath);
 
   const trace = getTrace(db, traceId);

@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import chalk from 'chalk';
+import { existsSync } from 'node:fs';
 
 /**
  * A refusal answered in the shape the caller asked for.
@@ -29,7 +30,7 @@ export function makeRefuse(json: boolean | undefined) {
 }
 
 /**
- * Open the store, answering a failure in the caller's requested shape.
+ * Open the store for READING, answering a failure in the caller's shape.
  *
  * Opening happens before any command's own try block, so an unopenable store —
  * a corrupt file, a permissions problem, or a schema written by a NEWER build
@@ -48,6 +49,25 @@ export function openStoreOr(
   open: () => Database.Database,
   dbPath: string,
 ): Database.Database | undefined {
+  // A store that is not there is refused, not created. Every caller of this
+  // helper only READS, but they all open with `ensureDatabase`, which CREATES
+  // what it does not find — so running any of them from a directory without a
+  // store wrote a 143 KB SQLite file that nobody asked for and then answered
+  // from it: `list` printed "No traces found" at exit 0, and `show`/`why`
+  // reported "Trace not found". Both name the wrong problem. The real one is
+  // almost always a wrong working directory or a missing `--dir`, and the
+  // answer conceals it — worse, it conceals it permanently, because the second
+  // run finds a store that now genuinely exists and is genuinely empty.
+  //
+  // This is the rule `guard check` and `hook --enforce` already apply, for the
+  // same reason and in the same words; creating a store is what `init` is for.
+  if (!existsSync(dbPath)) {
+    refuse(2, `No trace store at ${dbPath}.`, [
+      'Run "agent-replay init" in the project directory to create one,',
+      'or point this command at an existing store with --dir <path>.',
+    ]);
+    return undefined;
+  }
   try {
     return open();
   } catch (err) {

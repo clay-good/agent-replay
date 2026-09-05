@@ -31,6 +31,17 @@ Two things to know before upgrading:
   `npm install -g agent-replay` failed at install time on Node 24 and newer.
   The dependency moved to a version with prebuilt binaries for Node 20 through
   26, and CI now tests all four.
+- **A read command run where there is no store now refuses (exit `2`)
+  instead of creating one.** `list`, `show`, `why`, `decisions`, `stats`,
+  `diff`, `eval`, `export`, `fork` and `replay` all opened the store with a
+  call that CREATES what it does not find, so running any of them from the
+  wrong directory wrote a ~143 KB SQLite file nobody asked for and then
+  answered from it — `list` said "No traces found" at exit `0`. That names the
+  wrong problem, and it conceals it permanently, because the next run finds a
+  store that now genuinely exists and is genuinely empty. `guard check` and
+  `hook --enforce` already refused for exactly this reason. Creating a store is
+  what `init` is for; an empty store that really exists still answers normally.
+
 - **A few commands now refuse input they used to accept**, always where
   accepting it produced a silently wrong answer rather than an error: an empty
   value for a narrowing flag on `list`, `export`, `check` or `config set` (which

@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import BetterSqlite3 from 'better-sqlite3';
-import { mkdtempSync, rmSync, statSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync, mkdirSync, writeFileSync, chmodSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runMigrations } from '../src/db/migrations.js';
@@ -552,5 +552,79 @@ describe('a store from a newer build is refused, not half-read', () => {
 
   it('still opens a store at the current version', () => {
     expect(() => runMigrations(db)).not.toThrow();
+  });
+});
+
+describe('a read-only command refuses a missing store instead of creating one', () => {
+  // Regression: every read command opened with `ensureDatabase`, which CREATES
+  // what it does not find. Run from a directory without a store, each wrote a
+  // ~143 KB SQLite file nobody asked for and then answered from it — `list`
+  // printed "No traces found" at exit 0, `show`/`why` reported "Trace not
+  // found". Both name the wrong problem: the real one is almost always a wrong
+  // working directory or a missing --dir. Worse, the answer conceals it
+  // permanently, because the next run finds a store that now genuinely exists
+  // and is genuinely empty. `guard check` and `hook --enforce` already applied
+  // this rule; creating a store is what `init` is for.
+  let dir: string;
+  let out: string[];
+  let err: string[];
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let errSpy: ReturnType<typeof vi.spyOn>;
+  let prevExit: typeof process.exitCode;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ar-nostore-'));
+    out = []; err = [];
+    logSpy = vi.spyOn(console, 'log').mockImplementation((m?: unknown) => { out.push(String(m)); });
+    errSpy = vi.spyOn(console, 'error').mockImplementation((m?: unknown) => { err.push(String(m)); });
+    prevExit = process.exitCode;
+    process.exitCode = 0;
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+    errSpy.mockRestore();
+    process.exitCode = prevExit;
+    resetConnection();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const noAnsi = (s: string) => s.replace(/\x1B\[[0-9;]*m/g, '');
+  const storeWritten = () => existsSync(join(dir, 'traces.db'));
+
+  it.each([
+    ['list', async (d: string) => (await import('../src/commands/list.js')).runList({ dir: d })],
+    ['show', async (d: string) => (await import('../src/commands/show.js')).runShow('trc_x', { dir: d })],
+    ['why', async (d: string) => (await import('../src/commands/why.js')).runWhy('trc_x', { step: '1', dir: d })],
+    ['decisions', async (d: string) => (await import('../src/commands/decisions.js')).runDecisions('trc_x', { dir: d })],
+    ['stats', async (d: string) => (await import('../src/commands/stats.js')).runStats({ dir: d })],
+    ['diff', async (d: string) => (await import('../src/commands/diff.js')).runDiff('trc_a', 'trc_b', { dir: d })],
+    ['eval', async (d: string) => (await import('../src/commands/eval.js')).runEvalCommand('trc_x', { dir: d })],
+    ['export', async (d: string) => (await import('../src/commands/export.js')).runExport(undefined, { dir: d })],
+    ['fork', async (d: string) => (await import('../src/commands/fork.js')).runFork('trc_x', { fromStep: '1', dir: d })],
+    ['replay', async (d: string) => (await import('../src/commands/replay.js')).runReplay('trc_x', { dir: d })],
+  ])('%s says so, exits 2, and writes nothing', async (_name, run) => {
+    await run(dir);
+    expect(process.exitCode).toBe(2);
+    expect(noAnsi([...err, ...out].join('\n'))).toMatch(/No trace store at/);
+    expect(storeWritten()).toBe(false);
+  });
+
+  it('answers in JSON when the caller asked for JSON', async () => {
+    const { runShow } = await import('../src/commands/show.js');
+    await runShow('trc_x', { dir, json: true });
+    const doc = JSON.parse(noAnsi(out.join('\n')));
+    expect(doc.ok).toBe(false);
+    expect(doc.error).toMatch(/No trace store at/);
+    expect(process.exitCode).toBe(2);
+  });
+
+  it('still reads a store that exists, including an empty one', async () => {
+    ensureDatabase(join(dir, 'traces.db'));
+    const { runList } = await import('../src/commands/list.js');
+    await runList({ dir });
+    // An empty store is a real answer, not a refusal: exit 0, "no traces".
+    expect(process.exitCode).toBe(0);
+    expect(noAnsi(out.join('\n'))).toMatch(/No traces found/);
   });
 });
