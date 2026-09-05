@@ -539,10 +539,12 @@ filter, and blocking every step would be worse than the misconfiguration.
 **`output_contains` cannot block live.** Enforcement evaluates a *proposed* tool
 call — before it runs, so it has no output yet — and every match key in a pattern
 must match. A `deny` or `require_review` keyed on `output_contains` therefore
-never fires under `hook --enforce`, no matter how it looks in `guard list`. It
-still matches in post-hoc evaluation (`guard test`, and `guard check` on a
-recorded step), so it is a useful auditing pattern, not a blocking one; `guard
-add` warns when you write one as a blocking policy.
+never fires under `hook --enforce`. It still matches in post-hoc evaluation
+(`guard test`, and `guard check` on a recorded step), so it is a useful auditing
+pattern, not a blocking one. Both `guard add` and `guard list` say so — the
+first when you write one, the second every time you audit, naming the policies,
+because a listing that shows `DENY / Enabled: Yes` otherwise reads as an armed
+kill switch and the add-time warning is long gone by then.
 
 **The most restrictive match wins.** When several policies match one step, the
 verdict is the strictest of them — `deny` over `require_review` over `warn` over

@@ -2346,3 +2346,40 @@ describe('the unmatched refusal names the remedy that actually works', () => {
     expect(r.stderr).not.toContain('recorded no input');
   });
 });
+
+describe('guard list flags a blocking policy that cannot block', () => {
+  // A `deny` policy matching on OUTPUT can never fire during enforcement --
+  // that runs before a tool call, when there is no output yet. `guard add`
+  // says so when the policy is written, but that warning scrolls away, and the
+  // table is the durable record: it shows DENY / Enabled: Yes, which reads as
+  // an armed kill switch however inert it is. Anyone auditing an inherited
+  // store, or their own a month later, sees only the table.
+  const add = (name: string, pattern: string, action: string) =>
+    run(['guard', 'add', '--name', name, '--pattern', pattern, '--action', action]);
+
+  it('names the inert policy in the listing', () => {
+    expect(add('leak-guard', '{"step_type":"tool_call","output_contains":"SECRET"}', 'deny').code).toBe(0);
+    const listed = run(['guard', 'list']);
+    expect(listed.code).toBe(0);
+    expect(listed.stdout).toContain('cannot block live');
+    expect(listed.stdout).toContain('leak-guard'); // by name, so it can be acted on
+  });
+
+  it('says nothing when every blocking policy can actually fire', () => {
+    // The guard against crying wolf: a pre-tool pattern is exactly what
+    // enforcement can evaluate.
+    expect(add('normal-guard', '{"step_type":"tool_call","name_contains":"rm"}', 'deny').code).toBe(0);
+    const listed = run(['guard', 'list']);
+    expect(listed.stdout).toContain('normal-guard');
+    expect(listed.stdout).not.toContain('cannot block live');
+  });
+
+  it('leaves a warn policy alone, since it is not claiming to block', () => {
+    // `warn` on output is a legitimate post-hoc rule -- `guard test` and
+    // recorded traces both evaluate it -- so flagging it would be noise.
+    expect(add('warnonly', '{"step_type":"tool_call","output_contains":"x"}', 'warn').code).toBe(0);
+    const listed = run(['guard', 'list']);
+    expect(listed.stdout).toContain('warnonly');
+    expect(listed.stdout).not.toContain('cannot block live');
+  });
+});

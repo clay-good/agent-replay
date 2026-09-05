@@ -51,6 +51,29 @@ export function runGuardList(opts: GuardListOptions = {}): void {
   console.log('');
   console.log(policyTable(policies));
   console.log('');
+
+  // A blocking policy that matches on OUTPUT cannot block live, and this is the
+  // view where that has to be visible. `guard add` says so at the moment it is
+  // written — but that warning scrolls away, and the table is the durable
+  // record: it shows `DENY / Enabled: Yes`, which reads as an armed kill switch
+  // however inert it is against a live tool call. Anyone auditing an inherited
+  // store, or their own store a month later, sees only the table.
+  //
+  // Listed by name rather than flagged with a column, so the table's shape
+  // stays as it is; the explanation is the same one `guard add` gives.
+  // Enabled state is deliberately not part of the test: enabling one of these
+  // later would not make it block either.
+  const inert = policies.filter(
+    (p) => (p.action === 'deny' || p.action === 'require_review')
+      && (p.match_pattern as { output_contains?: unknown } | null)?.output_contains != null,
+  );
+  if (inert.length > 0) {
+    const names = inert.map((p) => p.name).join(', ');
+    console.log(chalk.yellow(`  ⚠ ${inert.length} blocking ${inert.length === 1 ? 'policy matches' : 'policies match'} on output, so ${inert.length === 1 ? 'it cannot' : 'they cannot'} block live: ${names}`));
+    console.log(chalk.dim('    Enforcement runs before a tool call, when there is no output yet;'));
+    console.log(chalk.dim(`    ${inert.length === 1 ? 'it still matches' : 'they still match'} in \`guard test\` and recorded traces.`));
+    console.log('');
+  }
 }
 
 // ── guard add ────────────────────────────────────────────────────────────

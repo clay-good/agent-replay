@@ -328,6 +328,21 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **`guard list` showed a kill switch that cannot fire as an armed one.** A
+  `deny` (or `require_review`) policy matching on `output_contains` can never
+  block during enforcement — that runs *before* a tool call, when there is no
+  output yet. `guard add` warns about this at the moment the policy is written,
+  and the listing said nothing: the row reads `DENY / Enabled: Yes`, which is
+  indistinguishable from a policy that really does block. The add-time warning
+  scrolls away; the table is the durable record, and it is what anyone auditing
+  an inherited store — or their own a month later — actually looks at. The
+  listing now names those policies, with the same explanation `guard add`
+  gives. It stays quiet when every blocking policy can genuinely fire, and
+  leaves `warn` policies alone, since a `warn` on output is a legitimate
+  post-hoc rule that `guard test` and recorded traces both evaluate. Enabled
+  state is deliberately not part of the test: enabling one of these later would
+  not make it block either.
+
 - **The fail-closed guardrail refusal told you to add a policy when you already
   had one.** `guard check` and `hook --enforce` both refuse a store with no
   *enabled* policy — a gate that cannot fire — and both said "add one with
