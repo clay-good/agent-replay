@@ -288,7 +288,7 @@ agent-replay show <trace-id> --tree
 agent-replay show <trace-id> --from-step 100 --to-step 150
 ```
 
-A windowed `show --json` carries a `step_window` object (`from`, `to`, `shown`, `omitted`) so a consumer can tell a subset from a whole trace; an unwindowed one has no such field.
+A `show --json` whose window actually left steps out carries a `step_window` object (`from`, `to`, `shown`, `omitted`) so a consumer can tell a subset from a whole trace. The field marks a SUBSET, not the presence of the flags: a window that omits nothing — `--from-step 1 --to-step 3` on a three-step trace — returns the whole trace and no such field, exactly as an unwindowed call does, because in both cases what you have is everything.
 
 Trace IDs support prefix matching — just type the first few characters. A prefix that matches more than one trace is an error naming the candidates, not a silent pick, so a command never answers about (or, in `fork`'s case, writes from) a trace you did not name.
 

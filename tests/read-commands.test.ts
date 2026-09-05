@@ -95,6 +95,22 @@ describe('show', () => {
     expect(doc().steps).toHaveLength(4);
   });
 
+  it('omits the window key when the window left nothing out', async () => {
+    // `step_window` marks a SUBSET, not the presence of the flags. A window
+    // that happens to cover the whole trace returns the whole trace, so a
+    // consumer reading the key to tell "is this everything?" gets the same
+    // answer it gets for an unwindowed call -- which is the true one.
+    //
+    // Worth pinning because the obvious "simplification" is to attach the key
+    // whenever --from-step/--to-step is passed, which would make the key mean
+    // "flags were used" instead of "steps are missing" and quietly break the
+    // one question it exists to answer. The README claimed the flag-based rule
+    // until this case was actually run.
+    await runShow(id, { dir, json: true, fromStep: '1', toStep: '4' });
+    expect(doc().steps).toHaveLength(4);
+    expect(doc().step_window).toBeUndefined();
+  });
+
   it.each([
     ['a non-integer --from-step', { fromStep: 'two' }, /Invalid --from-step/],
     ['--to-step below 1', { toStep: '0' }, /Invalid --to-step/],
