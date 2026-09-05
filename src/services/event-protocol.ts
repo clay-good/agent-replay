@@ -1,7 +1,7 @@
 import type { IngestDecisionInput, IngestSnapshotInput } from '../models/types.js';
 import { STEP_TYPES, TRACE_STATUSES } from '../models/enums.js';
 import { decisionOptionProblem, isValidConfidence } from '../utils/validators.js';
-import { escapeForMessage } from '../utils/json.js';
+import { escapeForMessage, truncate } from '../utils/json.js';
 
 /**
  * Versioned JSONL event protocol for incremental trace capture.
@@ -451,5 +451,7 @@ function preview(s: string): string {
   // escaped here and NOT in the renderer, deliberately: a preview is one line,
   // and a raw newline in it forges a second.
   const safe = escapeForMessage(s);
-  return safe.length > 60 ? `${safe.slice(0, 57)}...` : safe;
+  // Surrogate-safe: this quotes a producer's own bytes back at the operator,
+  // and a bare slice can cut an astral character in half.
+  return truncate(safe, 60);
 }

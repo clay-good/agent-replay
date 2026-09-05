@@ -3,6 +3,7 @@ import { readJsonlLines } from './jsonl-reader.js';
 import { basename } from 'node:path';
 import { ingestTrace } from '../trace-service.js';
 import { selectPrompt } from './user-turns.js';
+import { truncate } from '../../utils/json.js';
 import type { IngestTraceInput, IngestStepInput, Trace } from '../../models/types.js';
 import type { ImportReport } from './claude-transcript.js';
 
@@ -366,7 +367,7 @@ function toolFailure(result: unknown): string | undefined {
   // return JSON.
   const firstLine = text.split('\n', 1)[0].trim();
   if (/^Script (failed|error)\b/i.test(firstLine) || /^Script error:/i.test(firstLine)) {
-    return text.slice(0, 500).trim() || 'tool failed';
+    return truncate(text, 500).trim() || 'tool failed';
   }
 
   // A JSON object — either the output itself, or text that parses as one.

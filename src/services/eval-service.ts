@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import type { EvalResult, TraceStep, TraceWithDetails } from '../models/types.js';
 import type { EvalType } from '../models/enums.js';
 import { createEval, getTrace } from './trace-service.js';
-import { safeRegex, hasRenderableContent } from '../utils/json.js';
+import { safeRegex, hasRenderableContent, truncate } from '../utils/json.js';
 import type { LlmClientOptions } from './llm-client.js';
 import { callLlm, estimateCost } from './llm-client.js';
 import { summarizeTrace } from './trace-summarizer.js';
@@ -914,7 +914,10 @@ export async function runAiEval(
       passed: false,
       details: {
         parse_error: true,
-        raw_response: response.text.slice(0, 2000),
+        // Surrogate-safe, and marked as cut. This is STORED, so a lone
+        // surrogate here does not just misdraw once — it round-trips into
+        // `show`, `export`, and the next prompt built from this trace.
+        raw_response: truncate(response.text, 2000),
       },
     };
   }

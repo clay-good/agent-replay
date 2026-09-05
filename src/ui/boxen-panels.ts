@@ -6,6 +6,7 @@ import { statusBadge, colors, label, formatScorePct, formatCostUsd, safeText, sa
 import { effectiveDurationMs, formatDuration } from '../utils/time.js';
 import { effectiveTokens } from '../utils/totals.js';
 import { truncateToWidth } from './width.js';
+import { truncate } from '../utils/json.js';
 
 /**
  * `boxen`, with a plain-text fallback instead of a crash.
@@ -246,7 +247,9 @@ export function aiEvalPanel(evalResult: { evaluator_name: string; score: number;
     // The whole details blob is producer-controlled — this is the fallback for
     // a shape the branches above don't recognize, so it is exactly where an
     // unmapped field reaches the terminal.
-    lines.push(chalk.dim(safeText(JSON.stringify(d, null, 2).slice(0, 500))));
+    // Surrogate-safe, and it now says that it was cut rather than simply
+    // stopping mid-value.
+    lines.push(chalk.dim(safeText(truncate(JSON.stringify(d, null, 2), 500))));
   }
 
   // Cost footer

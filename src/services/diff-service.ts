@@ -6,7 +6,7 @@ import { getTrace } from './trace-service.js';
 import { summarizeDiffForLlm } from './trace-summarizer.js';
 import { extractJson, fenceTraceContent, INJECTION_GUARD, DEFAULT_EVAL_MAX_TOKENS } from './eval-service.js';
 import { stableStringify } from './check-service.js';
-import { safeParseJson } from '../utils/json.js';
+import { safeParseJson, truncate } from '../utils/json.js';
 
 /**
  * Compare two traces step-by-step, identifying the divergence point and
@@ -337,7 +337,7 @@ export async function aiDiffAnalysis(
     parsed = extractJson(response.text);
   } catch {
     parsed = {
-      explanation: response.text.slice(0, 500),
+      explanation: truncate(response.text, 500),
       better_trace: 'neither',
       reasoning: 'Could not parse structured response',
       key_differences: [],

@@ -316,6 +316,19 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **Six call sites still cut producer text at a bare code-unit offset.**
+  `truncate` has been surrogate-safe for a while, but a check-report value, an
+  event-protocol warning preview, the AI panel's fallback rendering, a stored
+  `raw_response`, the `diff --ai` explanation fallback, and a Codex tool result
+  had each reimplemented the cut with a plain `slice`. Each could land between
+  the halves of an astral character and leave a lone surrogate — rendered as
+  U+FFFD, and only at some values, since whether it happened depended on the
+  length of an unrelated field earlier in the same payload. The two stored ones
+  mattered most: a lone surrogate there does not misdraw once, it round-trips
+  into `show`, `export`, and the next prompt built from that trace. All six now
+  call the shared helper, so they also mark the cut instead of stopping
+  mid-value.
+
 - **`diff --ai` ignored `ai.max_tokens`.** The setting is validated, stored,
   priced by the cost estimate, and honored by `eval --ai` — but the diff path
   sent a hard-coded `max_tokens: 1024` at the *request* level, which overrides

@@ -11,7 +11,7 @@ import { parseSinceToIso } from '../utils/time.js';
 import { errorMessage } from '../utils/json.js';
 import { resolveDataDir } from '../utils/paths.js';
 import { makeRefuse } from '../utils/refuse.js';
-import { escapeForMessage } from '../utils/json.js';
+import { escapeForMessage, truncate } from '../utils/json.js';
 
 export interface CheckOptions {
   golden?: string;
@@ -407,6 +407,10 @@ export function runCheck(opts: CheckOptions = {}): void {
  */
 function short(v: unknown): string {
   const s = typeof v === 'string' ? v : JSON.stringify(v);
-  const out = s != null && s.length > 60 ? `${s.slice(0, 57)}...` : String(s);
+  // `truncate`, not a bare slice: the cut is at an arbitrary code-unit offset
+  // over agent data, so it can land between the halves of an astral character
+  // and leave a lone surrogate — which the terminal draws as U+FFFD, and only
+  // at some values, since whether it happens depends on the exact offset.
+  const out = s != null ? truncate(s, 60) : String(s);
   return escapeForMessage(out);
 }

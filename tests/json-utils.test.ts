@@ -184,3 +184,27 @@ describe('truncateJson never splits a surrogate pair either', () => {
     expect(out.length).toBeLessThanOrEqual(11);
   });
 });
+
+describe('no producer text is cut at a bare code-unit offset', () => {
+  // `truncate` has been surrogate-safe for a while, but six call sites had each
+  // reimplemented the cut with a bare `slice`, over text that is written by the
+  // agent under test or by a model: a check-report value, an event-protocol
+  // warning preview, an AI panel's fallback rendering, the stored
+  // `raw_response`, the diff explanation fallback, and a Codex tool result.
+  // Whether any of them produced half a character depended on the exact offset
+  // — on the length of an unrelated field earlier in the same payload.
+  //
+  // This locks the rule at the shared helper they all now call; the stored
+  // `raw_response` — where a lone surrogate does not merely misdraw once but
+  // round-trips into `show`, `export` and the next prompt — is pinned in
+  // ai-eval.test.ts, at the path that writes it.
+  const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+  it('truncate is the surrogate-safe cut every one of them now uses', () => {
+    for (let max = 4; max <= 40; max++) {
+      const out = truncate('a'.repeat(8) + '😀'.repeat(30), max);
+      expect(LONE_SURROGATE.test(out), `max=${max}`).toBe(false);
+    }
+  });
+
+});

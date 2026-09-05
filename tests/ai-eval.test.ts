@@ -1111,3 +1111,28 @@ describe('diff --ai honors the configured output ceiling', () => {
     expect(plain.max_tokens).toBe(1024);
   });
 });
+
+describe('a stored raw_response is not cut mid-character', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('leaves no lone surrogate in what an unparseable reply stores', async () => {
+    // `raw_response` was cut with a bare `slice`, so a reply whose 2000th code
+    // unit fell inside an astral character stored half of it. This value is
+    // STORED, so the damage does not stop at one misdrawn panel: it round-trips
+    // into `show`, `export`, and the next prompt built from this trace.
+    const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    const db = createTestDb();
+    const trace = ingestTrace(db, makeTrace());
+    // Not JSON, so parse_response throws and the raw_response path runs.
+    // Sized so a bare `slice(0, 2000)` lands between the halves of an emoji.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(llmText('a'.repeat(1997) + '😀😀😀')));
+
+    const result = await runAiEval(db, trace.id, 'ai-root-cause', {
+      provider: 'anthropic', api_key: 'k', model: 'claude-haiku-4-5-20251001',
+    });
+    const raw = String(result.details.raw_response ?? '');
+    expect(result.details.parse_error).toBe(true);
+    expect(raw.length).toBeGreaterThan(1000);
+    expect(LONE_SURROGATE.test(raw)).toBe(false);
+  });
+});
