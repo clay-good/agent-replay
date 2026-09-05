@@ -364,6 +364,43 @@ describe('runHook with no payload', () => {
     expect(process.exitCode).toBe(0);
   });
 
+  // Capture mode's contract is a SAFETY invariant, not a nicety: in these
+  // harnesses exit 2 blocks the agent and stdout is read as a hook decision, so
+  // a capture hook that ever exits non-zero or prints a byte can stop or steer
+  // somebody's run. Only the empty-stdin shape was pinned; this is the rest of
+  // what a real harness can hand it — every one verified by hand against the
+  // built CLI before being written down here.
+  it.each([
+    ['a well-formed PreToolUse', '{"session_id":"s1","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}'],
+    ['a well-formed PostToolUse', '{"session_id":"s1","hook_event_name":"PostToolUse","tool_name":"Bash","tool_response":{"out":"x"}}'],
+    ['a body that is not JSON', 'not json at all'],
+    ['a bare null', 'null'],
+    ['an array', '[1,2,3]'],
+    ['a bare string', '"hello"'],
+    ['an event name it does not know', '{"session_id":"s1","hook_event_name":"Nonsense"}'],
+    ['a payload with no session_id', '{"hook_event_name":"PreToolUse","tool_name":"Bash"}'],
+    ['a session_id that is not a string', '{"session_id":{"a":1},"hook_event_name":"PreToolUse","tool_name":"B"}'],
+    ['whitespace only', '   \n  '],
+  ])('capture stays silent and exits 0 on %s', async (_label, payload) => {
+    const { runHook } = await import('../src/commands/hook.js');
+    setStdin([payload]);
+    await runHook('PreToolUse', { dir: '/nonexistent-should-not-be-touched' });
+    expect(stdout.join('')).toBe('');
+    // `undefined` is Node's exit-0; an explicit 0 is equally fine.
+    expect(process.exitCode ?? 0).toBe(0);
+  });
+
+  it('capture stays silent and exits 0 on a payload far larger than one pipe chunk', async () => {
+    const { runHook } = await import('../src/commands/hook.js');
+    setStdin([JSON.stringify({
+      session_id: 's1', hook_event_name: 'PreToolUse', tool_name: 'B',
+      tool_input: { x: 'a'.repeat(200_000) },
+    })]);
+    await runHook('PreToolUse', { dir: '/nonexistent-should-not-be-touched' });
+    expect(stdout.join('')).toBe('');
+    expect(process.exitCode ?? 0).toBe(0);
+  });
+
   it('decodes a payload split mid-character across stdin chunks', async () => {
     // A pipe delivers 64 KiB chunks, and `raw += chunk` decoded each chunk on
     // its own — so a multi-byte character straddling a boundary became U+FFFD.
