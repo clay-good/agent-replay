@@ -752,48 +752,54 @@ describe('the causal walk does not rescan the trace at every hop', () => {
     expect(chain[0].decision?.chosen).toBe('a');
   });
 
-  it('costs the same per step at twenty times the size', () => {
-    // A per-step RATIO, not a wall-clock budget, so the assertion means the
-    // same thing on any machine. Measured here: with the map, per-step cost is
-    // flat at ~2us from 500 to 10,000 steps; with the old rescan it doubled
-    // every time n doubled — 4.5us at 500, 49.6us at 10,000, and the whole walk
-    // went from 2.3ms to 495.7ms. So linear lands near 1x and the old
-    // quadratic near 10x; 3x separates them with room on both sides.
-    const small = allDecisions(db, 500);
-    const large = allDecisions(db, 10_000);
-
-    causalWalk(db, small, 500); // warm the query path
-    causalWalk(db, large, 10_000);
-
-    // The MINIMUM of several runs, not a single timed one.
+  it('costs the same whether it walks one hop or ten thousand', () => {
+    // The property under guard: the "nearest earlier decision" fallback is
+    // precomputed once per walk, so each HOP is an O(1) map lookup. Before that
+    // fix each hop rescanned every step, making `why` O(steps x hops) on the
+    // exact shape a hook-captured session produces — every step a decision
+    // point, none carrying `caused_by`.
     //
-    // vitest runs test files in parallel workers, so a walk can be descheduled
-    // mid-measurement. With one sample each, an unlucky large run (or a lucky
-    // small one) inverted a ratio that has 3x of headroom, and this failed
-    // roughly half the time in a full-suite run while passing in isolation —
-    // a red CI that measured the machine's load rather than the code.
-    // Scheduler noise only ever ADDS time, so the floor of a few runs is the
-    // honest estimate of per-step cost. The guard itself is unweakened: a
-    // quadratic walk's floor is still ~10x the small one's.
+    // The measurement compares a full 10,000-hop walk against a ONE-hop walk on
+    // the SAME trace. Both pay an identical fixed cost — the same SELECT, the
+    // same JSON.parse of 10,000 step rows, the same two maps built over them —
+    // so that cost cancels and what remains in the ratio is hop work alone. If
+    // hops are O(1) the full walk costs about what one hop costs; if a hop
+    // rescans, the full walk costs 10,000 rescans more.
     //
-    // The export guard above solved its version of this by COUNTING the work
-    // instead of timing it, which is exact on any machine and the better answer
-    // where it applies. It does not apply here: the rescan this test exists to
-    // catch was a pure-JS loop over the step array, not extra SQL, so there is
-    // no statement execution to count. Timing is the only measure available;
-    // taking its floor is what makes it trustworthy.
-    const perStep = (traceId: string, steps: number): number => {
+    // This replaced a per-step ratio between a 500-step and a 10,000-step walk,
+    // which failed on a correct implementation about half the time. That guard
+    // was measuring the wrong thing: loading the trace dominates the walk, and
+    // loading 20x the rows does NOT cost a flat amount per row — cache
+    // residency and GC pressure alone moved per-step cost 2.1us -> 9.7us, a
+    // 4.5x swing on code whose hop cost is genuinely flat, against a 3x
+    // threshold. Comparing two walks over the SAME rows removes that term
+    // instead of trying to out-average it.
+    //
+    // Measured separation across runs on this machine: correct code 0.79-1.84,
+    // the rescan 13.0-77.2. The threshold sits above the worst correct run with
+    // 2x of room and below the best quadratic run with 3x.
+    const trace = allDecisions(db, 10_000);
+
+    causalWalk(db, trace, 10_000); // warm the query path and JIT
+    causalWalk(db, trace, 1);
+
+    // The FLOOR of several runs, not a single sample. vitest runs test files in
+    // parallel workers, so any one measurement can be descheduled mid-flight;
+    // scheduler noise only ever ADDS time, so the minimum is the honest
+    // estimate. Both terms are measured the same way in the same run, so a
+    // loaded machine slows both and the ratio holds.
+    const floorOf = (steps: number, expected: number): number => {
       let best = Infinity;
       for (let i = 0; i < 5; i++) {
         const t = performance.now();
-        expect(causalWalk(db, traceId, steps)!.chain).toHaveLength(steps);
-        best = Math.min(best, (performance.now() - t) / steps);
+        expect(causalWalk(db, trace, steps)!.chain).toHaveLength(expected);
+        best = Math.min(best, performance.now() - t);
       }
       return best;
     };
-    const perStepSmall = perStep(small, 500);
-    const perStepLarge = perStep(large, 10_000);
+    const wholeChain = floorOf(10_000, 10_000);
+    const singleHop = floorOf(1, 1); // step 1 has no antecedent: one hop, full load
 
-    expect(perStepLarge).toBeLessThan(perStepSmall * 3);
+    expect(wholeChain).toBeLessThan(singleHop * 4);
   }, 120_000);
 });
