@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { traceTable, evalTable, policyTable } from '../src/ui/table.js';
-import { traceHeaderPanel, summaryPanel } from '../src/ui/boxen-panels.js';
+import { traceHeaderPanel, summaryPanel, aiEvalPanel } from '../src/ui/boxen-panels.js';
 import { formatScorePct, formatCostUsd, safeText, safeLine } from '../src/ui/theme.js';
 import { formatDuration } from '../src/utils/time.js';
 import { renderTimeline, renderTree } from '../src/ui/timeline.js';
@@ -888,5 +888,104 @@ describe('render budgets are columns, not UTF-16 code units', () => {
   it('bounds a wide step name in the tree', () => {
     const out = renderTree([step({ step_type: 'tool_call', name: WIDE })]);
     expect(widest(out)).toBeLessThanOrEqual(80 + 40);
+  });
+});
+
+describe('the AI panels escape every model-supplied field they render', () => {
+  // `aiEvalPanel` renders `details` — a blob the MODEL wrote, parsed from its
+  // reply — straight to the operator's terminal, and only one of its five
+  // branches was covered. A trace is written by the agent under test, and a
+  // model's reply is no more trustworthy: \u009b controls decode as CSI on
+  // xterm/VTE/iTerm2, so an unescaped field could recolour or address the
+  // terminal of the person reading the audit.
+  //
+  // An \x1b-introduced sequence and a bare U+009B, in every field of every branch.
+  const HOSTILE = '\x1b[31mred\x1b[0m\u009b2K';
+  const clean = (s: string) => {
+    const out = noAnsi(s);
+    // No raw escape introducer survives, in either encoding.
+    expect(out).not.toMatch(/\x1b/);
+    expect(out).not.toMatch(/\u009b/);
+    return out;
+  };
+
+  it('ai-root-cause: root cause, failing step, factors, fix and severity', () => {
+    const out = clean(aiEvalPanel({
+      evaluator_name: 'ai-root-cause', score: 0.9, passed: true,
+      details: {
+        root_cause: HOSTILE, failing_step: HOSTILE, severity: HOSTILE,
+        suggested_fix: HOSTILE, contributing_factors: [HOSTILE, 'plain factor'],
+      },
+    }));
+    expect(out).toMatch(/Root cause/);
+    expect(out).toMatch(/plain factor/);
+  });
+
+  it('ai-quality-review: assessment and issues', () => {
+    const out = clean(aiEvalPanel({
+      evaluator_name: 'ai-quality-review', score: 0.8, passed: true,
+      details: {
+        relevance: 8, completeness: 7, coherence: 9, accuracy: 6,
+        overall_assessment: HOSTILE, issues: [HOSTILE, 'plain issue'],
+      },
+    }));
+    expect(out).toMatch(/relevance/);
+    expect(out).toMatch(/plain issue/);
+  });
+
+  it('ai-security-audit: risk, findings and recommendations', () => {
+    const out = clean(aiEvalPanel({
+      evaluator_name: 'ai-security-audit', score: 0.5, passed: false,
+      details: {
+        risk_level: HOSTILE, safe: false,
+        findings: [{ type: HOSTILE, description: HOSTILE, step: HOSTILE, severity: HOSTILE }],
+        recommendations: [HOSTILE, 'rotate the keys'],
+      },
+    }));
+    expect(out).toMatch(/Risk level/);
+    expect(out).toMatch(/rotate the keys/);
+  });
+
+  it.each([
+    ['object entries', [{ step: 1, type: 'x', description: 'cache it', estimated_savings: '40%' }]],
+    // An entry the model wrote as a bare string has no step/description to
+    // read; printing the object template anyway rendered "Step undefined".
+    ['bare-string entries', ['just cache it']],
+  ])('ai-optimization: %s', (_label, optimizations) => {
+    const out = clean(aiEvalPanel({
+      evaluator_name: 'ai-optimization', score: 0.7, passed: true,
+      details: {
+        efficiency_score: HOSTILE, total_waste_estimate_pct: HOSTILE,
+        optimizations, summary: HOSTILE,
+      },
+    }));
+    expect(out).toMatch(/Efficiency/);
+    expect(out).not.toMatch(/Step undefined/);
+    expect(out).not.toMatch(/undefined/);
+  });
+
+  it('falls back readably for a shape it does not recognize', () => {
+    // The fallback is exactly where an unmapped, model-controlled field reaches
+    // the terminal, so it is escaped too — and it marks that it truncated
+    // rather than stopping mid-value.
+    const out = clean(aiEvalPanel({
+      evaluator_name: 'ai-something-new', score: 0.5, passed: true,
+      details: { weird: HOSTILE, big: 'y'.repeat(2000) },
+    }));
+    expect(out).toMatch(/weird/);
+    expect(out).toMatch(/\.\.\./);
+  });
+
+  it('renders the cost footer from whatever the provider replied with', () => {
+    const out = clean(aiEvalPanel({
+      evaluator_name: 'ai-root-cause', score: 0.9, passed: true,
+      details: {
+        root_cause: 'x', cost_usd: 0.000123,
+        input_tokens: HOSTILE, output_tokens: HOSTILE,
+        llm_provider: HOSTILE, llm_model: HOSTILE,
+      },
+    }));
+    expect(out).toMatch(/Cost:/);
+    expect(out).toMatch(/0\.000123/);
   });
 });
