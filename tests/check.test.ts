@@ -523,6 +523,42 @@ describe('runCheck refuses a gate with nothing to check', () => {
     }
   });
 
+  it('names the exclusion when traces DID match but none can be compared', () => {
+    // The other half of the same refusal, and the one whose advice matters:
+    // "No traces matched" sends the reader to widen --agent/--since when traces
+    // matched perfectly well and were then excluded as not-comparable — advice
+    // that cannot work. A fork is a never-executed copy and a running trace is
+    // mid-flight, so neither can show a regression; the gate must say that
+    // instead of pointing at the filters.
+    const dir = mkdtempSync(join(tmpdir(), 'ar-check-excluded-'));
+    try {
+      const cdb = ensureDatabase(resolve(dir, 'traces.db'));
+      const done = ingestTrace(cdb, baseline);
+      const goldenPath = join(dir, 'golden.json');
+      writeFileSync(goldenPath, exportTraces(cdb, { agent_name: 'travel-bot' }, 'golden'));
+
+      // Leave only non-comparable candidates: a fork of the run, and a run
+      // still in flight. Then remove the completed one they were made from.
+      forkTrace(cdb, done.id, 1);
+      ingestTrace(cdb, { ...baseline, status: 'running' });
+      deleteTrace(cdb, done.id);
+      resetConnection();
+
+      const res = checkWith({ golden: goldenPath, dir, agent: 'travel-bot' });
+      expect(res.exit).toBe(2);
+      expect(res.errs).toMatch(/No comparable runs/);
+      expect(res.errs).toMatch(/2 matching trace\(s\) were excluded/);
+      // ...and NOT the advice for the other case.
+      expect(res.errs).not.toMatch(/Widen --agent/);
+
+      // `--allow-empty` is the documented opt-out, and it applies here too.
+      expect(checkWith({ golden: goldenPath, dir, agent: 'travel-bot', allowEmpty: true }).exit).toBe(0);
+    } finally {
+      resetConnection();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('answers in JSON when --json was asked for, on every refusal path', () => {
     // `check --json | jq -r .ok` is the documented CI form. Printing only a red
     // line on stderr turned "the gate could not run" into a jq parse error —
