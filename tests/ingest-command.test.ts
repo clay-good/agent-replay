@@ -70,6 +70,50 @@ function sourceDoc(build: (db: ReturnType<typeof ensureDatabase>, id: string) =>
   }
 }
 
+describe('ingest refuses a golden dataset', () => {
+  // A golden entry carries `agent_name` and `input`, so validation passed and
+  // ingest reported "Ingested 20 trace(s) successfully" -- while storing 20
+  // traces with NO steps, because a golden file's steps live in
+  // `steps_summary`. Those stepless traces look like real runs: they widen
+  // `list` and `stats`, and a golden dataset exported later includes them, so a
+  // baseline made of empty runs gates CI on nothing. `check` already refuses
+  // the mirror mistake (a --format json export handed to the gate).
+  const golden = [
+    { id: 'trc_a', agent_name: 'g', input: { q: 'x' }, expected_output: {}, steps_summary: [{ step_number: 1, step_type: 'output', name: 'done', failed: false }], eval_criteria: [], metadata: { status: 'completed' } },
+  ];
+
+  it('refuses with exit 2 and stores nothing', () => {
+    runIngest(docFile('golden.json', golden), { dir: store });
+    expect(process.exitCode).toBe(2);
+    const db = ensureDatabase(resolve(store, 'traces.db'));
+    expect(listTraces(db, {}).total).toBe(0);
+  });
+
+  it('names the right command for the file, and for the traces', () => {
+    // Following a refusal's own advice must resolve the case it names: the file
+    // belongs to `check --golden`, and traces come from a --format json export.
+    const errs: string[] = [];
+    const errSpy = vi.spyOn(console, 'error').mockImplementation((m?: unknown) => { errs.push(String(m)); });
+    try {
+      runIngest(docFile('golden2.json', golden), { dir: store });
+      const text = noAnsi(errs.join('\n'));
+      expect(text).toMatch(/check --golden/);
+      expect(text).toMatch(/--format json/);
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it('still ingests a trace export whose trace has no steps', () => {
+    // The cry-wolf guard: `steps: []` is a legitimate trace, not a golden file.
+    // The tell is `steps_summary`, a key a trace export never writes.
+    runIngest(docFile('empty.json', [{ agent_name: 'empty-bot', status: 'completed', input: { q: 'x' }, steps: [] }]), { dir: store });
+    expect(process.exitCode).toBe(0);
+    const db = ensureDatabase(resolve(store, 'traces.db'));
+    expect(listTraces(db, {}).total).toBe(1);
+  });
+});
+
 describe('ingest reports what it actually restored', () => {
   it('restores stored evals without claiming it cannot', () => {
     const doc = sourceDoc((db, id) => {

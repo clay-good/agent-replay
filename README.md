@@ -71,6 +71,8 @@ agent-replay ingest trace.json --tags production,v2
 agent-replay ingest trace.json --dry-run
 ```
 
+A **golden dataset** is not a trace export, and `ingest` says so instead of taking it: a golden entry has an `agent_name` and an `input` but keeps its steps in `steps_summary`, so ingesting one would store traces with no steps that read as real runs. Use a golden file with `check --golden`, and re-export with `--format json` when you want the traces back.
+
 #### Live capture
 
 `ingest` loads a complete trace after the fact. To capture a run **as it happens**, stream newline-delimited capture events into `record` — the trace grows step by step and stays `running` until a `trace_end` event arrives.

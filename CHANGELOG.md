@@ -336,6 +336,20 @@ and one-way.
 
 ### Fixed
 
+- **`ingest` accepted a golden dataset and manufactured empty traces from it.**
+  A golden entry carries `agent_name` and `input`, so validation passed and the
+  command reported "Ingested 20 trace(s) successfully" — while storing 20
+  traces with no steps at all, because a golden file keeps its steps in
+  `steps_summary`, a key a trace export never writes and `ingest` never reads.
+  Those stepless traces are indistinguishable from real runs: they widen `list`
+  and `stats`, and a golden dataset exported afterwards includes them, so a
+  baseline built from a store that swallowed one gates CI on empty runs.
+  `ingest` now refuses (exit `2`) and points at `check --golden` for the file
+  and `--format json` for the traces — the mirror of the guard `check` already
+  had for a `--format json` export handed to the gate. A trace whose `steps` is
+  legitimately empty still ingests; the tell is `steps_summary`, not the
+  absence of steps.
+
 - **`ingest`'s fork note left out the consequence that costs the most.** It
   said a restored fork becomes an ordinary trace and that `check` and `watch`
   would treat it as a real run, but not that `export --format golden` would

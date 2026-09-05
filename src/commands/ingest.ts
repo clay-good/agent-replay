@@ -87,6 +87,37 @@ export function runIngest(filePath: string, opts: IngestOptions = {}): void {
     return;
   }
 
+  // A GOLDEN dataset handed to `ingest` validated cleanly and produced garbage:
+  // a golden entry carries `agent_name` and `input`, so nothing here objected,
+  // but its steps live in `steps_summary` — a key a trace export never writes
+  // and this command never reads. The result was "Ingested 20 trace(s)
+  // successfully" and a store holding 20 stepless traces that look like real
+  // runs: they widen `list` and `stats`, and a golden dataset exported later
+  // includes them, so a baseline made of empty runs gates CI on nothing.
+  //
+  // `check` already refuses the mirror mistake — a `--format json` export
+  // handed to the gate — and names the command that produces the right file.
+  // This is that guard at the twin site, worded the same way.
+  const goldenLike = traces.filter(
+    (t) => t != null && typeof t === 'object'
+      && Array.isArray((t as Record<string, unknown>).steps_summary)
+      && (t as Record<string, unknown>).steps === undefined,
+  ).length;
+  if (goldenLike > 0) {
+    failSpinner(
+      spinner,
+      `Not a trace export: ${absPath} (${goldenLike} of ${traces.length} entries have steps_summary, not steps).`,
+    );
+    console.error(
+      chalk.dim('  That is a golden dataset from "agent-replay export --format golden". Its steps are a summary this command cannot read,'),
+    );
+    console.error(
+      chalk.dim('  so ingesting it would store traces with no steps. Use it with "agent-replay check --golden", or re-export the traces with "--format json".'),
+    );
+    process.exitCode = 2;
+    return;
+  }
+
   spinner.text = `Validating ${traces.length} trace(s)...`;
 
   // Validate
