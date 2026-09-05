@@ -336,6 +336,20 @@ and one-way.
 
 ### Fixed
 
+- **`show --json --snapshots` returned no snapshots.** `--snapshots` reached
+  the human path only, so the JSON document had no `snapshots` key at all —
+  exit `0`, no warning, and `jq .snapshots` null forever, while the very same
+  trace printed its snapshots without `--json`. That left no machine-readable
+  way to get a snapshot out of the tool, though `evals` — the sibling section
+  rendered right above it — has always been in the payload. It is the defect
+  `diff --ai --json` had and fixed, in the same shape: a flag whose data the
+  JSON path could carry, dropped by an early return. The key is written only
+  when the flag is passed, exactly as `ai_analysis` is, so a `show --json`
+  without it is byte-for-byte unchanged; each entry is tagged with the
+  `step_number` it belongs to (the stored row carries only a `step_id`), a step
+  with no snapshot is absent rather than null, and the
+  `--from-step`/`--to-step` window applies as it does on the human path.
+
 - **`check --trace` silently ignored `--agent`, `--agent-exact` and
   `--since`.** `--trace` names one trace and the filter branch is never
   consulted, so passing both got the named trace whatever the filters said. The

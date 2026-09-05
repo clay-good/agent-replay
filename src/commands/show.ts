@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import chalk from 'chalk';
 import type Database from 'better-sqlite3';
-import type { TraceWithDetails } from '../models/types.js';
+import type { TraceWithDetails, TraceSnapshot } from '../models/types.js';
 import type { StepType } from '../models/enums.js';
 import { getTrace, getStepSnapshot } from '../services/trace-service.js';
 import { ensureDatabase } from '../db/index.js';
@@ -91,9 +91,23 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
   // silently a subset, indistinguishable from a trace that really has that many
   // steps. Additive: an unwindowed `show --json` is byte-for-byte unchanged.
   if (opts.json) {
-    const payload = omitted > 0
+    const base = omitted > 0
       ? { ...trace, steps: windowed, step_window: { from: fromStep ?? null, to: toStep ?? null, shown: windowed.length, omitted } }
       : trace;
+    // `--snapshots` reached the human path only, so `show --json --snapshots`
+    // answered with a document that had no `snapshots` key at all: exit 0, no
+    // warning, and `jq .snapshots` null forever — while the very same trace
+    // printed snapshots without `--json`. That left NO machine-readable way to
+    // get a snapshot out of this tool, though `evals` (the sibling section
+    // right above it) has always been in the payload. It is the defect
+    // `diff --ai --json` already had and already fixed, in the same shape: a
+    // flag whose data the JSON path could carry, dropped by an early return.
+    // Keyed off the flag rather than emitted always, exactly as `ai_analysis`
+    // is, so a `show --json` without it stays byte-for-byte unchanged. Built
+    // from `windowed`, so the window applies here as it does on the human path.
+    const payload = opts.snapshots
+      ? { ...base, snapshots: collectSnapshots(db, trace.id, windowed) }
+      : base;
     console.log(JSON.stringify(payload, null, 2));
     return;
   }
@@ -170,14 +184,34 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
+/**
+ * The snapshots for `steps`, skipping any step that has none, tagged with the
+ * `step_number` they belong to — the snapshot row itself carries only a
+ * `step_id`, and every other step reference in the payload is by number.
+ * Shared by the JSON and human paths so the two cannot drift on which steps
+ * they cover or which they silently skip.
+ */
+function collectSnapshots(
+  db: Database.Database,
+  traceId: string,
+  steps: TraceWithDetails['steps'],
+): Array<{ step_number: number; step_name: string } & TraceSnapshot> {
+  const out: Array<{ step_number: number; step_name: string } & TraceSnapshot> = [];
+  for (const step of steps) {
+    const snapshot = getStepSnapshot(db, traceId, step.step_number);
+    if (!snapshot) continue;
+    out.push({ step_number: step.step_number, step_name: step.name, ...snapshot });
+  }
+  return out;
+}
+
 function renderSnapshots(
   db: Database.Database,
   traceId: string,
   steps: TraceWithDetails['steps'],
 ): void {
-  for (const step of steps) {
-    const snapshot = getStepSnapshot(db, traceId, step.step_number);
-    if (!snapshot) continue;
+  for (const snapshot of collectSnapshots(db, traceId, steps)) {
+    const step = { step_number: snapshot.step_number, name: snapshot.step_name };
 
     console.log(
       chalk.dim(`  Step ${step.step_number}`) +

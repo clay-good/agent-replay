@@ -332,3 +332,69 @@ describe('show says when a flag it was given does nothing', () => {
     expect(stderr()).not.toMatch(/no effect/);
   });
 });
+
+describe('show --json carries the snapshots it was asked for', () => {
+  // `--snapshots` reached the human path only: `show --json --snapshots`
+  // answered with a document that had no `snapshots` key at all, so
+  // `jq .snapshots` was null forever and there was NO machine-readable way to
+  // read a snapshot out of this tool -- while the very same trace printed them
+  // without `--json`. `evals`, the sibling section right above it, has always
+  // been in the payload. Same defect, and same fix, as `diff --ai --json`.
+  let snapId: string;
+
+  beforeEach(() => {
+    const db = ensureDatabase(resolve(dir, 'traces.db'));
+    snapId = ingestTrace(db, {
+      agent_name: 'snap-bot',
+      status: 'completed',
+      input: { q: 'snapshot me' },
+      steps: [
+        {
+          step_number: 1,
+          step_type: 'tool_call',
+          name: 'first',
+          snapshot: { context_window: { messages: 2 }, environment: { db: 'prod' }, token_count: 111 },
+        },
+        { step_number: 2, step_type: 'llm_call', name: 'no-snapshot-here' },
+        {
+          step_number: 3,
+          step_type: 'output',
+          name: 'last',
+          snapshot: { tool_state: { conn: 'open' }, token_count: 333 },
+        },
+      ],
+    }).id;
+  });
+
+  const payload = (): Record<string, unknown> => JSON.parse(out.join('\n'));
+
+  it('includes a snapshot for every step that has one', async () => {
+    await runShow(snapId, { dir, json: true, snapshots: true });
+    const snapshots = payload().snapshots as Array<Record<string, unknown>>;
+    // The fixture must actually carry snapshots, or every assertion below
+    // passes vacuously against a trace that simply has none.
+    expect(snapshots).toHaveLength(2);
+    // Tagged by step_number: the stored row carries only a step_id, and every
+    // other step reference in the payload is by number.
+    expect(snapshots.map((s) => s.step_number)).toEqual([1, 3]);
+    expect(snapshots.map((s) => s.token_count)).toEqual([111, 333]);
+    expect(snapshots[0].context_window).toEqual({ messages: 2 });
+    expect(snapshots[0].environment).toEqual({ db: 'prod' });
+    expect(snapshots[1].tool_state).toEqual({ conn: 'open' });
+    // Step 2 has no snapshot and must simply be absent, not a null entry.
+    expect(snapshots.map((s) => s.step_number)).not.toContain(2);
+  });
+
+  it('omits the key entirely without --snapshots, so the old payload is unchanged', async () => {
+    await runShow(snapId, { dir, json: true });
+    expect(payload()).not.toHaveProperty('snapshots');
+  });
+
+  it('applies the --from-step/--to-step window, as the human path does', async () => {
+    // The window scopes `steps`; a snapshot list that ignored it would describe
+    // steps the same document says it left out.
+    await runShow(snapId, { dir, json: true, snapshots: true, fromStep: '2' });
+    const snapshots = payload().snapshots as Array<Record<string, unknown>>;
+    expect(snapshots.map((s) => s.step_number)).toEqual([3]);
+  });
+});
