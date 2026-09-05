@@ -8,7 +8,7 @@ Get traces back out of the store for sharing, pipelines, and regression testing:
 
 ### Requirement: Filtered export
 
-The system SHALL export traces via `agent-replay export` in `json`, `jsonl`, or `golden` format, honoring filters (`--status`, `--tag`, `--agent`, `--since`) and optionally including evals (`--with-evals`) and snapshots (`--with-snapshots`), writing to `--output <file>` or stdout. Export processes every matching trace: a fixed cap silently truncated large exports, which corrupts a golden or JSONL dataset built from them.
+The system SHALL export traces via `agent-replay export` in `json`, `jsonl`, or `golden` format, honoring filters (`--status`, `--tag`, `--agent`, `--since`) and optionally including evals (`--with-evals`) and snapshots (`--with-snapshots`), writing to `--output <file>` or stdout. Export processes every matching trace: a fixed cap silently truncated large exports, which corrupts a golden or JSONL dataset built from them. Because a `json`/`jsonl` export is a BACKUP, its document SHALL restore as one: `ingest` reads back both the evals written by `--with-evals` and the per-step snapshots written by `--with-snapshots`, so neither flag is a no-op on the one path that consumes its output.
 
 #### Scenario: Export completed traces as JSONL
 

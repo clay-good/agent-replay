@@ -168,6 +168,25 @@ export interface IngestStepInput {
   decision?: IngestDecisionInput | null;
 }
 
+/**
+ * An evaluation carried on an ingested trace.
+ *
+ * `export --with-evals` writes exactly this shape, and restoring it is the
+ * whole point: a json/jsonl export is a BACKUP, and a backup that cannot put
+ * the evaluation history back is not one. `evaluated_at` is optional but
+ * PRESERVED when given — the column defaults to `datetime('now')`, so dropping
+ * it would stamp a July evaluation with the moment of the restore and quietly
+ * re-date the record.
+ */
+export interface IngestEvalInput {
+  evaluator_type: EvalType;
+  evaluator_name: string;
+  score: number;
+  passed: boolean;
+  details?: Record<string, unknown>;
+  evaluated_at?: string;
+}
+
 export interface IngestTraceInput {
   agent_name: string;
   agent_version?: string | null;
@@ -185,6 +204,7 @@ export interface IngestTraceInput {
   metadata?: Record<string, unknown>;
   session_id?: string | null;
   steps?: IngestStepInput[];
+  evals?: IngestEvalInput[];
 }
 
 // ── Update Types ──────────────────────────────────────────────────────────

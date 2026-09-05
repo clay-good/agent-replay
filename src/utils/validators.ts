@@ -167,6 +167,52 @@ export function validateTraceInput(input: unknown): ValidationResult {
     }
   }
 
+  // Evaluations carried on the trace. `export --with-evals` writes them and a
+  // json/jsonl export is a BACKUP, so they are accepted here rather than
+  // dropped — but validated as strictly as everything else at this boundary: a
+  // bad `evaluator_type` used to reach the CHECK constraint as a cryptic
+  // SqliteError instead of a named field error.
+  if (data.evals != null) {
+    if (!Array.isArray(data.evals)) {
+      errors.push({ field: 'evals', message: 'evals must be an array' });
+    } else {
+      for (let i = 0; i < data.evals.length; i++) {
+        const e = data.evals[i];
+        const prefix = `evals[${i}]`;
+        if (e == null || typeof e !== 'object' || Array.isArray(e)) {
+          errors.push({ field: prefix, message: 'each eval must be an object' });
+          continue;
+        }
+        const ev = e as Record<string, unknown>;
+        if (typeof ev.evaluator_type !== 'string' || !isValidEvalType(ev.evaluator_type)) {
+          errors.push({
+            field: `${prefix}.evaluator_type`,
+            message: `Invalid evaluator_type "${escapeForMessage(String(ev.evaluator_type))}". Must be one of: ${EVAL_TYPES.join(', ')}`,
+          });
+        }
+        if (!ev.evaluator_name || typeof ev.evaluator_name !== 'string') {
+          errors.push({ field: `${prefix}.evaluator_name`, message: 'evaluator_name is required and must be a string' });
+        }
+        if (typeof ev.score !== 'number' || !Number.isFinite(ev.score)) {
+          errors.push({ field: `${prefix}.score`, message: 'score is required and must be a finite number' });
+        }
+        if (typeof ev.passed !== 'boolean') {
+          errors.push({ field: `${prefix}.passed`, message: 'passed is required and must be a boolean' });
+        }
+        if (ev.details != null && (typeof ev.details !== 'object' || Array.isArray(ev.details))) {
+          errors.push({ field: `${prefix}.details`, message: 'details must be an object' });
+        }
+        // Rejected rather than silently replaced with the restore time: the
+        // column defaults to now, so an unusable value would re-date the
+        // evaluation to the moment of the import and read exactly like a
+        // measurement taken then.
+        if (ev.evaluated_at != null && (typeof ev.evaluated_at !== 'string' || Number.isNaN(Date.parse(ev.evaluated_at)))) {
+          errors.push({ field: `${prefix}.evaluated_at`, message: 'evaluated_at must be a parseable timestamp' });
+        }
+      }
+    }
+  }
+
   return { valid: errors.length === 0, errors };
 }
 

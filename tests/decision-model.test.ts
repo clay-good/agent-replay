@@ -3,7 +3,7 @@ import Database from 'better-sqlite3';
 import { applySchemaV1, applySchemaV2, applySchemaV3, SCHEMA_VERSION } from '../src/db/schema.js';
 import { runMigrations } from '../src/db/migrations.js';
 import { getSchemaVersion } from '../src/db/schema.js';
-import { ingestTrace, getTrace, listTraces, attachDecision, appendStep } from '../src/services/trace-service.js';
+import { ingestTrace, getTrace, listTraces, attachDecision, appendStep, createEval } from '../src/services/trace-service.js';
 import { forkTrace } from '../src/services/fork-service.js';
 import { exportTraces } from '../src/services/export-service.js';
 import { listDecisions, causalWalk } from '../src/services/decision-service.js';
@@ -802,4 +802,78 @@ describe('the causal walk does not rescan the trace at every hop', () => {
 
     expect(wholeChain).toBeLessThan(singleHop * 4);
   }, 120_000);
+});
+
+describe('export --with-evals survives a re-ingest', () => {
+  // A json/jsonl export is a BACKUP, and `--with-evals` exists to put the
+  // evaluation history in it -- but ingest read only `steps`, so restoring one
+  // reported success and kept ZERO evaluations. The existing round-trip test
+  // above passed `withSnapshots` and never `withEvals`, which is exactly how
+  // this survived.
+  beforeEach(() => {
+    runMigrations(db);
+  });
+
+  const rich: IngestTraceInput = {
+    agent_name: 'eval-rt',
+    status: 'completed',
+    input: { q: 'measure me' },
+    steps: [{ step_number: 1, step_type: 'output', name: 'done' }],
+  };
+
+  it('restores every eval, with its own evaluated_at', () => {
+    const id = ingestTrace(db, rich).id;
+    createEval(db, id, { evaluator_type: 'rubric', evaluator_name: 'accuracy', score: 0.75, passed: true, details: { note: 'close' } });
+    createEval(db, id, { evaluator_type: 'llm_judge', evaluator_name: 'tone', score: 0.2, passed: false });
+
+    const exported = JSON.parse(
+      exportTraces(db, {}, 'json', { withEvals: true }),
+    ) as IngestTraceInput[];
+    // The fixture must actually carry evals, or the round-trip below proves
+    // nothing -- the same vacuous-fixture trap that hid this in the first place.
+    expect(exported[0].evals).toHaveLength(2);
+
+    const db2 = new Database(':memory:');
+    db2.pragma('foreign_keys = ON');
+    runMigrations(db2);
+    try {
+      const reId = ingestTrace(db2, exported[0]).id;
+      const back = getTrace(db2, reId)!;
+      expect(back.evals).toHaveLength(2);
+
+      const byName = Object.fromEntries(back.evals.map((e) => [e.evaluator_name, e]));
+      expect(byName.accuracy).toMatchObject({ evaluator_type: 'rubric', score: 0.75, passed: true });
+      expect(byName.accuracy.details).toEqual({ note: 'close' });
+      // `passed: false` must come back false, not 0 or a truthy 1.
+      expect(byName.tone).toMatchObject({ evaluator_type: 'llm_judge', score: 0.2, passed: false });
+
+      // The column defaults to `datetime('now')`, so a dropped timestamp would
+      // silently re-date a restored evaluation to the moment of the import --
+      // and a wrong timestamp reads exactly like a right one.
+      const original = Object.fromEntries((exported[0].evals ?? []).map((e) => [e.evaluator_name, e]));
+      expect(byName.accuracy.evaluated_at).toBe(original.accuracy.evaluated_at);
+      expect(byName.tone.evaluated_at).toBe(original.tone.evaluated_at);
+    } finally {
+      db2.close();
+    }
+  });
+
+  it('leaves a trace without evals alone', () => {
+    // The cry-wolf side: an export made WITHOUT --with-evals carries no evals
+    // key, and ingesting it must not invent one.
+    const id = ingestTrace(db, rich).id;
+    createEval(db, id, { evaluator_type: 'rubric', evaluator_name: 'accuracy', score: 1, passed: true });
+    const exported = JSON.parse(exportTraces(db, {}, 'json', {})) as IngestTraceInput[];
+    expect(exported[0].evals).toBeUndefined();
+
+    const db2 = new Database(':memory:');
+    db2.pragma('foreign_keys = ON');
+    runMigrations(db2);
+    try {
+      const back = getTrace(db2, ingestTrace(db2, exported[0]).id)!;
+      expect(back.evals).toEqual([]);
+    } finally {
+      db2.close();
+    }
+  });
 });

@@ -588,6 +588,11 @@ agent-replay export --format golden --tag production --output golden.json
 agent-replay export --format json --with-evals --with-snapshots --output full.json
 ```
 
+A `json` or `jsonl` export is a backup, so it restores as one: `ingest` reads
+back the evals written by `--with-evals` (keeping each evaluation's own
+`evaluated_at`, not the moment of the restore) and the per-step snapshots
+written by `--with-snapshots`.
+
 An **empty** value for `--status`, `--agent`, `--tag` or `--since` is a usage
 error (exit `2`), as it is for `list`. It matters more here, because `export`
 writes: a widened `--agent ""` would dump the whole store into a file you

@@ -512,6 +512,34 @@ export function ingestTrace(
       }
     }
 
+    // Evaluations carried on the document. `export --with-evals` writes them,
+    // and a json/jsonl export is a BACKUP — but ingest read only `steps`, so
+    // restoring one reported "Ingested N trace(s) successfully" and kept ZERO
+    // evaluations. A success message for data that was dropped is the failure
+    // this tool exists to catch.
+    //
+    // `evaluated_at` is carried through rather than left to the column's
+    // `datetime('now')` default: an evaluation restored from a July backup in
+    // September would otherwise be stamped September, and a wrong timestamp
+    // reads exactly like a right one. Same rule the importers follow for a
+    // step's `started_at`.
+    for (const ev of input.evals ?? []) {
+      db.prepare(
+        `INSERT INTO agent_trace_evals
+          (id, trace_id, evaluator_type, evaluator_name, score, passed, details, evaluated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        generateId('evl'),
+        traceId,
+        ev.evaluator_type,
+        ev.evaluator_name,
+        ev.score,
+        ev.passed ? 1 : 0,
+        jsonStr(ev.details),
+        ev.evaluated_at ?? now(),
+      );
+    }
+
     return db
       .prepare('SELECT * FROM agent_traces WHERE id = ?')
       .get(traceId) as Record<string, unknown>;

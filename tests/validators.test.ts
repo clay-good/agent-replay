@@ -327,3 +327,47 @@ describe('holes the writer assumed were covered here', () => {
     expect(r.valid).toBe(true);
   });
 });
+
+// ── Evals carried on an ingested trace ───────────────────────────────────────
+
+describe('validateTraceInput: evals', () => {
+  const base = { agent_name: 'a' };
+  const ok = { evaluator_type: 'rubric', evaluator_name: 'accuracy', score: 0.5, passed: true };
+
+  it('accepts a well-formed eval, with and without the optional fields', () => {
+    expect(validateTraceInput({ ...base, evals: [ok] }).valid).toBe(true);
+    expect(
+      validateTraceInput({
+        ...base,
+        evals: [{ ...ok, details: { note: 'x' }, evaluated_at: '2026-07-19T06:45:51.000Z' }],
+      }).valid,
+    ).toBe(true);
+    // Absent entirely is the common case and must stay valid.
+    expect(validateTraceInput(base).valid).toBe(true);
+  });
+
+  it('names the offending field rather than failing at the CHECK constraint', () => {
+    // Without validation these reached SQLite as a cryptic SqliteError.
+    const cases: Array<[Record<string, unknown>, string]> = [
+      [{ ...ok, evaluator_type: 'vibes' }, 'evals[0].evaluator_type'],
+      [{ ...ok, evaluator_name: '' }, 'evals[0].evaluator_name'],
+      [{ ...ok, score: 'high' }, 'evals[0].score'],
+      [{ ...ok, score: Infinity }, 'evals[0].score'],
+      [{ ...ok, passed: 1 }, 'evals[0].passed'],
+      [{ ...ok, details: [1, 2] }, 'evals[0].details'],
+      [{ ...ok, evaluated_at: 'whenever' }, 'evals[0].evaluated_at'],
+    ];
+    for (const [evalInput, field] of cases) {
+      const result = validateTraceInput({ ...base, evals: [evalInput] });
+      expect(result.valid, `${field} should be rejected`).toBe(false);
+      expect(result.errors.map((e) => e.field)).toContain(field);
+    }
+  });
+
+  it('rejects a non-array evals and a non-object entry', () => {
+    expect(validateTraceInput({ ...base, evals: 'lots' }).valid).toBe(false);
+    const entry = validateTraceInput({ ...base, evals: ['nope'] });
+    expect(entry.valid).toBe(false);
+    expect(entry.errors.map((e) => e.field)).toContain('evals[0]');
+  });
+});

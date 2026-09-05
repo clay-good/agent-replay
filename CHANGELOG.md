@@ -336,6 +336,20 @@ and one-way.
 
 ### Fixed
 
+- **A backup made with `export --with-evals` restored none of them.**
+  `ingest` read only `steps`, so a json/jsonl export — the format the spec
+  calls a backup — came back with every evaluation gone, and said
+  "Ingested N trace(s) successfully" while doing it. `--with-evals` exists to
+  put the evaluation history in the file, so a restore that drops it makes the
+  flag a no-op on the one path that consumes its output. Evaluations carried on
+  an ingested trace are now restored, validated as strictly as everything else
+  at that boundary (a bad `evaluator_type` is a named field error rather than a
+  cryptic `SqliteError` from the CHECK constraint), and their `evaluated_at` is
+  preserved rather than left to the column's `datetime('now')` default — a July
+  evaluation restored in September would otherwise be stamped September, and a
+  wrong timestamp reads exactly like a right one. A document with no `evals`
+  key is unaffected.
+
 - **`--json` silently ignored the flags that only shape the human view.**
   `show --json --steps-only`, `show --json --tree` and `diff --json --compact`
   each produced a document byte-for-byte identical to one without the flag, and
