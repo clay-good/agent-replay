@@ -316,6 +316,15 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **`export <trace-id> --format golden` silently exported nothing for a
+  fork.** The golden path drops forks so that one stray fork on a shared store
+  cannot poison a baseline gathered in bulk — but it applied that rule to a
+  trace the caller had named outright too. The command looked the trace up,
+  found it, and then wrote `[]`, exited `0`, and reported "No traces matched"
+  for a filter the caller never passed. `check --trace` already follows the
+  opposite rule for the same reason: a trace named by id is used whatever its
+  lineage. Bulk exports are unchanged.
+
 - **`eval` dropped the evaluators that failed to run.** Each throwing
   evaluator was recorded, and then reported only if *every* one of them
   failed. A partial failure — some AI presets erroring at the provider while

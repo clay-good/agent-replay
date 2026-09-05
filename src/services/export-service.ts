@@ -91,7 +91,15 @@ export function exportTraces(
   const { items } = listTraces(db, exportFilter);
 
   if (format === 'golden') {
-    return exportGolden(db, items);
+    // `filter.id` is set only by `export <trace-id>`, where the caller named one
+    // trace outright rather than describing a set. The fork exclusion below
+    // exists so a single stray fork on a shared store can't poison a baseline
+    // gathered in bulk — reasoning that does not apply to a trace someone asked
+    // for by id. Without this, `export <fork-id> --format golden` wrote `[]`,
+    // exited 0, and reported "No traces matched" for a trace the command had
+    // just looked up and found. `check --trace` already follows exactly this
+    // rule: an explicitly named trace is compared "whatever its lineage".
+    return exportGolden(db, items, { explicit: filter.id != null });
   }
 
   // Build full trace objects
@@ -168,13 +176,18 @@ function goldenMetadata(trace: Trace): Record<string, unknown> {
   return { ...trace.metadata, ...shadowed, ...reserved };
 }
 
-function exportGolden(db: Database.Database, items: Trace[]): string {
+function exportGolden(
+  db: Database.Database,
+  items: Trace[],
+  opts: { explicit?: boolean } = {},
+): string {
   // A golden dataset is a set of known-good RUNS. A fork is a never-executed
   // copy — `fork` duplicates a step prefix and leaves it `running` — so baking
   // one in gives `check` a shorter shape to match: a real run that crashed part
   // way then reproduces the fork and the gate certifies it green. Excluded here
   // only; a json/jsonl export is a backup and must still carry the forks.
-  const entries: GoldenEntry[] = items.filter((t) => t.parent_trace_id == null).map((trace) => {
+  const candidates = opts.explicit ? items : items.filter((t) => t.parent_trace_id == null);
+  const entries: GoldenEntry[] = candidates.map((trace) => {
     const full = getTrace(db, trace.id);
     const evals = full?.evals ?? [];
 

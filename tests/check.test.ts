@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { runMigrations } from '../src/db/migrations.js';
@@ -1333,5 +1333,63 @@ describe('the gate can see the agent CHOOSING differently', () => {
     base[0].steps_summary[0].decision = undefined;
     const res = checkGolden(base, candidates(), { fields: ['decisions'] });
     expect(res.results.every((r) => r.passed)).toBe(true);
+  });
+});
+
+// ── export: a trace named by id is exported, whatever its lineage ────────────
+
+describe('export <trace-id> --format golden honors the trace it was given', () => {
+  it('exports an explicitly named fork, which the bulk exclusion drops', async () => {
+    // Regression: `exportGolden` drops forks so one stray fork on a shared
+    // store can't poison a baseline gathered in bulk. That reasoning does not
+    // apply to a trace the caller named outright — and the command applied it
+    // anyway, so `export <fork-id> --format golden` looked the trace up, found
+    // it, and then wrote `[]` at exit 0 while reporting "No traces matched" for
+    // a filter the caller never passed. `check --trace` already follows the
+    // opposite rule: an explicitly named trace is compared whatever its lineage.
+    const { runExport } = await import('../src/commands/export.js');
+    const dir = mkdtempSync(join(tmpdir(), 'ar-export-fork-'));
+    try {
+      const cdb = ensureDatabase(resolve(dir, 'traces.db'));
+      const parent = ingestTrace(cdb, baseline);
+      const fork = forkTrace(cdb, parent.id, 1);
+
+      const outPath = join(dir, 'one.json');
+      const errs: string[] = [];
+      const errSpy = vi.spyOn(console, 'error').mockImplementation((m?: unknown) => void errs.push(String(m)));
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const prevExit = process.exitCode;
+      try {
+        process.exitCode = 0;
+        runExport(fork.forked_trace_id, { format: 'golden', dir, output: outPath });
+      } finally {
+        errSpy.mockRestore();
+        logSpy.mockRestore();
+      }
+
+      const written = JSON.parse(readFileSync(outPath, 'utf-8')) as GoldenEntry[];
+      expect(written).toHaveLength(1);
+      expect(written[0].id).toBe(fork.forked_trace_id);
+      expect(errs.join('\n')).not.toMatch(/No traces matched/);
+      process.exitCode = prevExit;
+
+      // The bulk path still leaves it out: the store holds a parent and a fork,
+      // and a baseline gathered by filter carries only the parent.
+      const bulkPath = join(dir, 'bulk.json');
+      const errs2: string[] = [];
+      const errSpy2 = vi.spyOn(console, 'error').mockImplementation((m?: unknown) => void errs2.push(String(m)));
+      const logSpy2 = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        runExport(undefined, { format: 'golden', dir, output: bulkPath });
+      } finally {
+        errSpy2.mockRestore();
+        logSpy2.mockRestore();
+      }
+      const bulk = JSON.parse(readFileSync(bulkPath, 'utf-8')) as GoldenEntry[];
+      expect(bulk.map((e) => e.id)).toEqual([parent.id]);
+    } finally {
+      resetConnection();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
