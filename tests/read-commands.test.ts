@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { ensureDatabase, resetConnection } from '../src/db/index.js';
-import { ingestTrace, attachDecision } from '../src/services/trace-service.js';
+import { ingestTrace, attachDecision, getTrace, getStepSnapshot } from '../src/services/trace-service.js';
 import { runShow } from '../src/commands/show.js';
 import { runWhy } from '../src/commands/why.js';
 import { runDecisions } from '../src/commands/decisions.js';
@@ -335,11 +335,11 @@ describe('show says when a flag it was given does nothing', () => {
 
 describe('show --json carries the snapshots it was asked for', () => {
   // `--snapshots` reached the human path only: `show --json --snapshots`
-  // answered with a document that had no `snapshots` key at all, so
-  // `jq .snapshots` was null forever and there was NO machine-readable way to
-  // read a snapshot out of this tool -- while the very same trace printed them
-  // without `--json`. `evals`, the sibling section right above it, has always
-  // been in the payload. Same defect, and same fix, as `diff --ai --json`.
+  // answered with a document that had no snapshot data at all, so there was NO
+  // machine-readable way to read a snapshot out of this tool -- while the very
+  // same trace printed them without `--json`. `evals`, the sibling section
+  // right above it, has always been in the payload. Same defect, and same fix,
+  // as `diff --ai --json`.
   let snapId: string;
 
   beforeEach(() => {
@@ -367,35 +367,61 @@ describe('show --json carries the snapshots it was asked for', () => {
   });
 
   const payload = (): Record<string, unknown> => JSON.parse(out.join('\n'));
+  const steps = (): Array<Record<string, unknown>> =>
+    payload().steps as Array<Record<string, unknown>>;
 
-  it('includes a snapshot for every step that has one', async () => {
+  it('attaches each snapshot to its own step, as export does', async () => {
     await runShow(snapId, { dir, json: true, snapshots: true });
-    const snapshots = payload().snapshots as Array<Record<string, unknown>>;
+    const s = steps();
     // The fixture must actually carry snapshots, or every assertion below
     // passes vacuously against a trace that simply has none.
-    expect(snapshots).toHaveLength(2);
-    // Tagged by step_number: the stored row carries only a step_id, and every
-    // other step reference in the payload is by number.
-    expect(snapshots.map((s) => s.step_number)).toEqual([1, 3]);
-    expect(snapshots.map((s) => s.token_count)).toEqual([111, 333]);
-    expect(snapshots[0].context_window).toEqual({ messages: 2 });
-    expect(snapshots[0].environment).toEqual({ db: 'prod' });
-    expect(snapshots[1].tool_state).toEqual({ conn: 'open' });
-    // Step 2 has no snapshot and must simply be absent, not a null entry.
-    expect(snapshots.map((s) => s.step_number)).not.toContain(2);
+    expect(s).toHaveLength(3);
+    expect(s[0].snapshot).toMatchObject({ token_count: 111, context_window: { messages: 2 }, environment: { db: 'prod' } });
+    expect(s[2].snapshot).toMatchObject({ token_count: 333, tool_state: { conn: 'open' } });
+    // `null`, not a missing key, on a step that has none -- the shape
+    // `export --with-snapshots` writes, so an absence is never ambiguous.
+    expect(s[1].snapshot).toBeNull();
   });
 
-  it('omits the key entirely without --snapshots, so the old payload is unchanged', async () => {
+  it('re-ingests with its snapshots intact', async () => {
+    // The point of matching export's shape: `ingest` reads `steps[].snapshot`,
+    // so a top-level array (what this first shipped as) was accepted with
+    // "Ingested 1 trace(s) successfully" and silently kept no snapshot at all.
+    // A success message for data that was dropped is the failure this tool
+    // exists to catch, so the round-trip is pinned rather than the shape alone.
+    await runShow(snapId, { dir, json: true, snapshots: true });
+    const doc = payload() as unknown as IngestTraceInput;
+
+    const other = mkdtempSync(join(tmpdir(), 'ar-snap-rt-'));
+    try {
+      const db2 = ensureDatabase(resolve(other, 'traces.db'));
+      const reId = ingestTrace(db2, doc).id;
+      const back = getTrace(db2, reId);
+      expect(back).toBeTruthy();
+      const first = getStepSnapshot(db2, reId, 1);
+      const third = getStepSnapshot(db2, reId, 3);
+      expect(first?.token_count).toBe(111);
+      expect(first?.environment).toEqual({ db: 'prod' });
+      expect(third?.tool_state).toEqual({ conn: 'open' });
+      // The step that had none must not acquire one from the `null`.
+      expect(getStepSnapshot(db2, reId, 2)).toBeNull();
+    } finally {
+      resetConnection();
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves the steps untouched without --snapshots, so the old payload is unchanged', async () => {
     await runShow(snapId, { dir, json: true });
-    expect(payload()).not.toHaveProperty('snapshots');
+    expect(steps()[0]).not.toHaveProperty('snapshot');
   });
 
   it('applies the --from-step/--to-step window, as the human path does', async () => {
-    // The window scopes `steps`; a snapshot list that ignored it would describe
-    // steps the same document says it left out.
+    // The window scopes `steps`; snapshots ride along on the steps that remain.
     await runShow(snapId, { dir, json: true, snapshots: true, fromStep: '2' });
-    const snapshots = payload().snapshots as Array<Record<string, unknown>>;
-    expect(snapshots.map((s) => s.step_number)).toEqual([3]);
+    const s = steps();
+    expect(s.map((x) => x.step_number)).toEqual([2, 3]);
+    expect(s[1].snapshot).toMatchObject({ token_count: 333 });
   });
 });
 

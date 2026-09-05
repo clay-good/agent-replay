@@ -109,18 +109,28 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
       ? { ...trace, steps: windowed, step_window: { from: fromStep ?? null, to: toStep ?? null, shown: windowed.length, omitted } }
       : trace;
     // `--snapshots` reached the human path only, so `show --json --snapshots`
-    // answered with a document that had no `snapshots` key at all: exit 0, no
-    // warning, and `jq .snapshots` null forever — while the very same trace
-    // printed snapshots without `--json`. That left NO machine-readable way to
-    // get a snapshot out of this tool, though `evals` (the sibling section
-    // right above it) has always been in the payload. It is the defect
+    // answered with a document that had no snapshot data at all: exit 0, no
+    // warning, and nothing to read — while the very same trace printed
+    // snapshots without `--json`. That left NO machine-readable way to get a
+    // snapshot out of this tool, though `evals` (the sibling section right
+    // above it) has always been in the payload. It is the defect
     // `diff --ai --json` already had and already fixed, in the same shape: a
     // flag whose data the JSON path could carry, dropped by an early return.
+    //
+    // Attached PER STEP as `snapshot`, which is `export --with-snapshots`'s
+    // shape and the one `ingest` reads — not a top-level array, which is what
+    // this first shipped as and which does not round-trip: `show --json
+    // --snapshots | ingest` reported "Ingested 1 trace(s) successfully" and
+    // silently kept none of them, since ingest looks for `steps[].snapshot`.
+    // A success message for data that was dropped is the exact failure this
+    // tool exists to catch. `null` on a step with no snapshot, as export
+    // writes it, so the key's absence is never ambiguous.
+    //
     // Keyed off the flag rather than emitted always, exactly as `ai_analysis`
     // is, so a `show --json` without it stays byte-for-byte unchanged. Built
     // from `windowed`, so the window applies here as it does on the human path.
     const payload = opts.snapshots
-      ? { ...base, snapshots: collectSnapshots(db, trace.id, windowed) }
+      ? { ...base, steps: attachSnapshots(db, trace.id, windowed) }
       : base;
     console.log(JSON.stringify(payload, null, 2));
     return;
@@ -217,6 +227,33 @@ function collectSnapshots(
     out.push({ step_number: step.step_number, step_name: step.name, ...snapshot });
   }
   return out;
+}
+
+/**
+ * `windowed` with each step's snapshot attached as `snapshot`, mirroring
+ * `export --with-snapshots` field for field — the shape `ingest` reads, so a
+ * `show --json --snapshots` document re-ingests with its snapshots intact.
+ * `null` where a step has none, as export writes it.
+ */
+function attachSnapshots(
+  db: Database.Database,
+  traceId: string,
+  steps: TraceWithDetails['steps'],
+): Array<Record<string, unknown>> {
+  return steps.map((step) => {
+    const snap = getStepSnapshot(db, traceId, step.step_number);
+    return {
+      ...step,
+      snapshot: snap
+        ? {
+            context_window: snap.context_window,
+            environment: snap.environment,
+            tool_state: snap.tool_state,
+            token_count: snap.token_count,
+          }
+        : null,
+    };
+  });
 }
 
 function renderSnapshots(

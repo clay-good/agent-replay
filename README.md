@@ -296,7 +296,7 @@ the absence as "this trace has none".
 
 `--steps-only` and `--tree` shape the human view only — a `--json` document is the whole trace either way — so pairing either with `--json` says the flag did nothing rather than implying the payload was narrowed. (`steps` carries `parent_step_number` and `caused_by_step_number`, so a consumer can rebuild the tree itself.) `diff --json --compact` says the same.
 
-`show --json --snapshots` carries the snapshots too, in a `snapshots` array — one entry per step that has one, tagged with its `step_number`, scoped by the same `--from-step`/`--to-step` window as the steps beside it. The key is written only when you ask for it, so a `show --json` without the flag is unchanged.
+`show --json --snapshots` carries the snapshots too, attached to each step as `snapshot` (`null` where a step has none) — the same shape `export --with-snapshots` writes, so the document re-ingests with its snapshots intact. The steps are only rewritten when you ask for it, so a `show --json` without the flag is unchanged.
 
 A `show --json` whose window actually left steps out carries a `step_window` object (`from`, `to`, `shown`, `omitted`) so a consumer can tell a subset from a whole trace. The field marks a SUBSET, not the presence of the flags: a window that omits nothing — `--from-step 1 --to-step 3` on a three-step trace — returns the whole trace and no such field, exactly as an unwindowed call does, because in both cases what you have is everything.
 

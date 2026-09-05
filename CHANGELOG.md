@@ -355,12 +355,15 @@ and one-way.
   way to get a snapshot out of the tool, though `evals` — the sibling section
   rendered right above it — has always been in the payload. It is the defect
   `diff --ai --json` had and fixed, in the same shape: a flag whose data the
-  JSON path could carry, dropped by an early return. The key is written only
-  when the flag is passed, exactly as `ai_analysis` is, so a `show --json`
-  without it is byte-for-byte unchanged; each entry is tagged with the
-  `step_number` it belongs to (the stored row carries only a `step_id`), a step
-  with no snapshot is absent rather than null, and the
-  `--from-step`/`--to-step` window applies as it does on the human path.
+  JSON path could carry, dropped by an early return. Each snapshot is attached
+  to its own step as `snapshot`, field for field the shape
+  `export --with-snapshots` writes and the one `ingest` reads, so a
+  `show --json --snapshots` document re-ingests with its snapshots intact — a
+  top-level array would not, and `ingest` would have reported "Ingested 1
+  trace(s) successfully" while keeping none of them. A step with no snapshot
+  carries `null`, as export writes it. The steps are only rewritten when the
+  flag is passed, so a `show --json` without it is byte-for-byte unchanged, and
+  the `--from-step`/`--to-step` window applies as it does on the human path.
 
 - **`check --trace` silently ignored `--agent`, `--agent-exact` and
   `--since`.** `--trace` names one trace and the filter branch is never

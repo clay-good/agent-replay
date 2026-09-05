@@ -17,14 +17,16 @@ The system SHALL list traces via `agent-replay list` with filters (`--status` ex
 
 The system SHALL show a full trace via `agent-replay show <trace-id>` including metadata, the step timeline, and optionally eval results (`--evals`) and snapshot data (`--snapshots`). Trace lookup SHALL match by exact ID or ID prefix (IDs are `trc_`-prefixed, so a usable prefix starts with `trc_`); a prefix matching more than one trace SHALL be an error naming the candidates, never a silent pick — `show`/`why`/`decisions` answer about a trace the user did not name, and `fork`, which WRITES, would derive a new trace from one.
 
-A `--json` document SHALL be the whole trace, in document order, whatever the view flags say. `--snapshots` SHALL add a `snapshots` array — one entry per step that has one, tagged with its `step_number` (the stored row carries only a `step_id`), scoped by the same step window as `steps`, and absent rather than null for a step with no snapshot; the key SHALL be written ONLY when the flag is passed, so a `show --json` without it is unchanged. `--evals` needs no such handling because evaluations are always in the payload. The flags that shape the HUMAN view alone — `--steps-only` and `--tree` — cannot be honoured by a document, so passing either with `--json` SHALL say the flag did nothing, on stderr, leaving stdout a clean document; the tree it would have drawn is rebuildable from the `parent_step_number` and `caused_by_step_number` carried on each step.
+A `--json` document SHALL be the whole trace, in document order, whatever the view flags say. `--snapshots` SHALL attach each snapshot to its own step as `snapshot`, field for field the shape `export --with-snapshots` writes and `ingest` reads, so the document re-ingests with its snapshots intact; a step with no snapshot SHALL carry `null`. The steps SHALL be rewritten ONLY when the flag is passed, so a `show --json` without it is unchanged. `--evals` needs no such handling because evaluations are always in the payload. The flags that shape the HUMAN view alone — `--steps-only` and `--tree` — cannot be honoured by a document, so passing either with `--json` SHALL say the flag did nothing, on stderr, leaving stdout a clean document; the tree it would have drawn is rebuildable from the `parent_step_number` and `caused_by_step_number` carried on each step.
 
 #### Scenario: Snapshots in machine-readable form
 
 - **WHEN** a user runs `agent-replay show <id> --json --snapshots` on a trace whose steps 1 and 3 have snapshots and step 2 does not
-- **THEN** the document carries a `snapshots` array of two entries, tagged `step_number` 1 and 3
+- **THEN** steps 1 and 3 carry their snapshot under `snapshot` and step 2 carries `null`
+- **WHEN** that document is piped back through `agent-replay ingest`
+- **THEN** the re-ingested trace has both snapshots, and step 2 still has none
 - **WHEN** the same command runs without `--snapshots`
-- **THEN** the document has no `snapshots` key at all
+- **THEN** no step carries a `snapshot` key at all
 
 #### Scenario: A view flag a document cannot honour
 
