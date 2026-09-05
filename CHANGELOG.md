@@ -336,6 +336,18 @@ and one-way.
 
 ### Fixed
 
+- **`ingest`'s fork note left out the consequence that costs the most.** It
+  said a restored fork becomes an ordinary trace and that `check` and `watch`
+  would treat it as a real run, but not that `export --format golden` would
+  then INCLUDE it in a baseline it deliberately excludes — the reason forks are
+  excluded in the first place, and the item its own source comment lists first.
+  Measured on a restored backup: a golden export that held 5 entries before the
+  round trip held 6 after, the extra one a never-executed copy of a step prefix
+  that a real run stopping early would reproduce and pass against. Restoring
+  the lineage itself remains a maintainer call (ingest regenerates ids, so it
+  needs an in-file remap and a decision about a fork whose parent is absent);
+  naming the cost is not.
+
 - **A backup made with `export --with-evals` restored none of them.**
   `ingest` read only `steps`, so a json/jsonl export — the format the spec
   calls a backup — came back with every evaluation gone, and said
@@ -348,7 +360,10 @@ and one-way.
   preserved rather than left to the column's `datetime('now')` default — a July
   evaluation restored in September would otherwise be stamped September, and a
   wrong timestamp reads exactly like a right one. A document with no `evals`
-  key is unaffected.
+  key is unaffected. `ingest`'s note saying stored evals could not be restored
+  — which advised re-running `agent-replay eval` to regenerate them — is gone
+  with the limitation it described; a note the tool contradicts is worse than
+  none, and it sent the reader to redo work the restore had already done.
 
 - **`--json` silently ignored the flags that only shape the human view.**
   `show --json --steps-only`, `show --json --tree` and `diff --json --compact`

@@ -310,10 +310,12 @@ describe('CLI integration', () => {
     rmSync(fresh, { recursive: true, force: true });
   });
 
-  it('reports eval results this store cannot restore instead of dropping them silently', () => {
-    // `export --with-evals` writes an `evals` array that `ingest` has no field
-    // for, so it is dropped — on the documented backup/restore path, for data
-    // the user explicitly opted in to keeping, with an exit 0 and no mention.
+  it('restores the eval results an export carried, and no longer says it cannot', () => {
+    // `export --with-evals` writes an `evals` array, and a json export is a
+    // BACKUP: ingest reads it back rather than dropping it. This test used to
+    // pin the opposite -- a note saying the evals could not be restored and
+    // advising `agent-replay eval` to regenerate them -- which is how that note
+    // survived the change that made the restore work.
     const evalDir = mkdtempSync(join(tmpdir(), 'ar-evals-'));
     const file = join(evalDir, 'withevals.json');
     writeFileSync(file, JSON.stringify([{
@@ -324,11 +326,15 @@ describe('CLI integration', () => {
       evals: [{ evaluator_type: 'rubric', evaluator_name: 'r1', score: 1, passed: true }],
     }]));
     const res = run(['ingest', file]);
-    expect(res.code).toBe(0); // the traces themselves restore faithfully
-    expect(`${res.stdout}${res.stderr}`).toMatch(/1 stored eval result\(s\).*cannot be restored/);
-    // --dry-run is the documented preview of the real run, so it must say so too.
-    const dry = run(['ingest', file, '--dry-run']);
-    expect(`${dry.stdout}${dry.stderr}`).toMatch(/1 stored eval result\(s\).*cannot be restored/);
+    expect(res.code).toBe(0);
+    expect(`${res.stdout}${res.stderr}`).not.toMatch(/cannot be restored/);
+
+    // The eval is really in the store, not merely un-warned about.
+    const shown = run(['list', '--json']);
+    const id = JSON.parse(shown.stdout).items[0].id as string;
+    const trace = JSON.parse(run(['show', id, '--json']).stdout);
+    expect(trace.evals).toHaveLength(1);
+    expect(trace.evals[0]).toMatchObject({ evaluator_name: 'r1', passed: true });
     rmSync(evalDir, { recursive: true, force: true });
   });
 

@@ -141,37 +141,18 @@ export function runIngest(filePath: string, opts: IngestOptions = {}): void {
     console.log(
       chalk.yellow(
         `  Note: ${forks} trace(s) in this file are forks; they are restored as ordinary traces — ` +
-        'ingest cannot rebuild fork lineage, so `check` and `watch` will treat them as real runs.',
+        'ingest cannot rebuild fork lineage, so `check` and `watch` will treat them as real runs, ' +
+        'and `export --format golden` will INCLUDE them in a baseline it would otherwise exclude.',
       ),
     );
   }
 
-  // Reported BEFORE the dry-run return: --dry-run is the documented preview of
-  // the real run, so a preview that omits the one thing the real run warns about
-  // is exactly the surprise it exists to prevent.
-  //
-  // `export --with-evals` writes an `evals` array that `ingest` has no field
-  // for, so it is dropped — silently, on the documented backup/restore path,
-  // for data the user opted in to keeping. Restoring it is a schema change and
-  // a maintainer call; reporting the loss is not, and a restore that reads as
-  // complete while it is not is exactly what the rest of this command refuses
-  // to do. The traces themselves restore faithfully.
-  const withEvals = valid.reduce(
-    (n, t) => n + (Array.isArray((t as unknown as { evals?: unknown[] }).evals)
-      ? (t as unknown as { evals: unknown[] }).evals.length
-      : 0),
-    0,
-  );
-  if (withEvals > 0) {
-    // On stdout, like the sibling "Continuing with N valid trace(s)" note:
-    // `ingest` has no --json mode, so stdout is the report.
-    console.log(
-      chalk.yellow(
-        `  Note: ${withEvals} stored eval result(s) in this file cannot be restored — ` +
-        'ingest has no evals field. Re-run `agent-replay eval` to regenerate them.',
-      ),
-    );
-  }
+  // NOTE: there was a note here saying stored evals could not be restored and
+  // advising the reader to re-run `agent-replay eval` to regenerate them. Ingest
+  // now restores them (with their original `evaluated_at`), so the note was
+  // false and sent people to redo work that had already been done. A stale
+  // warning is worse than none: it is a statement about the tool's behaviour
+  // that the tool contradicts.
 
   // Dry run
   if (opts.dryRun) {
