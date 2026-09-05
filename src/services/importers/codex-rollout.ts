@@ -207,9 +207,7 @@ export function importCodexRollout(
         // Counted as skipped rather than merely uncounted, so
         // `imported + skipped = records` still holds — the same bookkeeping the
         // empty-text case a few lines below already does for the same reason.
-        const paired = it.call_id != null && callIds.has(String(it.call_id));
-        if (paired) contributed = true;
-        else skipped++;
+        contributed = it.call_id != null && callIds.has(String(it.call_id));
         break;
       }
       case 'token_count': {
@@ -261,13 +259,10 @@ export function importCodexRollout(
           steps.push({ step_number: stepNumber++, step_type: 'output', name: 'assistant_message', output: { text } });
           contributed = true;
         } else {
-          // A follow-up user turn (input already set) or an empty message has no
-          // home in the current model — there is no 'user' step type, so the
-          // initial prompt is trace.input and only agent actions become steps
-          // (same as the claude-transcript importer). Count it as skipped:
-          // previously it was marked imported while nothing was retained,
-          // inflating "Records imported" and breaking imported + skipped = records.
-          skipped++;
+          // An empty or non-user/assistant message has no home in the current
+          // model — there is no 'user' step type, so the prompt is trace.input
+          // and only agent actions become steps (same as the claude-transcript
+          // importer). `contributed` stays false, so it tallies as skipped.
         }
         break;
       }
@@ -277,11 +272,19 @@ export function importCodexRollout(
         break;
       }
       default:
-        skipped++;
         break;
     }
 
+    // One place decides, the way the sibling claude-transcript importer does it.
+    // This was `if (contributed) imported++;` with `skipped++` written into the
+    // individual branches instead — and one branch was missed: a user message
+    // whose text is blank sets `contributed = false` and fell out of the tally
+    // entirely, counted as neither. `imported + skipped = records` is the
+    // invariant this file's own comments appeal to three times over, and it did
+    // not hold: a rollout with a blank user turn reported fewer records than it
+    // read, with no indication which. Deciding once cannot miss a branch.
     if (contributed) imported++;
+    else skipped++;
   }
 
   // A file that yielded no steps AND no prompt has nothing of the session in

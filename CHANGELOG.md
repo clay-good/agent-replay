@@ -316,6 +316,19 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **`import` of a Codex rollout could report fewer records than it read.**
+  The importer decided `imported++` in one place at the bottom of its loop but
+  wrote `skipped++` into the individual branches, and one branch was missed: a
+  user message whose text is blank set `contributed = false` and was counted as
+  neither. `imported + skipped = records` is the invariant this importer's own
+  comments appeal to three times over, and it did not hold — the tally the
+  command prints quietly under-reported, with no indication which record went
+  missing. It now decides once, `if (contributed) imported++; else skipped++`,
+  the shape the sibling `claude-transcript` importer already uses, which cannot
+  miss a branch. Three existing assertions had encoded the old numbers, on the
+  reasoning that `session_meta` was "a header, not a tallied record" — it is
+  tallied, and the blank turn dropping out was what made those numbers come out.
+
 - **Six call sites still cut producer text at a bare code-unit offset.**
   `truncate` has been surrogate-safe for a while, but a check-report value, an
   event-protocol warning preview, the AI panel's fallback rendering, a stored

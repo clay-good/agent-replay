@@ -185,8 +185,15 @@ describe('an empty first prompt never eats the real one (codex-rollout)', () => 
       ]);
       const report = importCodexRollout(db, path);
       expect((report.trace?.input as { prompt?: string })?.prompt).toBe('THE REAL QUESTION');
-      // And the empty record counts as skipped, keeping imported + skipped = records.
-      expect(report.imported + report.skipped).toBe(2);
+      // And the empty record counts as skipped, keeping imported + skipped =
+      // records. This asserted 2 for a THREE-record fixture, reasoning that
+      // session_meta is "a header, not a tallied record" — but session_meta
+      // sets contributed and is counted (the multi-turn test above pins 5 for
+      // five records, session_meta included). What actually made the old number
+      // come out was the blank turn falling out of the tally entirely: two
+      // errors that happened to cancel.
+      expect(report.imported + report.skipped).toBe(3);
+      expect(report.skipped).toBe(1);
     });
   }
 });
@@ -200,9 +207,10 @@ describe('a rollout that captured nothing is a failed import', () => {
     const report = importCodexRollout(db, path);
     expect(report.trace).toBeNull();
     expect(report.steps).toBe(0);
-    // The one response_item is accounted for either way (session_meta is a
-    // header, not a tallied record), so the invariant still holds.
-    expect(report.imported + report.skipped).toBe(1);
+    // Both records are accounted for: session_meta contributes the session id
+    // and counts as imported, the empty message as skipped.
+    expect(report.imported + report.skipped).toBe(2);
+    expect(report.skipped).toBe(1);
   });
 });
 
@@ -384,5 +392,19 @@ describe('an orphan tool output is not counted as imported', () => {
     const report = importCodexRollout(db, path);
     expect(report.skipped).toBeGreaterThanOrEqual(1);
     expect(report.imported + report.skipped).toBe(3);
+  });
+});
+
+describe('every record lands in exactly one side of the tally', () => {
+  it('holds for a record type the importer does not recognize', () => {
+    const path = fixture([
+      { type: 'session_meta', payload: { id: 's-unk', timestamp: '2026-01-01T00:00:00Z' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ text: 'q' }] } },
+      { type: 'response_item', payload: { type: 'some_future_record' } },
+      { type: 'event_msg', payload: { type: 'thread_settings_applied' } },
+    ]);
+    const report = importCodexRollout(db, path);
+    expect(report.imported + report.skipped).toBe(4);
+    expect(report.skipped).toBe(2);
   });
 });
