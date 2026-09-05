@@ -328,6 +328,15 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **`fork` silently ignored an empty `--modify-input`, `--modify-context` or
+  `--tag`.** Each was read with a plain truthiness test, so an empty string —
+  the shape a flag built from an unset shell variable takes — skipped the flag
+  entirely, and the command printed "Forked trace successfully." at exit `0`
+  for a copy that carried none of the modification asked for, or no tag. This
+  is the refusal `list`, `export`, `check` and `config set` already make, and
+  the one headline command that had not adopted it. A literal `null` is
+  untouched: it remains the documented no-op that keeps the original value.
+
 - **`otel serve` rejected a bad protobuf body with no reason at all.** The
   request handler took only the status from the protobuf path and answered a
   failure with zero bytes — the reason ("invalid protobuf body") had already

@@ -380,6 +380,12 @@ agent-replay fork <trace-id> --from-step 2 --modify-input '{"task":"revised prom
 agent-replay fork <trace-id> --from-step 4 --tag experiment-1
 ```
 
+An **empty** value for `--modify-input`, `--modify-context` or `--tag` is a
+usage error (exit `2`), for the same reason it is on `list`: a flag built from
+an unset shell variable would otherwise be skipped silently, and `fork` would
+report success for a copy carrying none of what was asked. A literal `null`
+*is* accepted — it is the documented no-op that keeps the original value.
+
 ### Run under supervision
 
 Wrap any agent command to record it end-to-end and propagate its exit status — useful as a one-line harness around a run:

@@ -34,6 +34,30 @@ export function runFork(traceId: string, opts: ForkOptions): void {
     process.exitCode = 2;
     return;
   }
+  // An EMPTY value is a usage error, not "flag omitted" — the refusal `list`,
+  // `export`, `check` and `config set` already make, and it belongs here for
+  // the same reason: `--modify-input ""` is falsy, so the flag was skipped
+  // entirely and `fork` reported "Forked trace successfully." at exit 0 for a
+  // fork that carried none of the modification the caller asked for. `--tag ""`
+  // did the same, silently producing an untagged fork. Checked before the trace
+  // lookup, so a typo is reported at the point of use rather than after the
+  // work — the ordering `eval` settled on for --max-cost.
+  //
+  // A literal `null` is NOT this: it is a documented no-op that keeps the
+  // original value, and parseModifier below preserves it deliberately.
+  for (const [flag, value] of [
+    ['--modify-input', opts.modifyInput],
+    ['--modify-context', opts.modifyContext],
+    ['--tag', opts.tag],
+  ] as const) {
+    if (value != null && value.trim() === '') {
+      console.error(chalk.red(`  ${flag} was given an empty value.`));
+      console.error(chalk.dim(`  Pass a value, or omit ${flag}.`));
+      process.exitCode = 2;
+      return;
+    }
+  }
+
   const db = ensureDatabase(dbPath);
 
   // Resolve trace
