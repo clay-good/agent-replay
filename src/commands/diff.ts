@@ -158,7 +158,17 @@ export async function runDiff(
   // Raw JSON output
   if (opts.json) {
     if (opts.ai && !(await analyzeWithAi())) return;
-    console.log(JSON.stringify(opts.ai ? { ...diff, ai_analysis: aiAnalysis } : diff, null, 2));
+    // Say what was compared. The document carried a `diffs` array and a count
+    // with no record of the scope, so `--fields model --json` reporting three
+    // differences was byte-for-byte the shape of an UNFILTERED comparison that
+    // genuinely found three — and a filter that left nothing produced
+    // `"diffs": []`, which reads as "the traces are identical", the one claim
+    // the human path is careful never to make. Written on EVERY run, `null`
+    // when unfiltered, following the rule the golden `failed` field settled:
+    // emitting a key only in one case makes its absence ambiguous between
+    // "not narrowed" and "produced by a build that predates the field".
+    const document = { ...diff, compared_fields: appliedFields ?? null };
+    console.log(JSON.stringify(opts.ai ? { ...document, ai_analysis: aiAnalysis } : document, null, 2));
     return;
   }
 

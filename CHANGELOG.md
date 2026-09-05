@@ -328,6 +328,17 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **`diff --json` did not say what it had compared.** The document carried a
+  `diffs` array and nothing about scope, so `--fields model --json` reporting
+  three differences was byte-for-byte the shape of an *unfiltered* comparison
+  that genuinely found three — and a filter that left nothing produced
+  `"diffs": []`, which reads as "the traces are identical", the one claim the
+  human path is careful never to make. The document now carries
+  `compared_fields`: the list when `--fields` narrowed the comparison, `null`
+  when it did not. Written on every run, following the rule the golden `failed`
+  field settled — a key emitted only in one case makes its absence ambiguous
+  between "not narrowed" and "written by a build that predates the field".
+
 - **`fork` silently ignored an empty `--modify-input`, `--modify-context` or
   `--tag`.** Each was read with a plain truthiness test, so an empty string —
   the shape a flag built from an unset shell variable takes — skipped the flag

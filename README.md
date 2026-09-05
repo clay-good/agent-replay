@@ -359,7 +359,9 @@ and never set `divergence_step`, which means "the first step that went
 different". Steps are paired by `step_number`, so gaps don't misalign the
 comparison. Narrow the comparison with `--fields`; when a filter leaves nothing,
 the verdict says so rather than claiming the traces are identical, and a filter
-naming no field at all is a usage error.
+naming no field at all is a usage error. The `--json` document records the scope
+too, as `compared_fields` — the list when `--fields` narrowed the comparison and
+`null` when it did not — so a filtered count is never read as a full one.
 
 `decision` compares the chosen option, its rationale, and who decided — so two
 runs that took opposite actions at the same step are reported as different even
