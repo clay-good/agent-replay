@@ -334,6 +334,24 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
     return;
   }
 
+  // Evaluators that FAILED TO RUN were collected and then dropped unless every
+  // single one failed. So a partial failure — 3 of 5 presets threw on a
+  // provider error, the other 2 passed — printed `--json` output that is an
+  // array of nothing but passes, with no trace of the three that never looked
+  // at the trace. The exit code was 1, but the document a pipeline reads said
+  // the run was clean. Report them, on stderr under `--json` so the document
+  // itself stays parseable — the same rule the budget notice and the
+  // no-evaluator tip above already follow.
+  if (failures.length > 0) {
+    const note = opts.json ? console.error : console.log;
+    note(
+      chalk.redBright(
+        `  ${failures.length} evaluator(s) failed to run and are not in these results:`,
+      ),
+    );
+    for (const f of failures) note(chalk.dim(`    ${f}`));
+  }
+
   // A failing evaluation (a rubric that misses its threshold, or a built-in
   // preset that fails) is a non-zero exit, so `eval` works as a CI gate — the
   // whole point of "build regression tests" and the README's exit-code table.
@@ -375,10 +393,14 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
   const costStr = totalCost > 0 ? chalk.dim(`  AI cost: $${totalCost.toFixed(6)}`) : '';
 
   const skippedStr = skipped.length ? chalk.dim(`  ${skipped.length} not applicable`) : '';
+  // Same reason as above: the summary is the line a reader scans, and
+  // "3 passed  avg score: 100%" for a run where two evaluators errored is a
+  // score that was not measured over the run it claims to describe.
+  const erroredStr = failures.length ? chalk.redBright(`  ${failures.length} failed to run`) : '';
   const avgStr = measured.length ? chalk.dim(`avg score: ${Math.round(avgScore * 100)}%`) : chalk.dim('nothing measured');
   console.log(
     `  ${chalk.greenBright(`${passed} passed`)}  ${failed > 0 ? chalk.redBright(`${failed} failed`) : ''}  ` +
-      avgStr + skippedStr + costStr,
+      avgStr + skippedStr + erroredStr + costStr,
   );
   console.log('');
 }

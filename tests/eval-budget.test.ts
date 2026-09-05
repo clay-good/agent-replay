@@ -221,3 +221,82 @@ describe('when no evaluator produces a result', () => {
     }
   }, 30000);
 });
+
+describe('a partial evaluator failure is reported, not dropped', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    resetConnection();
+  });
+
+  /**
+   * Regression: `failures` was collected on every throwing evaluator and then
+   * consumed only when EVERY one failed. A partial failure — some AI presets
+   * threw on a provider error while others returned — printed results
+   * containing nothing but the successes. Under `--json` that document is an
+   * array of passes describing a run in which several evaluators never looked
+   * at the trace; the exit code said 1, but the document a pipeline reads said
+   * the run was clean.
+   */
+  async function evalWithFlakyProvider(
+    opts: Parameters<typeof runEvalCommand>[1],
+  ): Promise<{ out: string; err: string; code: number }> {
+    const dir = mkdtempSync(join(tmpdir(), 'ar-eval-partial-'));
+    const prevExit = process.exitCode;
+    try {
+      const db = ensureDatabase(resolve(dir, 'traces.db'));
+      const trace = ingestTrace(db, failedTrace);
+      vi.stubEnv('ANTHROPIC_API_KEY', 'test-key');
+
+      // First AI preset answers; every later one fails at the provider.
+      let call = 0;
+      vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => {
+        if (call++ === 0) {
+          return {
+            status: 200,
+            json: async () => ({
+              content: [{ text: JSON.stringify({ root_cause: 'x', failing_step: 1, confidence: 0.9, severity: 'high' }) }],
+              usage: { input_tokens: 10, output_tokens: 10 },
+            }),
+          } as unknown as Response;
+        }
+        throw new Error('provider unreachable');
+      }));
+
+      const out: string[] = []; const err: string[] = [];
+      const logSpy = vi.spyOn(console, 'log').mockImplementation((m?: unknown) => { out.push(String(m)); });
+      const errSpy = vi.spyOn(console, 'error').mockImplementation((m?: unknown) => { err.push(String(m)); });
+      process.exitCode = 0;
+      try {
+        await runEvalCommand(trace.id, { ai: true, dir, ...opts });
+      } finally { logSpy.mockRestore(); errSpy.mockRestore(); }
+
+      const code = Number(process.exitCode ?? 0);
+      const noAnsi = (s: string) => s.replace(/\x1B\[[0-9;]*m/g, '');
+      return { out: noAnsi(out.join('\n')), err: noAnsi(err.join('\n')), code };
+    } finally {
+      process.exitCode = prevExit;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('names the evaluators that never ran, on stderr under --json', async () => {
+    const { out, err, code } = await evalWithFlakyProvider({ json: true });
+    expect(code).toBe(1);
+    expect(err).toMatch(/evaluator\(s\) failed to run and are not in these results/);
+    expect(err).toMatch(/provider unreachable/);
+    // stdout must still be exactly the JSON document, so `| jq` keeps working.
+    const parsed = JSON.parse(out);
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed.length).toBeGreaterThan(0);
+  });
+
+  it('says so on the summary line a human reads', async () => {
+    const { out, code } = await evalWithFlakyProvider({});
+    expect(code).toBe(1);
+    expect(out).toMatch(/evaluator\(s\) failed to run and are not in these results/);
+    // The summary line is the one a reader scans; it must not imply the score
+    // covers the whole run.
+    expect(out).toMatch(/failed to run/);
+  });
+});

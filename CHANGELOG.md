@@ -316,6 +316,16 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **`eval` dropped the evaluators that failed to run.** Each throwing
+  evaluator was recorded, and then reported only if *every* one of them
+  failed. A partial failure — some AI presets erroring at the provider while
+  others returned — printed results containing nothing but the successes: under
+  `--json`, an array of passes describing a run in which several evaluators
+  never looked at the trace, and on the human path a summary reading "3 passed,
+  avg score: 100%". The exit code said 1, but the report said the run was
+  clean. Both now name what failed to run; under `--json` on stderr, so stdout
+  stays a parseable document.
+
 - **`guard check` read "is a human present?" from the wrong channel.** It
   tested `process.stdout.isTTY` — but stdout is the command's *machine*
   channel, carrying the JSON verdict this README documents capturing "so it

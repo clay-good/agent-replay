@@ -459,7 +459,11 @@ agent-replay eval <trace-id> --json
 
 `eval` exits non-zero when an evaluation fails (a rubric below its threshold or a
 built-in preset that fails), so `agent-replay eval <trace-id> --rubric q.yaml`
-drops straight into a CI job as a pass/fail gate.
+drops straight into a CI job as a pass/fail gate. It also exits non-zero when an
+evaluator *fails to run at all* — a provider error, an unreachable network — and
+names each one, so a score is never reported as if it covered evaluators that
+never looked at the trace. Under `--json` those names go to stderr, keeping
+stdout a clean document for `jq`.
 
 ### Guardrails
 
