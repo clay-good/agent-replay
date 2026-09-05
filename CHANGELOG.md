@@ -328,6 +328,16 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
+- **`list` took about seven seconds to draw a large listing.** The query is
+  flat — `--json --limit 10000` returns in roughly 0.13s — but the terminal
+  table renderer costs time quadratic in its row count (measured on a bare
+  table with no options and no styling: 1,000 rows 123ms, 8,000 rows 3.9s), so
+  `list --limit 10000` spent ~7s building an 11 MB string for a table nobody
+  reads. The human path now draws at most 1,000 rows — already some forty
+  screenfuls, and a tenth of a second — and says so, naming `--json` as the
+  uncapped path. The count in the header still reports everything that matched,
+  and `--json` is untouched: it returns every row the query found.
+
 - **One unusable decision field cost the whole step on the live path.** A
   `confidence` outside `[0, 1]` made `record` and the `TraceRecorder` SDK skip
   the entire event, so a producer sending `confidence: 99` lost the decision

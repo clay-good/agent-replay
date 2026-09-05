@@ -108,6 +108,26 @@ export function runList(opts: ListOptions = {}): void {
   console.log('');
   console.log(heading(`  ${traces.length} trace(s) found${total > traces.length ? ` (${total} total)` : ''}`));
   console.log('');
-  console.log(traceTable(traces));
+  // Bound what gets DRAWN. The query is flat — `--json --limit 10000` returns
+  // in ~0.13s — but cli-table3's rendering is quadratic in row count (measured
+  // on a bare table with no options and no styling: 1,000 rows 123ms, 8,000
+  // rows 3.9s), so `list --limit 10000` spent about 7 seconds building an 11 MB
+  // string for a table no one reads. 1,000 rows is already some forty
+  // screenfuls and renders in a tenth of a second.
+  //
+  // Bounded and SAID, like the agent-name column above it and `show`'s step
+  // window: the note names the cap and points at the path that has no cap at
+  // all. `--json` is untouched — it returns every row the query matched.
+  const RENDER_MAX = 1000;
+  const drawn = traces.length > RENDER_MAX ? traces.slice(0, RENDER_MAX) : traces;
+  console.log(traceTable(drawn));
+  if (drawn.length < traces.length) {
+    console.log('');
+    console.log(
+      chalk.dim(`  Drawing the first ${RENDER_MAX} of ${traces.length} matching traces. `) +
+        chalk.white('--json') +
+        chalk.dim(' returns them all.'),
+    );
+  }
   console.log('');
 }

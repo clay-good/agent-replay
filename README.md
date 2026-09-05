@@ -241,6 +241,13 @@ agent-replay list --tag production --sort -tokens --limit 10
 agent-replay list --json
 ```
 
+`list` draws at most **1,000 rows** and says so when it stops there, naming
+`--json` as the uncapped path. The query itself is not limited — `--limit`
+still decides how many traces match, and `--json` returns all of them — but the
+terminal table renderer costs time quadratic in its row count, so drawing ten
+thousand rows took about seven seconds to build output no one reads. A thousand
+rows is already some forty screenfuls.
+
 An **empty** value for `--status`, `--agent`, `--tag`, `--session` or `--since` is
 a usage error (exit `2`), not an unfiltered listing — so a filter built from an
 unset shell variable (`list --agent "$AGENT"`) fails loudly instead of quietly
