@@ -57,6 +57,19 @@ export function runList(opts: ListOptions = {}): void {
   if (opts.agent) filter.agent_name = opts.agent;
   if (opts.tag) filter.tag = opts.tag;
   if (opts.session) filter.session_id = opts.session;
+  // `--sort ""` is a usage error for the same reason `--sort bogus` is, and it
+  // was reaching the opposite answer. `listTraces` deliberately rejects an
+  // unknown sort field "rather than silently falling back to the default order
+  // (which would hide the user's mistake)" — but the guard below is a bare
+  // truthiness test, so `""` never reached that check at all and did exactly the
+  // silent fall-back the check exists to prevent. A listing ordered by
+  // `started_at` is indistinguishable from one ordered as asked.
+  if (opts.sort != null && opts.sort.trim() === '') {
+    refuse(2, '--sort was given an empty value.', [
+      'Pass a field, or omit --sort to order by start time.',
+    ]);
+    return;
+  }
   if (opts.sort) {
     const desc = opts.sort.startsWith('-');
     filter.sort_by = desc ? opts.sort.slice(1) : opts.sort;

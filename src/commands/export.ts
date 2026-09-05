@@ -104,6 +104,20 @@ export function runExport(traceId: string | undefined, opts: ExportOptions = {})
     }
   }
 
+  // An empty --output is a usage error too, for the mirror image of the reason
+  // above. The destination is read with a bare truthiness test below, so `""` —
+  // `export --output "$OUT"` with OUT unset — silently took the OTHER branch and
+  // wrote the whole export to stdout: no file, no success line naming a path,
+  // and exit 0. The caller's next step reads a golden baseline that was never
+  // created, and the failure surfaces somewhere else entirely. An empty string
+  // is not a path, so there is nothing to interpret it as.
+  if (opts.output != null && opts.output.trim() === '') {
+    console.error(chalk.red('  --output was given an empty value.'));
+    console.error(chalk.dim('  Pass a file path, or omit --output to write to stdout.'));
+    process.exitCode = 2;
+    return;
+  }
+
   if (opts.agent) filter.agent_name = opts.agent;
   if (opts.tag) filter.tag = opts.tag;
   if (opts.since) {

@@ -50,6 +50,34 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
     process.exitCode = code;
   };
 
+  // An empty --rubric/--preset is a usage error, not "no evaluator asked for".
+  //
+  // Both are read with a bare truthiness test (`if (opts.rubric)`, and the
+  // "nothing specified" check further down), so `""` — an unset shell variable
+  // in `eval "$ID" --rubric "$RUBRIC"` — skipped the flag entirely and fell
+  // through to "No evaluator specified. Running all built-in presets." The
+  // command then reported the PRESETS' verdict, exit code and all, for a run
+  // the caller believes was scored against their rubric: a CI gate that goes
+  // red attributes the failure to a rubric that was never opened, and one that
+  // goes green certifies a rubric that never ran. Same refusal `--fields ""`,
+  // `--tag ""` and `list`'s narrowing flags already make, and the same shape as
+  // `fork --modify-input ""`, which was silently skipped for this same reason.
+  //
+  // Note this is a SELECTOR, not a number: the `""` → 0 convention that
+  // `--priority`/`--max-cost` deliberately follow (0 is a legal value there)
+  // has no analogue here, since no evaluator is named by the empty string.
+  for (const [flag, value] of [
+    ['--rubric', opts.rubric],
+    ['--preset', opts.preset],
+  ] as const) {
+    if (value != null && value.trim() === '') {
+      refuse(2, `${flag} was given an empty value.`, [
+        `Pass a value, or omit ${flag} to run every built-in preset.`,
+      ]);
+      return;
+    }
+  }
+
   // --max-cost is the spend cap for paid AI calls, so a malformed value must
   // fail loudly rather than fall back to Infinity (an unlimited budget). A typo
   // like "0.O5" would otherwise silently disable the cap.

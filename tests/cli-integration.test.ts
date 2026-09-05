@@ -1657,6 +1657,61 @@ describe('CLI integration', () => {
       expect(JSON.parse(r.stdout).error).toMatch(/empty value/);
     });
 
+    // The four flags left behind by the pass above. Each is read with a bare
+    // truthiness test, so `""` did not widen the request — it made the flag
+    // VANISH, and the command quietly did something else and called it success.
+    /** Ingest one trace from a real file and return its id. */
+    function ingestOne(agentName: string): string {
+      const file = join(dir, `${agentName}.json`);
+      const now = new Date().toISOString();
+      writeFileSync(file, JSON.stringify({
+        agent_name: agentName, trigger: 'manual', status: 'completed',
+        started_at: now, ended_at: now, input: {},
+        steps: [{ step_number: 1, step_type: 'llm_call', name: 's', input: {}, output: 'x', started_at: now }],
+      }));
+      run(['ingest', file]);
+      return JSON.parse(run(['list', '--json']).stdout).items[0].id as string;
+    }
+
+    it.each([['--rubric'], ['--preset']])(
+      'eval refuses an empty %s rather than scoring with the built-in presets',
+      (flag) => {
+        const id = ingestOne('ev');
+
+        const r = run(['eval', id, flag, '', '--json']);
+        expect(r.code).toBe(2);
+        expect(JSON.parse(r.stdout).error).toMatch(/empty value/);
+        // The point of the refusal: the presets must not have run and reported
+        // THEIR verdict for an evaluator the caller named and never got.
+        expect(r.stdout).not.toMatch(/hallucination-check/);
+        expect(r.stderr).not.toMatch(/No evaluator specified/);
+      },
+    );
+
+    it('export refuses an empty --output rather than writing to stdout', () => {
+      ingestOne('outy');
+      // The store really does hold an exportable trace, so the assertion below
+      // is about the refusal and not about an empty store.
+      expect(run(['export', '--format', 'json']).stdout).toContain('"agent_name"');
+
+      const r = run(['export', '--output', '', '--format', 'json']);
+      expect(r.code).toBe(2);
+      expect(r.stderr).toMatch(/empty value/);
+      // It took the "no --output" branch and dumped the whole store instead.
+      expect(r.stdout).not.toContain('"agent_name"');
+    });
+
+    it('list refuses an empty --sort rather than falling back to the default order', () => {
+      // `--sort bogus` is already exit 2; `--sort ""` skipped that check
+      // entirely and ordered by started_at, which reads as a correct listing.
+      const bogus = run(['list', '--sort', 'bogus']);
+      expect(bogus.code).toBe(2);
+
+      const r = run(['list', '--sort', '', '--json']);
+      expect(r.code).toBe(2);
+      expect(JSON.parse(r.stdout).error).toMatch(/empty value/);
+    });
+
     it('watch refuses an --interval that overflows the timer into a poll loop', () => {
       // Node clamps a >32-bit timer delay to 1 ms, so "poll almost never"
       // became "poll a thousand times a second" against SQLite. `dashboard

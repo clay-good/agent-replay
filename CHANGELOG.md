@@ -718,6 +718,24 @@ between them, and nothing else. Upgrades are automatic and one-way.
   golden baseline built that way then gates on runs it was never meant to cover.
   `check --since "$WINDOW"` unset gated over the entire store instead of the
   window, green for the same reason. Both now refuse at exit 2.
+- **Four selector flags were still skipped entirely on an empty value.** The
+  passes above fixed the flags that *widen* when emptied; these four do
+  something worse, because they are read with a bare truthiness test and so
+  simply VANISH — the command then does something else and calls it success.
+  `eval --rubric ""` and `eval --preset ""` fell through to "No evaluator
+  specified. Running all built-in presets" and reported the PRESETS' verdict,
+  exit code and all, for a run the caller believes was scored against what they
+  named: a CI gate that goes red blames a rubric that was never opened, and one
+  that goes green certifies a rubric that never ran. `export --output ""` took
+  the other branch and wrote the whole export to stdout — no file, no path in
+  the success line, exit 0 — so the next step reads a golden baseline that does
+  not exist. `list --sort ""` skipped the very check beside it that rejects an
+  unknown sort field "rather than silently falling back to the default order",
+  and a listing ordered by start time reads exactly like one ordered as asked.
+  All four now refuse at exit 2. (Unchanged: the deliberate convention that an
+  empty *numeric* value means 0 where 0 is legal — `guard add --priority ""`,
+  `eval --max-cost ""`, `replay --speed ""`. These four name a thing, and
+  nothing is named by the empty string.)
 - **`watch --interval` had the same 32-bit timer overflow `dashboard --refresh`
   was just capped for.** It validated only that the number was positive, so
   `--interval 999999999999` — plainly "poll almost never" — was clamped by Node
