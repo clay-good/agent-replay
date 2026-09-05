@@ -115,6 +115,18 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
 
   // Steps-only mode
   if (opts.stepsOnly) {
+    // `--steps-only` returns before the evaluations and snapshots sections, so
+    // asking for either alongside it gets you neither — silently, and the
+    // output looks exactly like a trace that has none. Same inert-flag idiom
+    // the export path already uses for `--with-evals --format golden`: say the
+    // flag did nothing rather than let the reader infer an absence from it.
+    // On stderr, so `show --steps-only` stays pipeable.
+    const ignoredFlags = [opts.evals && '--evals', opts.snapshots && '--snapshots'].filter(Boolean) as string[];
+    if (ignoredFlags.length > 0) {
+      const ignored = ignoredFlags.join(' and ');
+      console.error(chalk.yellow(`  ⚠ ${ignored} ${ignoredFlags.length === 1 ? 'has' : 'have'} no effect with --steps-only.`));
+      console.error(chalk.dim('    --steps-only prints the step timeline alone; drop it to see those sections.'));
+    }
     console.log('');
     console.log(heading('  Steps'));
     console.log('');

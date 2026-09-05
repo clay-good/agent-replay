@@ -278,7 +278,8 @@ agent-replay show <trace-id>
 # Just the steps
 agent-replay show <trace-id> --steps-only
 
-# Include eval results and state snapshots
+# Show the evaluations section even when there are none, plus state snapshots
+# (eval results already appear whenever the trace has any)
 agent-replay show <trace-id> --evals --snapshots
 
 # Render steps as a hierarchy (subagents/nested calls) with causal links
@@ -287,6 +288,11 @@ agent-replay show <trace-id> --tree
 # Window a large trace (real sessions can run to thousands of steps)
 agent-replay show <trace-id> --from-step 100 --to-step 150
 ```
+
+`--steps-only` prints the step timeline alone and returns before the
+evaluations and snapshots sections, so pairing it with `--evals` or
+`--snapshots` gets you neither; `show` says so rather than leaving you to read
+the absence as "this trace has none".
 
 A `show --json` whose window actually left steps out carries a `step_window` object (`from`, `to`, `shown`, `omitted`) so a consumer can tell a subset from a whole trace. The field marks a SUBSET, not the presence of the flags: a window that omits nothing — `--from-step 1 --to-step 3` on a three-step trace — returns the whole trace and no such field, exactly as an unwindowed call does, because in both cases what you have is everything.
 

@@ -177,7 +177,7 @@ program
   .option('--tree', 'Render steps as a hierarchy (parent/child + causal links)')
   .option('--from-step <n>', 'Only show steps from this step number (for large traces)')
   .option('--to-step <n>', 'Only show steps up to this step number')
-  .option('--evals', 'Include evaluation results')
+  .option('--evals', 'Show the evaluations section even when the trace has none (they are shown whenever present)')
   .option('--snapshots', 'Show full snapshot data for each step')
   .option('--dir <path>', 'Custom data directory')
   .action(async (traceId, opts) => {

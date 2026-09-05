@@ -297,3 +297,38 @@ describe('replay', () => {
     expect(stderr()).toMatch(pattern);
   });
 });
+
+describe('show says when a flag it was given does nothing', () => {
+  // `--steps-only` returns before the evaluations and snapshots sections, so
+  // asking for either alongside it gets you neither -- silently, and the output
+  // is indistinguishable from a trace that has none. The export path already
+  // warns for its own inert pair (`--with-evals` with `--format golden`); this
+  // is the same rule at the twin site.
+  it('warns that --evals and --snapshots are inert with --steps-only', async () => {
+    await runShow(id, { dir, stepsOnly: true, evals: true, snapshots: true });
+    const text = stderr();
+    expect(text).toMatch(/--evals and --snapshots have no effect with --steps-only/);
+    // Plural agreement: the same list rendered for one flag must read "has".
+    err.length = 0;
+    await runShow(id, { dir, stepsOnly: true, evals: true });
+    expect(stderr()).toMatch(/--evals has no effect with --steps-only/);
+  });
+
+  it('says nothing when --steps-only is used on its own', async () => {
+    // The cry-wolf guard: the warning must key off the flags actually given.
+    await runShow(id, { dir, stepsOnly: true });
+    expect(stderr()).not.toMatch(/no effect/);
+  });
+
+  it('keeps the warning off stdout, so --steps-only stays pipeable', async () => {
+    // The steps table is the thing a caller pipes; a warning belongs on stderr.
+    await runShow(id, { dir, stepsOnly: true, evals: true });
+    expect(stdout()).not.toMatch(/no effect/);
+    expect(stdout()).toMatch(/Steps/);
+  });
+
+  it('leaves the full view alone, where both flags do something', async () => {
+    await runShow(id, { dir, evals: true });
+    expect(stderr()).not.toMatch(/no effect/);
+  });
+});

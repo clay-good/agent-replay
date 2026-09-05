@@ -144,10 +144,10 @@ export function runExport(traceId: string | undefined, opts: ExportOptions = {})
   // flags were accepted and then silently did nothing, so a user asking for
   // snapshots got a success message and a file without them.
   if (format === 'golden' && (opts.withEvals || opts.withSnapshots)) {
-    const ignored = [opts.withEvals && '--with-evals', opts.withSnapshots && '--with-snapshots']
-      .filter(Boolean)
-      .join(' and ');
-    console.error(chalk.yellow(`  ⚠ ${ignored} has no effect with --format golden.`));
+    const ignoredFlags = [opts.withEvals && '--with-evals', opts.withSnapshots && '--with-snapshots']
+      .filter(Boolean) as string[];
+    const ignored = ignoredFlags.join(' and ');
+    console.error(chalk.yellow(`  ⚠ ${ignored} ${ignoredFlags.length === 1 ? 'has' : 'have'} no effect with --format golden.`));
     console.error(chalk.dim('    A golden entry always includes eval criteria, and never includes snapshots.'));
   }
 

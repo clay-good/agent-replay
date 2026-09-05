@@ -336,6 +336,26 @@ and one-way.
 
 ### Fixed
 
+- **`show --steps-only` silently ignored `--evals` and `--snapshots`.**
+  `--steps-only` prints the step timeline and returns before either section, so
+  asking for one alongside it got you neither — and the output is
+  indistinguishable from a trace that genuinely has no evals or snapshots, so
+  the flag's absence reads as an answer. `export` already warns for its own
+  inert pair (`--with-evals` / `--with-snapshots` with `--format golden`); this
+  is the same rule at the twin site. The warning names the flags that did
+  nothing and goes to stderr, so `show --steps-only` stays pipeable.
+
+- **Two inert-flag warnings said "has" for a list of two.** `--with-evals and
+  --with-snapshots has no effect` — now "have", in both the export message and
+  the new one.
+
+- **`show --evals` was described as "Include evaluation results"**, which
+  implies they are excluded without it. They are not: the evaluations section
+  is shown whenever the trace has any. The flag's real effect is to show the
+  section when the trace has *none*, reporting "No evaluations found" — which
+  is the useful thing it does, since an absent section otherwise cannot be
+  told from a trace nobody evaluated. The help text now says that.
+
 - **`guard list` showed a kill switch that cannot fire as an armed one.** A
   `deny` (or `require_review`) policy matching on `output_contains` can never
   block during enforcement — that runs *before* a tool call, when there is no
