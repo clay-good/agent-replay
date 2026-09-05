@@ -587,6 +587,29 @@ function stepMetadata(
   // OpenInference trace recorded no provider despite carrying one.
   const provider = str(a['gen_ai.provider.name']) ?? str(a['gen_ai.system']) ?? str(a['llm.provider']);
   if (provider) meta.provider = provider;
+  // The ROOT's model, normalized across dialects exactly as `provider` above.
+  //
+  // A model attribute is read by the STEP mapping, into the step's `model`
+  // column. The root is not a step, so on the root nothing read it, and every
+  // spelling was dropped — which contradicted the intent stated where this
+  // metadata is assembled: "carry the root's own attributes (model, provider,
+  // and any unmapped gen_ai.* keys) … they were dropped entirely, so a
+  // single-span trace recorded no model or provider at all". Only the provider
+  // half worked, because only it was written explicitly.
+  //
+  // A one-span agent run (a root `invoke_agent` with no children) therefore
+  // recorded its agent, tokens and provider and lost the model it ran on, with
+  // no step whose column could hold it and no trace-level model column either.
+  //
+  // Written as a normalized `model` rather than by letting the raw key through,
+  // so all three dialects land in one place: OpenInference spells it
+  // `llm.model_name`, which is not a `gen_ai.*` key and so was never eligible
+  // for the preservation loop below at all. That is the same dialect gap
+  // `llm.provider` was fixed for on the line above.
+  if (isRoot) {
+    const model = str(a['gen_ai.request.model']) ?? str(a['gen_ai.response.model']) ?? str(a['llm.model_name']);
+    if (model) meta.model = model;
+  }
   // Preserve any gen_ai.* attributes we didn't explicitly map.
   for (const [k, v] of Object.entries(a)) {
     if (!k.startsWith('gen_ai.') || CONSUMED.has(k)) continue;
@@ -603,41 +626,20 @@ function stepMetadata(
     // only when the producer happened to repeat the name in the span name
     // ("invoke_agent researcher"); a span named plainly "invoke_agent" lost it.
     if (k === 'gen_ai.agent.name' && isRoot) continue;
-    // The mirror image: these are read by the STEP mapping (`model`, and the
-    // tool's name as the step name). The ROOT is not a step, so nothing reads
-    // them there, and listing them unconditionally dropped them exactly where
-    // the comment on the trace's own metadata says they should be kept --
-    // "carry the root's own attributes (model, provider, and any unmapped
-    // gen_ai.* keys) ... they were dropped entirely, so a single-span trace
-    // recorded no model or provider at all". The provider half worked, because
-    // it is written explicitly above. The model half did not: a single-agent
-    // trace (one root span, no children) recorded the agent, its tokens and its
-    // provider, and lost the model it ran on. There is no trace-level `model`
-    // column, so metadata is the only home it has.
-    if (!isRoot && STEP_ONLY_CONSUMED.has(k)) continue;
     meta[k] = v;
   }
   return meta;
 }
 
 const CONSUMED = new Set([
-  // Keys consumed on EVERY span, so they never belong in the metadata bag.
-  // Two groups are deliberately absent because they are consumed CONDITIONALLY;
-  // see `stepMetadata`, which skips each on the side that actually reads it.
-  'gen_ai.operation.name', 'gen_ai.conversation.id',
-  'gen_ai.provider.name', 'gen_ai.system',
+  // `gen_ai.agent.name` is deliberately absent: it is consumed only on the ROOT
+  // span, where it becomes the trace's agent_name, so `stepMetadata` skips it
+  // there and keeps it everywhere else.
+  'gen_ai.operation.name', 'gen_ai.conversation.id', 'gen_ai.tool.name',
+  'gen_ai.request.model', 'gen_ai.response.model', 'gen_ai.provider.name', 'gen_ai.system',
   'gen_ai.usage.input_tokens', 'gen_ai.usage.output_tokens', 'gen_ai.usage.prompt_tokens',
   'gen_ai.usage.completion_tokens', 'gen_ai.input.messages', 'gen_ai.output.messages',
   'gen_ai.prompt', 'gen_ai.completion',
-]);
-
-/**
- * Read by the STEP mapping only — `model` becomes the step's column, and the
- * tool's name becomes the step's name. The root span is not a step, so on the
- * root these are consumed by nobody and are kept in its metadata instead.
- */
-const STEP_ONLY_CONSUMED = new Set([
-  'gen_ai.request.model', 'gen_ai.response.model', 'gen_ai.tool.name',
 ]);
 
 // ── small helpers ───────────────────────────────────────────────────────────

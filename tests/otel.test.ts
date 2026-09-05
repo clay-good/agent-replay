@@ -1200,10 +1200,26 @@ describe('a root span keeps the attributes only a step would have consumed', () 
     const [trace] = mapOtlpTraces(soloAgent());
     expect(trace.steps).toHaveLength(0);
     expect(trace.agent_name).toBe('solo');
-    expect(trace.metadata).toMatchObject({
-      provider: 'anthropic',
-      'gen_ai.request.model': 'claude-opus-5',
-    });
+    expect(trace.metadata).toMatchObject({ provider: 'anthropic', model: 'claude-opus-5' });
+  });
+
+  it('normalizes the root model across dialects, as it does the provider', () => {
+    // OpenInference spells it `llm.model_name`, which is not a `gen_ai.*` key
+    // and so was never eligible for the unmapped-key loop at all. Letting the
+    // raw key through would therefore have fixed the GenAI spelling and left
+    // this one broken -- the same dialect gap `llm.provider` was fixed for.
+    const [trace] = mapOtlpTraces(otlp([
+      span({
+        traceId: '6af7651916cd43dd8448eb211c80319c', spanId: 'b1ad6b7169203331', name: 'agent',
+        start: 1767225700000000000, end: 1767225706000000000,
+        attrs: {
+          'openinference.span.kind': 'AGENT', 'llm.model_name': 'gpt-4o',
+          'llm.provider': 'openai', 'llm.token_count.prompt': 10,
+        },
+      }),
+    ]));
+    expect(trace.steps).toHaveLength(0);
+    expect(trace.metadata).toMatchObject({ provider: 'openai', model: 'gpt-4o' });
   });
 
   it('still keeps the model out of a step\'s metadata, where the column holds it', () => {
@@ -1224,5 +1240,6 @@ describe('a root span keeps the attributes only a step would have consumed', () 
     ]));
     expect(trace.steps[0].model).toBe('claude-opus-5');
     expect(trace.steps[0].metadata).not.toHaveProperty('gen_ai.request.model');
+    expect(trace.steps[0].metadata).not.toHaveProperty('model');
   });
 });

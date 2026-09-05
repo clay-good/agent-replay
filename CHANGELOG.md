@@ -328,20 +328,22 @@ between them, and nothing else. Upgrades are automatic and one-way.
 
 ### Fixed
 
-- **A single-span agent trace recorded no model.** The mirror of the nested-agent
-  case below: `gen_ai.request.model` / `gen_ai.response.model` (and
-  `gen_ai.tool.name`) are read by the STEP mapping — the model becomes the
-  step's column, the tool's name becomes the step's name — but the root span is
-  not a step, so on the root nothing reads them, and they were excluded from
-  metadata anyway. That contradicted the intent stated on the trace's own
-  metadata, which set out to "carry the root's own attributes (model, provider,
-  and any unmapped `gen_ai.*` keys) … they were dropped entirely, so a
-  single-span trace recorded no model or provider at all". The provider half
-  worked, because it is written explicitly; the model half did not. A one-span
-  agent run (root only, no children) therefore recorded its agent, its tokens
-  and its provider, and lost the model it ran on — and with no steps, a step's
-  `model` column could never hold it either. The root now keeps these in its
-  metadata; a step still does not, since there the column holds them.
+- **A single-span agent trace recorded no model.** A model attribute is read by
+  the STEP mapping, into the step's `model` column, but the root span is not a
+  step — so on the root nothing read it and every spelling was dropped. That
+  contradicted the intent stated where the trace's metadata is assembled, which
+  set out to "carry the root's own attributes (model, provider, and any unmapped
+  `gen_ai.*` keys) … they were dropped entirely, so a single-span trace recorded
+  no model or provider at all". Only the provider half worked, because only it
+  was written explicitly. A one-span agent run (a root `invoke_agent` with no
+  children) therefore recorded its agent, its tokens and its provider, and lost
+  the model it ran on — with no step whose column could hold it, and no
+  trace-level model column either. The root's metadata now carries a normalized
+  `model`, written the same way `provider` already is, so all three dialects
+  land in one place: OpenInference spells it `llm.model_name`, which is not a
+  `gen_ai.*` key and so was never eligible for the unmapped-key pass at all —
+  the same dialect gap `llm.provider` was fixed for. A step's metadata still
+  carries neither, since there the column holds them.
 
 - **A nested agent span lost its own `gen_ai.agent.name`.** In a multi-agent
   trace each `invoke_agent` span names its own sub-agent, and the OTel mapper
