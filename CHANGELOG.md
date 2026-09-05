@@ -33,7 +33,8 @@ Two things to know before upgrading:
   26, and CI now tests all four.
 - **A read command run where there is no store now refuses (exit `2`)
   instead of creating one.** `list`, `show`, `why`, `decisions`, `stats`,
-  `diff`, `eval`, `export`, `fork` and `replay` all opened the store with a
+  `diff`, `eval`, `export`, `fork`, `replay`, `watch` and `dashboard` all
+  opened the store with a
   call that CREATES what it does not find, so running any of them from the
   wrong directory wrote a ~143 KB SQLite file nobody asked for and then
   answered from it — `list` said "No traces found" at exit `0`. That names the

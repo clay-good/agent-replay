@@ -6,7 +6,7 @@ import { getTrace, getStepsAfter, getMostRecentRunningTrace } from '../services/
 import { ensureDatabase } from '../db/index.js';
 import { stepIcon, stepLabel, heading, statusBadge, safeText, safeLine} from '../ui/theme.js';
 import { formatDuration } from '../utils/time.js';
-import { resolveDataDir } from '../utils/paths.js';
+import { resolveDataDir, storeExists } from '../utils/paths.js';
 import { escapeForMessage, truncate} from '../utils/json.js';
 
 export interface WatchOptions {
@@ -26,6 +26,16 @@ const MAX_POLL_MS = 2_147_483_647;
  */
 export function runWatch(traceId: string | undefined, opts: WatchOptions = {}): void {
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
+  // Refused, not created — same rule as the other read paths and as
+  // `guard check`: `ensureDatabase` CREATES what it does not find, so this
+  // wrote an empty store nobody asked for and then watched it forever, which
+  // looks exactly like an agent that never started. Creating a store is `init`.
+  if (!storeExists(resolveDataDir(opts.dir))) {
+    console.error(chalk.red(`  No trace store at ${dbPath}.`));
+    console.error(chalk.dim('  Run "agent-replay init" in the project directory, or pass --dir <path>.'));
+    process.exitCode = 2;
+    return;
+  }
   const db = ensureDatabase(dbPath);
 
   // Reject a malformed --interval up front — before resolving the trace — rather

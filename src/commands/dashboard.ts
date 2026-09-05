@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import chalk from 'chalk';
 import { ensureDatabase } from '../db/index.js';
 import { DashboardView } from '../ui/dashboard-view.js';
-import { resolveDataDir } from '../utils/paths.js';
+import { resolveDataDir, storeExists } from '../utils/paths.js';
 
 export interface DashboardOptions {
   refresh?: string;
@@ -69,6 +69,16 @@ export function runDashboard(opts: DashboardOptions = {}): void {
   }
 
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
+  // Refused, not created — same rule as the other read paths and as
+  // `guard check`: `ensureDatabase` CREATES what it does not find, so this
+  // wrote an empty store nobody asked for and then drew an empty dashboard
+  // over it, which looks exactly like a project that has recorded nothing. Creating a store is `init`.
+  if (!storeExists(resolveDataDir(opts.dir))) {
+    console.error(chalk.red(`  No trace store at ${dbPath}.`));
+    console.error(chalk.dim('  Run "agent-replay init" in the project directory, or pass --dir <path>.'));
+    process.exitCode = 2;
+    return;
+  }
   const db = ensureDatabase(dbPath);
 
   const dashboard = new DashboardView(db, {

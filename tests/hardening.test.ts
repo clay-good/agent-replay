@@ -603,6 +603,10 @@ describe('a read-only command refuses a missing store instead of creating one', 
     ['export', async (d: string) => (await import('../src/commands/export.js')).runExport(undefined, { dir: d })],
     ['fork', async (d: string) => (await import('../src/commands/fork.js')).runFork('trc_x', { fromStep: '1', dir: d })],
     ['replay', async (d: string) => (await import('../src/commands/replay.js')).runReplay('trc_x', { dir: d })],
+    // The two live views read the store too: `watch` would otherwise tail an
+    // empty store forever (indistinguishable from an agent that never started)
+    // and `dashboard` would draw an empty view over one.
+    ['watch', async (d: string) => (await import('../src/commands/watch.js')).runWatch(undefined, { dir: d })],
   ])('%s says so, exits 2, and writes nothing', async (_name, run) => {
     await run(dir);
     expect(process.exitCode).toBe(2);
