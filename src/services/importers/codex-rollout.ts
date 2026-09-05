@@ -154,6 +154,8 @@ export function importCodexRollout(
   };
   const steps: IngestStepInput[] = [];
   let stepNumber = 1;
+  /** The last timestamp seen; see the stamp fallback in the loop below. */
+  let lastStamp: string | undefined;
   // The model in force for the steps that follow. A rollout states it on a
   // `turn_context` record rather than on each item, and it is PER TURN — a
   // session that switches models mid-run says so here — so it is tracked as the
@@ -163,8 +165,12 @@ export function importCodexRollout(
   for (const rec of records) {
     const type = recordType(rec);
     const it = itemOf(rec);
-    const stamp = str(rec.timestamp) ?? str(it.timestamp);
-    if (stamp) endedAt = stamp;
+    // Falls back to the last timestamp seen, for the reason the sibling
+    // claude-transcript importer documents: a record with none still hands its
+    // steps a value, because the storage layer defaults a missing `started_at`
+    // to now and that lands outside the trace's own window.
+    const stamp = str(rec.timestamp) ?? str(it.timestamp) ?? lastStamp;
+    if (stamp) { endedAt = stamp; lastStamp = stamp; }
     // Where this record's steps begin, so each can be stamped below without
     // touching every `steps.push` site — missing one is the mistake this file
     // already documents having made with the imported/skipped tally.

@@ -235,6 +235,65 @@ describe('importClaudeTranscript — when each step happened', () => {
     // merely missing, and the one worth guarding: an import months later put
     // every step after the trace had already ended.
     const trace = getTrace(db, importClaudeTranscript(db, timed()).trace!.id)!;
+    expect(trace.steps.length).toBeGreaterThan(0);
+    for (const s of trace.steps) {
+      expect(s.started_at! >= trace.started_at, `step ${s.step_number} starts before its trace`).toBe(true);
+      expect(s.started_at! <= trace.ended_at!, `step ${s.step_number} starts after its trace ended`).toBe(true);
+    }
+  });
+
+  it('holds that property even when a record carries no timestamp of its own', () => {
+    // The version above only proves the property for a fully-timestamped
+    // transcript, which is the easy case -- so on its own it reads stronger
+    // than it is. A record with no timestamp still has to hand its steps
+    // SOMETHING, because the storage layer defaults a missing started_at to
+    // now, which is exactly the out-of-window stamp being guarded against. It
+    // inherits the last timestamp seen: a measured value, and an ordering
+    // bound, rather than an invented one.
+    const path = fixture([
+      { type: 'user', sessionId: 'sc', timestamp: '2026-07-01T00:00:00Z', message: { role: 'user', content: 'go' } },
+      { type: 'assistant', sessionId: 'sc', message: { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: {} }] } },
+      { type: 'user', sessionId: 'sc', timestamp: '2026-07-01T00:00:09Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] } },
+      { type: 'assistant', sessionId: 'sc', timestamp: '2026-07-01T00:00:12Z', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } },
+    ]);
+    const trace = getTrace(db, importClaudeTranscript(db, path).trace!.id)!;
+    const bash = trace.steps.find((s) => s.name === 'Bash')!;
+    expect(bash.started_at).toBe('2026-07-01T00:00:00Z'); // the previous record's time
+    for (const s of trace.steps) {
+      expect(s.started_at! >= trace.started_at).toBe(true);
+      expect(s.started_at! <= trace.ended_at!).toBe(true);
+    }
+  });
+
+  it('keeps an untimestamped subagent record inside the session window', () => {
+    const path = fixture([
+      { type: 'user', sessionId: 'sub-nt', timestamp: '2026-07-01T00:00:00Z', message: { role: 'user', content: 'research' } },
+      { type: 'assistant', sessionId: 'sub-nt', timestamp: '2026-07-01T00:00:04Z', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Task', input: { agent: 'Explore' } }] } },
+      { type: 'user', sessionId: 'sub-nt', timestamp: '2026-07-01T00:00:20Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'done' }] } },
+    ]);
+    const subDir = join(dir, 'transcript', 'subagents');
+    mkdirSync(subDir, { recursive: true });
+    writeFileSync(
+      join(subDir, 'agent-a1.jsonl'),
+      [{ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'sub says' }] } }]
+        .map((r) => JSON.stringify(r)).join('\n'),
+    );
+    const trace = getTrace(db, importClaudeTranscript(db, path).trace!.id)!;
+    const sub = trace.steps.find((s) => s.name === 'assistant_message')!;
+    // Subagent files are read after the main loop and carry no link back to
+    // the Task call that spawned them, so the exact invocation moment is not
+    // recoverable. What IS guaranteed, and all that is claimed: a time drawn
+    // from the session's own records, inside the session's window -- never the
+    // import moment, which is what the storage default would have supplied.
+    expect(sub.started_at! >= trace.started_at).toBe(true);
+    expect(sub.started_at! <= trace.ended_at!).toBe(true);
+    // And specifically NOT the import moment: the session is in 2026-07 and
+    // this assertion fails the day the storage default creeps back in.
+    expect(sub.started_at!.startsWith('2026-07-01')).toBe(true);
+  });
+
+  it('(original window check, fully timestamped)', () => {
+    const trace = getTrace(db, importClaudeTranscript(db, timed()).trace!.id)!;
     for (const s of trace.steps) {
       expect(s.started_at! >= trace.started_at, `step ${s.step_number} starts before its trace`).toBe(true);
       expect(s.started_at! <= trace.ended_at!, `step ${s.step_number} starts after its trace ended`).toBe(true);

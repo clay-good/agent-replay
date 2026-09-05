@@ -213,6 +213,14 @@ export function importClaudeTranscript(
     return undefined;
   })();
 
+  // The most recent timestamp seen, seeded with the trace's own start. A record
+  // carrying none still hands its steps SOMETHING, because the storage layer
+  // defaults a missing `started_at` to now — the very bug this stamping exists
+  // to fix, and it would put the step outside the window of its own trace. The
+  // previous record's time is a measured value and an ordering bound (records
+  // are in session order), so it is the honest answer where the record is
+  // silent. Nothing is invented: every value here was read from some record.
+  let lastStamp = startedAt;
   for (const rec of records) {
     const type = rec.type as string | undefined;
     if (typeof rec.sessionId === 'string' && !sessionId) sessionId = rec.sessionId;
@@ -231,7 +239,8 @@ export function importClaudeTranscript(
     // is the exact mistake this file has made before (the empty-prompt tally,
     // fixed in one content branch and not the other).
     const stepsBefore = steps.length;
-    const stamp = typeof rec.timestamp === 'string' && rec.timestamp ? rec.timestamp : undefined;
+    const stamp = typeof rec.timestamp === 'string' && rec.timestamp ? rec.timestamp : lastStamp;
+    if (stamp) lastStamp = stamp;
     const message = rec.message as
       { content?: unknown; usage?: Record<string, unknown>; model?: unknown } | undefined;
     const content = message?.content;
@@ -409,7 +418,7 @@ export function importClaudeTranscript(
       // which also made `steps.length` non-zero, defeating the "nothing
       // importable → exit 1" guard below: `Records imported: 0` and exit 0 at
       // the same time. The spec says not to fabricate steps for unknown records.
-      const built = buildSubagentSteps(subRecords, stepNumber + 1, anchor);
+      const built = buildSubagentSteps(subRecords, stepNumber + 1, anchor, lastStamp);
       if (built.steps.length === 0) {
         imported += built.imported;
         skipped += built.skipped;
@@ -492,6 +501,9 @@ function buildSubagentSteps(
   records: Record<string, unknown>[],
   startNumber: number,
   parentStep: number,
+  /** When the parent invoked this subagent — the fallback for a record with no
+   *  timestamp of its own, and the moment the subagent actually ran. */
+  anchorStamp?: string,
 ): { steps: IngestStepInput[]; tokens: number; imported: number; skipped: number } {
   const toolResults = new Map<string, unknown>();
   const toolErrors = new Set<string>();
@@ -512,6 +524,7 @@ function buildSubagentSteps(
   const steps: IngestStepInput[] = [];
   let n = startNumber;
   let tokens = 0;
+  let lastSubStamp = anchorStamp;
   // Count records the same way the main loop does — a record that yields at
   // least one step is imported, one that yields none is skipped — so the
   // caller's "Records imported" total stays a record count and the
@@ -522,8 +535,11 @@ function buildSubagentSteps(
   for (const rec of records) {
     const before = steps.length;
     // Subagent records carry timestamps exactly as the main transcript's do,
-    // and the same default-to-now applies. See the note in the main loop.
-    const stamp = typeof rec.timestamp === 'string' && rec.timestamp ? rec.timestamp : undefined;
+    // and the same default-to-now applies. See the note in the main loop,
+    // including why a record with none inherits the last one seen — which for
+    // the first such record is when its parent invoked it.
+    const stamp = typeof rec.timestamp === 'string' && rec.timestamp ? rec.timestamp : lastSubStamp;
+    if (stamp) lastSubStamp = stamp;
     // A tool_result block yields no step of its own — it was indexed above and
     // attached to the paired tool_use step's output — but it DID contribute
     // retained data, so the record counts as imported (mirroring the main loop's

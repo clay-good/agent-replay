@@ -339,7 +339,13 @@ between them, and nothing else. Upgrades are automatic and one-way.
   reading the store saw a run whose steps happened after it ended. Both
   importers now stamp each step from the record that produced it,
   including a Claude Code subagent's own records — which the OpenTelemetry
-  mapper has always done, from each span's start.
+  mapper has always done, from each span's start. A record carrying no
+  timestamp of its own inherits the last one seen rather than falling back to
+  the default: that is still a measured value and an ordering bound, since
+  records are in session order, and it keeps every step inside the window of
+  its own trace. Nothing is invented — per-step *durations* are still not
+  recorded, because the gap between two records includes however long the human
+  was away, and a made-up duration is worse than an absent one.
 
 - **An imported Codex session recorded no model.** The same gap as the Claude
   Code one below, in the sibling importer. A rollout states the model on a
