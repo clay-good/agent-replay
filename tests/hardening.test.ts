@@ -603,9 +603,10 @@ describe('a read-only command refuses a missing store instead of creating one', 
     ['export', async (d: string) => (await import('../src/commands/export.js')).runExport(undefined, { dir: d })],
     ['fork', async (d: string) => (await import('../src/commands/fork.js')).runFork('trc_x', { fromStep: '1', dir: d })],
     ['replay', async (d: string) => (await import('../src/commands/replay.js')).runReplay('trc_x', { dir: d })],
-    // The two live views read the store too: `watch` would otherwise tail an
-    // empty store forever (indistinguishable from an agent that never started)
-    // and `dashboard` would draw an empty view over one.
+    // The live views read the store too: `watch` would otherwise tail an empty
+    // store forever, indistinguishable from an agent that never started.
+    // `dashboard` is the same rule but needs its own case below, because it
+    // refuses a non-interactive terminal BEFORE it opens anything.
     ['watch', async (d: string) => (await import('../src/commands/watch.js')).runWatch(undefined, { dir: d })],
   ])('%s says so, exits 2, and writes nothing', async (_name, run) => {
     await run(dir);
@@ -613,6 +614,33 @@ describe('a read-only command refuses a missing store instead of creating one', 
     expect(noAnsi([...err, ...out].join('\n'))).toMatch(/No trace store at/);
     expect(storeWritten()).toBe(false);
   });
+
+  it('dashboard says so too, once a terminal is present to get past its TTY check', async () => {
+    // The twelfth command the upgrade note names, and the one the table above
+    // cannot reach: `dashboard` refuses a non-interactive terminal first and
+    // deliberately so ("before opening the store or drawing anything"), so in
+    // any scriptable context it never gets as far as the store. That leaves the
+    // promise untested exactly where it applies — a person in a real terminal
+    // running it from the wrong directory.
+    //
+    // Both streams are faked because the guard requires both. They are plain
+    // data properties, not getters, so they are assigned and restored rather
+    // than spied on. With no store present it refuses before drawing, so this
+    // never reaches blessed and cannot take over the test's terminal.
+    const prevOut = process.stdout.isTTY;
+    const prevIn = process.stdin.isTTY;
+    process.stdout.isTTY = true;
+    process.stdin.isTTY = true;
+    try {
+      await (await import('../src/commands/dashboard.js')).runDashboard({ dir });
+      expect(process.exitCode).toBe(2);
+      expect(noAnsi([...err, ...out].join('\n'))).toMatch(/No trace store at/);
+      expect(storeWritten()).toBe(false);
+    } finally {
+      process.stdout.isTTY = prevOut;
+      process.stdin.isTTY = prevIn;
+    }
+  }, 20000);
 
   it('answers in JSON when the caller asked for JSON', async () => {
     const { runShow } = await import('../src/commands/show.js');
