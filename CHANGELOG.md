@@ -336,6 +336,18 @@ and one-way.
 
 ### Fixed
 
+- **`check --trace` silently ignored `--agent`, `--agent-exact` and
+  `--since`.** `--trace` names one trace and the filter branch is never
+  consulted, so passing both got the named trace whatever the filters said. The
+  contradiction is the interesting case: `--trace X --since 1d` reads as "check
+  X if it is recent" and checks X regardless of age. `export` already treats the
+  same combination as a usage error ("a trace id can't be combined with filter
+  flags"); this warns instead rather than refusing, because checking a named
+  trace whatever its lineage or status is documented behaviour a script may
+  already rely on — so it says the filter did nothing rather than rejecting a
+  command that used to work. The warning goes to stderr, so a `check --json`
+  document is untouched.
+
 - **`show --steps-only` silently ignored `--evals` and `--snapshots`.**
   `--steps-only` prints the step timeline and returns before either section, so
   asking for one alongside it got you neither — and the output is

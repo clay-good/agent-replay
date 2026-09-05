@@ -2383,3 +2383,74 @@ describe('guard list flags a blocking policy that cannot block', () => {
     expect(listed.stdout).not.toContain('cannot block live');
   });
 });
+
+describe('check --trace says when a filter alongside it does nothing', () => {
+  // `--trace` names one trace and the filter branch is never consulted, so
+  // `--trace X --since 1d` reads as "check X if it is recent" and checks X
+  // regardless. `export` treats the same combination as a usage error; this
+  // one warns instead, because checking a named trace whatever its lineage or
+  // status is documented behaviour a script may rely on.
+  // spawnSync, not run(): every assertion here is about stderr on a run that
+  // EXITS 0, and run() reports stderr only for a failing exit -- so through it
+  // the positive assertion fails and, worse, the two `.not.toMatch` guards
+  // would pass vacuously against an empty string.
+  const ck = (args: string[]) => {
+    const r = spawnSync(process.execPath, [CLI, ...args, '--dir', dir], { encoding: 'utf8', timeout: 60000 });
+    if (r.status == null) {
+      return { stdout: r.stdout ?? '', stderr: `${r.stderr ?? ''}\n[killed by ${r.signal ?? 'unknown'}]`, code: -1 };
+    }
+    return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', code: r.status };
+  };
+
+  function seedAndGolden(): { id: string; golden: string } {
+    const now = new Date().toISOString();
+    const file = join(dir, 'ct.json');
+    writeFileSync(file, JSON.stringify([{
+      agent_name: 'ct-bot', trigger: 'manual', status: 'completed', input: { q: 1 },
+      started_at: now, ended_at: now,
+      steps: [{ step_number: 1, step_type: 'llm_call', name: 's', input: {}, output: 'x', started_at: now }],
+    }]));
+    expect(run(['ingest', file]).code).toBe(0);
+    const id = JSON.parse(run(['list', '--json']).stdout).items[0].id;
+    const golden = join(dir, 'ct-golden.json');
+    expect(run(['export', '--format', 'golden', '--output', golden]).code).toBe(0);
+    return { id, golden };
+  }
+
+  it('names the inert filters, singular and plural', () => {
+    const { id, golden } = seedAndGolden();
+    const one = ck(['check', '--golden', golden, '--trace', id, '--agent', 'someone-else']);
+    expect(one.stderr).toMatch(/--agent has no effect with --trace/);
+
+    const two = ck(['check', '--golden', golden, '--trace', id, '--agent', 'x', '--since', '1d']);
+    expect(two.stderr).toMatch(/--agent and --since have no effect with --trace/);
+  });
+
+  it('still checks the named trace, filter or no filter', () => {
+    // The warning must not change the outcome -- that behaviour is documented.
+    const { id, golden } = seedAndGolden();
+    const r = ck(['check', '--golden', golden, '--trace', id, '--agent', 'someone-else']);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/1 passed/);
+  });
+
+  it('stays quiet for --trace alone and for filters without --trace', () => {
+    const { id, golden } = seedAndGolden();
+    // Both of these exit 0, so they must go through ck() or the assertion is
+    // vacuous -- the guard only means something if stderr is really captured.
+    const alone = ck(['check', '--golden', golden, '--trace', id]);
+    expect(alone.code).toBe(0);
+    expect(alone.stderr).not.toMatch(/no effect/);
+    const filtered = ck(['check', '--golden', golden, '--agent', 'ct-bot']);
+    expect(filtered.stderr).not.toMatch(/no effect/);
+  });
+
+  it('leaves the --json document pure', () => {
+    // The warning goes to stderr; a `check --json | jq` pipeline must still
+    // parse, which is the contract every other refusal here keeps.
+    const { id, golden } = seedAndGolden();
+    const r = ck(['check', '--golden', golden, '--trace', id, '--agent', 'x', '--json']);
+    expect(r.stderr).toMatch(/no effect/); // the warning really did fire...
+    expect(() => JSON.parse(r.stdout)).not.toThrow(); // ...and stdout is still pure
+  });
+});

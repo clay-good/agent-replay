@@ -209,6 +209,27 @@ export function runCheck(opts: CheckOptions = {}): void {
   // a zero-candidate refusal can say which of the two things happened.
   let excluded = 0;
   if (opts.trace) {
+    // `--trace` names one trace and the filters below are never consulted, so
+    // passing both gets the named trace whatever the filters said. Silently, and
+    // the contradiction is the interesting case: `--trace X --since 1d` reads as
+    // "check X if it is recent" and actually checks X regardless.
+    //
+    // `export` treats the same combination as a usage error ("a trace id can't
+    // be combined with filter flags"). This one only warns, because checking a
+    // named trace whatever its lineage or status is documented behaviour that a
+    // script may already rely on -- so say the filter did nothing rather than
+    // start rejecting a command that used to work. stderr, so a `--json`
+    // document is untouched.
+    const inertFlags = [
+      opts.agent && '--agent',
+      opts.agentExact && '--agent-exact',
+      opts.since && '--since',
+    ].filter(Boolean) as string[];
+    if (inertFlags.length > 0) {
+      const inert = inertFlags.join(' and ');
+      console.error(chalk.yellow(`  ⚠ ${inert} ${inertFlags.length === 1 ? 'has' : 'have'} no effect with --trace.`));
+      console.error(chalk.dim('    --trace checks exactly that trace; drop it to check a filtered set.'));
+    }
     let t;
     try {
       t = getTrace(db, opts.trace);
