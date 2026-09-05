@@ -2210,3 +2210,61 @@ describe('export says how many traces it wrote', () => {
     expect(r.stderr).not.toContain('the export is empty');
   });
 });
+
+describe('an imported session can be gated on the model it ran on', () => {
+  // The end-to-end chain this exists to protect, which did not work before the
+  // importers learned to record `model`: import a real session, export it as a
+  // golden baseline, and have `check --fields model` catch a model change.
+  //
+  // Every link is load-bearing and each has failed independently in this
+  // codebase's history, so the assertion is the whole chain rather than any one
+  // step: the importer must record the model, on EVERY step and not just the
+  // text reply; `export --format golden` must carry it into `steps_summary`;
+  // and `check` must compare it and fail. `check` refuses a baseline that
+  // cannot exercise the field, which is exactly what an imported baseline used
+  // to be -- so a break anywhere shows up here as a green gate or a refusal.
+  function transcript(name: string, sessionId: string, model: string): string {
+    const file = join(dir, name);
+    writeFileSync(file, [
+      { type: 'user', sessionId, timestamp: '2026-07-01T00:00:00Z', message: { role: 'user', content: 'same question' } },
+      { type: 'assistant', sessionId, timestamp: '2026-07-01T00:00:05Z', message: { role: 'assistant', model, content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { c: 'ls' } }] } },
+      { type: 'user', sessionId, timestamp: '2026-07-01T00:00:07Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] } },
+      { type: 'assistant', sessionId, timestamp: '2026-07-01T00:00:09Z', message: { role: 'assistant', model, content: [{ type: 'text', text: 'done' }] } },
+    ].map((r) => JSON.stringify(r)).join('\n'));
+    return file;
+  }
+
+  it('catches a model change between two imported sessions', () => {
+    expect(run(['import', transcript('base.jsonl', 'sa', 'claude-opus-4-5'), '--format', 'claude-transcript']).code).toBe(0);
+    const baseId = JSON.parse(run(['list', '--json']).stdout).items[0].id;
+
+    const golden = join(dir, 'golden.json');
+    expect(run(['export', baseId, '--format', 'golden', '--output', golden]).code).toBe(0);
+    // The baseline must actually carry the model, or `check` would refuse the
+    // field rather than compare it -- the failure mode this replaces.
+    const entries = JSON.parse(readFileSync(golden, 'utf8'));
+    expect(entries[0].steps_summary.every((s: { model?: string }) => s.model === 'claude-opus-4-5')).toBe(true);
+
+    // A second session, same shape, different model.
+    expect(run(['import', transcript('other.jsonl', 'sb', 'claude-haiku-4-5'), '--format', 'claude-transcript']).code).toBe(0);
+
+    const checked = run(['check', '--golden', golden, '--fields', 'model']);
+    expect(checked.code, checked.stderr).toBe(1); // 1 = a regression, not 2 = could not run
+    expect(checked.stdout).toContain('REGRESSED');
+    expect(checked.stdout).toMatch(/model @step 1/); // the TOOL CALL step, not only the reply
+  });
+
+  it('passes when the model is unchanged', () => {
+    // The other half: the gate must not cry wolf on an identical rerun, which
+    // is what a baseline carrying no model at all would have done once the
+    // field started being compared.
+    expect(run(['import', transcript('one.jsonl', 'sa', 'claude-opus-4-5'), '--format', 'claude-transcript']).code).toBe(0);
+    const id = JSON.parse(run(['list', '--json']).stdout).items[0].id;
+    const golden = join(dir, 'same.json');
+    expect(run(['export', id, '--format', 'golden', '--output', golden]).code).toBe(0);
+
+    const checked = run(['check', '--golden', golden, '--fields', 'model']);
+    expect(checked.code, checked.stderr).toBe(0);
+    expect(checked.stdout).toContain('1 passed');
+  });
+});
