@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import chalk from 'chalk';
 import type { TraceStep } from '../models/types.js';
 import type { StepType, TraceStatus } from '../models/enums.js';
-import { getTrace, getStepsAfter, getStepsSince, getStepsByNumbers, countSteps, getMostRecentRunningTrace } from '../services/trace-service.js';
+import { getTrace, getStepsAfter, getStepsSince, getStepsByNumbers, countSteps, getMostRecentRunningTrace, isPossiblyAbandoned } from '../services/trace-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { stepIcon, stepLabel, heading, statusBadge, safeText, safeLine} from '../ui/theme.js';
 import { formatDuration } from '../utils/time.js';
@@ -91,6 +91,17 @@ export function runWatch(traceId: string | undefined, opts: WatchOptions = {}): 
   // One-line header, so the stricter escaper: a newline here would forge a
   // second line into the live view.
   console.log(heading(`  Watching ${escapeForMessage(id)} — ${escapeForMessage(resolved.agent_name)}`));
+  // The same `⚠ abandoned?` the listing and `show` put on this trace. `watch`
+  // with no id attaches to the most recent RUNNING trace, and a run whose
+  // producer died is still running as far as the store knows — so the tail sat
+  // on a dead trace printing nothing, which reads exactly like an agent that is
+  // thinking. Say it once, at attach: the trace may be finished-but-unfinalized,
+  // and no more steps are coming.
+  if (isPossiblyAbandoned(resolved)) {
+    console.log(
+      chalk.yellow('  ⚠ This trace has been running long enough to look abandoned — its producer may have exited without finalizing it.'),
+    );
+  }
   console.log(chalk.dim(`  Polling every ${pollMs}ms. Press Ctrl-C to stop.`));
   console.log('');
 

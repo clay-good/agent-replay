@@ -459,3 +459,57 @@ describe('show says when a render flag does nothing under --json', () => {
     expect(() => JSON.parse(out.join('\n'))).not.toThrow();
   });
 });
+
+describe('an abandoned-looking trace says so everywhere, not just in the listing', () => {
+  // `list` marks a run that has been `running` past the threshold with
+  // "⚠ abandoned?". `show` — the view you open NEXT, precisely to look into
+  // that run — printed a bare RUNNING, and `show --json` carried nothing at
+  // all, so the two views disagreed about the same trace and a script could not
+  // see what the table was showing.
+  let dir: string;
+  let id: string;
+  let out: string[];
+  let logSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ar-abandoned-'));
+    const db = ensureDatabase(resolve(dir, 'traces.db'));
+    id = ingestTrace(db, {
+      agent_name: 'crasher', status: 'running', input: { prompt: 'p' },
+      started_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+      steps: [{ step_number: 1, step_type: 'tool_call', name: 'committed' }],
+    } as Parameters<typeof ingestTrace>[1]).id;
+    out = [];
+    logSpy = vi.spyOn(console, 'log').mockImplementation((m?: unknown) => { out.push(String(m ?? '')); });
+  });
+  afterEach(() => {
+    logSpy.mockRestore();
+    resetConnection();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('marks it in the show header', async () => {
+    await runShow(id, { dir });
+    expect(out.join('\n').replace(/\x1B\[[0-9;]*m/g, '')).toMatch(/abandoned\?/);
+  });
+
+  it('reports it in show --json, so a script sees what the table shows', async () => {
+    await runShow(id, { dir, json: true });
+    const doc = JSON.parse(out.join('\n')) as { possibly_abandoned: boolean; status: string };
+    expect(doc.status).toBe('running');
+    expect(doc.possibly_abandoned).toBe(true);
+  });
+
+  it('says nothing for a run that started moments ago', async () => {
+    // The marker is about a run that looks STUCK; a live one must not be
+    // slandered, or the warning means nothing.
+    const db = ensureDatabase(resolve(dir, 'traces.db'));
+    const fresh = ingestTrace(db, {
+      agent_name: 'live', status: 'running', input: { prompt: 'p' },
+      steps: [{ step_number: 1, step_type: 'tool_call', name: 'now' }],
+    } as Parameters<typeof ingestTrace>[1]).id;
+    out.length = 0;
+    await runShow(fresh, { dir, json: true });
+    expect((JSON.parse(out.join('\n')) as { possibly_abandoned: boolean }).possibly_abandoned).toBe(false);
+  });
+});

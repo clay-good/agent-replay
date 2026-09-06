@@ -75,12 +75,14 @@ describe('the --json documents keep their shape', () => {
   it('show', () => {
     // `effective_duration_ms` / `effective_tokens` are the DERIVED pair the
     // human view fills a null column with; they were missing here once, so a
-    // script could not read the number the table printed.
+    // script could not read the number the table printed. `possibly_abandoned`
+    // joined them for the same reason: `list` and the header panel print
+    // "⚠ abandoned?" and the payload could not say it.
     expect(keysOf(payload(['show', traceA, '--json']))).toEqual([
       'agent_name', 'agent_version', 'created_at', 'effective_duration_ms', 'effective_tokens',
       'ended_at', 'error', 'evals', 'forked_from_step', 'id', 'input', 'metadata', 'output',
-      'parent_trace_id', 'session_id', 'started_at', 'status', 'steps', 'tags', 'total_cost_usd',
-      'total_duration_ms', 'total_tokens', 'trigger',
+      'parent_trace_id', 'possibly_abandoned', 'session_id', 'started_at', 'status', 'steps',
+      'tags', 'total_cost_usd', 'total_duration_ms', 'total_tokens', 'trigger',
     ]);
   });
 

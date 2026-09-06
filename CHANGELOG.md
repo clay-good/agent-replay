@@ -902,6 +902,18 @@ and one-way.
   the one headline command that had not adopted it. A literal `null` is
   untouched: it remains the documented no-op that keeps the original value.
 
+- **Only the listing said a trace looked abandoned.** `list` marks a run that
+  has been `running` past the threshold with `⚠ abandoned?` — a producer that
+  died without finalizing looks exactly like one still thinking. `show`, the
+  view you open NEXT to look into that run, printed a bare `RUNNING`, and
+  `show --json` carried nothing at all, so the two views disagreed about the
+  same trace and a script could not read what the table displayed. The marker
+  is now on the `show` header, in the payload as `possibly_abandoned` (derived
+  on the display path, like `effective_duration_ms`/`effective_tokens`, so it
+  never reaches an export or a golden baseline), and on `watch`'s attach line —
+  where it matters most, since a tail on a dead trace prints nothing and reads
+  like an agent that is thinking.
+
 - **`diff` called two traces identical when it had not compared them.** The
   unfiltered summary printed "Traces are identical." over a comparison that
   looks at each step's type, name, input, output, model, error and decision plus

@@ -5,6 +5,7 @@ import type { TraceStatus } from '../models/enums.js';
 import { statusBadge, colors, label, formatScorePct, formatCostUsd, safeText, safeLine} from './theme.js';
 import { effectiveDurationMs, formatDuration } from '../utils/time.js';
 import { effectiveTokens } from '../utils/totals.js';
+import { isPossiblyAbandoned } from '../services/trace-service.js';
 import { truncateToWidth } from './width.js';
 import { truncate } from '../utils/json.js';
 
@@ -66,7 +67,13 @@ export function traceHeaderPanel(trace: Trace): string {
   // (`trace_start.trace_id` is only checked for being a non-empty string), so it
   // is no more trustworthy than the fields beside it.
   lines.push(`${label('Trace ID:')}  ${chalk.dim(safeLine(trace.id))}`);
-  lines.push(`${label('Status:')}    ${statusBadge(trace.status as TraceStatus)}`);
+  // The same `⚠ abandoned?` the listing puts on this trace. `list` marks a run
+  // that has been `running` past the threshold, and the DETAIL view — the thing
+  // you open next, precisely to look into that run — dropped the marker, so the
+  // two views disagreed about the same trace. Same rule as the derived duration
+  // both of them now report.
+  const abandoned = isPossiblyAbandoned(trace) ? ` ${chalk.yellow('⚠ abandoned?')}` : '';
+  lines.push(`${label('Status:')}    ${statusBadge(trace.status as TraceStatus)}${abandoned}`);
   lines.push(`${label('Trigger:')}   ${chalk.white(trace.trigger)}`);
 
   const durationMs = effectiveDurationMs(trace);

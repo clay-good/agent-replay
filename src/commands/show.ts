@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import type Database from 'better-sqlite3';
 import type { TraceWithDetails, TraceSnapshot } from '../models/types.js';
 import type { StepType } from '../models/enums.js';
-import { getTrace, getStepSnapshot } from '../services/trace-service.js';
+import { getTrace, getStepSnapshot, isPossiblyAbandoned } from '../services/trace-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { traceHeaderPanel } from '../ui/boxen-panels.js';
 import { truncate } from '../utils/json.js';
@@ -126,6 +126,12 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
     const derived = {
       effective_duration_ms: effectiveDurationMs(trace),
       effective_tokens: effectiveTokens(trace as Parameters<typeof effectiveTokens>[0]),
+      // The `⚠ abandoned?` marker `list` and the header panel show, as a value a
+      // script can read. Derived from status + started_at + now, exactly like
+      // the two above, and for the same reason: a number (or a warning) the
+      // human view prints and the payload cannot report is a gap for anyone
+      // automating against it.
+      possibly_abandoned: isPossiblyAbandoned(trace),
     };
     const base = omitted > 0
       ? { ...trace, ...derived, steps: windowed, step_window: { from: fromStep ?? null, to: toStep ?? null, shown: windowed.length, omitted } }
