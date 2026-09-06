@@ -728,6 +728,7 @@ Respond in this exact JSON format (no other text):
     // Compare the rounded score that is stored/displayed, not the raw average,
     // so a boundary result can't read as `score 0.700 ... passed false`.
     const score = Math.round(avg * 1000) / 1000;
+    const missing = missingNumericFields(data, ['relevance', 'completeness', 'coherence', 'accuracy']);
     return {
       score,
       passed: score >= 0.7,
@@ -735,6 +736,9 @@ Respond in this exact JSON format (no other text):
         relevance, completeness, coherence, accuracy,
         overall_assessment: data.overall_assessment ?? '',
         issues: asList(data.issues),
+        // Each absent dimension costs a quarter of the score, so a reader owes
+        // an explanation for a verdict the model only partly gave.
+        ...(missing.length > 0 ? { missing_fields: missing } : {}),
       },
     };
   },
@@ -843,9 +847,18 @@ Respond in this exact JSON format (no other text):
       passed: score >= 0.6,
       details: {
         efficiency_score: effScore,
-        total_waste_estimate_pct: data.total_waste_estimate_pct ?? 0,
+        // Absent stays absent rather than becoming a measured 0%: the two
+        // defaults here fabricate in OPPOSITE directions — a missing efficiency
+        // score reads as 0/10 (damning) and a missing waste estimate as 0%
+        // (perfect) — and neither is something the model said.
+        ...(data.total_waste_estimate_pct == null
+          ? {}
+          : { total_waste_estimate_pct: data.total_waste_estimate_pct }),
         optimizations: asList(data.optimizations),
         summary: data.summary ?? '',
+        ...(missingNumericFields(data, ['efficiency_score', 'total_waste_estimate_pct']).length > 0
+          ? { missing_fields: missingNumericFields(data, ['efficiency_score', 'total_waste_estimate_pct']) }
+          : {}),
       },
     };
   },
@@ -1117,6 +1130,29 @@ export function estimateAiEvalCost(
  * what `asList` is for); a scalar score gets the same scepticism, and anything
  * that is not actually a finite number scores 0.
  */
+/**
+ * Which of the numeric fields a preset asked for the model did not send.
+ *
+ * `numericScore` reads an absent field as 0, which is right for arithmetic and
+ * wrong as a verdict: a model that omits `efficiency_score` produces score 0
+ * and `passed: false`, and a model that omits one quality dimension has its
+ * overall score dragged down by a quarter — in both cases a judgement the model
+ * never made, indistinguishable from it genuinely scoring the run badly.
+ *
+ * The verdict still fails closed, which is the right direction for a gate that
+ * could not read its answer. What changes is that the reason is RECORDED, the
+ * same way a reply cut off at the token ceiling records
+ * `truncated_at_max_tokens` and a cost from the fallback rate records
+ * `cost_usd_rate_unknown`. A stored zero that nothing can explain is the shape
+ * this codebase treats as a defect.
+ *
+ * Absent means absent: a field the model DID send as 0 is a real score and is
+ * not listed.
+ */
+function missingNumericFields(data: Record<string, unknown>, fields: readonly string[]): string[] {
+  return fields.filter((f) => data[f] == null);
+}
+
 function numericScore(v: unknown): number {
   if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
   // A JSON-quoted number is the single most common way a model mis-sends one,

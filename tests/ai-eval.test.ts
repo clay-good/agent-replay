@@ -1244,6 +1244,66 @@ describe('a cost priced off an unknown model says so', () => {
   });
 });
 
+describe('a score the model did not give is not reported as one', () => {
+  const opts = { provider: 'anthropic' as const, api_key: 'k', model: 'claude-haiku-4-5-20251001' };
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('records which numeric fields an AI reply omitted', async () => {
+    // `numericScore` reads an absent field as 0 — right for arithmetic, wrong
+    // as a verdict. A model that omits `efficiency_score` scores 0 and FAILS
+    // the run; a model that omits one quality dimension loses a quarter of its
+    // score. Failing closed is the right direction for a gate that could not
+    // read its answer, but the reason has to be recorded, like
+    // `truncated_at_max_tokens` and `cost_usd_rate_unknown` beside it.
+    const db = createTestDb();
+    const trace = ingestTrace(db, makeTrace({ status: 'completed', error: undefined }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(llmText(JSON.stringify({
+      relevance: 8, completeness: 7, overall_assessment: 'fine', issues: [],
+    }))));
+    const result = await runAiEval(db, trace.id, 'ai-quality-review', opts);
+    const d = result.details as Record<string, unknown>;
+    expect(d.missing_fields).toEqual(['coherence', 'accuracy']);
+  });
+
+  it('treats a field the model sent as 0 as a real score, not an absence', async () => {
+    // The control: absent means absent. A genuine zero is a judgement.
+    const db = createTestDb();
+    const trace = ingestTrace(db, makeTrace({ status: 'completed', error: undefined }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(llmText(JSON.stringify({
+      relevance: 0, completeness: 0, coherence: 0, accuracy: 0, overall_assessment: 'bad', issues: [],
+    }))));
+    const result = await runAiEval(db, trace.id, 'ai-quality-review', opts);
+    expect((result.details as Record<string, unknown>).missing_fields).toBeUndefined();
+    expect(result.score).toBe(0);
+  });
+
+  it('draws an omitted dimension as unscored rather than as 0/10', async () => {
+    const { aiEvalPanel: panel } = await import('../src/ui/boxen-panels.js');
+    const out = noAnsiPanel(panel({
+      id: 'e', trace_id: 't', evaluator_type: 'llm_judge', evaluator_name: 'ai-quality-review',
+      score: 0.375, passed: false, evaluated_at: '',
+      details: { relevance: 8, completeness: 7, coherence: 0, accuracy: 0, missing_fields: ['coherence', 'accuracy'] },
+    } as never));
+    expect(out).toMatch(/coherence: not scored by the model/);
+    expect(out).toMatch(/relevance:/);
+    expect(out).not.toMatch(/coherence:\s+\S*\s*0\/10/);
+  });
+
+  it("does not print an absent waste estimate as 0%", async () => {
+    // The two defaults on this panel fabricated in OPPOSITE directions: an
+    // absent efficiency score read as 0/10 (damning), an absent waste estimate
+    // as 0% (perfect).
+    const { aiEvalPanel: panel } = await import('../src/ui/boxen-panels.js');
+    const out = noAnsiPanel(panel({
+      id: 'e', trace_id: 't', evaluator_type: 'llm_judge', evaluator_name: 'ai-optimization',
+      score: 0, passed: false, evaluated_at: '',
+      details: { efficiency_score: 0, missing_fields: ['efficiency_score', 'total_waste_estimate_pct'] },
+    } as never));
+    expect(out).toMatch(/Efficiency: not scored/);
+    expect(out).toMatch(/Est. waste: not estimated/);
+  });
+});
+
 describe('a cost the reader cannot check is not printed as a measurement', () => {
   // The stored flag had no reader: `runAiEval` recorded `cost_usd_rate_unknown`
   // and both panels printed the figure to six decimals regardless, which reads

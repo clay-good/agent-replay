@@ -2464,6 +2464,18 @@ and one-way.
   table and the run summary already distinguished them; the line the user
   actually watches disagreed with both. All four call sites now render through
   one helper, so a preset that checked anything at all still shows its score.
+- An AI judge that omitted a numeric field had one invented for it. `numericScore`
+  reads an absent field as 0 — right for arithmetic, wrong as a verdict — so a
+  model that left out `efficiency_score` scored 0 and FAILED the run, and one
+  that left out a quality dimension lost a quarter of its score, in both cases
+  for a judgement it never made. The panels then drew it: a full bar at "0/10"
+  for a dimension nobody scored, and — fabricating in the opposite direction on
+  the same line — "Est. waste: 0%" for an estimate nobody gave. The verdict still
+  fails closed, which is right for a gate that could not read its answer, but the
+  reason is now recorded as `missing_fields` (beside `truncated_at_max_tokens`
+  and `cost_usd_rate_unknown`) and the panels say "not scored by the model"
+  instead of a number. A field the model genuinely sent as 0 is still a real
+  score and is untouched.
 - The AI panels printed that same cost to six decimals with nothing to say it
   was a floor — `eval --ai`'s result panel and `diff --ai`'s analysis panel
   both. The eval run already RECORDED `cost_usd_rate_unknown` and no reader

@@ -218,7 +218,16 @@ export function aiEvalPanel(evalResult: { evaluator_name: string; score: number;
 
   } else if (evalResult.evaluator_name === 'ai-quality-review') {
     const dims = ['relevance', 'completeness', 'coherence', 'accuracy'] as const;
+    // A dimension the model did not send is not a dimension it scored 0. Drawn
+    // as a full bar at 0/10 it read as a damning judgement nobody made, and it
+    // is exactly the shape `better_trace: 'neither'` used to have on the diff
+    // path: a plausible value filling a slot the answer left empty.
+    const absent = new Set((d.missing_fields as string[] | undefined) ?? []);
     for (const dim of dims) {
+      if (absent.has(dim)) {
+        lines.push(`${label(dim + ':')}  ${chalk.dim('not scored by the model')}`);
+        continue;
+      }
       const val = Number(d[dim] ?? 0);
       const bar = scoreBar(val, 10);
       lines.push(`${label(dim + ':')}  ${bar} ${chalk.white(String(val) + '/10')}`);
@@ -256,7 +265,16 @@ export function aiEvalPanel(evalResult: { evaluator_name: string; score: number;
     }
 
   } else if (evalResult.evaluator_name === 'ai-optimization') {
-    lines.push(`${label('Efficiency:')} ${chalk.white(safeText(String(d.efficiency_score ?? 0)) + '/10')}  ${label('Est. waste:')} ${chalk.white(safeText(String(d.total_waste_estimate_pct ?? 0)) + '%')}`);
+    // Same rule, and here the two defaults fabricated in opposite directions:
+    // an absent efficiency score showed 0/10 and an absent waste estimate 0%.
+    const missingOpt = new Set((d.missing_fields as string[] | undefined) ?? []);
+    const eff = missingOpt.has('efficiency_score')
+      ? chalk.dim('not scored')
+      : chalk.white(safeText(String(d.efficiency_score ?? 0)) + '/10');
+    const waste = d.total_waste_estimate_pct == null
+      ? chalk.dim('not estimated')
+      : chalk.white(safeText(String(d.total_waste_estimate_pct)) + '%');
+    lines.push(`${label('Efficiency:')} ${eff}  ${label('Est. waste:')} ${waste}`);
     const opts = d.optimizations as Array<string | { step: number; type: string; description: string; estimated_savings?: string }> | undefined;
     if (opts && opts.length > 0) {
       lines.push('');
