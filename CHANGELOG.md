@@ -19,9 +19,17 @@ correctness of the comparison, evaluation, and golden-regression paths
 content, timing, and identity its dialects carry; output that is safe to look
 at, since a trace is written by the agent under test and every command that
 prints one now escapes what it shows (and an id, which is rendered nearly
-everywhere, must be an identifier before it can be stored at all); and a
-whole-store `export` that no longer costs time quadratic in the size of the
-store.
+everywhere, must be an identifier before it can be stored at all); honesty
+about WHICH STORE a command is using, since resolution follows the working
+directory and a hook fires from wherever the agent stands, so every command
+that only reads now refuses a store that is not there and every command that
+creates one says when it is creating a second below a project that already has
+one; a package that works when installed — `require('agent-replay')` threw on
+load and the published TypeScript types did not resolve, both now covered by a
+CI job that installs the tarball and uses it; and work that no longer grows with
+what it is looking at: a whole-store `export` that is no longer quadratic in the
+size of the store, and a `watch` whose polling no longer costs more the longer
+the run it is following.
 
 Three things to know before upgrading:
 
