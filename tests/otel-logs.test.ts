@@ -358,6 +358,39 @@ describe('mapOtlpLogs — data fidelity', () => {
     expect(traces[0].total_tokens).toBe(120);
   });
 
+  it('counts the cache tokens a Claude Code record reports, not just input and output', () => {
+    // The hook adapter, the transcript importer and the stream translators all
+    // sum the four Anthropic usage fields; this path summed two of them. On a
+    // real session `cache_read` dwarfs `input`, so one session captured two
+    // ways reported two very different totals — and this was the low one.
+    const [t] = mapOtlpLogs(otlpLogs([
+      logRecord('claude_code.api_request', {
+        'session.id': 'cc-cache',
+        input_tokens: 100,
+        output_tokens: 20,
+        cache_creation_input_tokens: 300,
+        cache_read_input_tokens: 9000,
+      }, 2 * MS),
+    ]));
+    expect(t.total_tokens).toBe(9420);
+  });
+
+  it('takes the emitter\'s own total when it covers more than the named parts', () => {
+    // Gemini's `total_token_count` includes its thoughts and tool tokens, which
+    // have no input/output field to be read from. The larger of the two wins,
+    // so an emitter that reports a total narrower than the parts it also sent
+    // cannot drag the number down.
+    const [wide] = mapOtlpLogs(otlpLogs([
+      logRecord('gemini_cli.api_response', { 'session.id': 'g-tot', input_token_count: 100, output_token_count: 20, total_token_count: 500 }, MS),
+    ]));
+    expect(wide.total_tokens).toBe(500);
+
+    const [narrow] = mapOtlpLogs(otlpLogs([
+      logRecord('gemini_cli.api_response', { 'session.id': 'g-tot2', input_token_count: 100, output_token_count: 20, total_token_count: 7 }, MS),
+    ]));
+    expect(narrow.total_tokens).toBe(120);
+  });
+
   it('records the model on a failed model call, not only in its name', () => {
     // The model was put in `name` alone, leaving the `model` column null on
     // every log-derived step — so a capture of these CLIs had no model recorded

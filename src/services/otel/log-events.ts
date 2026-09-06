@@ -291,9 +291,7 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
       }
 
       if (evt.endsWith('.api_response') || evt.endsWith('.api_request')) {
-        totalTokens +=
-          usage(num(a.input_token_count ?? a['gen_ai.usage.input_tokens'] ?? a.input_tokens)) +
-          usage(num(a.output_token_count ?? a['gen_ai.usage.output_tokens'] ?? a.output_tokens));
+        totalTokens += recordTokens(a);
         // The same record carries the spend when the emitter reports it. It was
         // read by nothing, so `stats` printed "Total cost: -" and
         // `list --sort cost` was inert for every OTel-captured trace, with the
@@ -427,6 +425,35 @@ function num(v: unknown): number {
  */
 function usage(n: number): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * What one `api_request` / `api_response` record spent.
+ *
+ * This summed input + output only, and dropped the cache counters both CLIs
+ * report beside them. On a Claude Code session that is not a rounding error:
+ * `cache_read` is routinely an order of magnitude larger than `input`, so an
+ * OTel-log capture reported a fraction of the session's real spend while the
+ * hook adapter, the transcript importer and the stream translators — all
+ * reading the same four Anthropic fields via `anthropicUsageTokens` — reported
+ * the whole of it. One session captured two ways gave two different totals,
+ * and the log path was the one that undercounted.
+ *
+ * The emitter's own total wins when it reports one, because it covers
+ * categories the named components do not (Gemini's `total_token_count`
+ * includes its thoughts and tool tokens). Components are the fallback for
+ * emitters that report only the split — and the larger of the two is taken,
+ * so an emitter that reports a total NARROWER than the parts it also sent
+ * cannot make the number go backwards.
+ */
+function recordTokens(a: Record<string, unknown>): number {
+  const parts =
+    usage(num(a.input_token_count ?? a['gen_ai.usage.input_tokens'] ?? a.input_tokens)) +
+    usage(num(a.output_token_count ?? a['gen_ai.usage.output_tokens'] ?? a.output_tokens)) +
+    usage(num(a.cache_creation_input_tokens ?? a.cache_creation_tokens ?? a['gen_ai.usage.cache_creation_input_tokens'])) +
+    usage(num(a.cache_read_input_tokens ?? a.cache_read_tokens ?? a.cached_content_token_count ?? a['gen_ai.usage.cached_input_tokens']));
+  const reported = usage(num(a.total_token_count ?? a['gen_ai.usage.total_tokens'] ?? a.total_tokens));
+  return Math.max(parts, reported);
 }
 
 /**

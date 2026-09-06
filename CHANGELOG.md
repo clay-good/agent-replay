@@ -2372,6 +2372,15 @@ and one-way.
   read the identical attribute — so `stats` showed no cost and `list --sort cost`
   was inert for every span-captured trace. It also ignored a reported
   `total_tokens` when the input/output split was absent.
+- The OTel log receiver counted only input and output tokens, dropping the cache
+  counters both CLIs report beside them — and on a Claude Code session
+  `cache_read` is routinely an order of magnitude larger than `input`. The hook
+  adapter, the transcript importer and the stream translators all sum the four
+  Anthropic usage fields, so one session captured two ways produced two very
+  different totals and the log path was the one that undercounted. It now reads
+  the cache counters, and prefers the emitter's own reported total when that
+  covers categories the named parts do not (Gemini's `total_token_count`
+  includes its thoughts and tool tokens).
 - An OTLP batch an exporter redelivered had its child spans appended again,
   permanently doubling the trace's steps and token total. Only the identity root
   was guarded; every span in the batch is now checked.
