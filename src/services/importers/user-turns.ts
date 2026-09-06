@@ -63,6 +63,26 @@ export function isEnvelopeTurn(text: string): boolean {
   );
 }
 
+/**
+ * One user turn, with whatever the producer said ABOUT it.
+ *
+ * `isMeta` is Claude Code's own flag for a record the harness injected rather
+ * than a person typing — a skill preamble, a hook notice, an image placeholder,
+ * a "Continue from where you left off." Measured across every transcript on this
+ * machine (2,015 sessions, 7,139 user turns): 1,361 turns carry it, the shape
+ * heuristic below misses 1,002 of them, and 147 sessions therefore chose one as
+ * `trace.input.prompt`. Not one of the 1,002 reads as a human question.
+ *
+ * A stated fact beats an inferred one, so it is read where it is present and
+ * the shape rule stays for records that carry no such flag — Codex rollouts
+ * have none, and neither do older transcripts.
+ */
+export interface UserTurn {
+  text: string;
+  /** The producer said this turn was harness-injected. */
+  isMeta?: boolean;
+}
+
 export interface SelectedPrompt {
   input: Record<string, unknown> | undefined;
   /** Turns AFTER the chosen prompt, in order. */
@@ -82,10 +102,15 @@ export interface SelectedPrompt {
  * to `preamble_prompts` instead: still nothing is discarded, and both fields say
  * exactly what they hold.
  */
-export function selectPrompt(turns: string[]): SelectedPrompt {
-  const real = turns.filter((t) => t.trim().length > 0);
-  if (real.length === 0) return { input: undefined, followUps: [], preamble: [] };
-  let idx = real.findIndex((t) => !isEnvelopeTurn(t));
+export function selectPrompt(turns: Array<string | UserTurn>): SelectedPrompt {
+  const norm: UserTurn[] = turns.map((t) => (typeof t === 'string' ? { text: t } : t));
+  const kept = norm.filter((t) => t.text.trim().length > 0);
+  if (kept.length === 0) return { input: undefined, followUps: [], preamble: [] };
+  const real = kept.map((t) => t.text);
+  // `isMeta` first: the producer's own statement that the harness wrote this
+  // turn, which no text rule can match reliably (a skill preamble opens with
+  // its own directory path; an image placeholder with "[Image: original …").
+  let idx = kept.findIndex((t) => !t.isMeta && !isEnvelopeTurn(t.text));
   // Every turn is an envelope: use the first anyway. An envelope prompt beats
   // no prompt at all, and that was the behavior before any of this existed.
   if (idx === -1) idx = 0;

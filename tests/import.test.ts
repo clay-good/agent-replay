@@ -828,6 +828,38 @@ describe('the stored prompt is what the person asked', () => {
     expect(trace.metadata.follow_up_prompts).toBeUndefined();
   });
 
+  it('honors the record\'s own isMeta flag, which no text rule can match', () => {
+    // The shape rule ("starts with <", plus a few known notices) is deliberate
+    // and was chosen by inversion over the whole corpus — but a skill preamble
+    // opens with its own directory path, and an image placeholder with
+    // "[Image: original …", so neither is matchable by shape. The record says
+    // so itself. Measured over every transcript on this machine (2,015 sessions,
+    // 7,139 user turns): 1,361 turns carry isMeta, the shape rule misses 1,002
+    // of them, and honoring it changes the stored prompt of 62 sessions — every
+    // one of them from harness machinery to something a person typed.
+    const path = fixture([
+      { type: 'user', sessionId: 'meta', isMeta: true, message: { content: 'Base directory for this skill: /Users/user/.claude/skills/x\n\n# Orient before you read' } },
+      { type: 'user', sessionId: 'meta', isMeta: true, message: { content: [{ type: 'text', text: '[Image: original 1080x2400, displayed at 900x2000.]' }] } },
+      { type: 'user', sessionId: 'meta', message: { content: 'why did the deploy fail?' } },
+      { type: 'assistant', sessionId: 'meta', message: { content: [{ type: 'text', text: 'because...' }] } },
+    ]);
+    const trace = getTrace(db, importClaudeTranscript(db, path).trace!.id)!;
+    expect(trace.input).toEqual({ prompt: 'why did the deploy fail?' });
+    // Nothing is discarded: both injected turns are kept, before the prompt.
+    expect((trace.metadata.preamble_prompts as string[]).length).toBe(2);
+  });
+
+  it('still uses an injected turn when the session has nothing else', () => {
+    // The existing fallback, unchanged: an envelope prompt beats no prompt at
+    // all. A session that is ONLY harness turns must not lose its input.
+    const path = fixture([
+      { type: 'user', sessionId: 'allmeta', isMeta: true, message: { content: 'Continue from where you left off.' } },
+      { type: 'assistant', sessionId: 'allmeta', message: { content: [{ type: 'text', text: 'ok' }] } },
+    ]);
+    const trace = getTrace(db, importClaudeTranscript(db, path).trace!.id)!;
+    expect(trace.input).toEqual({ prompt: 'Continue from where you left off.' });
+  });
+
   it('closes what the transcript proves finished, and only that', () => {
     // A hook-captured session closes its tool_call on PostToolUse; an imported
     // one left every step open, so the SAME session captured the two ways

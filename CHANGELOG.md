@@ -2372,6 +2372,21 @@ and one-way.
   read the identical attribute — so `stats` showed no cost and `list --sort cost`
   was inert for every span-captured trace. It also ignored a reported
   `total_tokens` when the input/output split was absent.
+- `import --format claude-transcript` stored harness machinery as the question a
+  session was asked. The prompt is chosen by SHAPE — a turn starting with `<`,
+  plus a few known notices — which was measured over the whole corpus and is
+  right as far as it goes, but a skill preamble opens with its own directory
+  path and an image placeholder with `[Image: original …`, so neither is
+  matchable that way. The record says so itself: Claude Code marks an injected
+  turn `isMeta`, and nothing read it. Measured over every transcript on this
+  machine (2,015 sessions, 7,139 user turns): 1,361 turns carry the flag, the
+  shape rule misses 1,002 of them, and 62 sessions therefore stored a skill
+  preamble, a hook notice or an image placeholder as `input.prompt` — which
+  `why`, the summarizer, the rubric evals and `check --golden`'s match key all
+  read as what was asked. The flag is now honored where present; the shape rule
+  stays for records that carry none, including every Codex rollout, and the
+  existing fallback is unchanged (a session that is nothing but injected turns
+  still keeps one, since an envelope prompt beats no prompt).
 - `watch` sat silent for a full poll interval when the trace it attached to had
   already finished. `setInterval` fires no earlier than the interval, and the
   status check lived only inside the tick, so the header and the recorded steps

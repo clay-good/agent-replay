@@ -3,7 +3,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import { readJsonlLines } from './jsonl-reader.js';
 import { dirname, join, basename } from 'node:path';
 import { ingestTrace } from '../trace-service.js';
-import { selectPrompt } from './user-turns.js';
+import { selectPrompt, type UserTurn } from './user-turns.js';
 import { anthropicUsageTokens, isTrueish } from '../../utils/json.js';
 import type { IngestTraceInput, IngestStepInput, Trace } from '../../models/types.js';
 
@@ -191,7 +191,7 @@ export function importClaudeTranscript(
   let sessionId: string | undefined;
   let input: Record<string, unknown> | undefined;
   /** Every user turn, in order; split into prompt + follow-ups after the loop. */
-  const userTurns: string[] = [];
+  const userTurns: UserTurn[] = [];
   let lastAssistantText = '';
   let totalTokens = 0;
   let imported = 0;
@@ -283,7 +283,10 @@ export function importClaudeTranscript(
         // EVERY user turn is retained now (as the prompt, or as a follow-up),
         // so a turn contributes whenever it has text — it is no longer tallied
         // as skipped merely for arriving second.
-        userTurns.push(content);
+        // `isMeta` is the record's own statement that the HARNESS wrote this
+        // turn, not a person. Carried through so prompt selection can prefer a
+        // stated fact over the shape of the text.
+        userTurns.push({ text: content, isMeta: isTrueish(rec.isMeta) });
         contributed = content.trim().length > 0;
       } else if (type === 'assistant') {
         lastAssistantText = content;
@@ -301,7 +304,7 @@ export function importClaudeTranscript(
             // the string branch left the bug fully reachable — and left the two
             // branches disagreeing about the tally for the identical situation.
             if (type === 'user') {
-              userTurns.push(block.text ?? '');
+              userTurns.push({ text: block.text ?? '', isMeta: isTrueish(rec.isMeta) });
               contributed = (block.text ?? '').trim().length > 0;
             } else if (type === 'assistant' && block.text) {
               lastAssistantText = block.text;
