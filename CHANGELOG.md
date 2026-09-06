@@ -2372,6 +2372,15 @@ and one-way.
   read the identical attribute — so `stats` showed no cost and `list --sort cost`
   was inert for every span-captured trace. It also ignored a reported
   `total_tokens` when the input/output split was absent.
+- `list` told you to run `agent-replay demo` when a FILTER matched nothing, not
+  only when the store was empty — so `list --agent typo` against a store holding
+  hundreds of traces read as though they were gone. Only `--source` had been
+  taught the difference; `--status`, `--agent`, `--tag`, `--session` and
+  `--since` all fell through to the same wrong hint. An empty result now says
+  how many traces the store holds and which filters matched none of them, and
+  `--agent` (free text, so the easiest to mistype) names the agents present and
+  that it matches by substring. The demo hint is kept for the case it was
+  written for: a store with nothing in it.
 - `show --from-step`/`--to-step` with a window matching no step printed "No
   steps recorded." — directly beneath its own accurate line, "Showing 0 of 10
   steps (10 outside the --from-step/--to-step window)". Two adjacent claims, one

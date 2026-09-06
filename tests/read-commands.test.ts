@@ -647,7 +647,40 @@ describe('an abandoned-looking trace says so everywhere, not just in the listing
     runList({ dir, source: 'record' });
     const text = out.join('\n').replace(/\x1B\[[0-9;]*m/g, '');
     expect(text).toMatch(/No traces found/);
-    expect(text).toMatch(/This store holds: hook, record:native/);
+    expect(text).toMatch(/Capture paths in this store: hook, record:native/);
+    // An empty RESULT is not an empty store: the demo hint is advice for a
+    // store with nothing in it, and it was printed for every filter that
+    // matched nothing against a store that was full.
+    expect(text).toMatch(/matched none of them/);
+    expect(text).not.toMatch(/to load sample data/);
+  });
+
+  it('tells a filter that matched nothing apart from an empty store', () => {
+    // `list --agent typo` against a full store said "Run `agent-replay demo` to
+    // load sample data", which reads as "your traces are gone". Only --source
+    // had been taught the difference; every other filter fell through to it.
+    out.length = 0;
+    runList({ dir, agent: 'no-such-agent' });
+    const text = out.join('\n').replace(/\x1B\[[0-9;]*m/g, '');
+    expect(text).toMatch(/No traces found/);
+    expect(text).toMatch(/--agent matched none of them/);
+    expect(text).toMatch(/Agents in this store:/);
+    expect(text).not.toMatch(/to load sample data/);
+  });
+
+  it('still offers the demo hint when the store really is empty', () => {
+    // The control: the hint is right for the case it was written for.
+    const emptyDir = mkdtempSync(join(tmpdir(), 'ar-emptylist-'));
+    // A store that EXISTS and holds nothing — a directory with no store at all
+    // is refused before any of this, which is a different message.
+    ensureDatabase(resolve(emptyDir, 'traces.db'));
+    resetConnection();
+    out.length = 0;
+    runList({ dir: emptyDir });
+    const text = out.join('\n').replace(/\x1B\[[0-9;]*m/g, '');
+    expect(text).toMatch(/to load sample data/);
+    expect(text).not.toMatch(/matched none of them/);
+    rmSync(emptyDir, { recursive: true, force: true });
   });
 
   it('reports possibly_abandoned in list --json, where a scan for stuck runs happens', () => {

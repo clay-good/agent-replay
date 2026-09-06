@@ -121,8 +121,30 @@ export function runList(opts: ListOptions = {}): void {
   }
 
   if (traces.length === 0) {
+    // WHICH filters narrowed this, so the lines below can say whether the store
+    // is empty or the filters simply matched nothing.
+    const applied = ([
+      ['--status', opts.status],
+      ['--agent', opts.agent],
+      ['--tag', opts.tag],
+      ['--session', opts.session],
+      ['--source', opts.source],
+      ['--since', opts.since],
+    ] as const).filter(([, v]) => v != null).map(([flag]) => flag);
+    const storeTotal = (db.prepare('SELECT COUNT(*) AS n FROM agent_traces').get() as { n: number }).n;
+
     console.log('');
     console.log(chalk.dim('  No traces found.'));
+    // An empty RESULT is not an empty store. "Run `agent-replay demo` to load
+    // sample data" is advice for a store with nothing in it, and it was printed
+    // for `list --agent typo` against a store holding hundreds — reading as
+    // though the traces were gone. Only `--source` had been taught the
+    // difference; every other filter fell through to the same wrong hint.
+    if (applied.length > 0 && storeTotal > 0) {
+      console.log(
+        chalk.dim(`  This store holds ${storeTotal.toLocaleString()} trace(s); ${applied.join(' / ')} matched none of them.`),
+      );
+    }
     // Name the sources the store actually holds. A capture path is a value the
     // user has to spell exactly (`record:codex-exec`, not `record`), and the
     // difference between "nothing was captured that way" and "I typed it wrong"
@@ -137,16 +159,36 @@ export function runList(opts: ListOptions = {}): void {
       console.log(
         chalk.dim(
           present.length > 0
-            ? `  This store holds: ${present.join(', ')}.`
+            ? `  Capture paths in this store: ${present.join(', ')}.`
             : '  No trace in this store records which capture path produced it.',
         ),
       );
     }
-    console.log(
-      chalk.dim('  Run ') +
-        chalk.white('agent-replay demo') +
-        chalk.dim(' to load sample data.'),
-    );
+    // The same courtesy for the filter people actually mistype most: an agent
+    // name is free text, so "I typed it wrong" and "that agent never ran" look
+    // identical without it. Capped, because a busy store has many agents and a
+    // wall of names is not an answer.
+    if (opts.agent) {
+      const agents = (db
+        .prepare('SELECT DISTINCT agent_name FROM agent_traces ORDER BY agent_name LIMIT 11')
+        .all() as Array<{ agent_name: string }>).map((r) => r.agent_name);
+      if (agents.length > 0) {
+        const shown = agents.slice(0, 10);
+        console.log(
+          chalk.dim(`  Agents in this store: ${shown.join(', ')}${agents.length > shown.length ? ', …' : ''}.`),
+        );
+        console.log(chalk.dim('  `--agent` matches any agent whose name CONTAINS the value.'));
+      }
+    }
+    // Only when the store really is empty. Otherwise this reads as "your traces
+    // are gone", which is the opposite of what happened.
+    if (storeTotal === 0) {
+      console.log(
+        chalk.dim('  Run ') +
+          chalk.white('agent-replay demo') +
+          chalk.dim(' to load sample data.'),
+      );
+    }
     console.log('');
     return;
   }
