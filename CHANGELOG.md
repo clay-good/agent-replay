@@ -890,6 +890,21 @@ and one-way.
   the one headline command that had not adopted it. A literal `null` is
   untouched: it remains the documented no-op that keeps the original value.
 
+- **The published TypeScript types did not resolve for a consumer.**
+  `dist/index.d.ts` opens with `import Database from 'better-sqlite3'` — the
+  store handle is the first argument of most of the public API — but
+  `@types/better-sqlite3` was a devDependency, so it never installed alongside
+  the package and that module had no types on the consumer's side. With
+  `skipLibCheck: false` the consumer got `TS7016: Could not find a declaration
+  file for module 'better-sqlite3'` pointing into *our* declaration file; with
+  `skipLibCheck` on — the common default — it failed more quietly and worse:
+  `ensureDatabase` returned `any`, so every misuse of the store handle compiled
+  silently and the type surface the Programmatic API section advertises was
+  untyped at its centre. The types package is now a runtime dependency, which is
+  what a `@types/*` entry named by published declarations has to be, and a test
+  reads the emitted declarations and holds every module they import to
+  installing with types.
+
 - **The package's `require` entry point threw on load.** `main` and the
   `require` condition both pointed at a bundled `dist/index.cjs`, and that file
   could not be loaded on any supported Node: esbuild's CommonJS interop compiles

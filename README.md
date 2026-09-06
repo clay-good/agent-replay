@@ -997,7 +997,7 @@ Every provider call has a **60-second deadline** and retries a transient failure
 
 ## Programmatic API
 
-You can also use `agent-replay` as a library. The package is **ESM** — `import` it as below; `require('agent-replay')` also works on Node 20.19+/22.12+, where Node loads an ES module from `require()`.
+You can also use `agent-replay` as a library. The package is **ESM** — `import` it as below; `require('agent-replay')` also works on Node 20.19+/22.12+, where Node loads an ES module from `require()`. TypeScript types ship with it and need nothing else installed.
 
 ```typescript
 import { ensureDatabase, ingestTrace, getTrace } from 'agent-replay';
