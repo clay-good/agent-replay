@@ -450,6 +450,16 @@ and one-way.
 
 ### Fixed
 
+- **An evaluator reported 100% for criteria that measured nothing.** A criterion
+  with nothing to check — no retrieval steps to ground an answer against, no
+  tool calls to inspect — scores 1.0 so that a trace which does not exercise it
+  cannot fail on that account. It also carries its full WEIGHT into the total,
+  and the summary said "All criteria passed": a trace with no retrieval steps
+  scored 100% on `hallucination-check`, 40% of whose weight is grounding. Such
+  criteria are now recorded as not applicable and the summary says so —
+  `All criteria passed (1 n/a)`, or `Nothing to check on this trace` when none
+  of them could run — the same disclosure `stats` makes with "(over N of M)".
+
 - **A hook-captured tool FAILURE was stored as a clean success.** Only a
   `post_tool_fail` event marked a step failed — and Claude Code has no such
   event: it sends `PostToolUse` with the result, and the failure lives inside it

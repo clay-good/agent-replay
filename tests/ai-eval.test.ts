@@ -2,15 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import BetterSqlite3 from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
 import { ingestTrace, createEval, getTrace, attachDecision } from '../src/services/trace-service.js';
-import {
-  AI_PRESETS,
-  AI_PRESET_NAMES,
-  estimateAiEvalCost,
-  extractJson,
-  runAiEval,
-  runCustomRubric,
-  fenceTraceContent,
-} from '../src/services/eval-service.js';
+import { AI_PRESETS, AI_PRESET_NAMES, PRESETS, estimateAiEvalCost, extractJson, fenceTraceContent, runAiEval, runCustomRubric, runEval } from '../src/services/eval-service.js';
 import { summarizeTrace, summarizeDiffForLlm } from '../src/services/trace-summarizer.js';
 import { diffTraces } from '../src/services/diff-service.js';
 import { estimateCost, COST_TABLE, LlmError } from '../src/services/llm-client.js';
@@ -543,6 +535,22 @@ describe('trace summarizer', () => {
     const inputA = text.split('\n').find((x) => x.startsWith('INPUT A:'))!.slice(8);
     const inputB = text.split('\n').find((x) => x.startsWith('INPUT B:'))!.slice(8);
     expect(inputA).not.toBe(inputB);
+  });
+
+  it('marks a preset criterion that had nothing to measure', () => {
+    // The stored result has to carry the fact, or no view can report it.
+    const db = createTestDb();
+    const trace = ingestTrace(db, {
+      agent_name: 'no-retrieval', status: 'completed', input: { q: 'hi' },
+      output: { text: 'the answer is 42' },
+      steps: [{ step_number: 1, step_type: 'output', name: 'answer', output: { text: 'the answer is 42' } }],
+    } as never);
+    const result = runEval(db, trace.id, 'hallucination-check');
+    const details = result.details as { criteria: Array<{ name: string; not_applicable?: boolean }> };
+    const grounded = details.criteria.find((c) => c.name === 'output_grounded_in_retrieval')!;
+    expect(grounded.not_applicable).toBe(true);
+    // The others measured something and say nothing.
+    expect(details.criteria.filter((c) => c.not_applicable)).toHaveLength(1);
   });
 
   it('tells the model a trace STOPPED rather than asking why it diverged', () => {

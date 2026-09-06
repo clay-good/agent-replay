@@ -6,12 +6,17 @@ Score trace quality automatically: deterministic rubric presets, custom rubrics,
 ## Requirements
 ### Requirement: Deterministic eval presets
 
-The system SHALL provide built-in deterministic presets — `hallucination-check`, `safety-check`, `completeness-check` — runnable via `agent-replay eval <id> --preset <name>` or all at once with `--all`, each producing a weighted score, pass/fail against a threshold, and stored details.
+The system SHALL provide built-in deterministic presets — `hallucination-check`, `safety-check`, `completeness-check` — runnable via `agent-replay eval <id> --preset <name>` or all at once with `--all`, each producing a weighted score, pass/fail against a threshold, and stored details. A criterion that had NOTHING to measure — no retrieval steps to ground an answer against, no tool calls to check — SHALL be recorded as not applicable and reported as such wherever the criteria are summarized. It scores 1.0 so that a trace which does not exercise it cannot fail on that account, and it therefore carries its full WEIGHT into a total presented as though everything was checked: a trace with no retrieval steps scored 100% on `hallucination-check`, 40% of whose weight is grounding, under the words "All criteria passed". When NO criterion could be measured, the summary SHALL say that instead.
 
 #### Scenario: Run all deterministic checks
 
 - **WHEN** a user runs `agent-replay eval <id> --all`
 - **THEN** all three presets run without requiring an API key and results are persisted as eval records
+
+#### Scenario: A criterion with nothing to check
+
+- **WHEN** `hallucination-check` runs against a trace that has no retrieval steps
+- **THEN** the grounding criterion is recorded as not applicable and the summary says how many criteria were skipped, rather than "All criteria passed"
 
 ### Requirement: Custom rubrics
 

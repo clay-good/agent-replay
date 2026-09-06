@@ -882,6 +882,41 @@ describe('the eval Details column never claims a criterion passed when it scored
     expect(out).toContain('needs_source');
     expect(out).not.toContain('All criteria passed');
   });
+
+  it('says how many criteria had nothing to measure', () => {
+    // A criterion with nothing to check scores 1.0 — so a trace that does not
+    // exercise it cannot fail on that account — and carries its full WEIGHT
+    // into the total. Reported as "All criteria passed", that claims a check
+    // that never ran: a trace with no retrieval steps scored 100% on
+    // hallucination-check, 40% of whose weight is "is the output grounded in
+    // retrieval".
+    const mixed: EvalResult = {
+      id: 'e2', trace_id: 't1', evaluator_name: 'r', evaluator_type: 'rubric',
+      score: 1, passed: true, evaluated_at: '',
+      details: { threshold: 0.7, criteria: [
+        { name: 'no_hedging', score: 1 },
+        { name: 'grounded', score: 1, not_applicable: true },
+      ] },
+    };
+    expect(noAnsi(evalTable([mixed]))).toContain('All criteria passed (1 n/a)');
+
+    // When NOTHING could be measured, say that instead of "all passed".
+    const nothing: EvalResult = {
+      ...mixed, id: 'e3',
+      details: { threshold: 0.7, criteria: [{ name: 'grounded', score: 1, not_applicable: true }] },
+    };
+    expect(noAnsi(evalTable([nothing]))).toContain('Nothing to check on this trace');
+
+    // A real failure is still named, with the skipped count beside it.
+    const failing: EvalResult = {
+      ...mixed, id: 'e4', score: 0.6, passed: false,
+      details: { threshold: 0.7, criteria: [
+        { name: 'no_errors', score: 0 },
+        { name: 'grounded', score: 1, not_applicable: true },
+      ] },
+    };
+    expect(noAnsi(evalTable([failing]))).toContain('no_errors (1 n/a)');
+  });
 });
 
 

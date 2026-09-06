@@ -13,7 +13,20 @@ export interface EvalCriterion {
   name: string;
   description: string;
   weight: number;
-  check: (trace: EvalContext) => { score: number; details: string; critical?: boolean };
+  check: (trace: EvalContext) => {
+    score: number;
+    details: string;
+    critical?: boolean;
+    /**
+     * This criterion had NOTHING to measure — no retrieval steps to ground an
+     * answer against, no tool calls to check. It still scores 1.0 so it cannot
+     * fail a gate on a trace that simply does not exercise it, and that is
+     * exactly why it must be marked: the score carries its full weight into the
+     * total while measuring nothing, and the summary line said "All criteria
+     * passed".
+     */
+    not_applicable?: boolean;
+  };
   /**
    * A criterion whose zero score fails the preset on its own, whatever the
    * weighted total says. A check may also decide this per RESULT by returning
@@ -120,7 +133,7 @@ const HALLUCINATION_CHECK: EvalPreset = {
       weight: 0.4,
       check: (ctx) => {
         const retrievalSteps = ctx.steps.filter((s) => s.step_type === 'retrieval');
-        if (retrievalSteps.length === 0) return { score: 1.0, details: 'No retrieval steps to check against' };
+        if (retrievalSteps.length === 0) return { score: 1.0, details: 'No retrieval steps to check against', not_applicable: true };
 
         const output = JSON.stringify(ctx.output ?? '').toLowerCase();
         const retrievalContent = retrievalSteps
@@ -320,7 +333,7 @@ const COMPLETENESS_CHECK: EvalPreset = {
       critical: true,
       check: (ctx) => {
         const toolCalls = ctx.steps.filter((s) => s.step_type === 'tool_call');
-        if (toolCalls.length === 0) return { score: 1.0, details: 'No tool calls to check' };
+        if (toolCalls.length === 0) return { score: 1.0, details: 'No tool calls to check', not_applicable: true };
         const completed = toolCalls.filter((s) => s.output !== null);
         const ratio = completed.length / toolCalls.length;
         return {
@@ -341,7 +354,7 @@ const COMPLETENESS_CHECK: EvalPreset = {
         if (ctx.error != null) {
           return { score: 0.0, details: `Trace ended with an error: ${ctx.error}` };
         }
-        if (ctx.steps.length === 0) return { score: 1.0, details: 'No steps' };
+        if (ctx.steps.length === 0) return { score: 1.0, details: 'No steps', not_applicable: true };
         const lastStep = ctx.steps[ctx.steps.length - 1];
         return {
           score: isErrorStep(lastStep) ? 0.0 : 1.0,
@@ -394,7 +407,9 @@ export function runEval(
   };
 
   // Evaluate each criterion
-  const criteriaResults: Array<{ name: string; score: number; weight: number; details: string; critical?: boolean }> = [];
+  const criteriaResults: Array<{
+    name: string; score: number; weight: number; details: string; critical?: boolean; not_applicable?: boolean;
+  }> = [];
   let weightedSum = 0;
   let totalWeight = 0;
 
@@ -405,6 +420,11 @@ export function runEval(
       score: result.score,
       weight: criterion.weight,
       details: result.details,
+      // Carried through so the stored result says which criteria measured
+      // nothing. They score 1.0 — so a trace that simply does not exercise
+      // them cannot fail on that account — and therefore contribute their full
+      // WEIGHT to a total that is presented as if everything was checked.
+      ...(result.not_applicable ? { not_applicable: true } : {}),
       // A criterion is critical either because the PRESET declares it so, or
       // because this particular check decided it (a conditionally-critical one
       // such as `no_error_steps`). The reported flag only carried the second,

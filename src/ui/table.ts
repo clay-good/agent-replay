@@ -209,9 +209,18 @@ function summarizeDetails(details: Record<string, unknown>): string {
   // recorded, not a hardcoded 0.7 — a criterion scoring below a stricter
   // threshold (or a rubric's own) was folded into "All criteria passed" while
   // having cost the eval part of its weight.
-  const criteria = details.criteria as Array<{ name: string; score: number }> | undefined;
+  const criteria = details.criteria as Array<{ name: string; score: number; not_applicable?: boolean }> | undefined;
   if (criteria && Array.isArray(criteria)) {
     const threshold = typeof details.threshold === 'number' ? details.threshold : 0.7;
+    // A criterion that had NOTHING to measure scores 1.0 — so it cannot fail a
+    // trace that does not exercise it — and carries its full weight into the
+    // total anyway. Reporting that as "All criteria passed" claims a check
+    // that never ran: a trace with no retrieval steps scored 100% on
+    // hallucination-check, 40% of whose weight is "is the output grounded in
+    // retrieval". Say how many were skipped, the way `stats` says "(over N of
+    // M)" for a figure taken over a subset.
+    const skipped = criteria.filter((c) => c.not_applicable).length;
+    const notApplicable = skipped > 0 ? ` (${skipped} n/a)` : '';
     // A criterion that scored ZERO has plainly not passed, whatever the
     // threshold — and `score < threshold` cannot express that when the
     // threshold is 0, since nothing is below it. A rubric written with
@@ -220,8 +229,12 @@ function summarizeDetails(details: Record<string, unknown>): string {
     // first written to fix for the hardcoded 0.7, reappearing at the other
     // end of the range.
     const failed = criteria.filter((c) => c.score <= 0 || c.score < threshold);
-    if (failed.length === 0) return 'All criteria passed';
-    return failed.map((c) => c.name).join(', ');
+    if (failed.length === 0) {
+      return skipped === criteria.length
+        ? 'Nothing to check on this trace'
+        : `All criteria passed${notApplicable}`;
+    }
+    return `${failed.map((c) => c.name).join(', ')}${notApplicable}`;
   }
   return truncateToWidth(JSON.stringify(details), 50);
 }
