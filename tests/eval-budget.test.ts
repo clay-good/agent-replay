@@ -240,6 +240,7 @@ describe('a partial evaluator failure is reported, not dropped', () => {
    */
   async function evalWithFlakyProvider(
     opts: Parameters<typeof runEvalCommand>[1],
+    mode: 'unreachable' | 'rejected' = 'unreachable',
   ): Promise<{ out: string; err: string; code: number }> {
     const dir = mkdtempSync(join(tmpdir(), 'ar-eval-partial-'));
     const prevExit = process.exitCode;
@@ -249,6 +250,13 @@ describe('a partial evaluator failure is reported, not dropped', () => {
       vi.stubEnv('ANTHROPIC_API_KEY', 'test-key');
 
       // First AI preset answers; every later one fails at the provider.
+      //
+      // `mode` picks HOW they fail, and it is not decoration. A thrown error is
+      // transient, so the client retries it twice with a doubling backoff —
+      // real seconds, several presets over: these two tests were 4.5 s each,
+      // the slowest in the suite. A 4xx is the client's own request being
+      // rejected and is never retried, so it reaches the same "this evaluator
+      // did not run" reporting instantly. One test keeps each path.
       let call = 0;
       vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => {
         if (call++ === 0) {
@@ -259,6 +267,9 @@ describe('a partial evaluator failure is reported, not dropped', () => {
               usage: { input_tokens: 10, output_tokens: 10 },
             }),
           } as unknown as Response;
+        }
+        if (mode === 'rejected') {
+          return { status: 400, text: async () => 'bad request', json: async () => ({}) } as unknown as Response;
         }
         throw new Error('provider unreachable');
       }));
@@ -292,7 +303,10 @@ describe('a partial evaluator failure is reported, not dropped', () => {
   });
 
   it('says so on the summary line a human reads', async () => {
-    const { out, code } = await evalWithFlakyProvider({});
+    // Uses the REJECTED provider (a 4xx, which the client does not retry): the
+    // reporting under test is the same, and the retry-exhaustion path is
+    // covered by the test above.
+    const { out, code } = await evalWithFlakyProvider({}, 'rejected');
     expect(code).toBe(1);
     expect(out).toMatch(/evaluator\(s\) failed to run and are not in these results/);
     // The summary line is the one a reader scans; it must not imply the score
