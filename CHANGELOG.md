@@ -419,7 +419,10 @@ and one-way.
   <parent> <fork>` as the next command to run, so that was the first thing a
   user saw about a copy that had not run at all. The verdict now says
   `RIGHT STOPS AFTER STEP 2 — identical up to there`, and `--json` carries the
-  same fact as `common_prefix` (absent when it does not apply).
+  same fact as `common_prefix` (absent when it does not apply). `--compact` and
+  the `--ai` prompt say it too: a model asked "why did these traces diverge"
+  about a run that merely stopped will supply a cause for an event that never
+  happened.
 
 - **A compacted session imported with the harness's summary as its prompt.**
   When a long session runs out of context the harness compacts it and the new

@@ -517,6 +517,22 @@ describe('trace summarizer', () => {
     expect(summary.estimated_tokens).toBeGreaterThan(0);
   });
 
+  it('tells the model a trace STOPPED rather than asking why it diverged', () => {
+    // The prompt asks "WHY did the traces diverge", so handing it
+    // "DIVERGES AT STEP 3" for a run that simply ends invites a confabulated
+    // cause for an event that never happened.
+    const db = createTestDb();
+    const steps = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ step_number: i + 1, step_type: 'output' as const, name: `s${i + 1}` }));
+    const long = getTrace(db, ingestTrace(db, { agent_name: 'a', status: 'completed', input: { q: 1 }, steps: steps(4) }).id)!;
+    const short = getTrace(db, ingestTrace(db, { agent_name: 'a', status: 'completed', input: { q: 1 }, steps: steps(2) }).id)!;
+
+    const summary = summarizeDiffForLlm(diffTraces(db, long.id, short.id), long, short);
+    expect(summary.text).toContain('NO DIVERGENCE');
+    expect(summary.text).toMatch(/identical through step 2 and then STOPS/);
+    expect(summary.text).not.toContain('DIVERGES AT STEP');
+  });
+
   it('renders object input/output diffs as JSON, not "[object Object]"', () => {
     const db = createTestDb();
     const base = { agent_version: undefined, error: undefined, status: 'completed' as const };

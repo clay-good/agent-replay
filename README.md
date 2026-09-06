@@ -422,7 +422,10 @@ fork, a run that crashed early — the verdict says it *stopped* rather than
 diverged (`RIGHT STOPS AFTER STEP 2`, "identical up to there"), because two
 traces that agree on every step they share have not diverged; `--json` carries
 the same fact as `common_prefix` (`shorter`, `last_common_step`,
-`missing_steps`), and the key is absent when it does not apply. Narrow the comparison with `--fields`; when a filter leaves nothing,
+`missing_steps`), and the key is absent when it does not apply. `--compact` and
+the `--ai` prompt say the same thing — an analysis asked "why did these diverge"
+about a run that merely stopped invents a cause for an event that never
+happened. Narrow the comparison with `--fields`; when a filter leaves nothing,
 the verdict says so rather than claiming the traces are identical, and a filter
 naming no field at all is a usage error. The `--json` document records the scope
 too, as `compared_fields` — the list when `--fields` narrowed the comparison and

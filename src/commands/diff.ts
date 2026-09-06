@@ -197,7 +197,15 @@ export async function runDiff(
       Differences: appliedFields && appliedFields.length > 0
         ? describeFilteredCount(diff.diffs, appliedFields)
         : diff.diffs.length,
-      'Divergence at': diff.divergence_step != null ? `Step ${diff.divergence_step}` : 'N/A',
+      // The same verdict the full view gives, in the summary's own words: one
+      // trace being a PREFIX of the other is not a divergence, and `--compact`
+      // is the view a script or a skim reads. Fixing only the full renderer
+      // would leave the two views disagreeing about the same pair.
+      'Divergence at': diff.common_prefix
+        ? `None — ${diff.common_prefix.shorter} stops after step ${diff.common_prefix.last_common_step}`
+        : diff.divergence_step != null
+          ? `Step ${diff.divergence_step}`
+          : 'N/A',
     };
     console.log(summaryPanel('Trace Diff Summary', stats));
     console.log('');

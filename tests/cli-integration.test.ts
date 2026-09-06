@@ -863,6 +863,25 @@ describe('CLI integration', () => {
     expect(run(['diff', ids[0], ids[1], '--fields', 'output']).stdout).not.toContain('DIVERGES AT STEP');
   });
 
+  it('--compact says a trace stopped, in the same words the full view uses', () => {
+    // Two views of one comparison must not disagree: the full renderer says a
+    // prefix STOPPED rather than diverged, and the summary panel — the view a
+    // skim or a script reads — still reported "Divergence at: Step N".
+    const f = join(dir, '..', 'cf.jsonl');
+    writeFileSync(f, JSON.stringify({
+      agent_name: 'compact-fork', status: 'completed',
+      input: { q: 'x' },
+      steps: [1, 2, 3].map((n) => ({ step_number: n, step_type: 'output', name: `s${n}` })),
+    }));
+    run(['ingest', f, '--format', 'jsonl']);
+    const parent = JSON.parse(run(['list', '--json', '--agent', 'compact-fork']).stdout).items[0].id as string;
+    const forkOut = run(['fork', parent, '--from-step', '2']).stdout;
+    const fork = (forkOut.match(/trc_[A-Za-z0-9_-]+/g) ?? []).pop() as string;
+    const out = run(['diff', parent, fork, '--compact']).stdout;
+    expect(out).toContain('stops after step 2');
+    expect(out).not.toMatch(/Divergence at:\s+Step/);
+  });
+
   it('translates a codex exec --json stream via record --format codex-exec', () => {
     const stream = [
       '{"type":"thread.started","thread_id":"th_ci"}',

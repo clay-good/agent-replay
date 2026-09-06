@@ -126,8 +126,17 @@ export function summarizeDiffForLlm(
   if (hasRenderableContent(left.output)) lines.push(`OUTPUT A: ${truncObj(left.output, 200)}`);
   if (hasRenderableContent(right.output)) lines.push(`OUTPUT B: ${truncObj(right.output, 200)}`);
 
-  // Divergence
-  if (diff.divergence_step != null) {
+  // Divergence — or the truth, when one trace is a prefix of the other.
+  //
+  // The model is asked "WHY did the traces diverge", so handing it
+  // "DIVERGES AT STEP 3" for a fork that has not run yet invites a confabulated
+  // cause for an event that did not happen. Say what actually holds instead.
+  if (diff.common_prefix) {
+    const { shorter, last_common_step, missing_steps } = diff.common_prefix;
+    lines.push(
+      `\nNO DIVERGENCE: the ${shorter} trace is identical through step ${last_common_step} and then STOPS; the ${shorter === 'right' ? 'left' : 'right'} continues for ${missing_steps} more step(s).`,
+    );
+  } else if (diff.divergence_step != null) {
     lines.push(`\nDIVERGES AT STEP ${diff.divergence_step}`);
   }
 
