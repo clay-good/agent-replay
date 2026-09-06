@@ -486,3 +486,78 @@ describe('the two OTel receivers front the same store, so they must agree', () =
     expect(src(viaSpans())).toBe('otel-genai');
   });
 });
+
+
+describe('one Gemini session, captured as a stream and as OTel logs', () => {
+  // The last pair of the set. Gemini CLI can be captured by piping its
+  // `--output-format stream-json` into `record`, or by pointing its OTel
+  // exporter at `otel serve` — again a configuration choice, not a property of
+  // the run, so the facts a reader relies on must match.
+  const NS = (ms: number) => String(ms * 1_000_000);
+  const at = (key: string, value: unknown) => {
+    if (typeof value === 'number') return { key, value: { intValue: String(value) } };
+    if (typeof value === 'boolean') return { key, value: { boolValue: value } };
+    return { key, value: { stringValue: String(value) } };
+  };
+  const attrs = (o: Record<string, unknown>) => Object.entries(o).map(([k, v]) => at(k, v));
+
+  function viaStream(): string {
+    const translator = makeTranslator('gemini-stream')!;
+    let id = '';
+    for (const line of [
+      { type: 'init', session_id: 'gem-stream' },
+      { type: 'tool_use', id: 't1', name: 'run_shell_command', input: { command: 'ls' } },
+      { type: 'tool_result', id: 't1', output: 'a.txt' },
+      { type: 'result', usage: { input_tokens: 100, output_tokens: 20 } },
+    ]) {
+      for (const event of translator.translate(line as Record<string, unknown>)) {
+        id = applyEvent(db, event as CaptureEvent).traceId;
+      }
+    }
+    for (const event of translator.finalize()) id = applyEvent(db, event as CaptureEvent).traceId;
+    return id;
+  }
+
+  function viaOtelLogs(): string {
+    const [mapped] = mapOtlpLogs({
+      resourceLogs: [{ resource: { attributes: [] }, scopeLogs: [{ logRecords: [
+        { timeUnixNano: NS(1000), eventName: 'gemini_cli.user_prompt', attributes: attrs({ 'session.id': 'gem-otel', prompt: 'list the files' }) },
+        { timeUnixNano: NS(2000), eventName: 'gemini_cli.tool_call', attributes: attrs({ 'session.id': 'gem-otel', function_name: 'run_shell_command', function_args: '{"command":"ls"}', success: true, duration_ms: 40 }) },
+        { timeUnixNano: NS(3000), eventName: 'gemini_cli.api_response', attributes: attrs({ 'session.id': 'gem-otel', input_token_count: 100, output_token_count: 20 }) },
+      ] }] }],
+    } as never);
+    return ingestTrace(db, mapped).id;
+  }
+
+  it('agrees on the agent, the token total and the tool step', () => {
+    const stream = getTrace(db, viaStream())!;
+    const otel = getTrace(db, viaOtelLogs())!;
+
+    expect(stream.agent_name).toBe(otel.agent_name);
+    // The same 120 tokens, whichever way the run was captured.
+    expect(stream.total_tokens).toBe(120);
+    expect(otel.total_tokens).toBe(stream.total_tokens);
+
+    // The tool call is a `tool_call` step named for the TOOL on both — the
+    // field `check --fields step_names` compares across paths.
+    const tool = (t: typeof stream) => t.steps.filter((s) => s.step_type === 'tool_call').map((s) => s.name);
+    expect(tool(stream)).toEqual(['run_shell_command']);
+    expect(tool(otel)).toEqual(tool(stream));
+
+    // Both close what they finished.
+    for (const t of [stream, otel]) expect(t.steps.filter((s) => !s.ended_at)).toEqual([]);
+  });
+
+  it('holds the one difference on purpose, rather than pretending it is gone', () => {
+    // A `gemini_cli.tool_call` record carries no tool OUTPUT — both CLIs redact
+    // content unless the user opts in — so the log path has only the success
+    // flag to put there, while the stream carries the real result. Recorded
+    // here so the difference is visible rather than discovered later; settling
+    // it needs a real Gemini capture with content logging on, which is the same
+    // evidence bar this repo applies to every other vendor field.
+    const stream = getTrace(db, viaStream())!;
+    const otel = getTrace(db, viaOtelLogs())!;
+    expect(stream.steps[0].output).toEqual({ output: 'a.txt' });
+    expect(otel.steps[0].output).toEqual({ success: true });
+  });
+});
