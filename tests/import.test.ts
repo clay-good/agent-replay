@@ -828,6 +828,51 @@ describe('the stored prompt is what the person asked', () => {
     expect(trace.metadata.follow_up_prompts).toBeUndefined();
   });
 
+  it('skips the compaction summary and records that the session was continued', () => {
+    // A long session runs out of context, is compacted, and the new transcript
+    // opens with a summary the HARNESS wrote — as a user turn. It was chosen as
+    // the prompt of every such session: measured on two real transcripts,
+    // `input.prompt` held 10 KB of summary while the user's own message sat in
+    // `follow_up_prompts`.
+    const summary = 'This session is being continued from a previous conversation that ran out of context.\n\nSummary: it did things.';
+    const path = fixture([
+      { type: 'system', subtype: 'compact_boundary', sessionId: 'cmp' },
+      { type: 'user', sessionId: 'cmp', isCompactSummary: true, message: { content: summary } },
+      { type: 'user', sessionId: 'cmp', message: { content: 'now fix the flaky test' } },
+      { type: 'assistant', sessionId: 'cmp', message: { content: [{ type: 'text', text: 'done' }] } },
+    ]);
+    const trace = getTrace(db, importClaudeTranscript(db, path).trace!.id)!;
+    expect(trace.input).toEqual({ prompt: 'now fix the flaky test' });
+    // Kept, not dropped — and before the prompt, so it is preamble.
+    expect(trace.metadata.preamble_prompts).toEqual([summary]);
+    // The file starts mid-story: the steps before the boundary are in an
+    // earlier transcript, which the Codex importer already records this way.
+    expect(trace.metadata.compacted).toBe(true);
+  });
+
+  it('keeps the compaction summary as the prompt when the session is only a continuation', () => {
+    // The fallback every other envelope uses: a continuation with no later
+    // question of its own still imports with something rather than nothing.
+    const summary = 'This session is being continued from a previous conversation that ran out of context.';
+    const path = fixture([
+      { type: 'user', sessionId: 'cmp2', isCompactSummary: true, message: { content: summary } },
+      { type: 'assistant', sessionId: 'cmp2', message: { content: [{ type: 'text', text: 'ok' }] } },
+    ]);
+    const trace = getTrace(db, importClaudeTranscript(db, path).trace!.id)!;
+    expect(trace.input).toEqual({ prompt: summary });
+    expect(trace.metadata.compacted).toBe(true);
+  });
+
+  // A session that was never compacted says nothing about it.
+  it('does not mark an ordinary session as compacted', () => {
+    const path = fixture([
+      { type: 'user', sessionId: 'plain', message: { content: 'hello' } },
+      { type: 'assistant', sessionId: 'plain', message: { content: [{ type: 'text', text: 'hi' }] } },
+    ]);
+    const trace = getTrace(db, importClaudeTranscript(db, path).trace!.id)!;
+    expect(trace.metadata.compacted).toBeUndefined();
+  });
+
   // An envelope prompt beats no prompt at all: a session that is ALL envelope
   // must still import with its first turn, as it did before.
   it('falls back to the first turn when every turn is an envelope', () => {

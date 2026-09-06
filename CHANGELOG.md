@@ -393,6 +393,19 @@ and one-way.
 
 ### Fixed
 
+- **A compacted session imported with the harness's summary as its prompt.**
+  When a long session runs out of context the harness compacts it and the new
+  transcript opens with a continuation summary it wrote for itself — as a user
+  turn. That turn was chosen as `trace.input.prompt`, which `why`, the
+  summarizer, the rubric evals and `check --golden` all read as "what was
+  asked": measured on two real transcripts, the prompt held 10 KB of summary
+  while the person's own message ("Goal check-in: ...") sat in
+  `follow_up_prompts`. The summary is now treated as the envelope it is (and
+  kept in `preamble_prompts`), and a compacted transcript is marked
+  `metadata.compacted` — the steps before the boundary are in an earlier file,
+  which the Codex importer already recorded and the Claude one did not, though
+  every long transcript says so twice.
+
 - **Every fork was reported as an abandoned capture half an hour after you
   made it.** `fork` copies a run up to a step and leaves the copy `running` for
   you to explore, and the staleness marker only asked "still running, and old?"

@@ -50,7 +50,16 @@ export function isEnvelopeTurn(text: string): boolean {
   return (
     t.startsWith('# AGENTS.md instructions') ||
     t.startsWith('A session-scoped Stop hook is now active') ||
-    t.startsWith('[SYSTEM NOTIFICATION')
+    t.startsWith('[SYSTEM NOTIFICATION') ||
+    // The continuation summary a harness writes for itself when a session is
+    // COMPACTED. It arrives as a user turn, so it was chosen as the prompt of
+    // every long session — measured on two real transcripts, `input.prompt`
+    // held 10 KB of harness-written summary while the user's actual message
+    // ("Goal check-in: ...") sat in `follow_up_prompts`. `why`, the summarizer,
+    // the rubric evals and `check --golden` all read `input.prompt` as what was
+    // asked. A session that was ONLY a continuation still keeps it, through the
+    // same fallback every other envelope uses.
+    t.startsWith('This session is being continued from a previous conversation')
   );
 }
 

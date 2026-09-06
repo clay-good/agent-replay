@@ -221,9 +221,21 @@ export function importClaudeTranscript(
   // are in session order), so it is the honest answer where the record is
   // silent. Nothing is invented: every value here was read from some record.
   let lastStamp = startedAt;
+  // Whether this transcript is a CONTINUATION: the session ran out of context,
+  // was compacted, and the file starts mid-story. The steps before the boundary
+  // are in an earlier file and cannot be recovered from this one, so a reader
+  // comparing this trace to a full session is comparing a fragment. The Codex
+  // importer already records exactly this (`metadata.compacted`) from its
+  // `compacted` record; the Claude importer read the same fact from two places
+  // in every long transcript — the `compact_boundary` system record and the
+  // summary turn's own `isCompactSummary` flag — and kept neither.
+  let compacted = false;
   for (const rec of records) {
     const type = rec.type as string | undefined;
     if (typeof rec.sessionId === 'string' && !sessionId) sessionId = rec.sessionId;
+    if (rec.isCompactSummary === true || (type === 'system' && rec.subtype === 'compact_boundary')) {
+      compacted = true;
+    }
 
     if (type !== 'user' && type !== 'assistant') {
       // Any record we don't turn into a step (system/summary and the various
@@ -486,6 +498,7 @@ export function importClaudeTranscript(
       // a Claude Code subagent sidecar carries the SAME sessionId as its parent
       // transcript, so session id alone made the two collide.
       source_file: basename(filePath),
+      ...(compacted ? { compacted: true } : {}),
       ...(selected.followUps.length > 0 ? { follow_up_prompts: selected.followUps } : {}),
       ...(selected.preamble.length > 0 ? { preamble_prompts: selected.preamble } : {}),
     },
