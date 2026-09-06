@@ -812,7 +812,13 @@ agent-replay config get ai.provider
 
 You can also set API keys via environment variables: `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `OPENAI_API_KEY`. Environment variables take priority over config file values.
 
-`ai.max_tokens` caps the model's reply on every AI path — `eval --ai` and `diff --ai` alike (default 1024) — and is what the `--max-cost` estimate prices, so raising it raises both the ceiling and the quoted cost. `ai.model` is only applied to a provider it belongs to — a `claude-*` model is never sent to OpenAI. Cost figures are priced from a small built-in rate table that covers the three default models; set `ai.model` to anything else and both the estimate and the recorded cost fall back to the highest rate in that table, which — since all three defaults are cheap-tier — is a **floor, not a ceiling**. `eval --ai --max-cost` says so out loud when that happens, and warns that the budget may not hold; a stored result carries `cost_usd_rate_unknown`.
+`ai.max_tokens` caps the model's reply on every AI path — `eval --ai` and `diff --ai` alike (default 1024) — and is what the `--max-cost` estimate prices, so raising it raises both the ceiling and the quoted cost. `ai.model` is only applied to a provider it belongs to — a `claude-*` model is never sent to OpenAI. A stored AI result explains any number a reader cannot check: `steps_shown` /
+`steps_total` when the trace did not fit the summary, `missing_fields` when the
+model omitted a score, `truncated_at_max_tokens` when its reply was cut off, and
+`cost_usd_rate_unknown` when the cost came from the fallback rate below. Each
+appears only when it applies, so an ordinary result carries none of them.
+
+Cost figures are priced from a small built-in rate table that covers the three default models; set `ai.model` to anything else and both the estimate and the recorded cost fall back to the highest rate in that table, which — since all three defaults are cheap-tier — is a **floor, not a ceiling**. `eval --ai --max-cost` says so out loud when that happens, and warns that the budget may not hold; a stored result carries `cost_usd_rate_unknown`.
 
 `config set` refuses an **empty** value (exit `2`): a blank key was stored, then
 displayed as `***` by `config get` — looking set — while every check downstream
@@ -904,7 +910,12 @@ finished" rather than "failed the run".
 **"An AI evaluator scored a long run and I don't trust the number."** Check the
 panel: when the trace did not fit the summary sent to the model, it says
 `Judged over N of M steps`, and the stored result carries `steps_shown` /
-`steps_total`. `diff --ai` says the same about differences
+`steps_total`. If the model left a score out
+altogether, the run's `details` carry `missing_fields` naming which — an absent
+field is read as 0 for the arithmetic, so it drags the score down and can fail
+the run, and the panel says `not scored by the model` rather than drawing a
+`0/10` nobody gave. A field the model genuinely sent as `0` is a real score and
+is not listed. `diff --ai` says the same about differences
 (`Analyzed 15 of 4178 differences`, with `diffs_shown`/`diffs_total` in the
 payload). The summary always keeps the failing step and the important ones,
 but a verdict about step counts or efficiency over a partial run is worth
