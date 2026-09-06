@@ -182,6 +182,8 @@ export interface DashboardTraceRow {
   agent_name: string;
   status: string;
   started_at: string;
+  /** Non-null for a fork, which is a copy that was never run. */
+  parent_trace_id: string | null;
 }
 
 /**
@@ -194,7 +196,15 @@ export interface DashboardTraceRow {
  * label wide enough to push the row past the box edge is a defect this file has
  * already had once.
  */
-export function traceStatusCell(row: { status: string; started_at: string }): string {
+export function traceStatusCell(row: DashboardTraceRow): string {
+  // A fork is marked as one, and is never stale: it is a copy left `running`
+  // for the user to explore. `isPossiblyAbandoned` knows that — but it reads
+  // `parent_trace_id`, and this row was SELECTed without it, so the fix at the
+  // source could not reach the view. The row type carries the field now, so the
+  // compiler is the thing that keeps them together rather than a cast.
+  if (row.parent_trace_id) return `${row.status} ⑂`;
+  // The row's `status` is the raw column text, so it is widened to the enum
+  // the check expects; the check only compares it to 'running'.
   return isPossiblyAbandoned(row as Parameters<typeof isPossiblyAbandoned>[0]) ? `${row.status} ⚠` : row.status;
 }
 
@@ -208,7 +218,10 @@ export function traceStatusCell(row: { status: string; started_at: string }): st
 export function recentTraces(db: Database.Database, limit = 30): DashboardTraceRow[] {
   return db
     .prepare(
-      `SELECT id, agent_name, status, started_at FROM agent_traces
+      // `parent_trace_id` is selected because the Status cell needs it: without
+      // it every fork read as a live run, and one older than the staleness
+      // threshold read as an abandoned capture.
+      `SELECT id, agent_name, status, started_at, parent_trace_id FROM agent_traces
         ORDER BY ${julianDayExpr('started_at')} DESC, started_at DESC LIMIT ?`,
     )
     .all(limit) as DashboardTraceRow[];

@@ -418,32 +418,59 @@ describe('the token and cost totals say what they measured', () => {
 });
 
 describe('traceStatusCell', () => {
+  const row = (over: Partial<Parameters<typeof traceStatusCell>[0]>) => ({
+    id: 'trc_x', agent_name: 'bot', status: 'running', started_at: new Date().toISOString(),
+    parent_trace_id: null, ...over,
+  });
+
   // The dashboard's trace table was the fourth view of a trace and the only one
   // that did not mark a run stuck in `running` — `list`, the `show` header and
   // `watch` all do. The marker here is the glyph alone because the column lives
   // in a fixed panel, and a status label wide enough to push the row past the
   // box edge is a defect this file has already had.
   it('marks a run that has been running past the threshold', () => {
-    const cell = traceStatusCell({ status: 'running', started_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString() });
+    const cell = traceStatusCell(row({ started_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString() }));
     expect(cell).toBe('running ⚠');
   });
 
   it('leaves a fresh run alone', () => {
-    expect(traceStatusCell({ status: 'running', started_at: new Date().toISOString() })).toBe('running');
+    expect(traceStatusCell(row({}))).toBe('running');
   });
 
   it('leaves a finished run alone, however old', () => {
     // Only `running` can be abandoned; a completed trace from last year is just
     // a completed trace.
     expect(
-      traceStatusCell({ status: 'completed', started_at: new Date(Date.now() - 400 * 24 * 3600 * 1000).toISOString() }),
+      traceStatusCell(row({ status: 'completed', started_at: new Date(Date.now() - 400 * 24 * 3600 * 1000).toISOString() })),
     ).toBe('completed');
+  });
+
+  it('marks a fork as a fork, and never as abandoned', () => {
+    // A fork is a copy left `running` for the user to explore, so it crosses the
+    // staleness threshold by simply existing. `isPossiblyAbandoned` knows that —
+    // but it reads `parent_trace_id`, and this table's query did not select the
+    // column, so the fix at the source never reached the view: every fork older
+    // than half an hour showed as an abandoned capture, and a fresh one as a
+    // second live run.
+    const old = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    expect(traceStatusCell(row({ parent_trace_id: 'trc_parent', started_at: old }))).toBe('running ⑂');
+    expect(traceStatusCell(row({ parent_trace_id: 'trc_parent' }))).toBe('running ⑂');
+  });
+
+  it('carries parent_trace_id out of the query, so the cell can see it', () => {
+    const parent = ingestTrace(db, trace({ status: 'running' }));
+    const forked = forkTrace(db, parent.id, 1, {}).forked_trace_id;
+    const rows = recentTraces(db);
+    expect(rows.find((r) => r.id === forked)?.parent_trace_id).toBe(parent.id);
+    expect(rows.find((r) => r.id === parent.id)?.parent_trace_id).toBeNull();
   });
 
   it('stays short enough for the column', () => {
     // The width lesson from the status-label fix: this cell sits in a fixed
     // panel beside three others.
-    const cell = traceStatusCell({ status: 'running', started_at: new Date(0).toISOString() });
+    const cell = traceStatusCell(row({ started_at: new Date(0).toISOString() }));
     expect(cell.length).toBeLessThanOrEqual('running'.length + 2);
+    // The fork glyph is the same width, and is the one a fork gets instead.
+    expect(traceStatusCell(row({ parent_trace_id: 'trc_parent' })).length).toBeLessThanOrEqual('running'.length + 2);
   });
 });

@@ -445,7 +445,9 @@ and one-way.
   remedies that marker implies applied. `getMostRecentRunningTrace` already drew
   exactly this line (it refuses to attach `watch` to a fork); the marker did
   not. A fork is now never marked abandoned, and the listing says what it
-  actually is (`⑂ fork`) — until now a fork appeared there as a second live run
+  actually is (`⑂ fork`, and `⑂` in the dashboard's trace table — whose query
+  did not select `parent_trace_id`, so the fix at the source could not reach
+  that view at all) — until now a fork appeared there as a second live run
   of the same agent, with the same status and token count, which is also why
   `list` counts it and `stats` does not.
 
