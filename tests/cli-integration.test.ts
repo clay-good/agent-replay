@@ -2533,3 +2533,106 @@ describe('check --trace says when a filter alongside it does nothing', () => {
     expect(() => JSON.parse(r.stdout)).not.toThrow(); // ...and stdout is still pure
   });
 });
+
+/**
+ * The whole gate over a piped harness stream, end to end.
+ *
+ * Each piece of this was separately broken until recently, and each failure was
+ * silent in the same way: the model was recorded nowhere, an `mcp_tool_call`'s
+ * arguments were dropped, and the capture carried no input at all — so the gate
+ * could only answer "none compared" at exit 2, and any of the three regressing
+ * again would take the gate back to a green-on-everything state rather than a
+ * loud one. Pinned as a workflow because the pieces only pay off together.
+ */
+describe('gating a codex-exec capture', () => {
+  const stream = (to: string, model: string) =>
+    [
+      JSON.stringify({ type: 'thread.started', thread_id: 'th_gate', model }),
+      JSON.stringify({
+        type: 'item.completed',
+        item: { item_type: 'mcp_tool_call', name: 'search_flights', arguments: `{"to":"${to}"}` },
+      }),
+      JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 3, output_tokens: 4 } }),
+    ].join('\n') + '\n';
+
+  /** Record into a store of our own, since `run()` forces the shared one. */
+  const capture = (store: string, text: string): number => {
+    try {
+      execFileSync(process.execPath, [
+        CLI, 'record', '--format', 'codex-exec',
+        '--agent-name', 'flightbot', '--input', 'book a flight', '--dir', store,
+      ], { encoding: 'utf8', input: text, stdio: ['pipe', 'pipe', 'pipe'], timeout: 20000 });
+      return 0;
+    } catch (e) {
+      return (e as { status?: number }).status ?? 1;
+    }
+  };
+
+  // Spawned directly, not through `run()`: that helper APPENDS its own `--dir`
+  // and commander takes the last occurrence, so a `--dir` of our own would be
+  // silently overridden and every command here would read the shared store.
+  const cli = (args: string[]): RunResult => {
+    try {
+      const stdout = execFileSync(process.execPath, [CLI, ...args], {
+        encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20000,
+      });
+      return { stdout, stderr: '', code: 0 };
+    } catch (e) {
+      const err = e as { stdout?: string; stderr?: string; status?: number };
+      return { stdout: err.stdout ?? '', stderr: err.stderr ?? '', code: err.status ?? 1 };
+    }
+  };
+
+  const check = (store: string, golden: string, fields: string): RunResult =>
+    cli(['check', '--golden', golden, '--fields', fields, '--dir', store]);
+
+  it('passes an unchanged run and reports the model and tool input that changed', () => {
+    const base = mkdtempSync(join(tmpdir(), 'ar-gate-base-'));
+    const same = mkdtempSync(join(tmpdir(), 'ar-gate-same-'));
+    const drift = mkdtempSync(join(tmpdir(), 'ar-gate-drift-'));
+    const golden = join(base, 'golden.json');
+    try {
+      expect(capture(base, stream('JFK', 'gpt-5-codex'))).toBe(0);
+      expect(cli(['export', '--format', 'golden', '--output', golden, '--dir', base]).code).toBe(0);
+
+      // An identical run is a pass, not an "unmatched" refusal: the capture has
+      // an input to match on and a model and tool input to compare.
+      expect(capture(same, stream('JFK', 'gpt-5-codex'))).toBe(0);
+      const clean = check(same, golden, 'tool_inputs,model');
+      expect(clean.code).toBe(0);
+      expect(clean.stdout).toMatch(/1 passed/);
+
+      // And a run that changed its model AND its tool query is a regression
+      // naming both, rather than a green gate.
+      expect(capture(drift, stream('LAX', 'gpt-5-codex-mini'))).toBe(0);
+      const bad = check(drift, golden, 'tool_inputs,model');
+      expect(bad.code).toBe(1);
+      expect(bad.stdout).toMatch(/model @step 1/);
+      expect(bad.stdout).toMatch(/gpt-5-codex-mini/);
+      expect(bad.stdout).toMatch(/tool_inputs @step 1/);
+      expect(bad.stdout).toMatch(/LAX/);
+    } finally {
+      for (const d of [base, same, drift]) rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses instead of passing green when the capture has no input to match on', () => {
+    // Without `--input` there is nothing to pair a candidate with, and the
+    // gate must say so (exit 2) rather than report a pass over zero comparisons.
+    const base = mkdtempSync(join(tmpdir(), 'ar-gate-noin-'));
+    const golden = join(base, 'golden.json');
+    try {
+      try {
+        execFileSync(process.execPath, [CLI, 'record', '--format', 'codex-exec', '--dir', base], {
+          encoding: 'utf8', input: stream('JFK', 'gpt-5-codex'), stdio: ['pipe', 'pipe', 'pipe'], timeout: 20000,
+        });
+      } catch { /* recorded or not, the check below is the assertion */ }
+      cli(['export', '--format', 'golden', '--output', golden, '--dir', base]);
+      const r = check(base, golden, 'model');
+      expect(r.code).toBe(2);
+      expect(r.stderr).toMatch(/record --input/);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+});
