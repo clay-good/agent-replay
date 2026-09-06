@@ -41,7 +41,11 @@ Three things to know before upgrading:
   next run finds a store that now genuinely exists and is genuinely empty.
   `guard check` and `hook --enforce` already refused for exactly this reason.
   Creating a store is what `init` is for; an empty store that really exists
-  still answers normally.
+  still answers normally. The same rule has since reached the commands this
+  sweep missed — `check --golden` and the `guard` subcommands, both below — so
+  every command that only reads now refuses, and the ones that legitimately
+  create a store say when they are creating a second one below a project that
+  already has one.
 
 - **A few commands now refuse input they used to accept**, always where
   accepting it produced a silently wrong answer rather than an error: an empty
