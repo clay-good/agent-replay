@@ -277,3 +277,28 @@ describe('record: naming the format that would have worked', () => {
     expect(stderr()).not.toContain('try --format');
   });
 });
+
+describe('record: a non-JSON line in a translated stream', () => {
+  const good = [
+    JSON.stringify({ type: 'thread.started', thread_id: 'th_j' }),
+    JSON.stringify({ type: 'item.completed', item: { item_type: 'command_execution', command: 'ls' } }),
+    JSON.stringify({ type: 'turn.completed', usage: {} }),
+  ];
+
+  it('warns and keeps going, rather than losing the run', async () => {
+    // A harness that prints a progress line into its own JSON stream is the
+    // real case. The rest of the stream must still be recorded.
+    await record([good[0], 'Building project...', good[1], good[2]], { format: 'codex-exec' });
+    expect(stderr()).toContain('invalid JSON in codex-exec stream');
+    const steps = store((db) => db.prepare('SELECT COUNT(*) FROM agent_trace_steps').pluck().get() as number);
+    expect(steps).toBe(1);
+    expect(process.exitCode).toBe(0);
+  });
+
+  it('fails the run when every line is unparseable', async () => {
+    // Nothing was recorded, so this must not report success.
+    await record(['not json', 'also not json'], { format: 'codex-exec' });
+    expect(process.exitCode).toBe(1);
+    expect(stderr()).toContain('Nothing was recorded');
+  });
+});
