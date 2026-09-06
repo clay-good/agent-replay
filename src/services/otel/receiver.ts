@@ -776,7 +776,7 @@ export function startOtelReceiver(db: Database.Database, port: number, stats: Ot
     for (const sessionId of stats.sessionCollisions ?? []) {
       announce(`collision ${sessionId}`, [
         `session ${truncate(sessionId, 60)} is already captured by another path — this receiver opened a SECOND trace for it.`,
-        'Two capture paths on one session double every store-wide count. Keep one: turn off the hook, or point the exporter elsewhere.',
+        'Two capture paths on one session double every store-wide count — the hook and this receiver, or an exporter sending both spans and log events. Keep one per session.',
       ]);
     }
   };

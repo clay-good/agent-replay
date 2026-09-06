@@ -1324,3 +1324,42 @@ describe('the /v1/traces endpoint rejects nothing, and says so by answering a ba
     expect(handleTracesExport(db, JSON.stringify({ resourceSpans: [] }), stats)).toEqual({ status: 200, payload: {} });
   });
 });
+
+describe('a span-captured trace names its session', () => {
+  // `gen_ai.conversation.id` is the GenAI semconv field; `session.id` is the
+  // general OTel one, and it is what the harnesses actually stamp — this repo's
+  // own LOG mapper groups by `session.id`. Reading only the GenAI attribute left
+  // a span-captured trace with `session_id: null` while the same session's log
+  // records carried it, so the two OTLP signals of one session could not be
+  // correlated by anything.
+  const span = (attrs: Record<string, unknown>) => ({
+    resourceSpans: [{
+      resource: { attributes: [{ key: 'service.name', value: { stringValue: 'claude-code' } }] },
+      scopeSpans: [{ spans: [{
+        traceId: '0000000000000000000000000000beef', spanId: '000000000000beef', name: 'chat',
+        startTimeUnixNano: '1750000000000000000', endTimeUnixNano: '1750000002000000000',
+        attributes: [
+          { key: 'gen_ai.system', value: { stringValue: 'anthropic' } },
+          ...Object.entries(attrs).map(([key, v]) => ({ key, value: { stringValue: String(v) } })),
+        ],
+      }] }],
+    }],
+  });
+
+  it('reads session.id when the GenAI conversation id is absent', () => {
+    const [trace] = mapOtlpTraces(span({ 'session.id': 'sess-from-span' }) as never);
+    expect(trace.session_id).toBe('sess-from-span');
+  });
+
+  it('still prefers the GenAI conversation id when both are present', () => {
+    const [trace] = mapOtlpTraces(
+      span({ 'gen_ai.conversation.id': 'conv-1', 'session.id': 'sess-2' }) as never,
+    );
+    expect(trace.session_id).toBe('conv-1');
+  });
+
+  it('synthesizes neither when the span carries no session at all', () => {
+    const [trace] = mapOtlpTraces(span({}) as never);
+    expect(trace.session_id).toBeNull();
+  });
+});

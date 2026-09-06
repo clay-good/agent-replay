@@ -443,6 +443,16 @@ and one-way.
 
 ### Fixed
 
+- **A span-captured trace named no session, so the two OTLP signals of one
+  session could not be correlated.** The span mapper read only
+  `gen_ai.conversation.id`; the harnesses stamp `session.id`, the general OTel
+  session attribute — which this receiver's own log mapper already groups by. So
+  a Claude Code session exporting both spans and log events produced one trace
+  carrying the session id and one carrying `null`, `list --session` found only
+  half of it, and the second-trace notice could not fire at all. Spans now fall
+  back to `session.id`, preferring the GenAI attribute when both are present and
+  synthesizing neither when absent.
+
 - **Importing a session you also captured live doubled it, silently.** The
   import identity is the session id, source format and source filename together,
   so it recognizes a previous import and cannot recognize a LIVE capture — the

@@ -418,7 +418,21 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): MappedOtelTrace[] 
     // spans are steps.)
     const root = roots[0];
     const stepSpans = group.filter((s) => s !== root);
-    const anyConversation = group.map((s) => str(s.attrs['gen_ai.conversation.id'])).find(Boolean);
+    // The session this trace belongs to, from either attribute that names one.
+    //
+    // `gen_ai.conversation.id` is the GenAI semconv field; `session.id` is the
+    // general OTel session attribute, and it is what the harnesses actually
+    // stamp — this repo's own LOG mapper groups by `session.id`, because that is
+    // what Gemini CLI and Claude Code emit. Reading only the GenAI one left a
+    // span-captured trace with `session_id: null` while the SAME session's log
+    // records carried it, so the two OTLP signals of one session could not be
+    // correlated by anything: `list --session` found one of them, the
+    // second-trace notice could not fire, and a store fed both signals held two
+    // traces where only one names the session. Two mappers, one concept, one
+    // spelling — the rule this file already applies to `meta.provider`.
+    const anyConversation = group
+      .map((s) => str(s.attrs['gen_ai.conversation.id']) ?? str(s.attrs['session.id']))
+      .find(Boolean);
     const agentName =
       str(root?.attrs['gen_ai.agent.name']) ??
       str(group[0]?.resource['service.name']) ??
@@ -494,7 +508,7 @@ export function mapOtlpTraces(otlp: Record<string, unknown>): MappedOtelTrace[] 
       // A failed trace must say why. It was stored `failed` with `error: null`,
       // so `show` rendered "✘ FAILED" with no reason anywhere on the page.
       error: anyError ? (rootError ?? group.map((s) => s.errorMessage).find(Boolean) ?? 'error') : null,
-      // gen_ai.conversation.id is never synthesized when absent.
+      // Neither attribute is ever synthesized when absent.
       session_id: anyConversation ?? null,
       input: rootInput,
       output: rootOutput,
