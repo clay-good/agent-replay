@@ -216,6 +216,39 @@ describe('replay', () => {
     expect(stdout()).toMatch(/Replay complete: 2 steps/);
   });
 
+  it('says what the replay totals were taken over', async () => {
+    // A trace mixing timed and untimed steps reported "3 steps | 150ms" — the
+    // sum of the two that carried a duration, presented as the run's. An
+    // imported session is exactly this shape: its steps are finished but
+    // undurated, because a transcript records when a record was written and not
+    // how long a tool took.
+    const db = ensureDatabase(resolve(dir, 'traces.db'));
+    const mixed = ingestTrace(db, {
+      agent_name: 'mixed', status: 'completed', input: { q: 1 },
+      steps: [
+        { step_number: 1, step_type: 'tool_call', name: 'timed', duration_ms: 120 },
+        { step_number: 2, step_type: 'tool_call', name: 'untimed' },
+        { step_number: 3, step_type: 'output', name: 'done', duration_ms: 30 },
+      ],
+    } as never).id;
+    out.length = 0;
+    await runReplay(mixed, { dir, speed: '0' });
+    expect(out.join('\n')).toMatch(/150ms \(over 2 of 3\)/);
+
+    // A fully measured trace says nothing extra.
+    const timed = ingestTrace(db, {
+      agent_name: 'timed', status: 'completed', input: { q: 2 },
+      steps: [
+        { step_number: 1, step_type: 'tool_call', name: 'a', duration_ms: 10 },
+        { step_number: 2, step_type: 'output', name: 'b', duration_ms: 20 },
+      ],
+    } as never).id;
+    out.length = 0;
+    await runReplay(timed, { dir, speed: '0' });
+    expect(out.join('\n')).toMatch(/30ms/);
+    expect(out.join('\n')).not.toMatch(/over \d+ of/);
+  });
+
   it('says a range holds no steps rather than replaying nothing silently', async () => {
     await runReplay(id, { dir, speed: '0', fromStep: '90' });
     expect(stderr()).toMatch(/No steps in the specified range/);

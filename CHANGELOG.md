@@ -450,6 +450,14 @@ and one-way.
 
 ### Fixed
 
+- **`replay`'s totals were sums over a subset, presented as the run's.** A trace
+  mixing timed and untimed steps reported `3 steps | 150ms` — the sum of the two
+  that carried a duration. An imported session is exactly that shape: its steps
+  are finished but undurated, because a transcript records when a record was
+  written, not how long a tool took. The line now says `150ms (over 2 of 3)`,
+  and says nothing extra when everything was measured — the same disclosure
+  `stats` makes and `eval` now makes for a criterion with nothing to check.
+
 - **An evaluator reported 100% for criteria that measured nothing.** A criterion
   with nothing to check — no retrieval steps to ground an answer against, no
   tool calls to inspect — scores 1.0 so that a trace which does not exercise it
