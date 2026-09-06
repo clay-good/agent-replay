@@ -336,6 +336,15 @@ and one-way.
 
 ### Fixed
 
+- **A codex tool call's arguments were dropped.** `record --format
+  codex-exec` read only a shell `command` as a step's input, so an
+  `mcp_tool_call` — whose arguments live under `arguments`, exactly as the
+  Codex rollout importer for the same harness reads them — stored an empty
+  input. `show` displayed none, and `diff` could not report a changed MCP
+  query, because the field it compares was empty on both sides. Arguments are
+  now read into the input column, parsed when they are JSON and kept verbatim
+  when they are freeform; the whole item is still preserved as the step's
+  output.
 - **A translated stream recorded the model nowhere.** `record --format
   codex-exec` / `gemini-stream` never read the model any record named, while
   every sibling capture path does — the Claude Code transcript and Codex

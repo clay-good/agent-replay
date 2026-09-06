@@ -267,7 +267,7 @@ export class CodexExecTranslator extends BaseTranslator {
           // / `book_flight`. Falls back to the type, which is all some items
           // have.
           name: str(item.name) ?? str(item.tool) ?? firstToken(item.command) ?? itemType,
-          input: item.command != null ? { command: item.command } : {},
+          input: codexItemInput(item),
           output: item as Record<string, unknown>,
           error: itemError,
           metadata: { source: 'codex-exec', item_type: itemType },
@@ -531,6 +531,47 @@ function errText(v: unknown): string | undefined {
     return json && json !== '{}' ? json : undefined;
   }
   return JSON.stringify(v);
+}
+
+/**
+ * A codex item's tool input.
+ *
+ * Only `command` was read, so an `mcp_tool_call` — whose arguments live under
+ * `arguments`, exactly as the codex-rollout importer for the same harness reads
+ * them — stored `input: {}`. `show` then displayed no input for the call, and
+ * `diff` could not report a changed MCP query between two runs, because the
+ * field it compares was empty on both sides. The whole item is still preserved
+ * as the step's `output`; this puts the arguments in the column every reader
+ * looks in.
+ *
+ * Shape-tolerant the way `parseArgs` is: a JSON string is parsed, an
+ * unparseable or freeform one is kept verbatim under `arguments` rather than
+ * dropped. No vendor-internal name is guessed — `arguments` and `input` are the
+ * two the sibling importer reads. Anything else an item carries stays in
+ * `output`.
+ */
+function codexItemInput(item: Record<string, unknown>): Record<string, unknown> {
+  if (item.command != null) return { command: item.command };
+  const args = item.arguments ?? item.input;
+  if (args == null) return {};
+  // An ARRAY is wrapped, not returned: the input column is read as an object
+  // everywhere, the same reason this file wraps a non-object `item`.
+  if (typeof args === 'object') {
+    return Array.isArray(args) ? { arguments: args } : (args as Record<string, unknown>);
+  }
+  if (typeof args === 'string') {
+    if (!args.trim()) return {};
+    try {
+      const parsed = JSON.parse(args);
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Freeform, which a custom tool call legitimately is.
+    }
+    return { arguments: args };
+  }
+  return { arguments: args };
 }
 
 /**

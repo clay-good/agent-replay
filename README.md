@@ -94,7 +94,7 @@ codex exec --json "fix the failing tests"      | agent-replay record --format co
 gemini -p "summarize" --output-format stream-json | agent-replay record --format gemini-stream
 ```
 
-Either stream's steps record the `model` that produced them, taken from whatever record names one (a codex thread or turn context, a gemini session); a session that switches models mid-run keeps each step labelled with the model in effect at its own time, and one that never names a model stores none. That makes a model swap between two captured runs visible to `show`, `replay` and `diff`. It does not make such a capture gateable on `--fields model`, though: these translators record no trace input, so `check --golden` cannot match the run in the first place (see below).
+A codex tool call records its arguments as the step's input: a shell `command`, or the `arguments` an `mcp_tool_call` carries (parsed when they are JSON, kept verbatim when they are freeform), so a changed tool query is visible to `show` and comparable by `diff`. Either stream's steps record the `model` that produced them, taken from whatever record names one (a codex thread or turn context, a gemini session); a session that switches models mid-run keeps each step labelled with the model in effect at its own time, and one that never names a model stores none. That makes a model swap between two captured runs visible to `show`, `replay` and `diff`. It does not make such a capture gateable on `--fields model`, though: these translators record no trace input, so `check --golden` cannot match the run in the first place (see below).
 
 For the native protocol, each event is one JSON object on its own line carrying `v: 1`, a `type`, and (except `trace_start`) the `trace_id` the producer generated:
 

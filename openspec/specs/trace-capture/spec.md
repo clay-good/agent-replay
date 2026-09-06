@@ -86,6 +86,13 @@ The system SHALL translate the documented non-interactive event streams of the m
 
 The system SHALL record, on the steps a translated stream produces, the model any record of that stream names — read from the record, its `item`, or its `session` — tracking it as a running value so a session that changes model mid-run labels each step with the model in effect at its own time. A stream that names no model SHALL leave the field unset rather than guessing one.
 
+The system SHALL record a codex tool item's arguments as its step's input — a shell `command`, or the `arguments`/`input` an MCP or custom tool call carries, parsed when they are JSON and preserved verbatim when they are not.
+
+#### Scenario: MCP tool call arguments recorded
+
+- **WHEN** a `codex-exec` stream reports an `mcp_tool_call` item carrying JSON `arguments`
+- **THEN** the step records those arguments as its input, so `diff` reports a changed tool query
+
 #### Scenario: Model carried onto a translated stream's steps
 
 - **WHEN** a `codex-exec` stream declares a model on `thread.started` and later items produce steps

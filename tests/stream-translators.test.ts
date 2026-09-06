@@ -653,3 +653,72 @@ describe('the model a translated stream reports', () => {
     expect(trace.steps.map((s) => s.model)).toEqual([null]);
   });
 });
+
+// ── the input a codex item carries ─────────────────────────────────────────
+
+describe('a codex item tool input', () => {
+  it('reads an mcp_tool_call\'s JSON arguments into the input column', () => {
+    const t = makeTranslator('codex-exec')!;
+    const id = run(t, [
+      { type: 'thread.started', thread_id: 'th_1' },
+      {
+        type: 'item.completed',
+        item: { item_type: 'mcp_tool_call', name: 'search_flights', arguments: '{"from":"SFO","to":"JFK"}' },
+      },
+      { type: 'turn.completed', usage: {} },
+    ]);
+    const trace = getTrace(db, id)!;
+    expect(trace.steps[0].input).toEqual({ from: 'SFO', to: 'JFK' });
+  });
+
+  it('reads arguments already sent as an object', () => {
+    const t = makeTranslator('codex-exec')!;
+    const id = run(t, [
+      { type: 'thread.started', thread_id: 'th_2' },
+      { type: 'item.completed', item: { item_type: 'mcp_tool_call', name: 'lookup', arguments: { id: 7 } } },
+      { type: 'turn.completed', usage: {} },
+    ]);
+    expect(getTrace(db, id)!.steps[0].input).toEqual({ id: 7 });
+  });
+
+  it('keeps a freeform tool input verbatim rather than dropping it', () => {
+    const t = makeTranslator('codex-exec')!;
+    const id = run(t, [
+      { type: 'thread.started', thread_id: 'th_3' },
+      { type: 'item.completed', item: { item_type: 'mcp_tool_call', name: 'shell', input: 'not json at all' } },
+      { type: 'turn.completed', usage: {} },
+    ]);
+    expect(getTrace(db, id)!.steps[0].input).toEqual({ arguments: 'not json at all' });
+  });
+
+  it('wraps a non-object argument value, so the input column stays an object', () => {
+    const t = makeTranslator('codex-exec')!;
+    const id = run(t, [
+      { type: 'thread.started', thread_id: 'th_4' },
+      { type: 'item.completed', item: { item_type: 'mcp_tool_call', name: 'batch', arguments: ['a', 'b'] } },
+      { type: 'turn.completed', usage: {} },
+    ]);
+    const input = getTrace(db, id)!.steps[0].input;
+    expect(input).toEqual({ arguments: ['a', 'b'] });
+  });
+
+  it('still prefers a command, which is what a command_execution carries', () => {
+    const t = makeTranslator('codex-exec')!;
+    const id = run(t, [
+      { type: 'thread.started', thread_id: 'th_5' },
+      { type: 'item.completed', item: { item_type: 'command_execution', command: 'ls -la' } },
+      { type: 'turn.completed', usage: {} },
+    ]);
+    expect(getTrace(db, id)!.steps[0].input).toEqual({ command: 'ls -la' });
+  });
+
+  it('records no input for an item that carries none', () => {
+    const t = makeTranslator('codex-exec')!;
+    const id = run(t, [
+      { type: 'thread.started', thread_id: 'th_6' },
+      { type: 'item.completed', item: { item_type: 'file_change', path: 'src/a.ts' } },
+      { type: 'turn.completed', usage: {} },
+    ]);
+    expect(getTrace(db, id)!.steps[0].input).toEqual({});
+  });
+});
