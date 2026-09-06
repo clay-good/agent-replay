@@ -40,6 +40,12 @@
 
 - `main` is the default branch; conventional-commit style titles (`feat:`, `fix:`, ...)
 
+### Specs
+
+- `openspec validate --all --strict` must pass; every capability's behavior lives in `openspec/specs/<capability>/spec.md`
+- A change under `openspec/changes/` that is still a PROPOSAL — a gap raised with its open questions, nothing implemented — carries `.openspec.yaml` with `schema: spec-driven` and `skip_specs: true`, because writing deltas would be writing the decisions the proposal exists to ask for. The deltas replace that marker when the shape is chosen
+- `openspec doctor` reports the root as unhealthy for a missing `openspec/config.yaml`; the project has never had one, and `openspec init` writes AI-tool instruction files across the repo, so that is a deliberate setup choice rather than drift
+
 ## Domain Context
 
 - A **trace** is one agent execution; it contains ordered **steps** (thought, tool_call, llm_call, retrieval, output, decision, error, guard_check)
