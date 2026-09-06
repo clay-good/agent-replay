@@ -37,6 +37,22 @@ function freePort(): Promise<number> {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Wait for a condition, rather than for a fixed number of milliseconds.
+ *
+ * These assertions read the STDERR OF A SPAWNED SERVER, which arrives when the
+ * OS and the event loop get to it. A flat `sleep(300)` is a bet on machine
+ * load: this repo's suite runs 54 files in parallel, often beside another
+ * agent's suite on the same machine, and the bet loses — "announces a repeating
+ * refused export once" failed a full-suite run with zero lines captured and
+ * passed alone three times in a row. Polling turns a load-sensitive sleep into
+ * a deadline, and keeps the fast path fast.
+ */
+async function waitFor(ready: () => boolean, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!ready() && Date.now() < deadline) await sleep(25);
+}
+
 const OTLP_PAYLOAD = JSON.stringify({
   resourceSpans: [
     {
@@ -405,19 +421,26 @@ describe('otel serve (end-to-end)', () => {
     });
     expect(ok.status).toBe(200);
 
-    await sleep(300);
+    await waitFor(() => stderr().includes('/v1/metrics'));
     const lines = stderr().split('\n').filter((l) => l.includes('/v1/metrics'));
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatch(/no metric target/);
     // The notice has to leave the reader able to act, not just informed.
     expect(stderr()).toMatch(/OTEL_METRICS_EXPORTER=none/);
 
+    // Wait for the trace itself, not for a fixed interval: the SIGTERM'd server
+    // exits when the OS gets to it, and the row is what this asserts on.
     server?.kill('SIGTERM');
-    await sleep(300);
-    const db = new Database(join(dir, 'traces.db'), { readonly: true });
-    const row = db.prepare('SELECT COUNT(*) AS n FROM agent_traces').get() as { n: number };
-    db.close();
-    expect(row.n).toBe(1);
+    const traceCount = (): number => {
+      const db = new Database(join(dir, 'traces.db'), { readonly: true });
+      try {
+        return (db.prepare('SELECT COUNT(*) AS n FROM agent_traces').get() as { n: number }).n;
+      } finally {
+        db.close();
+      }
+    };
+    await waitFor(() => traceCount() === 1);
+    expect(traceCount()).toBe(1);
   }, 20000);
 
   it('says when another capture path already has this session', async () => {
@@ -462,7 +485,7 @@ describe('otel serve (end-to-end)', () => {
       expect(res.status).toBe(200);
     }
 
-    await sleep(300);
+    await waitFor(() => stderr().includes('already captured by another path'));
     // Once per session, however many batches arrive.
     const lines = stderr().split('\n').filter((l) => l.includes('already captured by another path'));
     expect(lines).toHaveLength(1);
@@ -500,7 +523,7 @@ describe('otel serve (end-to-end)', () => {
       });
       expect(bad.status).toBe(400);
 
-      await sleep(300);
+      await waitFor(() => stderr().split('\n').filter((l) => l.includes('export failed')).length >= 2);
       const failures = stderr().split('\n').filter((l) => l.includes('export failed'));
       // Three identical failures, one line — the exporter retries on an interval.
       expect(failures).toHaveLength(2);
