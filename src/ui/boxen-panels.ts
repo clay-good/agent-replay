@@ -110,6 +110,22 @@ export function traceHeaderPanel(trace: Trace): string {
   if (trace.session_id) {
     lines.push(`${label('Session:')}   ${chalk.white(safeLine(trace.session_id))}`);
   }
+  // WHICH CAPTURE PATH produced this trace.
+  //
+  // A store holds traces from the hook, `record`, `import`, `ingest` and the
+  // OTel receiver at once, and the detail view could not say which — the fact
+  // was in `metadata` and shown nowhere. It is the first thing you want when
+  // one session has two traces (which the capture paths now report), and the
+  // second thing you want when a field is missing: a hook capture records no
+  // model, an OTLP span carries no prompt, and knowing the path explains both.
+  const source = (trace.metadata as { source_format?: unknown; dialect?: unknown } | null) ?? {};
+  if (typeof source.source_format === 'string' && source.source_format) {
+    const dialect = typeof source.dialect === 'string' && source.dialect && source.dialect !== source.source_format
+      ? chalk.dim(` (${safeLine(truncateToWidth(source.dialect, 20))})`)
+      : '';
+    lines.push(`${label('Source:')}    ${chalk.white(safeLine(truncateToWidth(source.source_format, 30)))}${dialect}`);
+  }
+
   // A CONTINUATION is a fragment, and the header is where that has to be said.
   //
   // `import` records `metadata.compacted` when the transcript states it (a

@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { ensureDatabase, resetConnection } from '../src/db/index.js';
+import { getTrace, listTraces } from '../src/services/trace-service.js';
 
 /**
  * `record` is the live-capture entry point: an agent's output is piped into it
@@ -300,5 +301,29 @@ describe('record: a non-JSON line in a translated stream', () => {
     await record(['not json', 'also not json'], { format: 'codex-exec' });
     expect(process.exitCode).toBe(1);
     expect(stderr()).toContain('Nothing was recorded');
+  });
+});
+
+describe('a recorded trace records how it was captured', () => {
+  it('stamps the stream format, and lets a producer describe itself', async () => {
+    // The importers and the OTel receiver stamp `source_format`; `record`
+    // stamped nothing, so a store could not say which path produced a trace —
+    // which matters most when one session has two.
+    await record(['{"type":"trace_start","agent_name":"a"}', '{"type":"trace_end","status":"completed"}']);
+    const db = ensureDatabase(resolve(dir, 'traces.db'));
+    const meta = getTrace(db, listTraces(db, {}).items[0].id)!.metadata as { source_format?: string };
+    expect(meta.source_format).toBe('record:native');
+  });
+
+  it('does not overwrite a source_format the producer sent', async () => {
+    // The native protocol lets a producer describe itself, and the stored trace
+    // must not disagree with it — the rule `--input` already follows.
+    await record([
+      '{"type":"trace_start","agent_name":"b","metadata":{"source_format":"my-harness"}}',
+      '{"type":"trace_end","status":"completed"}',
+    ]);
+    const db = ensureDatabase(resolve(dir, 'traces.db'));
+    const trace = listTraces(db, {}).items.find((t) => t.agent_name === 'b')!;
+    expect((getTrace(db, trace.id)!.metadata as { source_format?: string }).source_format).toBe('my-harness');
   });
 });

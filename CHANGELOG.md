@@ -443,6 +443,16 @@ and one-way.
 
 ### Fixed
 
+- **A store could not say which capture path produced a trace.** The importers
+  stamped `metadata.source_format` and the OTel receiver stamped its own, while
+  `hook` recorded only a `dialect` and `record` recorded nothing at all — so a
+  store holding several paths (the normal case, and the one where a session ends
+  up with two traces) had no single key to tell them apart. Every path now
+  stamps it: `hook`, `record:<stream format>`, the importers' and the receiver's
+  existing names. A producer's own value still wins, since the native protocol
+  lets it describe itself. `show` names it in the header, and says nothing when
+  a trace records none rather than guessing.
+
 - **A compacted session read as a whole run.** The importer records
   `metadata.compacted` when the transcript states it, and no view showed it — so
   a continuation looked like an ordinary trace, though its duration covers only

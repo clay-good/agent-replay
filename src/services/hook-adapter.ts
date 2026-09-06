@@ -320,6 +320,12 @@ function ensureTrace(
       trigger: 'user_message',
       session_id: sessionId,
       metadata: {
+        // The capture path, in the key every other path uses. `dialect` says
+        // WHICH HARNESS this came from and stays; `source_format` says HOW it
+        // was captured, which is the question a store holding hook, `record`,
+        // import and OTel traces could not answer — and the one that matters
+        // when a session ends up with two traces.
+        source_format: 'hook',
         dialect,
         cwd: str(payload.cwd),
         transcript_path: str(payload.transcript_path),

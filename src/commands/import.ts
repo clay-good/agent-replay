@@ -270,13 +270,20 @@ export function runImport(filePath: string, opts: ImportOptions = {}): void {
   // A note and not a refusal: both traces are legitimate and hold different
   // things — the transcript has the full turn-by-turn record, the live capture
   // has decisions and guard checks the file never sees.
+  // Any OTHER root trace for this session, whatever captured it.
+  //
+  // This used to look for `source_format IS NULL`, on the reasoning that a live
+  // capture stamps none — true when it was written, and exactly the kind of
+  // assumption that rots: `hook` and `record` now stamp one too. What the note
+  // is actually about is the session having more than one trace, so ask that.
+  // The same-format, same-file duplicates are handled by the priors query above
+  // and cannot reach here.
   const liveCaptures = sessionId
     ? (db
         .prepare(
           `SELECT id FROM agent_traces
             WHERE session_id = ? AND id != ? AND parent_trace_id IS NULL
-              AND json_extract(metadata, '$.source_format') IS NULL
-            ORDER BY ${julianDayExpr('started_at')} ASC, started_at ASC`,
+            ORDER BY ${julianDayExpr('started_at')} ASC, started_at ASC LIMIT 4`,
         )
         .all(sessionId, report.trace.id) as Array<{ id: string }>)
     : [];

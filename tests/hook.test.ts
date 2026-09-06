@@ -589,6 +589,18 @@ describe('a subagent stop that names no agent, and what finalize says', () => {
   });
 });
 
+describe('a hook-captured trace records how it was captured', () => {
+  it('stamps source_format beside the dialect', () => {
+    // `dialect` says WHICH HARNESS; `source_format` says HOW — the key the
+    // importers and the OTel receiver already use, and the question a store
+    // holding every capture path could not answer.
+    const res = apply({ hook_event_name: 'UserPromptSubmit', session_id: 'src1', prompt: 'go' });
+    const meta = getTrace(db, res.traceId!)!.metadata as { source_format?: string; dialect?: string };
+    expect(meta.source_format).toBe('hook');
+    expect(meta.dialect).toBe('claude-code');
+  });
+});
+
 describe('the guard_check audit step is closed when it is written', () => {
   // It records a decision that is already made, and nothing emits a PostToolUse
   // for a guard check — so left open it stays open forever: `show` renders an

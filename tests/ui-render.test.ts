@@ -204,6 +204,26 @@ describe('renderDiff', () => {
     expect(() => renderDiff(diff, trace(), trace())).not.toThrow();
   });
 
+  it('names the capture path in the header, when the trace records one', () => {
+    // A store holds hook, `record`, `import`, `ingest` and OTel traces at once,
+    // and the detail view could not say which produced this one — the fact sat
+    // in `metadata` and was shown nowhere. It is the first thing you want when
+    // a session has two traces, and the second when a field is missing (a hook
+    // capture records no model; an OTLP span carries no prompt).
+    const t = trace();
+    const hook = { ...t, metadata: { source_format: 'hook', dialect: 'claude-code' } };
+    expect(noAnsi(traceHeaderPanel(hook))).toMatch(/Source:\s+hook \(claude-code\)/);
+
+    // No dialect, no parenthetical.
+    const rec = { ...t, metadata: { source_format: 'record:codex-exec' } };
+    const line = noAnsi(traceHeaderPanel(rec)).split('\n').find((l) => l.includes('Source:'))!;
+    expect(line).toContain('record:codex-exec');
+    expect(line).not.toContain('(');
+
+    // A trace that records no capture path says nothing rather than guessing.
+    expect(noAnsi(traceHeaderPanel({ ...t, metadata: {} }))).not.toMatch(/Source:/);
+  });
+
   it('marks a compacted continuation in the header', () => {
     // `import` records `metadata.compacted` when the transcript says so, and
     // nothing showed it: a continuation read as a whole run, though its

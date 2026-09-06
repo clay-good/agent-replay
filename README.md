@@ -895,6 +895,13 @@ decision, plus the trace's input, status and error. State snapshots are outside
 it, so two runs whose only difference is the context window report none —
 read those with `show <id> --snapshots`.
 
+**"Which capture path produced this trace?"** `show` names it — `Source: hook
+(claude-code)`, `record:codex-exec`, `claude-transcript`, `otel-genai`,
+`claude-code-logs` — because a store usually holds several, and the path
+explains what a trace can and cannot carry (a hook capture records no model; an
+OTLP span carries no prompt). A trace ingested from your own document says
+nothing there unless the document did.
+
 **"I see two traces for one session."** Two capture paths recorded it, and none
 of them can see another's work: the hook adapter looks up only its own open
 trace, the OpenTelemetry receiver merges only within its own signal, `import`

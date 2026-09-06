@@ -132,6 +132,22 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
       const own = Array.isArray(event.tags) ? event.tags : [];
       event.tags = [...own, ...extraTags];
     }
+    if (event.type === 'trace_start') {
+      // Stamp HOW this trace was captured, the way every other path does.
+      //
+      // A `record` trace carried no provenance at all: the importers stamp
+      // `source_format` (`claude-transcript`, `codex-rollout`), the OTel
+      // receiver stamps its own (`otel-genai`, `claude-code-logs`), and a store
+      // holding all of them could not say which path produced which trace —
+      // which matters most exactly when one session has TWO traces, the case
+      // this tool now reports. A producer's own value wins: the native protocol
+      // lets it describe itself, and overwriting that would make the stored
+      // trace disagree with the producer, the rule `--input` follows above.
+      const meta = event.metadata != null && typeof event.metadata === 'object' && !Array.isArray(event.metadata)
+        ? (event.metadata as Record<string, unknown>)
+        : {};
+      event.metadata = { source_format: `record:${format}`, ...meta };
+    }
     try {
       const { traceId, warning: applyWarning, note } = applyEvent(db, event);
       touched.add(traceId);
