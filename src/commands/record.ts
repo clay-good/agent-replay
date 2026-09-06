@@ -14,6 +14,7 @@ import { existsSync } from 'node:fs';
 
 export interface RecordOptions {
   format?: string;
+  input?: string;
   tags?: string;
   leaveOpen?: boolean;
   dir?: string;
@@ -25,7 +26,8 @@ const FORMATS = ['native', 'codex-exec', 'gemini-stream'];
  * `agent-replay record` — consume an event stream from stdin and write traces
  * incrementally. Reads the native JSONL protocol by default, or translates a
  * harness's own stream via `--format codex-exec` / `gemini-stream`. Still-open
- * traces are finalized as `timeout` on EOF unless `--leave-open`.
+ * traces are finalized as `timeout` on EOF unless `--leave-open`. `--input`
+ * supplies the prompt for a stream that does not carry one.
  */
 export async function runRecord(opts: RecordOptions = {}): Promise<void> {
   const format = opts.format ?? 'native';
@@ -37,6 +39,23 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
 
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
   const db = ensureDatabase(dbPath);
+
+  // The prompt to give a trace the stream opens without one.
+  //
+  // `check --golden` matches a candidate to its baseline by agent name and a
+  // hash of the trace input, and deliberately never matches an empty input —
+  // it is the absence of an identity, not one that happens to be blank. The
+  // harness streams carry no prompt at all (codex and gemini both take it as a
+  // command-line argument, not as a stream event), so every capture in those
+  // formats was unmatchable and the gate could only answer "none compared".
+  // The prompt is right there in the shell command; this lets the caller pass
+  // it in, which is the only honest source for it.
+  //
+  // Trimmed, and empty is treated as absent: `--input ""` would otherwise
+  // store a blank prompt that reads as a captured input while hashing like
+  // every other blank one — the exact confusion the empty-input rule exists to
+  // prevent.
+  const suppliedInput = (opts.input ?? '').trim();
 
   const extraTags = (opts.tags ?? '')
     .split(',')
@@ -59,6 +78,18 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
   let inputLines = 0;
 
   const apply = (event: CaptureEvent): void => {
+    if (event.type === 'trace_start' && suppliedInput) {
+      // Fill in only, never override: a native producer that sends its own
+      // input knows more about the run than the command line does, and
+      // silently replacing it would make the stored trace disagree with the
+      // producer that emitted it. `{ prompt }` is the shape every other
+      // capture path stores a prompt in (the hook adapter, the transcript and
+      // rollout importers), so a recorded run matches an imported one of the
+      // same prompt.
+      const own = event.input;
+      const hasOwn = own != null && typeof own === 'object' && Object.keys(own).length > 0;
+      if (!hasOwn) event.input = { prompt: suppliedInput };
+    }
     if (event.type === 'trace_start' && extraTags.length > 0) {
       // Only merge into an actual array. Spreading a producer's non-array
       // `tags` threw here — OUTSIDE the per-event try below — which aborted the

@@ -86,6 +86,18 @@ The system SHALL translate the documented non-interactive event streams of the m
 
 The system SHALL record, on the steps a translated stream produces, the model any record of that stream names — read from the record, its `item`, or its `session` — tracking it as a running value so a session that changes model mid-run labels each step with the model in effect at its own time. A stream that names no model SHALL leave the field unset rather than guessing one.
 
+The system SHALL accept `record --input <text>`, recording it as the prompt of any trace the stream opens without an input of its own, so a capture in a format whose harness takes its prompt on the command line can be matched by `check --golden`. A blank value SHALL be treated as absent, and an input the producer sent SHALL NOT be overridden.
+
+#### Scenario: Prompt supplied for a translated stream
+
+- **WHEN** a user pipes a harness stream into `record --format codex-exec --input "fix the tests"`
+- **THEN** the trace records `{"prompt": "fix the tests"}` as its input and `check --golden` can match it
+
+#### Scenario: A producer's own input wins
+
+- **WHEN** a native stream's `trace_start` carries an input and `--input` is also given
+- **THEN** the producer's input is stored unchanged
+
 The system SHALL record a codex tool item's arguments as its step's input — a shell `command`, or the `arguments`/`input` an MCP or custom tool call carries, parsed when they are JSON and preserved verbatim when they are not.
 
 #### Scenario: MCP tool call arguments recorded

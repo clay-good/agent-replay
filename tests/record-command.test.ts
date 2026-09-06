@@ -160,3 +160,35 @@ describe('record: harness stream translation', () => {
     expect(stderr()).toMatch(/codex-exec/);
   });
 });
+
+describe('record --input', () => {
+  const codex = [
+    JSON.stringify({ type: 'thread.started', thread_id: 'th_in' }),
+    JSON.stringify({ type: 'item.completed', item: { item_type: 'command_execution', command: 'ls' } }),
+    JSON.stringify({ type: 'turn.completed', usage: {} }),
+  ];
+
+  it('gives a translated stream the prompt it does not carry', async () => {
+    await record(codex, { format: 'codex-exec', input: 'fix the failing tests' });
+    const input = store((db) => db.prepare('SELECT input FROM agent_traces').pluck().get() as string);
+    expect(JSON.parse(input)).toEqual({ prompt: 'fix the failing tests' });
+  });
+
+  it('does not override an input the producer sent', async () => {
+    await record([start, end], { input: 'from the command line' });
+    const input = store((db) => db.prepare('SELECT input FROM agent_traces').pluck().get() as string);
+    expect(JSON.parse(input)).toEqual({ q: 1 });
+  });
+
+  it('treats a blank --input as absent rather than storing an empty prompt', async () => {
+    await record(codex, { format: 'codex-exec', input: '   ' });
+    const input = store((db) => db.prepare('SELECT input FROM agent_traces').pluck().get() as string);
+    expect(JSON.parse(input)).toEqual({});
+  });
+
+  it('records no input when none is supplied', async () => {
+    await record(codex, { format: 'codex-exec' });
+    const input = store((db) => db.prepare('SELECT input FROM agent_traces').pluck().get() as string);
+    expect(JSON.parse(input)).toEqual({});
+  });
+});

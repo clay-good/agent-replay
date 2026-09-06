@@ -65,6 +65,17 @@ and one-way.
 
 ### Added
 
+- **`record --input <text>`, which makes a piped harness run gateable.**
+  `check --golden` matches a candidate to its baseline by agent name and a hash
+  of the trace input, and never matches an empty one — so a
+  `record --format codex-exec` / `gemini-stream` capture could not be gated at
+  all: neither harness puts its prompt in the stream, both take it on the
+  command line. The prompt is right there in the shell command, and this passes
+  it in, which is the only honest source for it. It fills in only — a native
+  producer that sends its own input keeps it — and a blank value is treated as
+  absent rather than stored as an empty prompt. The refusal that names this
+  cause now names the remedy too.
+
 - **`check --fields decisions` gates on what the agent CHOSE.** The structural
   gate was blind to the one divergence the tool exists to explain: rename
   nothing, change no tool, and swap `escalate_to_human` for `delete_records`,

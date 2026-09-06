@@ -115,6 +115,7 @@ program
   .command('record')
   .description('Record a trace incrementally from an event stream on stdin')
   .option('--format <format>', 'Stream format: native (default), codex-exec, gemini-stream', 'native')
+  .option('--input <text>', 'Prompt to record for a trace the stream opens without one')
   .option('--tags <tags>', 'Comma-separated tags to add to recorded traces')
   .option('--leave-open', 'Do not finalize still-running traces as timeout on EOF')
   .option('--dir <path>', 'Custom data directory')

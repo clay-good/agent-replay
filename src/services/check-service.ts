@@ -95,7 +95,8 @@ function goldenKey(agentName: string, input: Record<string, unknown>): string {
  * An empty input is not an identity — it is the absence of one. Every capture
  * with no recorded input hashed to the same key, so unrelated runs matched each
  * other: two `record --format codex-exec` captures of completely different
- * sessions (the translators record no input at all) compared as the same
+ * sessions (the translators record no input at all, unless `record --input`
+ * supplies one) compared as the same
  * scenario, producing a fabricated `tool_inputs` regression between them, and a
  * `--strict` run reported `uncovered: 0` at exit 0 while a baseline it never
  * exercised sat unused — the exact hole `uncovered` exists to report.
