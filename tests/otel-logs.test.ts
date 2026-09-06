@@ -628,3 +628,78 @@ describe('merging a later batch cannot invert the trace window', () => {
 });
 
 
+
+describe('mapOtlpLogs — per-step model', () => {
+  it('gives a Claude Code tool step the model its api_request reported', () => {
+    // Only `.api_error` ever set a step's model, so a session whose model calls
+    // all succeeded recorded the model NOWHERE — while every api_request states
+    // it. `check --golden --fields model` refuses such a baseline outright.
+    const payload = otlpLogs([
+      logRecord('claude_code.user_prompt', { 'session.id': 'm1', prompt: 'fix the bug' }, 1_000_000),
+      logRecord('claude_code.api_request', { 'session.id': 'm1', model: 'claude-opus-4-5', input_tokens: 200, output_tokens: 40 }, 2_000_000),
+      logRecord('claude_code.tool_result', { 'session.id': 'm1', tool_name: 'Read', success: true }, 3_000_000),
+    ]);
+
+    const [t] = mapOtlpLogs(payload);
+    const trace = getTrace(db, ingestTrace(db, t).id)!;
+
+    const tool = trace.steps.find((s) => s.step_type === 'tool_call')!;
+    expect(tool.model).toBe('claude-opus-4-5');
+  });
+
+  it('gives a Gemini tool step the model, and leaves its decision step alone', () => {
+    const payload = otlpLogs([
+      logRecord('gemini_cli.api_response', { 'session.id': 'm2', model: 'gemini-2.5-pro', input_token_count: 100, output_token_count: 20 }, 1_000_000),
+      logRecord('gemini_cli.tool_call', { 'session.id': 'm2', function_name: 'run_shell', success: true, decision: 'accept' }, 2_000_000),
+    ]);
+
+    const [t] = mapOtlpLogs(payload);
+    const trace = getTrace(db, ingestTrace(db, t).id)!;
+
+    expect(trace.steps.find((s) => s.step_type === 'tool_call')!.model).toBe('gemini-2.5-pro');
+    // A tool decision is the user's call, not the model's.
+    expect(trace.steps.find((s) => s.step_type === 'decision')!.model).toBeNull();
+  });
+
+  it('does not relabel earlier steps when the session falls back to another model', () => {
+    const payload = otlpLogs([
+      logRecord('claude_code.api_request', { 'session.id': 'm3', model: 'claude-opus-4-5', input_tokens: 10, output_tokens: 5 }, 1_000_000),
+      logRecord('claude_code.tool_result', { 'session.id': 'm3', tool_name: 'Read', success: true }, 2_000_000),
+      logRecord('claude_code.api_request', { 'session.id': 'm3', model: 'claude-haiku-4-5', input_tokens: 10, output_tokens: 5 }, 3_000_000),
+      logRecord('claude_code.tool_result', { 'session.id': 'm3', tool_name: 'Write', success: true }, 4_000_000),
+    ]);
+
+    const [t] = mapOtlpLogs(payload);
+    const trace = getTrace(db, ingestTrace(db, t).id)!;
+
+    const byName = Object.fromEntries(trace.steps.map((s) => [s.name, s.model]));
+    expect(byName.Read).toBe('claude-opus-4-5');
+    expect(byName.Write).toBe('claude-haiku-4-5');
+  });
+
+  it('back-fills a step that ran before the first model record', () => {
+    const payload = otlpLogs([
+      logRecord('claude_code.tool_result', { 'session.id': 'm4', tool_name: 'Read', success: true }, 1_000_000),
+      logRecord('claude_code.api_request', { 'session.id': 'm4', model: 'claude-opus-4-5', input_tokens: 10, output_tokens: 5 }, 2_000_000),
+    ]);
+
+    const [t] = mapOtlpLogs(payload);
+    const trace = getTrace(db, ingestTrace(db, t).id)!;
+
+    expect(trace.steps.find((s) => s.step_type === 'tool_call')!.model).toBe('claude-opus-4-5');
+  });
+
+  it('leaves the model absent when the session never reports one', () => {
+    // Feed the shape that LACKS the field: an absent model must stay absent
+    // rather than become an invented one.
+    const payload = otlpLogs([
+      logRecord('claude_code.user_prompt', { 'session.id': 'm5', prompt: 'go' }, 1_000_000),
+      logRecord('claude_code.tool_result', { 'session.id': 'm5', tool_name: 'Read', success: true }, 2_000_000),
+    ]);
+
+    const [t] = mapOtlpLogs(payload);
+    const trace = getTrace(db, ingestTrace(db, t).id)!;
+
+    expect(trace.steps.every((s) => s.model == null)).toBe(true);
+  });
+});

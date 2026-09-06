@@ -105,8 +105,52 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
     let stepNumber = 1;
     let startedAt: string | undefined;
     let endedAtNanos = 0;
+    /** The model the session's most recent model-bearing record reported. */
+    let currentModel: string | undefined;
+    /** The FIRST model the session reported, used to back-fill steps before it. */
+    let firstModel: string | undefined;
+    /** How far `stampModel` has already stamped, so each step is visited once. */
+    let stampedUpTo = 0;
+    /**
+     * Give the steps produced so far the model that was in effect when their
+     * record arrived. Only `.api_error` ever set a step's `model`, so a session
+     * whose model calls all SUCCEEDED carried the model nowhere at all — not on
+     * a step, and there is no trace-level model column — even though every
+     * `api_request`/`api_response` record states it. `check --golden --fields
+     * model` then exits 2 ("no baseline entry carries that data") for every
+     * OTel-log capture, which is the same gate the importers were unusable for
+     * until they started reading the model each record carries.
+     *
+     * Stamped from ONE site rather than at each `steps.push`: the branches below
+     * all `continue`, and both importers document having missed a branch doing
+     * exactly this. Called at the top of each iteration (before this record's
+     * own model is read) so a step is stamped with the model in effect at ITS
+     * time, not a later one — a session that falls back to a smaller model
+     * mid-run must not have its earlier steps relabelled.
+     *
+     * `decision` steps are deliberately left alone: a tool decision is the
+     * user's or the policy's call, not the model's, and `check` skips a
+     * null-model baseline step, so an honest absence costs the gate nothing.
+     */
+    const stampModel = () => {
+      for (; stampedUpTo < steps.length; stampedUpTo++) {
+        const st = steps[stampedUpTo];
+        if (st.model == null && (st.step_type === 'tool_call' || st.step_type === 'llm_call')) {
+          st.model = currentModel;
+        }
+      }
+    };
 
     for (const l of group) {
+      stampModel();
+      // Read from EVERY record, not just the model-call branches: the attribute
+      // names a property of the session, so any record stating it is reporting
+      // the model in effect, and one read cannot miss a branch.
+      const recordModel = logModel(l.attrs);
+      if (recordModel) {
+        currentModel = recordModel;
+        firstModel ??= recordModel;
+      }
       // The record's own event time. No log-derived step set `started_at`, and
       // the writer falls back to the ingest wall-clock, so every step of an
       // imported session carried the same fabricated timestamp — the moment the
@@ -212,12 +256,12 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
         steps.push({
           step_number: stepNumber++,
           step_type: 'llm_call',
-          name: str(a['gen_ai.request.model']) ?? str(a.model) ?? 'api_error',
+          name: logModel(a) ?? 'api_error',
           started_at: at,
           // The model was only ever put in `name`, leaving the `model` column
           // null on every log-derived step — so a capture of these CLIs had no
           // model recorded anywhere, while the span path sets it.
-          model: str(a['gen_ai.request.model']) ?? str(a.model),
+          model: logModel(a),
           error:
             str(a.error) ??
             str(a.error_message) ??
@@ -242,6 +286,17 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
         continue;
       }
     }
+
+    // The final record's steps are still unstamped — stampModel runs at the TOP
+    // of each iteration, so nothing stamps what the last one pushed.
+    stampModel();
+    // Back-fill a step that ran before the session's first model record with
+    // that first model. It is a measured value from this same session bounded by
+    // ordering (the earliest model the session reported is the one in effect at
+    // its start), not a guess — the same seeding both importers use. A session
+    // that never reports a model anywhere leaves every step null, because an
+    // absent model must stay absent rather than become an invented one.
+    if (firstModel) for (const st of steps) if (st.model == null && st.step_type !== 'decision') st.model = firstModel;
 
     // A flush window carrying only model-call events (very common between tool
     // calls) has no steps and no prompt, but it DOES have tokens — and dropping
@@ -316,6 +371,16 @@ function toolError(a: Record<string, unknown>): string | undefined {
   const failed = a.success === false || a.success === 0 || asText === 'false' || asText === '0';
   if (!failed) return undefined;
   return str(a.error) ?? str(a.error_message) ?? str(a.error_type) ?? 'tool failed';
+}
+
+/**
+ * The model a log record reports. Both CLIs put it on the plain `model`
+ * attribute (`claude_code.api_request`, `gemini_cli.api_response`); the
+ * `gen_ai.request.model` alias is kept because the `.api_error` branch has
+ * always read it. One helper so the sites that read a model cannot drift apart.
+ */
+function logModel(a: Record<string, unknown>): string | undefined {
+  return str(a['gen_ai.request.model']) ?? str(a.model);
 }
 
 function str(v: unknown): string | undefined {

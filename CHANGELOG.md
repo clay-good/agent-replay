@@ -336,6 +336,21 @@ and one-way.
 
 ### Fixed
 
+- **An OpenTelemetry log capture recorded the model nowhere, so
+  `check --golden --fields model` could not gate it.** Every
+  `claude_code.api_request` and `gemini_cli.api_response` record states the
+  model it called, but only the failure branch (`.api_error`) ever read it — a
+  session whose model calls all succeeded stored no model on any step, and there
+  is no trace-level model column, so the model sat unread in the payload. A
+  baseline exported from such runs made `check --golden --fields model` exit `2`
+  ("no baseline entry carries that data"): the gate a CI job added specifically
+  to catch a model swap could not run at all. Log-derived `tool_call` and
+  `llm_call` steps now carry the model in effect when their record arrived, so a
+  session that falls back to a smaller model mid-run keeps the earlier steps
+  labelled with the earlier model rather than being relabelled wholesale. A
+  session that never reports a model still stores none — an absent model stays
+  absent rather than becoming an invented one. `decision` steps are left alone:
+  a tool decision is the user's or the policy's call, not the model's.
 - **`ingest --format jsonl` on a JSON file reported the symptom thousands of
   times instead of the cause.** Every line of a pretty-printed array is a
   fragment, so an ordinary `--format json` export produced 5,664 "Invalid JSON
