@@ -890,6 +890,18 @@ and one-way.
   the one headline command that had not adopted it. A literal `null` is
   untouched: it remains the documented no-op that keeps the original value.
 
+- **`check --golden` created a store before deciding it had nothing to check.**
+  The regression gate never turned green wrongly — no store means no candidates,
+  which is already exit `2` — but it wrote a ~143 KB store into the working
+  directory and then described the outcome as "No traces matched", which sends
+  the reader to widen their filters when the real answer is that this is not the
+  directory the runs recorded into. It now refuses first, names the store and
+  the store above if the project has one, and writes nothing; the exit code and
+  the `--json` refusal document are unchanged. `--allow-empty` does not cover
+  this: that flag says an empty *window* is expected, not that the store is
+  missing — the distinction `guard check` already makes between an empty policy
+  set and a store that is not there.
+
 - **`guard list` created a store and told you the project had no guardrails.**
   The rule the twelve trace-reading commands adopted — refuse a missing store
   rather than create one — never reached the guard subcommands. `guard list`

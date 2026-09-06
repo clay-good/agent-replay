@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { runMigrations } from '../src/db/migrations.js';
@@ -1543,5 +1543,81 @@ describe('export <trace-id> --format golden honors the trace it was given', () =
       resetConnection();
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('check --golden pointed at a directory with no store', () => {
+  // The last read command still opening with a call that CREATES what it does
+  // not find. The gate never turned green wrongly — no store means no
+  // candidates, which is already exit 2 — but it wrote a store nobody asked for
+  // and then described the result as "No traces matched", sending the reader to
+  // look at their filters when the real answer is that this is not the
+  // directory the runs recorded into.
+  let dir: string;
+  let goldenPath: string;
+  let prevExit: typeof process.exitCode;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ar-check-nostore-'));
+    goldenPath = join(dir, 'golden.json');
+    writeFileSync(
+      goldenPath,
+      JSON.stringify([
+        {
+          id: 'g1',
+          agent_name: 'bot',
+          input: { task: 'x' },
+          expected_output: null,
+          steps_summary: [],
+          eval_criteria: [],
+          metadata: { status: 'completed' },
+        },
+      ]),
+    );
+    prevExit = process.exitCode;
+    process.exitCode = 0;
+  });
+  afterEach(() => {
+    process.exitCode = prevExit;
+    resetConnection();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const capture = (fn: () => void): { out: string; err: string } => {
+    const out: string[] = [];
+    const err: string[] = [];
+    const l = vi.spyOn(console, 'log').mockImplementation((m?: unknown) => { out.push(String(m)); });
+    const e = vi.spyOn(console, 'error').mockImplementation((m?: unknown) => { err.push(String(m)); });
+    try {
+      fn();
+    } finally {
+      l.mockRestore();
+      e.mockRestore();
+    }
+    return { out: out.join('\n'), err: err.join('\n') };
+  };
+
+  it('names the store, exits 2, and writes nothing', () => {
+    const { err } = capture(() => runCheck({ golden: goldenPath, dir: join(dir, 'store') }));
+    expect(process.exitCode).toBe(2);
+    expect(err).toContain('No trace store at');
+    expect(existsSync(join(dir, 'store', 'traces.db'))).toBe(false);
+  });
+
+  it('is not papered over by --allow-empty', () => {
+    // That flag says an empty WINDOW is expected, not that the store is absent
+    // — the distinction `guard check` already makes between an empty policy set
+    // and a missing store. A gate that cannot look anywhere must not pass.
+    capture(() => runCheck({ golden: goldenPath, dir: join(dir, 'store'), allowEmpty: true }));
+    expect(process.exitCode).toBe(2);
+  });
+
+  it('answers --json with the refusal document, on stdout', () => {
+    const { out, err } = capture(() => runCheck({ golden: goldenPath, dir: join(dir, 'store'), json: true }));
+    const doc = JSON.parse(out) as { ok: boolean; error: string };
+    expect(doc.ok).toBe(false);
+    expect(doc.error).toContain('No trace store at');
+    expect(err).toBe('');
+    expect(process.exitCode).toBe(2);
   });
 });

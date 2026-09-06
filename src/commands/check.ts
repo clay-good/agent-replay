@@ -9,7 +9,7 @@ import type { TraceWithDetails } from '../models/types.js';
 import { heading, safeText } from '../ui/theme.js';
 import { parseSinceToIso } from '../utils/time.js';
 import { errorMessage } from '../utils/json.js';
-import { resolveDataDir } from '../utils/paths.js';
+import { resolveDataDir, storeExists, storeAboveNote } from '../utils/paths.js';
 import { makeRefuse } from '../utils/refuse.js';
 import { escapeForMessage, truncate } from '../utils/json.js';
 
@@ -189,6 +189,26 @@ export function runCheck(opts: CheckOptions = {}): void {
   }
 
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
+  // Refused, not created — the last read command still opening with a call that
+  // CREATES what it does not find. The gate never turned green wrongly (no
+  // store means no candidates, which is already exit 2), but it wrote a store
+  // nobody asked for into the working directory and then described the result
+  // as "no traces matched", which sends the reader looking at their filters
+  // when the real answer is that this directory is not where the runs were
+  // recorded. `--allow-empty` does not cover it either: that flag says an empty
+  // WINDOW is expected, not that the store itself is absent — the same
+  // distinction `guard check` makes between an empty policy set and a missing
+  // store.
+  if (!storeExists(resolveDataDir(opts.dir))) {
+    const above = storeAboveNote(opts.dir);
+    fail(
+      2,
+      `No trace store at ${dbPath}.`,
+      'Run "agent-replay init" in the project directory, or point the check at the store the runs recorded into with --dir.' +
+        (above ? ` ${above}` : ''),
+    );
+    return;
+  }
   let db;
   try {
     db = ensureDatabase(dbPath);
