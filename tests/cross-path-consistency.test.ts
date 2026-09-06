@@ -13,6 +13,9 @@ import { applyEvent } from '../src/services/recorder.js';
 import { ingestTrace } from '../src/services/trace-service.js';
 import type { CaptureEvent } from '../src/services/event-protocol.js';
 import { getTrace, listTraces } from '../src/services/trace-service.js';
+import { exportTraces } from '../src/services/export-service.js';
+import { checkGolden } from '../src/services/check-service.js';
+import type { GoldenEntry } from '../src/models/types.js';
 
 /**
  * ONE SESSION, TWO CAPTURE PATHS, THE SAME FACTS.
@@ -209,6 +212,37 @@ describe('a failed tool call is a failure on every path', () => {
     const errorOf = (t: typeof hook) => t.steps.find((s) => s.step_type === 'tool_call')!.error;
     expect(errorOf(hook)).toBe('permission denied');
     expect(errorOf(imported)).toBe(errorOf(hook));
+  });
+});
+
+describe('a baseline from one path gates a run from another', () => {
+  // What the agreement is FOR. The documented workflow is "export a golden
+  // dataset once, then check new runs against it" — and the runs in a real
+  // project rarely come from the same path as the baseline: you import the
+  // transcripts you already have, then capture live in CI through the hook.
+  // If the paths disagreed about names, inputs or step shape, that gate would
+  // report a regression on every run, caused by the tool rather than the agent.
+  it('a hook-captured run passes a baseline exported from its imported twin', () => {
+    const path = join(dir, 'good.jsonl');
+    writeFileSync(path, [
+      { type: 'user', sessionId: 'gate-file', timestamp: '2026-09-06T10:00:00.000Z', message: { content: 'list the files' } },
+      {
+        type: 'assistant', sessionId: 'gate-file', timestamp: '2026-09-06T10:00:01.000Z',
+        message: { content: [{ type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'ls' } }] },
+      },
+      {
+        type: 'user', sessionId: 'gate-file', timestamp: '2026-09-06T10:00:02.000Z',
+        message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'a.txt' }] },
+      },
+    ].map((r) => JSON.stringify(r)).join('\n'));
+    const imported = importClaudeTranscript(db, path).trace!.id;
+    const golden = JSON.parse(exportTraces(db, { id: imported }, 'golden')) as GoldenEntry[];
+    expect(golden).toHaveLength(1);
+
+    const live = getTrace(db, captureViaHook('gate-live'))!;
+    const report = checkGolden(golden, [live]);
+    expect(report.results.map((r) => [r.matched, r.passed])).toEqual([[true, true]]);
+    expect(report.failed).toBe(0);
   });
 });
 
