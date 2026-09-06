@@ -2372,6 +2372,14 @@ and one-way.
   read the identical attribute — so `stats` showed no cost and `list --sort cost`
   was inert for every span-captured trace. It also ignored a reported
   `total_tokens` when the input/output split was absent.
+- An OTel log session ended when its last record was STAMPED, not when its last
+  step finished — but a log record reports work that already happened and says
+  how long it took, so a `tool_result` at t=2s carrying `duration_ms: 30000`
+  described work that ran to t=32s. The trace held a step ending thirty seconds
+  after the trace itself did, and since `total_duration_ms` falls back to
+  `ended_at - started_at`, `list` reported that 31-second session as 1 second
+  and `list --sort duration` ranked it among the shortest in the store. The span
+  path was never affected: it maxes over span END times.
 - The OTel log receiver counted only input and output tokens, dropping the cache
   counters both CLIs report beside them — and on a Claude Code session
   `cache_read` is routinely an order of magnitude larger than `input`. The hook

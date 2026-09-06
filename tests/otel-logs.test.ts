@@ -391,6 +391,40 @@ describe('mapOtlpLogs — data fidelity', () => {
     expect(narrow.total_tokens).toBe(120);
   });
 
+  it('ends the session no earlier than its last step', () => {
+    // A log record REPORTS work that already happened and carries how long it
+    // took, so a tool_result stamped at t=2s with duration_ms 30000 ran until
+    // t=32s. The session end was taken from record timestamps alone, so the
+    // trace held a step ending thirty seconds after the trace did — and since
+    // total_duration_ms falls back to ended_at - started_at, `list` reported
+    // that 31-second session as 1 second and ranked it among the shortest.
+    const [t] = mapOtlpLogs(otlpLogs([
+      logRecord('claude_code.user_prompt', { 'session.id': 'tail', prompt: 'go' }, 1 * MS),
+      logRecord('claude_code.tool_result', { 'session.id': 'tail', tool_name: 'Bash', success: true, duration_ms: 30_000 }, 2 * MS),
+    ]));
+    // Records at 1ms and 2ms; the tool ran 30s from its stamp, so the session
+    // ends at 30_002ms — not at 2ms, where the last record happened to land.
+    expect(t.ended_at).toBe(new Date(30_002).toISOString());
+    expect(effectiveDurationMs({ started_at: t.started_at, ended_at: t.ended_at })).toBe(30_001);
+  });
+
+  it('keeps every log-derived step inside its own trace window', () => {
+    // The invariant the demo data is held to, applied to the path that builds
+    // traces from real payloads. A step outside its trace's window renders as a
+    // run that was still working after it finished.
+    const [t] = mapOtlpLogs(otlpLogs([
+      logRecord('gemini_cli.user_prompt', { 'session.id': 'win', prompt: 'go' }, 1 * MS),
+      logRecord('gemini_cli.tool_call', { 'session.id': 'win', function_name: 'run_shell', success: true, duration_ms: 4000 }, 2 * MS),
+      logRecord('gemini_cli.api_response', { 'session.id': 'win', input_token_count: 5, output_token_count: 5 }, 3 * MS),
+    ]));
+    const start = Date.parse(t.started_at as string);
+    const end = Date.parse(t.ended_at as string);
+    for (const step of t.steps!) {
+      expect(Date.parse(step.started_at!)).toBeGreaterThanOrEqual(start);
+      expect(Date.parse(step.ended_at!)).toBeLessThanOrEqual(end);
+    }
+  });
+
   it('records the model on a failed model call, not only in its name', () => {
     // The model was put in `name` alone, leaving the `model` column null on
     // every log-derived step — so a capture of these CLIs had no model recorded

@@ -319,6 +319,7 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
     // where the exporter happened to cut its batches.
     if (steps.length === 0 && !input && !totalTokens) continue;
 
+    const closedSteps = closeLogSteps(steps);
     traces.push({
       agent_name: isGemini ? 'gemini' : 'claude-code',
       trigger: 'user_message',
@@ -345,7 +346,7 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
       started_at: startedAt,
       // The session spans its first event to its last. Without this the trace
       // had no ended_at and no total_duration_ms, so `list` showed "-" forever.
-      ended_at: isoFromNanos(endedAtNanos) ?? null,
+      ended_at: sessionEnd(isoFromNanos(endedAtNanos) ?? null, closedSteps),
       total_tokens: totalTokens || null,
       total_cost_usd: totalCost || null,
       metadata: {
@@ -359,7 +360,7 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
         ...(currentModel ? { model: currentModel } : {}),
         ...(followUpPrompts.length > 0 ? { follow_up_prompts: followUpPrompts } : {}),
       },
-      steps: closeLogSteps(steps),
+      steps: closedSteps,
     });
   }
 
@@ -454,6 +455,36 @@ function recordTokens(a: Record<string, unknown>): number {
     usage(num(a.cache_read_input_tokens ?? a.cache_read_tokens ?? a.cached_content_token_count ?? a['gen_ai.usage.cached_input_tokens']));
   const reported = usage(num(a.total_token_count ?? a['gen_ai.usage.total_tokens'] ?? a.total_tokens));
   return Math.max(parts, reported);
+}
+
+/**
+ * When the session ended: the last record's own timestamp, or the end of the
+ * last step to finish — whichever is later.
+ *
+ * The two are not the same. A record REPORTS something that already happened
+ * and carries how long it took, so a `tool_result` stamped at t=2s with
+ * `duration_ms: 30000` describes work that ran until t=32s — while the
+ * session's end was taken from record timestamps alone and stopped at t=2s.
+ * The trace then held a step that ended thirty seconds after the trace did:
+ * `show` drew a step running off the end of its own run, and because
+ * `total_duration_ms` falls back to `ended_at - started_at`, `list` reported a
+ * 31-second session as 1 second and `list --sort duration` ranked it as one of
+ * the shortest in the store. The span path never had this: it takes the max
+ * over span END times, which already include each span's duration.
+ *
+ * Steps are closed BEFORE this runs, so every step that can be dated has an
+ * `ended_at` to contribute. An unparseable one contributes nothing rather than
+ * poisoning the max, the same rule `endedAtNanos` applies to raw record stamps.
+ */
+function sessionEnd(fromRecords: string | null, steps: IngestStepInput[]): string | null {
+  let latest = fromRecords ? Date.parse(fromRecords) : NaN;
+  if (Number.isNaN(latest)) latest = -Infinity;
+  for (const step of steps) {
+    if (!step.ended_at) continue;
+    const end = Date.parse(step.ended_at);
+    if (!Number.isNaN(end) && end > latest) latest = end;
+  }
+  return Number.isFinite(latest) ? new Date(latest).toISOString() : fromRecords;
 }
 
 /**
