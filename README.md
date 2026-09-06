@@ -73,6 +73,8 @@ agent-replay ingest trace.json --tags production,v2
 agent-replay ingest trace.json --dry-run
 ```
 
+A `json`/`jsonl` export is a backup, and `ingest` restores it as one — including **fork lineage**. Ingest mints fresh ids, so a document's `parent_trace_id` points into the store it came from; the restore relinks each fork to its parent's new id once every trace in the file has a row. That matters because a fork restored as an ordinary trace is a never-executed copy of a step prefix, which `stats`, `check`, `watch` and `export --format golden` would then count as a real run. A fork whose parent is *not* in the file has nothing to point at — no parent is invented; it is restored unlinked and `ingest` says so, under `--dry-run` too. Export the parent alongside the fork to keep the link.
+
 A **golden dataset** is not a trace export, and `ingest` says so instead of taking it: a golden entry has an `agent_name` and an `input` but keeps its steps in `steps_summary`, so ingesting one would store traces with no steps that read as real runs. Use a golden file with `check --golden`, and re-export with `--format json` when you want the traces back.
 
 #### Live capture

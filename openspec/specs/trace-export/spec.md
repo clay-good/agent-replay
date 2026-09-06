@@ -8,7 +8,7 @@ Get traces back out of the store for sharing, pipelines, and regression testing:
 
 ### Requirement: Filtered export
 
-The system SHALL export traces via `agent-replay export` in `json`, `jsonl`, or `golden` format, honoring filters (`--status`, `--tag`, `--agent`, `--agent-exact`, `--since`) and optionally including evals (`--with-evals`) and snapshots (`--with-snapshots`), writing to `--output <file>` or stdout. Export processes every matching trace: a fixed cap silently truncated large exports, which corrupts a golden or JSONL dataset built from them. Because a `json`/`jsonl` export is a BACKUP, its document SHALL restore as one: `ingest` reads back both the evals written by `--with-evals` and the per-step snapshots written by `--with-snapshots`, so neither flag is a no-op on the one path that consumes its output.
+The system SHALL export traces via `agent-replay export` in `json`, `jsonl`, or `golden` format, honoring filters (`--status`, `--tag`, `--agent`, `--agent-exact`, `--since`) and optionally including evals (`--with-evals`) and snapshots (`--with-snapshots`), writing to `--output <file>` or stdout. Export processes every matching trace: a fixed cap silently truncated large exports, which corrupts a golden or JSONL dataset built from them. Because a `json`/`jsonl` export is a BACKUP, its document SHALL restore as one: `ingest` reads back both the evals written by `--with-evals` and the per-step snapshots written by `--with-snapshots`, so neither flag is a no-op on the one path that consumes its output. A FORK SHALL restore as a fork. `ingest` mints fresh ids, so a document's `parent_trace_id` names a trace in the store it came from; the restore knows what each of those ids became here and SHALL relink lineage accordingly, in a pass after every trace in the document has a row, since a document may list a fork before its parent. Restored as an ordinary trace, a fork is a never-executed copy of a step prefix that every fork-excluding guard then counts as a real run — `stats`, the dashboard, `check`, `watch`, and this command's own `golden` format, where it lets a run that crashed part way reproduce its shorter shape and pass. A fork whose parent is NOT in the document has no id here to point at and SHALL NOT have one invented: it is restored unlinked and reported, in a `--dry-run` as well as a real run. Lineage that no reader could survive SHALL be refused at the write — a trace forked from itself, or a cycle — because a document is untrusted input and everything that walks lineage assumes it terminates.
 
 #### Scenario: Export completed traces as JSONL
 
@@ -23,6 +23,11 @@ The system SHALL build golden datasets from known-good runs via `--format golden
 
 - **WHEN** a user runs `agent-replay export --format golden --tag production --output golden.json`
 - **THEN** a golden dataset containing the production-tagged traces is written
+
+#### Scenario: Restoring a backup that contains a fork
+
+- **WHEN** a store holding a run and a fork of it is exported as `json` and ingested into an empty store
+- **THEN** the restored fork points at the restored parent's new id, keeps its `forked_from_step`, and is excluded from `stats` and from a `golden` baseline exactly as the original was
 
 #### Scenario: A baseline that holds two shapes of one scenario
 

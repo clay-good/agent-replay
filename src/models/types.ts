@@ -217,6 +217,18 @@ export interface IngestTraceInput {
   tags?: string[];
   metadata?: Record<string, unknown>;
   session_id?: string | null;
+  /**
+   * Fork lineage, as an EXPORT DOCUMENT carries it.
+   *
+   * `ingestTrace` does not store these: the id names a trace in the store the
+   * document came from, and ingest mints fresh ids, so writing it through would
+   * point the link at nothing. They are honored by the RESTORE path
+   * (`ingest`), which knows every id the document remapped and can relink a
+   * fork to its parent's new id. A fork whose parent is not in the document
+   * cannot be relinked and is reported rather than guessed at.
+   */
+  parent_trace_id?: string | null;
+  forked_from_step?: number | null;
   steps?: IngestStepInput[];
   evals?: IngestEvalInput[];
 }

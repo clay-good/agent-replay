@@ -2372,6 +2372,19 @@ and one-way.
   read the identical attribute — so `stats` showed no cost and `list --sort cost`
   was inert for every span-captured trace. It also ignored a reported
   `total_tokens` when the input/output split was absent.
+- A fork restored from a backup came back as an ordinary trace. `ingest` mints
+  fresh ids, so a `parent_trace_id` written by `export` points into the store the
+  document came from, and the link was dropped. But a fork is a never-executed
+  copy of a step prefix, so every guard that excludes forks — `stats`, the
+  dashboard, `check`, `watch`, and `export --format golden` — then counted it as
+  a real run, and a baseline built after a restore let a run that crashed part
+  way reproduce the fork's shorter shape and pass. Ingest now relinks lineage
+  from the ids the restore assigns, in a second pass so a document may list a
+  fork before its parent. A fork whose parent is not in the document still
+  cannot be relinked — nothing here to point at, and a parent is not invented —
+  and is reported, under `--dry-run` as well. Lineage a reader could not survive
+  (a trace forked from itself, or a cycle) is refused at the write, since a
+  document is untrusted input.
 - `show --evals` could not say which run of an evaluator was current. An
   evaluation is a record, not a slot — re-running one appends, and the store
   keeps that history on purpose — but the table showed every run identically, so

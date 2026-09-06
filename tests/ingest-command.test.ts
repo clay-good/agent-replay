@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { ensureDatabase, resetConnection } from '../src/db/index.js';
-import { ingestTrace, getTrace, createEval, listTraces } from '../src/services/trace-service.js';
+import { ingestTrace, getTrace, createEval, listTraces, relinkFork } from '../src/services/trace-service.js';
 import { exportTraces } from '../src/services/export-service.js';
 import { forkTrace } from '../src/services/fork-service.js';
 import { runIngest } from '../src/commands/ingest.js';
@@ -215,40 +215,110 @@ describe('ingest reports what it actually restored', () => {
     expect(getTrace(db, restored.id)!.evals).toHaveLength(1);
   });
 
-  it('says a fork is restored as an ordinary trace, and what that costs', () => {
+  it('restores a fork as a fork when the file carries its parent', () => {
+    // A json/jsonl export is a BACKUP, and it carries forks. Ingest mints fresh
+    // ids, so a `parent_trace_id` from the document names a trace in the store
+    // it came from — the link has to be rebuilt from the ids this restore
+    // assigns. Without it, every restored fork became an ordinary trace: a
+    // never-executed copy of a step prefix that `stats` counts as spend, and
+    // that `export --format golden` bakes into a baseline it is written to
+    // exclude, where a real run that crashed part way reproduces its shorter
+    // shape and passes.
     const doc = sourceDoc((db, id) => {
       forkTrace(db, id, 1);
     });
     runIngest(docFile('fork.json', doc), { dir: store });
 
+    expect(stdout()).toMatch(/Restored fork lineage for 1 trace/);
+    const db = ensureDatabase(resolve(store, 'traces.db'));
+    const all = listTraces(db, {}).items;
+    const ids = new Set(all.map((t) => t.id));
+    const forks = all.filter((t) => t.parent_trace_id != null);
+    expect(forks).toHaveLength(1);
+    // Pointed at the parent's NEW id, not the one the document carried.
+    expect(ids.has(forks[0].parent_trace_id!)).toBe(true);
+    expect(forks[0].forked_from_step).toBe(1);
+  });
+
+  it('says so when a fork names a parent the file does not contain', () => {
+    // Nothing here to point at, and inventing a parent would fabricate lineage.
+    // The consequences are the damaging ones and belong in the note: the fork is
+    // no longer identifiable as one, so a baseline built afterwards includes a
+    // never-executed copy of a step prefix.
+    const doc = sourceDoc((db, id) => {
+      forkTrace(db, id, 1);
+    }) as { traces?: unknown[] } | unknown[];
+    const traces = (Array.isArray(doc) ? doc : doc.traces ?? []) as Array<Record<string, unknown>>;
+    const forkOnly = traces.filter((t) => t.parent_trace_id != null);
+    expect(forkOnly).toHaveLength(1);
+    runIngest(docFile('orphan.json', forkOnly), { dir: store });
+
     const text = stdout();
-    expect(text).toMatch(/1 trace\(s\) in this file are forks/);
-    // The golden consequence is the damaging one and was missing from the note
-    // while its own code comment listed it first: a restored fork is no longer
-    // identifiable as one, so a baseline built afterwards includes a
-    // never-executed copy of a step prefix, which a real run that stopped early
-    // then reproduces and passes against.
+    expect(text).toMatch(/1 fork\(s\) name a parent this file does not contain/);
     expect(text).toMatch(/golden/);
     expect(text).toMatch(/check.*watch|watch.*check/);
+    expect(text).not.toMatch(/Restored fork lineage/);
   });
 
   it('stays quiet about forks when the file has none', () => {
-    // The cry-wolf guard: the note must key off the file's contents.
+    // The cry-wolf guard: the notes must key off the file's contents.
     const doc = sourceDoc(() => {});
     runIngest(docFile('plain.json', doc), { dir: store });
-    expect(stdout()).not.toMatch(/are forks/);
+    expect(stdout()).not.toMatch(/fork/i);
   });
 
-  it('shows the fork note under --dry-run, which previews the real run', () => {
+  it('previews an unrestorable fork under --dry-run, which stands in for the real run', () => {
     // A preview that omits the one thing the real run warns about is exactly
     // the surprise it exists to prevent.
     const doc = sourceDoc((db, id) => {
       forkTrace(db, id, 1);
-    });
-    runIngest(docFile('fork2.json', doc), { dir: store, dryRun: true });
-    expect(stdout()).toMatch(/are forks/);
+    }) as { traces?: unknown[] } | unknown[];
+    const traces = (Array.isArray(doc) ? doc : doc.traces ?? []) as Array<Record<string, unknown>>;
+    runIngest(docFile('orphan2.json', traces.filter((t) => t.parent_trace_id != null)), { dir: store, dryRun: true });
+    expect(stdout()).toMatch(/name a parent this file does not contain/);
     // And it really was a preview: nothing was inserted.
     const db = ensureDatabase(resolve(store, 'traces.db'));
     expect(listTraces(db, {}).total).toBe(0);
+  });
+});
+
+
+describe('relinkFork refuses lineage a store cannot hold', () => {
+  // The restore rebuilds these links from an UNTRUSTED document, so the write
+  // is where the shapes no reader could survive have to be refused. Anything
+  // that walks lineage — `diff`'s stopped-fork verdict, the abandoned-run
+  // marker, the fork-excluding guards — assumes it terminates.
+  const trace = (name: string) => ({ agent_name: name, status: 'completed', started_at: new Date().toISOString(), steps: [{ step_number: 1, step_type: 'tool_call' as const, name: 't' }] });
+
+  it('refuses a trace forked from itself', () => {
+    const db = ensureDatabase(resolve(store, 'traces.db'));
+    const a = ingestTrace(db, trace('a'));
+    expect(() => relinkFork(db, a.id, a.id, 1)).toThrow(/forked from itself/);
+  });
+
+  it('refuses a cycle', () => {
+    const db = ensureDatabase(resolve(store, 'traces.db'));
+    const a = ingestTrace(db, trace('a'));
+    const b = ingestTrace(db, trace('b'));
+    relinkFork(db, b.id, a.id, 1);
+    expect(() => relinkFork(db, a.id, b.id, 1)).toThrow(/cycle/);
+  });
+
+  it('refuses a link to a trace that is not stored', () => {
+    const db = ensureDatabase(resolve(store, 'traces.db'));
+    const a = ingestTrace(db, trace('a'));
+    expect(() => relinkFork(db, a.id, 'trc_nope', 1)).toThrow(/must be stored/);
+  });
+
+  it('links a fork that is itself forked from a fork', () => {
+    // Legal lineage, and the cycle walk must not mistake depth for a loop.
+    const db = ensureDatabase(resolve(store, 'traces.db'));
+    const a = ingestTrace(db, trace('a'));
+    const b = ingestTrace(db, trace('b'));
+    const c = ingestTrace(db, trace('c'));
+    relinkFork(db, b.id, a.id, 1);
+    relinkFork(db, c.id, b.id, 2);
+    expect(getTrace(db, c.id)!.parent_trace_id).toBe(b.id);
+    expect(getTrace(db, c.id)!.forked_from_step).toBe(2);
   });
 });

@@ -1000,6 +1000,52 @@ export function mergeBatchIntoTrace(
  * live recorder for `trace_start` events; honors a client-supplied `id` so the
  * producer can stamp the same `trace_id` on every subsequent event.
  */
+/**
+ * Attach a restored trace to the parent it was forked from.
+ *
+ * `ingestTrace` deliberately stores no lineage: a `parent_trace_id` in a
+ * document names a trace in the store that document came from, and ingest mints
+ * fresh ids, so writing it through would point at nothing. Only the RESTORE
+ * knows which new id each old one became, so only the restore can rebuild the
+ * link — which it must, because a fork restored as an ordinary trace is counted
+ * as a real run by every guard that excludes forks: `stats`, the dashboard,
+ * `check`, `watch`, and `export --format golden`, where a never-executed step
+ * prefix in a baseline lets a run that crashed part way reproduce its shorter
+ * shape and pass.
+ *
+ * Both ids must already exist. A trace may not become its own ancestor: a
+ * document is untrusted input and can describe a cycle, which would hang any
+ * reader that walks lineage.
+ */
+export function relinkFork(
+  db: Database.Database,
+  traceId: string,
+  parentTraceId: string,
+  forkedFromStep: number | null,
+): void {
+  if (traceId === parentTraceId) throw new Error('a trace cannot be forked from itself');
+  const exists = (id: string): boolean =>
+    db.prepare('SELECT 1 FROM agent_traces WHERE id = ?').get(id) != null;
+  if (!exists(traceId) || !exists(parentTraceId)) {
+    throw new Error('both the fork and its parent must be stored before they can be linked');
+  }
+  // Walk up from the intended parent. Reaching `traceId` means this link would
+  // close a loop. Bounded by the walk itself, which cannot revisit a row without
+  // having already returned to the start.
+  const seen = new Set<string>([traceId]);
+  let cursor: string | null = parentTraceId;
+  while (cursor != null) {
+    if (seen.has(cursor)) throw new Error('fork lineage would form a cycle');
+    seen.add(cursor);
+    const row = db
+      .prepare('SELECT parent_trace_id FROM agent_traces WHERE id = ?')
+      .get(cursor) as { parent_trace_id: string | null } | undefined;
+    cursor = row?.parent_trace_id ?? null;
+  }
+  db.prepare('UPDATE agent_traces SET parent_trace_id = ?, forked_from_step = ? WHERE id = ?')
+    .run(parentTraceId, numOrNull(forkedFromStep), traceId);
+}
+
 export function startTrace(
   db: Database.Database,
   input: IngestTraceInput,

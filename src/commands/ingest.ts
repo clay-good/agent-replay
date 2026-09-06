@@ -4,7 +4,7 @@ import chalk from 'chalk';
 import type Database from 'better-sqlite3';
 import type { IngestTraceInput } from '../models/types.js';
 import { validateTraceInput } from '../utils/validators.js';
-import { ingestTrace } from '../services/trace-service.js';
+import { ingestTrace, relinkFork } from '../services/trace-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { summaryPanel } from '../ui/boxen-panels.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
@@ -166,20 +166,27 @@ export function runIngest(filePath: string, opts: IngestOptions = {}): void {
     console.log(chalk.yellow(`  Continuing with ${valid.length} valid trace(s).`));
   }
 
-  // Fork lineage is dropped: `insertTraceRow` hard-codes parent_trace_id to null
-  // (and ingest regenerates ids, so a parent reference in the file would not
-  // point anywhere), while `export` writes both fields. Restoring the link needs
-  // an in-file id remap and a decision about a fork whose parent is not in the
-  // file — a schema/semantics call. Saying so is not: a restored fork silently
-  // becomes an ordinary trace, and the guards that exclude forks (golden export,
-  // `check`, `watch`) then treat it as a real run.
-  const forks = valid.filter((t) => (t as unknown as { parent_trace_id?: unknown }).parent_trace_id != null).length;
-  if (forks > 0) {
+  // Which forks this restore can reattach, decided before anything is written so
+  // `--dry-run` — which exists to preview the real run — says the same thing.
+  //
+  // A json/jsonl export is a BACKUP and carries forks, but ingest mints fresh
+  // ids, so a `parent_trace_id` from the document names a trace in the store it
+  // came from. The link is rebuilt below from the ids this restore assigns. A
+  // fork whose parent is NOT in the document has nothing here to point at, and
+  // inventing one would fabricate lineage — so it is restored as an ordinary
+  // trace and reported, which is what every fork used to get.
+  const docIds = new Set(
+    valid.map((t) => (t as { id?: unknown }).id).filter((id): id is string => typeof id === 'string' && id !== ''),
+  );
+  const forkInputs = valid.filter((t) => t.parent_trace_id != null);
+  const orphanCount = forkInputs.filter((t) => !docIds.has(String(t.parent_trace_id))).length;
+  if (orphanCount > 0) {
     console.log(
       chalk.yellow(
-        `  Note: ${forks} trace(s) in this file are forks; they are restored as ordinary traces — ` +
-        'ingest cannot rebuild fork lineage, so `check` and `watch` will treat them as real runs, ' +
-        'and `export --format golden` will INCLUDE them in a baseline it would otherwise exclude.',
+        `  Note: ${orphanCount} fork(s) name a parent this file does not contain, so they are ` +
+        'restored as ordinary traces — `check` and `watch` will treat them as real runs, and ' +
+        '`export --format golden` will INCLUDE them in a baseline it would otherwise exclude. ' +
+        'Export the parent alongside them to keep the link.',
       ),
     );
   }
@@ -203,15 +210,52 @@ export function runIngest(filePath: string, opts: IngestOptions = {}): void {
   let totalSteps = 0;
   const failedIds: string[] = [];
 
+  // Every id the document remapped, so the fork pass below knows what each old
+  // id became in this store.
+  const remapped = new Map<string, string>();
+  const storedForks: Array<{ id: string; input: IngestTraceInput }> = [];
+
   for (const input of valid) {
     try {
-      ingestTrace(db, input);
+      const stored = ingestTrace(db, input);
+      const originalId = (input as { id?: unknown }).id;
+      if (typeof originalId === 'string' && originalId) remapped.set(originalId, stored.id);
+      if (input.parent_trace_id != null) storedForks.push({ id: stored.id, input });
       inserted++;
       totalSteps += input.steps?.length ?? 0;
     } catch (err) {
       failedIds.push(input.agent_name ?? '?');
       console.error(chalk.red(`  Error inserting trace "${escapeForMessage(String(input.agent_name))}": ${errorMessage(err)}`));
     }
+  }
+
+  // Rebuild fork lineage, now that every trace in the document has a row and an
+  // id to point at. A json/jsonl export is a BACKUP, and a fork restored as an
+  // ordinary trace is a never-executed step prefix that every fork-excluding
+  // guard then counts as a real run — `stats`, `check`, `watch`, and
+  // `export --format golden`, where it lets a run that crashed part way
+  // reproduce its shorter shape and pass. This pass is second on purpose: a
+  // document may list a fork before its parent.
+  //
+  // A fork whose parent is NOT in the document cannot be relinked — there is no
+  // id here to point at, and inventing one would fabricate lineage. Those are
+  // reported, which is what this whole file used to do for every fork.
+  let relinked = 0;
+  for (const { id, input } of storedForks) {
+    const newParent = remapped.get(String(input.parent_trace_id));
+    if (!newParent) continue; // already counted and reported as an orphan above
+    try {
+      relinkFork(db, id, newParent, input.forked_from_step ?? null);
+      relinked++;
+    } catch (err) {
+      // A document can describe lineage the store must refuse (a cycle). The
+      // trace is already restored; only its link is missing, and saying which
+      // one beats a silent ordinary trace.
+      console.error(chalk.red(`  Could not restore fork lineage for "${escapeForMessage(String(input.agent_name))}": ${errorMessage(err)}`));
+    }
+  }
+  if (relinked > 0) {
+    console.log(chalk.dim(`  Restored fork lineage for ${relinked} trace(s).`));
   }
 
   if (failedIds.length > 0) {
