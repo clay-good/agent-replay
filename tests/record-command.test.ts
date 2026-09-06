@@ -223,3 +223,57 @@ describe('record --agent-name', () => {
     expect(stderr()).toContain('--agent-name was blank');
   });
 });
+
+describe('record: naming the format that would have worked', () => {
+  const codexLines = [
+    JSON.stringify({ type: 'thread.started', thread_id: 'th' }),
+    JSON.stringify({ type: 'item.completed', item: { item_type: 'command_execution', command: 'ls' } }),
+    JSON.stringify({ type: 'turn.completed', usage: {} }),
+  ];
+  const claudeLines = [
+    JSON.stringify({ type: 'system', subtype: 'init', session_id: 's' }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'hi' }] } }),
+    JSON.stringify({ type: 'result', subtype: 'success' }),
+  ];
+  const geminiLines = [
+    JSON.stringify({ type: 'init', session_id: 's' }),
+    JSON.stringify({ type: 'message', content: 'hi' }),
+  ];
+
+  it('names claude-stream when a claude stream was piped as codex-exec', async () => {
+    await record(claudeLines, { format: 'codex-exec' });
+    expect(stderr()).toContain('try --format claude-stream');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('names codex-exec when a codex stream was piped as claude-stream', async () => {
+    await record(codexLines, { format: 'claude-stream' });
+    expect(stderr()).toContain('try --format codex-exec');
+  });
+
+  it('names gemini-stream when a gemini stream was piped as codex-exec', async () => {
+    await record(geminiLines, { format: 'codex-exec' });
+    expect(stderr()).toContain('try --format gemini-stream');
+  });
+
+  it('says nothing when the records name no format', async () => {
+    // `result` is emitted by two of the streams, so it is evidence for neither.
+    await record([JSON.stringify({ type: 'result', foo: 1 })], { format: 'codex-exec' });
+    expect(stderr()).not.toContain('try --format');
+  });
+
+  it('says nothing when the records point at two formats at once', async () => {
+    await record(
+      [JSON.stringify({ type: 'thread.started' }), JSON.stringify({ type: 'tool_use', name: 'x' })],
+      { format: 'claude-stream' },
+    );
+    expect(stderr()).not.toContain('try --format');
+  });
+
+  it('never suggests the format already in use', async () => {
+    // A codex stream that records nothing for some other reason must not be
+    // told to try the format it is already using.
+    await record([JSON.stringify({ type: 'turn.failed', error: { message: 'x' } })], { format: 'codex-exec' });
+    expect(stderr()).not.toContain('try --format');
+  });
+});

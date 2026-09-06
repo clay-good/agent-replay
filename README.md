@@ -95,6 +95,8 @@ gemini -p "summarize" --output-format stream-json  | agent-replay record --forma
 claude -p "fix the build" --output-format stream-json | agent-replay record --format claude-stream
 ```
 
+If a run records nothing because the wrong `--format` was piped in, the failure names the format that reads those records — but only when the evidence is unambiguous, since a wrong suggestion just sends you to a second format that also captures nothing.
+
 `claude-stream` reads the same `system` / `assistant` / `user` / `result` records, with the same content blocks, that `import --format claude-transcript` reads off disk, so the two paths stay in step: `text` becomes an `output` step, `thinking` a `thought` step, and a `tool_use`/`tool_result` pair one `tool_call` step whose `is_error` result is recorded on the step's error field. Token totals include both cache fields, and the `total_cost_usd` the run reports is recorded, so `stats` shows the real spend of a piped capture (a zero cost is kept — it is what a fully cached turn reports). It exists because a CI job running `claude -p` has no settings file to register hooks in and no collector to point at — the other two ways to capture Claude Code.
 
 None of the three harnesses puts its prompt in the stream — all take it as a command-line argument — so `--input` supplies it: `codex exec --json "fix the tests" | agent-replay record --format codex-exec --input "fix the tests"`. Without it the capture has no input, and `check --golden` never matches a run without one, so a gate over these formats could only report that nothing was compared. It fills in only: a native producer that sends its own input keeps it.

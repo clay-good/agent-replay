@@ -65,6 +65,16 @@ and one-way.
 
 ### Added
 
+- **A capture that recorded nothing now names the format that would have
+  worked.** There are four `--format` values, and piping the wrong one is the
+  easy mistake: every line parses as JSON, the translator recognizes none of
+  it, and the run ends having stored nothing. The lines name their own record
+  kinds, so the failure now says which format reads them instead of leaving the
+  reader to try the other three. Only on a run that already failed, and only on
+  unambiguous evidence — a `result` record is emitted by two of the streams, so
+  it names neither, and a stream pointing at two formats gets no suggestion at
+  all. A wrong suggestion would send the reader to a second format that also
+  captures nothing.
 - **`record --format claude-stream`, live capture for Claude Code.** Claude
   Code was reachable through hooks and OpenTelemetry but not by piping, which
   is the path a CI job actually uses: `claude -p` in a script has no settings

@@ -165,6 +165,10 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
     apply(checked);
   };
 
+  // The record kinds seen, for the wrong-format hint on a capture that recorded
+  // nothing.
+  const seenTypes = new Set<string>();
+
   const translator = makeTranslator(format);
   const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
 
@@ -202,6 +206,11 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
       // the two paths now share one gate, so a rule added to it covers both —
       // not that it is catching something today. (`output` shape is normalized
       // by the translators themselves; see the codex item branch.)
+      // Remember the record kinds this stream carries, so a run that captures
+      // nothing can name the format that WOULD have read them (below). Bounded:
+      // a stream is unbounded and a handful of distinct kinds is all the
+      // suggestion needs.
+      if (seenTypes.size < 12 && typeof obj.type === 'string' && obj.type) seenTypes.add(obj.type);
       const translated = translator.translate(obj);
       for (const ev of translated) applyTranslated(ev);
       // Report a line the translator dropped, the way the native path reports a
@@ -298,6 +307,50 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
           : `  Nothing was recorded: none of the ${inputLines} line(s) matched the ${format} format.`,
       ),
     );
+    // There are four formats now, and piping the wrong one is the easy mistake:
+    // every line parses as JSON, the translator recognizes none of it, and the
+    // run ends having stored nothing. The lines are right here and they name
+    // their own record kinds, so say which format reads them instead of leaving
+    // the reader to try the other three. Only ever a suggestion on a run that
+    // already failed — nothing is captured on a guess.
+    const suggestion = formatForTypes(seenTypes, format);
+    if (suggestion) {
+      console.error(
+        chalk.yellow(`  These records look like the ${suggestion} format — try --format ${suggestion}.`),
+      );
+    }
     process.exitCode = 1;
   }
+}
+
+/**
+ * The `--format` that reads these record kinds, or null when they do not
+ * clearly belong to one.
+ *
+ * Keyed on record kinds that are UNAMBIGUOUS across the supported streams: a
+ * `result` record is emitted by both the gemini and claude streams and so
+ * names neither, while `thread.started` can only be codex. Silence is the right
+ * answer when nothing is distinctive — a wrong suggestion sends the reader to a
+ * second format that also captures nothing, which is worse than none.
+ */
+function formatForTypes(types: Set<string>, current: string): string | null {
+  const votes = new Map<string, number>();
+  const vote = (fmt: string) => votes.set(fmt, (votes.get(fmt) ?? 0) + 1);
+  for (const t of types) {
+    if (t === 'thread.started' || t === 'item.completed' || t === 'turn.completed' || t === 'turn.failed') {
+      vote('codex-exec');
+    } else if (t === 'system' || t === 'assistant') {
+      // `user` is deliberately absent: it is this stream's tool-result carrier
+      // and too generic a word to treat as evidence on its own.
+      vote('claude-stream');
+    } else if (t === 'tool_use' || t === 'tool_result' || t === 'init' || t === 'message') {
+      vote('gemini-stream');
+    }
+  }
+  // A single winner only. A stream that voted for two formats is telling us the
+  // kinds are shared, not that one of them is right.
+  const ranked = [...votes.entries()].sort((a, b) => b[1] - a[1]);
+  if (ranked.length !== 1) return null;
+  const [best] = ranked[0];
+  return best === current ? null : best;
 }

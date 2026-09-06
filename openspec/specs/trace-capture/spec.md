@@ -122,6 +122,18 @@ The system SHALL record a codex tool item's arguments as its step's input — a 
 - **WHEN** a translated stream never names a model
 - **THEN** every step it produces records no model, and `check --golden --fields model` skips those baseline steps rather than comparing an invented value
 
+The system SHALL, when a translated capture records nothing, name the `--format` that reads the records it saw — and SHALL stay silent when those records belong to no single format, rather than suggesting one that would also capture nothing.
+
+#### Scenario: The wrong format was piped in
+
+- **WHEN** a Claude Code stream is piped into `record --format codex-exec` and nothing is recorded
+- **THEN** the failure names `claude-stream` as the format to try
+
+#### Scenario: The records name no format
+
+- **WHEN** the records seen belong to two of the supported streams, or to none
+- **THEN** no format is suggested
+
 #### Scenario: Claude Code headless run captured
 
 - **WHEN** a user pipes `claude -p "..." --output-format stream-json` into `agent-replay record --format claude-stream`
