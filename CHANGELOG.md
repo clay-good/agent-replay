@@ -2472,6 +2472,12 @@ and one-way.
   table and the run summary already distinguished them; the line the user
   actually watches disagreed with both. All four call sites now render through
   one helper, so a preset that checked anything at all still shows its score.
+- The AI panels printed that same cost to six decimals with nothing to say it
+  was a floor — `eval --ai`'s result panel and `diff --ai`'s analysis panel
+  both. The eval run already RECORDED `cost_usd_rate_unknown` and no reader
+  looked at it, which made it a stored value with no consumer; `diff --ai` did
+  not carry the distinction at all. Both panels now say so, and neither says
+  anything for a model whose rate is known.
 - An AI cost estimate for a model with no published rate was presented as the
   model's price. The rate table covers the three default models; anything else
   — `config set ai.model claude-opus-5`, a Sonnet, a GPT-5, a Gemini Pro — is

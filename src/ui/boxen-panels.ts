@@ -311,6 +311,14 @@ export function aiEvalPanel(evalResult: { evaluator_name: string; score: number;
     // that already were, and they are only NUMBERS when the model sent numbers
     // — this object is whatever the provider replied with.
     lines.push(chalk.dim(`Cost: ${safeText(String(d.input_tokens ?? '?'))} in + ${safeText(String(d.output_tokens ?? '?'))} out tokens = $${Number(d.cost_usd).toFixed(6)} (${safeText(String(d.llm_provider ?? '?'))}/${safeText(String(d.llm_model ?? '?'))})`));
+    // Six decimals read as a measurement. For a model this build has no rate
+    // for, the figure comes from the highest rate it DOES know — all of them
+    // cheap-tier defaults — so it is a floor, not the model's price. The run
+    // already records `cost_usd_rate_unknown`; until now nothing read it, which
+    // made it a stored value with no reader.
+    if (d.cost_usd_rate_unknown === true) {
+      lines.push(chalk.yellow('No published rate for this model — a floor, not its price.'));
+    }
   }
 
   // The title is derived from a stored evaluator name, and boxen measures the
@@ -338,7 +346,7 @@ export function aiDiffPanel(analysis: {
   key_differences: string[];
   diffs_shown?: number;
   diffs_total?: number;
-  cost: { tokens_used: number; cost_usd: number };
+  cost: { tokens_used: number; cost_usd: number; rate_unknown?: boolean };
 }): string {
   const lines: string[] = [];
 
@@ -371,6 +379,11 @@ export function aiDiffPanel(analysis: {
 
   lines.push('');
   lines.push(chalk.dim(`Cost: ${analysis.cost.tokens_used} tokens = $${analysis.cost.cost_usd.toFixed(6)}`));
+  // Same disclosure the eval panel makes, for the same reason: this path prices
+  // an unknown model off the highest KNOWN rate, which is a floor.
+  if (analysis.cost.rate_unknown === true) {
+    lines.push(chalk.yellow('No published rate for this model — a floor, not its price.'));
+  }
 
   return box(lines.join('\n'), {
     title: ' AI Diff Analysis ',

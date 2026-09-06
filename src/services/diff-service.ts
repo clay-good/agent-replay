@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 import type { TraceDiffResult, StepDiff } from '../models/types.js';
 import type { LlmClientOptions } from './llm-client.js';
-import { callLlm } from './llm-client.js';
+import { callLlm, modelRateIsKnown } from './llm-client.js';
 import { getTrace } from './trace-service.js';
 import { summarizeDiffForLlm } from './trace-summarizer.js';
 import { extractJson, fenceTraceContent, INJECTION_GUARD, DEFAULT_EVAL_MAX_TOKENS } from './eval-service.js';
@@ -331,7 +331,7 @@ export interface AiDiffAnalysis {
    */
   diffs_shown?: number;
   diffs_total?: number;
-  cost: { tokens_used: number; cost_usd: number };
+  cost: { tokens_used: number; cost_usd: number; rate_unknown?: boolean };
 }
 
 const DIFF_SYSTEM_PROMPT_BODY = `You are comparing two AI agent execution traces. Analyze the differences and explain:
@@ -420,6 +420,11 @@ export async function aiDiffAnalysis(
     cost: {
       tokens_used: response.input_tokens + response.output_tokens,
       cost_usd: response.cost_estimate_usd,
+      // Whether that figure is the model's own rate or the fallback. This build
+      // knows a rate for three models, all cheap-tier defaults, so for anything
+      // else the number is a FLOOR — and printed to six decimals it reads as a
+      // measurement. The eval path records the same distinction.
+      ...(modelRateIsKnown(response.model) ? {} : { rate_unknown: true }),
     },
   };
 }

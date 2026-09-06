@@ -9,6 +9,11 @@ import { estimateCost, COST_TABLE, LlmError, modelRateIsKnown } from '../src/ser
 import { aiEvalPanel } from '../src/ui/boxen-panels.js';
 import type { IngestTraceInput } from '../src/models/types.js';
 
+// Strip colour AND collapse the box's own wrapping, so an assertion is about
+// the sentence rather than the terminal width it happened to be drawn at.
+const noAnsiPanel = (t: string): string =>
+  t.replace(/\x1B\[[0-9;]*m/g, '').replace(/[\s│╭╮╰╯─]+/g, ' ');
+
 function createTestDb() {
   const db = new BetterSqlite3(':memory:');
   db.pragma('journal_mode = WAL');
@@ -1236,6 +1241,47 @@ describe('a cost priced off an unknown model says so', () => {
     }))));
     const result = await runAiEval(db, trace.id, 'ai-root-cause', opts);
     expect((result.details as Record<string, unknown>).cost_usd_rate_unknown).toBeUndefined();
+  });
+});
+
+describe('a cost the reader cannot check is not printed as a measurement', () => {
+  // The stored flag had no reader: `runAiEval` recorded `cost_usd_rate_unknown`
+  // and both panels printed the figure to six decimals regardless, which reads
+  // as a measurement of what the call cost. For a model this build has no rate
+  // for, it is the highest rate it DOES know — all three cheap-tier defaults —
+  // so it is a floor.
+  it('marks an AI eval panel whose cost came from the fallback rate', async () => {
+    const { aiEvalPanel: panel } = await import('../src/ui/boxen-panels.js');
+    const out = noAnsiPanel(panel({
+      id: 'e', trace_id: 't', evaluator_type: 'llm_judge', evaluator_name: 'ai-root-cause',
+      score: 0.8, passed: true, evaluated_at: '',
+      details: { cost_usd: 0.0123, input_tokens: 10, output_tokens: 5, llm_model: 'claude-opus-5', llm_provider: 'anthropic', cost_usd_rate_unknown: true },
+    } as never));
+    expect(out).toMatch(/a floor, not its price/);
+  });
+
+  it('leaves a priced model unmarked', async () => {
+    const { aiEvalPanel: panel } = await import('../src/ui/boxen-panels.js');
+    const out = noAnsiPanel(panel({
+      id: 'e', trace_id: 't', evaluator_type: 'llm_judge', evaluator_name: 'ai-root-cause',
+      score: 0.8, passed: true, evaluated_at: '',
+      details: { cost_usd: 0.0123, input_tokens: 10, output_tokens: 5, llm_model: 'claude-haiku-4-5-20251001', llm_provider: 'anthropic' },
+    } as never));
+    expect(out).not.toMatch(/a floor, not its price/);
+  });
+
+  it('marks the diff panel the same way', async () => {
+    const { aiDiffPanel } = await import('../src/ui/boxen-panels.js');
+    const marked = noAnsiPanel(aiDiffPanel({
+      explanation: 'x', better_trace: 'left', reasoning: 'y', key_differences: [],
+      cost: { tokens_used: 15, cost_usd: 0.0123, rate_unknown: true },
+    }));
+    expect(marked).toMatch(/a floor, not its price/);
+    const plain = noAnsiPanel(aiDiffPanel({
+      explanation: 'x', better_trace: 'left', reasoning: 'y', key_differences: [],
+      cost: { tokens_used: 15, cost_usd: 0.0123 },
+    }));
+    expect(plain).not.toMatch(/a floor, not its price/);
   });
 });
 
