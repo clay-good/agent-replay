@@ -17,6 +17,35 @@ The system SHALL run an agent process under supervision via `agent-replay run [o
 - **WHEN** the wrapped command exits with code 3
 - **THEN** the trace is finalized as `failed` and `agent-replay run` itself exits with code 3
 
+### Requirement: Run invocation and labelling
+
+The system SHALL refuse `run` with no command as a usage error (exit `2`), without creating a trace. It SHALL accept `--agent-name`, `--tags` (comma-separated, blank entries dropped) and `--dir`. A blank `--agent-name` SHALL NOT refuse the run — the child process is the user's real work, and losing it over a label is the worse outcome — but SHALL fall back to the command name and say that it did, so the trace does not quietly carry a name nobody chose.
+
+#### Scenario: No command given
+
+- **WHEN** a user runs `agent-replay run` with nothing after `--`
+- **THEN** it prints the usage line, exits `2`, and no trace is created
+
+### Requirement: Honest reporting of the recorded run
+
+The system SHALL end a wrapped run with a summary naming the trace, the status the trace was actually STORED with, and how many events it recorded. When the stored status and the child's exit code disagree — a child that declared `completed` and then crashed during shutdown — the summary SHALL name both rather than hide either. The trace id SHALL be printed as a leading prefix that the other commands resolve, since this is the only pointer to the run at the moment it finishes.
+
+Every event the wrapper could not record SHALL be counted and reported in that summary, whether the protocol REJECTED the line (bad JSON, unknown type, a missing `trace_id`) or the store refused it. The stderr warning alone is not the durable record: this wrapper passes the child's own output through unmodified, so a warning is interleaved with the agent's output while the summary is the last thing printed. A blank or `//` comment line is legal protocol and is not a loss, and neither is an event validation KEPT while ignoring one unusable field.
+
+#### Scenario: A child emits malformed events
+
+- **WHEN** a wrapped child writes lines the protocol rejects
+- **THEN** the summary reports how many events could not be recorded, instead of reporting only that zero were recorded
+
+### Requirement: Append-only event channel
+
+The system SHALL treat the recording channel as append-only and SHALL detect a producer that rewrites or truncates it — by a shrink in size, or by a change in the file's opening bytes when a rewrite happens to be at least as long as what was already consumed. On detection it SHALL say so, name the append-only contract, and resume from the new end, rather than reading on at a stale offset and dropping every later event silently at exit `0`.
+
+#### Scenario: Channel opened with 'w' instead of 'a'
+
+- **WHEN** a child reopens the events file truncating and writes fresh events
+- **THEN** the wrapper reports that the channel was rewritten and continues reading from the new end
+
 ### Requirement: Transparent supervision
 
 The system SHALL pass the child's stdin, stdout, and stderr through unmodified, and SHALL still record a minimal trace (start, end, duration, exit metadata) for children that emit no events.

@@ -96,7 +96,30 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
   const applyLine = (line: string): void => {
     const { event, warning, repaired } = parseEventLine(line);
     if (warning) process.stderr.write(`agent-replay run: ${warning}\n`);
-    if (!event) return;
+    if (!event) {
+      // A line the PROTOCOL rejected is data the child emitted and lost, exactly
+      // like one that failed to store — so it belongs in the same count. Only
+      // the storage failure below was counted, so a child whose events were
+      // malformed (a missing `trace_id`, an unknown type, a bad JSON line — the
+      // ordinary first-integration mistakes) got a summary reading "0 event(s)
+      // recorded" with nothing saying anything had been thrown away. That reads
+      // as "my instrumentation never fired" rather than "it fired and was
+      // rejected", which sends the reader looking in the wrong place entirely.
+      //
+      // The stderr line above is not the durable record here: this wrapper
+      // passes the child's own stdout and stderr through unmodified, so a
+      // warning is interleaved with the agent's output and scrolls away, while
+      // the summary is the last thing printed. `record`, which consumes the same
+      // protocol, has always counted these.
+      //
+      // Only when there IS a warning: a blank or `//` comment line is legal
+      // protocol and produces no event, and counting those would report losses
+      // for a well-formed stream. And only when there is NO event: validation
+      // can keep an event while warning about a single unusable FIELD it
+      // ignored, which is a repair, not a drop.
+      if (warning) dropped++;
+      return;
+    }
     // The wrapper owns the trace; ignore the child's trace_start and stamp our
     // id onto every other event. Stamp UNCONDITIONALLY: a compliant child
     // generates its own trace_id (the SDK does, unless it threads

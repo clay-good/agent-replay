@@ -228,6 +228,54 @@ fs.appendFileSync(f, JSON.stringify({ v: 1, type: 'trace_end', trace_id: 'trc_ch
 
 // ── the wrapper must always finalize and clean up ──────────────────────────
 
+describe('runWrapped counts every event it could not record', () => {
+  it('counts a line the protocol REJECTED, not only one that failed to store', async () => {
+    // The stderr warning is not the durable record: this wrapper passes the
+    // child's own output through unmodified, so a warning is interleaved with
+    // the agent's output and scrolls away, while the summary is the last line.
+    // Counting only storage failures made a child with malformed events report
+    // "0 event(s) recorded" and claim nothing was lost.
+    const child = `
+const fs = require('fs');
+const f = process.env.AGENT_REPLAY_EVENTS;
+fs.appendFileSync(f, JSON.stringify({ type: 'trace_end', status: 'completed' }) + '\\n');
+fs.appendFileSync(f, JSON.stringify({ type: 'nonsense', trace_id: 'x' }) + '\\n');
+fs.appendFileSync(f, 'not json at all\\n');
+`;
+    const res = await runWrapped(db, { command: process.execPath, args: ['-e', child] });
+    // A trace_end with no trace_id, an unknown type, and a bad JSON line.
+    expect(res.eventsDropped).toBe(3);
+    expect(res.eventsApplied).toBe(0);
+  });
+
+  it('does not count blank or comment lines, which are legal protocol', async () => {
+    const child = `
+const fs = require('fs');
+const f = process.env.AGENT_REPLAY_EVENTS;
+const t = process.env.AGENT_REPLAY_TRACE_ID;
+fs.appendFileSync(f, '\\n// a comment\\n\\n');
+fs.appendFileSync(f, JSON.stringify({ v: 1, type: 'step', trace_id: t, step_number: 1, step_type: 'thought', name: 'plan' }) + '\\n');
+`;
+    const res = await runWrapped(db, { command: process.execPath, args: ['-e', child] });
+    expect(res.eventsApplied).toBe(1);
+    expect(res.eventsDropped).toBe(0);
+  });
+
+  it('does not count an event validation REPAIRED rather than rejected', async () => {
+    // A warning can accompany a kept event when validation ignored one unusable
+    // field. That is a repair, not a loss, and must not be reported as one.
+    const child = `
+const fs = require('fs');
+const f = process.env.AGENT_REPLAY_EVENTS;
+const t = process.env.AGENT_REPLAY_TRACE_ID;
+fs.appendFileSync(f, JSON.stringify({ v: 1, type: 'step', trace_id: t, step_number: 1, step_type: 'thought', name: 'plan', tokens_used: 'lots' }) + '\\n');
+`;
+    const res = await runWrapped(db, { command: process.execPath, args: ['-e', child] });
+    expect(res.eventsApplied).toBe(1);
+    expect(res.eventsDropped).toBe(0);
+  });
+});
+
 describe('runWrapped robustness', () => {
   it('finalizes the trace when spawn fails synchronously', async () => {
     // Regression: `spawn` throws synchronously on an empty command — a script

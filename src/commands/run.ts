@@ -64,7 +64,7 @@ export async function runRun(parts: string[] = [], opts: RunOptions = {}): Promi
     // and `fork` print, which do paste.
     chalk.dim(`\n  agent-replay: trace ${result.traceId.slice(0, 12)} ${status}, ${result.eventsApplied} event(s) recorded.`) +
       (result.eventsDropped > 0
-        ? chalk.yellow(` ${result.eventsDropped} event(s) could not be stored — see the messages above.`)
+        ? chalk.yellow(` ${result.eventsDropped} event(s) could not be recorded — see the messages above.`)
         : ''),
   );
 

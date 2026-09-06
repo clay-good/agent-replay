@@ -336,6 +336,22 @@ and one-way.
 
 ### Fixed
 
+- **`run` reported that nothing was lost when a child's events were
+  malformed.** The wrapper's closing summary counts the events it could not
+  record, but only ones the STORE refused — a line the protocol rejected (bad
+  JSON, an unknown event type, a missing `trace_id`: the ordinary
+  first-integration mistakes) was warned about on stderr and then dropped from
+  the tally. The summary read "0 event(s) recorded" with nothing saying anything
+  had been thrown away, which reads as "my instrumentation never fired" rather
+  than "it fired and was rejected" and sends the reader looking in the wrong
+  place. The stderr warning is not the durable record here: `run` passes the
+  child's own stdout and stderr through unmodified, so the warning is
+  interleaved with the agent's output and scrolls away, while the summary is the
+  last line printed. Rejected lines are now counted alongside unstorable ones
+  ("N event(s) could not be recorded"). `record`, which consumes the same
+  protocol, has always counted them. Blank and `//` comment lines are legal
+  protocol and are still not counted, and neither is an event validation kept
+  while ignoring one unusable field — that is a repair, not a loss.
 - **An OpenTelemetry log capture recorded the model nowhere, so
   `check --golden --fields model` could not gate it.** Every
   `claude_code.api_request` and `gemini_cli.api_response` record states the
