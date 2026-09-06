@@ -720,6 +720,15 @@ directory that already exists is left exactly as you set it, since the mode of a
 directory you made is your decision. The file modes are set at creation only, so
 if you deliberately open a store up it stays open.
 
+**Removing captured data.** There is no `delete` command: nothing in the CLI
+removes a trace, and every command that writes only adds. To drop a single run,
+call `deleteTrace(db, id)` from the [SDK](#programmatic-api) — it cascades, so
+the trace's steps, decisions, snapshots and evaluations go with it. To drop
+everything, delete the store: `rm -rf .agent-replay` (or the directory `--dir`
+names), which also removes `config.json` and the API keys in it. `demo --reset`
+clears a store before reloading the samples, and refuses a directory that does
+not look like one it created.
+
 ## Exit codes
 
 Every command exits non-zero on failure, so it drops cleanly into scripts and CI:
