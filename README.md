@@ -1042,3 +1042,5 @@ npm install
 npm run verify    # typecheck + build + test
 npm run dev       # watch mode
 ```
+
+CI runs `verify` on Node 20, 22, 24 and 26, and separately packs the tarball, installs it into an empty project, and uses it from there — the CLI through the `bin` npm links, both module entry points, and the published types with nothing else installed. Packaging breaks do not show up in a test run against the repo, where `dist/` is a relative path away and every dev dependency is present.

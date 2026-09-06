@@ -35,3 +35,71 @@ jobs:
         run: npm ci
       - name: Typecheck, build, and test
         run: npm run verify
+
+  # The published ARTIFACT, exercised the way a user meets it: packed, installed
+  # into a clean project, and used through the entry points package.json
+  # advertises. `verify` above runs against the repo, where `dist/` is reachable
+  # by relative path and every dependency — including dev-only ones — is present.
+  # Two real breaks lived in exactly that gap: `main`/`exports.require` pointed at
+  # a CommonJS bundle that threw on load, and `@types/better-sqlite3` was a
+  # devDependency although the published declarations import it, so a consumer's
+  # `ensureDatabase` typed as `any`. Both shipped with the whole suite green.
+  #
+  # One Node version on purpose: this checks packaging, not runtime behaviour,
+  # and the matrix above covers the code. Node 20.x is the floor, and the one
+  # where `require()` of an ES module is newest.
+  package:
+    name: packaged install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20.x'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build and pack
+        run: |
+          npm run build
+          npm pack --pack-destination "$RUNNER_TEMP/pkg"
+      - name: Install the tarball into a clean project
+        working-directory: ${{ runner.temp }}
+        run: |
+          mkdir consumer && cd consumer
+          npm init -y > /dev/null
+          npm pkg set type=module
+          npm install "$RUNNER_TEMP"/pkg/*.tgz --no-audit --no-fund
+      - name: The bin the package installs runs a real session
+        working-directory: ${{ runner.temp }}/consumer
+        run: |
+          ./node_modules/.bin/agent-replay --version
+          ./node_modules/.bin/agent-replay init --dir ./store
+          ./node_modules/.bin/agent-replay demo --no-interactive --dir ./store
+          ./node_modules/.bin/agent-replay list --json --dir ./store > list.json
+          ./node_modules/.bin/agent-replay stats --json --dir ./store > stats.json
+          node -e "const n=require('fs');const d=JSON.parse(n.readFileSync('list.json','utf8'));if(d.items.length!==5)throw new Error('expected 5 demo traces, got '+d.items.length)"
+      - name: Both module paths load from the installed package
+        working-directory: ${{ runner.temp }}/consumer
+        run: |
+          node -e "import('agent-replay').then(m=>{if(!m.TraceRecorder)throw new Error('import: TraceRecorder missing');console.log('import ok,',Object.keys(m).length,'exports')})"
+          # `require()` of an ES module is supported from Node 20.19/22.12. Below
+          # that the documented outcome is ERR_REQUIRE_ESM — a contract a caller
+          # can act on. Anything else (as the old CommonJS bundle did: a
+          # TypeError from inside a dependency) is the failure this step exists
+          # to catch, so it is not swallowed.
+          node -e "try{const m=require('agent-replay');if(!m.TraceRecorder)throw new Error('require: TraceRecorder missing');console.log('require ok,',Object.keys(m).length,'exports')}catch(e){if(e.code!=='ERR_REQUIRE_ESM')throw e;console.log('require -> ERR_REQUIRE_ESM on node',process.versions.node,'(expected below 20.19)')}"
+      - name: The published types resolve with nothing else installed
+        working-directory: ${{ runner.temp }}/consumer
+        run: |
+          npm install --no-save --no-audit --no-fund typescript@5
+          printf "import { ensureDatabase } from 'agent-replay';\nconst db = ensureDatabase('./x.db');\ndb.prepare('SELECT 1');\n" > probe.ts
+          ./node_modules/.bin/tsc --noEmit --strict --module nodenext --moduleResolution nodenext --skipLibCheck probe.ts
+          # ...and the handle is really typed, not silently `any`: a method that
+          # does not exist has to be a compile error. Without the types package
+          # installed this line compiled clean, which is how the break hid.
+          printf "import { ensureDatabase } from 'agent-replay';\nensureDatabase('./x.db').prepareNoSuchMethod();\n" > bad.ts
+          if ./node_modules/.bin/tsc --noEmit --strict --module nodenext --moduleResolution nodenext --skipLibCheck bad.ts; then
+            echo "::error::the store handle typed as any — @types/better-sqlite3 did not install with the package"
+            exit 1
+          fi
