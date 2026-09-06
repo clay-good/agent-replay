@@ -443,6 +443,14 @@ and one-way.
 
 ### Fixed
 
+- **`record --format claude-stream` threw away the token total the stream
+  states.** Usage was summed from ASSISTANT records only, so a stream that
+  reports it once — at the end, in the `result` record, which is a shape
+  `claude -p` emits — recorded a run with no tokens at all, next to a cost read
+  from that very record. The result's total is now used, replacing the per-turn
+  accumulation rather than adding to it: it is the whole run's figure, the same
+  rule the codex-rollout importer applies to its cumulative `token_count`.
+
 - **An imported session's steps were all stored unfinished.** A hook-captured
   session closes its tool call when `PostToolUse` arrives; an import left every
   step with no `ended_at`, so the SAME session captured the two ways disagreed

@@ -896,6 +896,48 @@ describe('claude-stream and the transcript importer agree', () => {
   });
 });
 
+describe('the tokens a claude-stream run reports', () => {
+  const init = { type: 'system', subtype: 'init', session_id: 'tok' };
+  const usage = { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 900 };
+
+  it('reads the total the result states, when the assistants carry none', () => {
+    // The translator summed `usage` from ASSISTANT records only, so a stream
+    // that reports usage once — at the end, which is a shape `claude -p`
+    // emits — recorded a run with NO tokens, beside a cost read from that very
+    // record.
+    const t = makeTranslator('claude-stream')!;
+    const id = run(t, [
+      init,
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'hi' }] } },
+      { type: 'result', subtype: 'success', usage },
+    ]);
+    expect(getTrace(db, id)!.total_tokens).toBe(1020);
+  });
+
+  it('does not double a session that reports usage both ways', () => {
+    // The result's figure is the whole run's, like the `token_count` the
+    // codex-rollout importer takes from its last record — so it REPLACES the
+    // per-turn accumulation rather than adding to it.
+    const t = makeTranslator('claude-stream')!;
+    const id = run(t, [
+      init,
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'hi' }], usage } },
+      { type: 'result', subtype: 'success', usage },
+    ]);
+    expect(getTrace(db, id)!.total_tokens).toBe(1020);
+  });
+
+  it('keeps the per-turn total when the result states none', () => {
+    const t = makeTranslator('claude-stream')!;
+    const id = run(t, [
+      init,
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'hi' }], usage } },
+      { type: 'result', subtype: 'success' },
+    ]);
+    expect(getTrace(db, id)!.total_tokens).toBe(1020);
+  });
+});
+
 describe('the cost a claude-stream run reports', () => {
   const init = { type: 'system', subtype: 'init', session_id: 's1' };
 

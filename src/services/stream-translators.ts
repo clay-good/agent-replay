@@ -667,6 +667,21 @@ export class ClaudeStreamTranslator extends BaseTranslator {
       // `toNum`, which clamps at zero and would turn it into "not reported".
       const cost = toCost(obj.total_cost_usd ?? obj.cost_usd);
       if (cost != null) this.totalCost = cost;
+      // The session's own token total, which this record states and which was
+      // being thrown away: the translator summed `usage` from ASSISTANT records
+      // only, so a stream whose assistants carry none — the shape `claude -p`
+      // emits when it reports usage once, at the end — recorded a run with no
+      // tokens at all, beside a cost read from this very record.
+      //
+      // REPLACES rather than adds: this figure is the whole run's, like the
+      // `token_count` the codex-rollout importer takes from its last record,
+      // so adding it to a per-turn accumulation would double the session. The
+      // vendor's own total wins when it states one.
+      const resultUsage = obj.usage;
+      if (resultUsage != null && typeof resultUsage === 'object' && !Array.isArray(resultUsage)) {
+        const resultTokens = claudeUsageTokens(resultUsage as Record<string, unknown>);
+        if (resultTokens > 0) this.totalTokens = resultTokens;
+      }
       const subtype = str(obj.subtype);
       if (isTrueish(obj.is_error) || (subtype != null && subtype !== 'success')) {
         this.failed = true;
