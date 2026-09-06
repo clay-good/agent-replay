@@ -28,7 +28,7 @@ function scopeNote(sample: number, total: number): string {
 export function runStats(opts: StatsOptions = {}): void {
   const refuse = makeRefuse(opts.json);
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
-  const db = openStoreOr(refuse, () => ensureDatabase(dbPath), dbPath);
+  const db = openStoreOr(refuse, () => ensureDatabase(dbPath), dbPath, opts.dir);
   if (!db) return;
 
   // A malformed --since is a usage error, not a silent store-wide fallback

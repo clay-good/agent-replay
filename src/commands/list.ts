@@ -28,7 +28,7 @@ export interface ListOptions {
 export function runList(opts: ListOptions = {}): void {
   const refuse = makeRefuse(opts.json);
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
-  const db = openStoreOr(refuse, () => ensureDatabase(dbPath), dbPath);
+  const db = openStoreOr(refuse, () => ensureDatabase(dbPath), dbPath, opts.dir);
   if (!db) return;
 
   // An EMPTY value is a usage error, not "no filter". `--agent "$AGENT"` with an

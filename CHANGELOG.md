@@ -890,6 +890,22 @@ and one-way.
   the one headline command that had not adopted it. A literal `null` is
   untouched: it remains the documented no-op that keeps the original value.
 
+- **"No trace store here" sent you to create a second one.** Standing in a
+  subdirectory of your own project is the ordinary way to meet that refusal —
+  store resolution is relative to the working directory, and a hook fires from
+  wherever the agent happens to be. The advice attached to it, run `init` in the
+  project directory, is right for someone who has no store and wrong for someone
+  who has one two levels up: following it creates a second store beside your
+  source and splits your traces between the two, which is also how an
+  `--enforce` gate ends up pointed at a store with no policies. Every one of
+  these refusals — the ten read, export, replay, fork, dashboard, `guard check`
+  and `hook --enforce` sites — now names the store that does exist above the
+  working directory, with both ways to reach it (`cd`, or `--dir`). Resolution
+  itself is unchanged: nothing walks up to CHOOSE a store, which would silently
+  change which store every command reads; only the message looks. Silent when a
+  directory was named with `--dir` or `AGENT_REPLAY_DIR`, since the working
+  directory is then not the story.
+
 - **`watch` re-read the entire trace on every poll.** The live tail asked for
   every step of the trace twice a second and rebuilt each row — parsing its
   JSON columns — only to discard all but the new ones. The cost of following a

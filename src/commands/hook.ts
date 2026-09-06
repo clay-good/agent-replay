@@ -5,7 +5,7 @@ import { applyHookPayload, formatEnforcementResponse, resolveHookRouting, enforc
 import type { HookDialect } from '../services/hook-adapter.js';
 import { listPolicies, noEnabledPolicyReason } from '../services/guard-service.js';
 import { errorMessage } from '../utils/json.js';
-import { resolveDataDir, storeExists } from '../utils/paths.js';
+import { resolveDataDir, storeExists, storeAboveNote } from '../utils/paths.js';
 
 export interface HookOptions {
   noInput?: boolean;
@@ -159,10 +159,18 @@ export async function runHook(eventArg: string | undefined, opts: HookOptions = 
     if (opts.enforce && !storeExists(resolveDataDir(opts.dir))) {
       const gating = resolveHookRouting(payload, eventArg).action === 'pre_tool';
       if (gating) {
-        throw new Error(`no trace store at ${dbPath} — run "agent-replay init" there, or point the hook at one with --dir`);
+        // A hook fires from wherever the agent happens to be, so "the store is
+        // not in this directory" is most often "the agent is in a subdirectory
+        // of the project". Name the store that does exist rather than sending
+        // the operator to create a second, policy-less one.
+        throw new Error(
+          `no trace store at ${dbPath} — run "agent-replay init" there, or point the hook at one with --dir` +
+            (storeAboveNote(opts.dir) ? `. ${storeAboveNote(opts.dir)}` : ''),
+        );
       }
       console.error(
-        `agent-replay hook: no trace store at ${dbPath} — not creating one under --enforce; run "agent-replay init" there (event ignored)`,
+        `agent-replay hook: no trace store at ${dbPath} — not creating one under --enforce; run "agent-replay init" there (event ignored)` +
+          (storeAboveNote(opts.dir) ? `. ${storeAboveNote(opts.dir)}` : ''),
       );
       return;
     }

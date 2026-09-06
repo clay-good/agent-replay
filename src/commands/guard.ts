@@ -21,7 +21,7 @@ import { isValidStepType } from '../utils/validators.js';
 import { openSync, readSync, closeSync } from 'node:fs';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage, safeParseInt, truncate} from '../utils/json.js';
-import { resolveDataDir, storeExists } from '../utils/paths.js';
+import { resolveDataDir, storeExists, storeAboveNote } from '../utils/paths.js';
 
 // ── guard list ───────────────────────────────────────────────────────────
 
@@ -426,7 +426,15 @@ export async function runGuardCheck(opts: GuardCheckOptions = {}): Promise<void>
   // `allow` at exit 0, and left that store behind so every later check allowed
   // too. Creating a policy store is what `agent-replay init` is for.
   if (!storeExists(resolveDataDir(opts.dir))) {
-    denied(`no trace store at ${dbPath} — run "agent-replay init" there, or point the check at one with --dir`);
+    // The same note the read commands add: a gate configured once and then run
+    // from a subdirectory of the project is the ordinary way to reach this, and
+    // "run init there" would create a second, policy-less store — the exact
+    // state this refusal exists to prevent.
+    const above = storeAboveNote(opts.dir);
+    denied(
+      `no trace store at ${dbPath} — run "agent-replay init" there, or point the check at one with --dir` +
+        (above ? `. ${above}` : ''),
+    );
     return;
   }
   let verdict: ReturnType<typeof verdictForMatches>;

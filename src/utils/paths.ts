@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { resolve } from 'node:path';
+import { resolve, dirname, join } from 'node:path';
 
 /**
  * Expand a leading `~` to the user's home directory.
@@ -65,6 +65,42 @@ export function resolveDataDir(dir?: string): string {
   if (dir != null && dir.trim() !== '') return expandTilde(dir);
   const fromEnv = process.env.AGENT_REPLAY_DIR;
   return fromEnv != null && fromEnv.trim() !== '' ? expandTilde(fromEnv) : '.agent-replay';
+}
+
+/**
+ * The note to add to a "no trace store here" refusal when the user is standing
+ * INSIDE a project whose store is a directory or two up.
+ *
+ * The refusal's advice — run `init` in the project directory — is right for
+ * someone who has no store, and actively wrong for someone who has one and is
+ * simply in a subdirectory of it: following it creates a SECOND store beside
+ * their source and splits their traces between the two. `openStoreOr`'s own
+ * comment already says the real cause is "almost always a wrong working
+ * directory or a missing --dir", and the ancestor chain is right there to be
+ * looked at, so the message can name the store the user actually meant instead
+ * of describing the class of mistake.
+ *
+ * Resolution itself is unchanged: this only reports. Walking up to CHOOSE a
+ * store silently is a different decision (it would change which store every
+ * command reads, everywhere, including a hook firing from an arbitrary
+ * directory) and is not one a refusal message should make.
+ *
+ * Only when the caller did NOT name a directory: with `--dir` or
+ * `AGENT_REPLAY_DIR` given, the working directory is not the story, and
+ * pointing at some unrelated ancestor store would be a worse guess than
+ * silence.
+ */
+export function storeAboveNote(dir?: string, from: string = process.cwd()): string | null {
+  if (dirWasNamed(dir) || (process.env.AGENT_REPLAY_DIR ?? '').trim() !== '') return null;
+  let current = resolve(from);
+  // Skip `from` itself: the caller has already established there is no store
+  // there, and reporting it back would be nonsense.
+  for (let parent = dirname(current); parent !== current; current = parent, parent = dirname(parent)) {
+    if (existsSync(join(parent, '.agent-replay', 'traces.db'))) {
+      return `A store does exist at ${join(parent, '.agent-replay')} — run from ${parent}, or pass --dir ${join(parent, '.agent-replay')}.`;
+    }
+  }
+  return null;
 }
 
 /**

@@ -102,7 +102,7 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
   }
 
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
-  const db = openStoreOr(refuse, () => ensureDatabase(dbPath), dbPath);
+  const db = openStoreOr(refuse, () => ensureDatabase(dbPath), dbPath, opts.dir);
   if (!db) return;
 
   // Resolve trace

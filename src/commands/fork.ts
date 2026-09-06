@@ -6,7 +6,7 @@ import { ensureDatabase } from '../db/index.js';
 import { summaryPanel } from '../ui/boxen-panels.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage } from '../utils/json.js';
-import { resolveDataDir, storeExists } from '../utils/paths.js';
+import { resolveDataDir, storeExists, storeAboveNote } from '../utils/paths.js';
 import { safeText } from '../ui/theme.js';
 
 export interface ForkOptions {
@@ -31,6 +31,11 @@ export function runFork(traceId: string, opts: ForkOptions): void {
   if (!storeExists(resolveDataDir(opts.dir))) {
     console.error(chalk.red(`  No trace store at ${dbPath}.`));
     console.error(chalk.dim('  Run "agent-replay init" in the project directory, or pass --dir <path>.'));
+    // ...and, if the caller is simply standing in a subdirectory of a project
+    // that HAS a store, name it: the advice above would otherwise have them
+    // create a second one beside their source.
+    const above = storeAboveNote(opts.dir);
+    if (above) console.error(chalk.dim(`  ${above}`));
     process.exitCode = 2;
     return;
   }

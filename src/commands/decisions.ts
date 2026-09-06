@@ -19,7 +19,7 @@ export interface DecisionsOptions {
 export function runDecisions(traceId: string, opts: DecisionsOptions = {}): void {
   const refuse = makeRefuse(opts.json);
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
-  const db = openStoreOr(refuse, () => ensureDatabase(dbPath), dbPath);
+  const db = openStoreOr(refuse, () => ensureDatabase(dbPath), dbPath, opts.dir);
   if (!db) return;
 
   let result;

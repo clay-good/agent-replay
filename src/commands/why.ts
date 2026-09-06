@@ -29,7 +29,7 @@ const LINK_LABELS: Record<CausalHop['link'], string> = {
 export function runWhy(traceId: string, opts: WhyOptions = {}): void {
   const refuse = makeRefuse(opts.json);
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
-  const db = openStoreOr(refuse, () => ensureDatabase(dbPath), dbPath);
+  const db = openStoreOr(refuse, () => ensureDatabase(dbPath), dbPath, opts.dir);
   if (!db) return;
 
   // Parse with Number, not parseInt: `--step 1e2` must mean 100 (or be a usage

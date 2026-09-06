@@ -15,6 +15,12 @@ A leading `~` or `~/` SHALL be expanded to the user's home directory. A shell ex
 
 A destructive command SHALL gate on the same decision, not on the raw option: a blank `--dir` does not name a target, so `demo --reset` must still refuse to inherit its target from the environment.
 
+#### Scenario: The store is a directory or two up
+
+- **WHEN** a command that needs a store is run from a subdirectory of a project whose store is at an ancestor's `.agent-replay/`, with no `--dir` given
+- **THEN** the refusal names that store and both ways to reach it, rather than only advising `init` — which would create a second store and split the project's traces
+- **AND** the store actually used is unchanged: resolution does not walk up, it only reports
+
 #### Scenario: Blank value falls through
 
 - **WHEN** `AGENT_REPLAY_DIR` is set and a user runs a command with `--dir "   "`
@@ -26,6 +32,8 @@ A destructive command SHALL gate on the same decision, not on the raw option: a 
 - **THEN** the store resolves under the user's home directory, not a directory named `~` in the working directory
 
 ### Requirement: Store confidentiality
+
+A refusal for a missing store SHALL name a store found in an ancestor of the working directory, when the caller named no directory, so that "run `init` here" cannot be followed into creating a second store for a project that already has one. Resolution SHALL NOT walk up — which store a command reads is decided by `--dir`, `AGENT_REPLAY_DIR`, or the working directory alone.
 
 The system SHALL create `traces.db` and `config.json` owner-only (`0600`), because a trace holds prompts, tool inputs and tool outputs, and the config holds API keys in plaintext. A directory the system creates for itself SHALL be `0700`.
 

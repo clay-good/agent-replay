@@ -34,7 +34,7 @@ export interface ShowOptions {
 export function runShow(traceId: string, opts: ShowOptions = {}): void {
   const refuse = makeRefuse(opts.json);
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
-  const db = openStoreOr(refuse, () => ensureDatabase(dbPath), dbPath);
+  const db = openStoreOr(refuse, () => ensureDatabase(dbPath), dbPath, opts.dir);
   if (!db) return;
 
   // An ambiguous prefix is a usage error answered in the requested shape — it

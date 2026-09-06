@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import chalk from 'chalk';
 import { existsSync } from 'node:fs';
+import { storeAboveNote } from './paths.js';
 
 /**
  * A refusal answered in the shape the caller asked for.
@@ -48,6 +49,8 @@ export function openStoreOr(
   refuse: ReturnType<typeof makeRefuse>,
   open: () => Database.Database,
   dbPath: string,
+  /** The `--dir` the caller was given, so the hint can tell "wrong cwd" from "wrong --dir". */
+  dirOpt?: string,
 ): Database.Database | undefined {
   // A store that is not there is refused, not created. Every caller of this
   // helper only READS, but they all open with `ensureDatabase`, which CREATES
@@ -62,9 +65,15 @@ export function openStoreOr(
   // This is the rule `guard check` and `hook --enforce` already apply, for the
   // same reason and in the same words; creating a store is what `init` is for.
   if (!existsSync(dbPath)) {
+    // Name the store the user probably meant, when they are standing in a
+    // subdirectory of a project that has one: the generic advice below tells
+    // them to run `init`, which would create a second store beside their
+    // source and split their traces in two.
+    const above = storeAboveNote(dirOpt);
     refuse(2, `No trace store at ${dbPath}.`, [
       'Run "agent-replay init" in the project directory to create one,',
       'or point this command at an existing store with --dir <path>.',
+      ...(above ? [above] : []),
     ]);
     return undefined;
   }

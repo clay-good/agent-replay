@@ -16,6 +16,7 @@ import {
   ingestTrace,
 } from '../src/services/trace-service.js';
 import { validateEvent } from '../src/services/event-protocol.js';
+import { storeAboveNote } from '../src/utils/paths.js';
 import { applyEvent } from '../src/services/recorder.js';
 import { mapOtlpTraces } from '../src/services/otel/semconv.js';
 import { applyHookPayload } from '../src/services/hook-adapter.js';
@@ -658,5 +659,81 @@ describe('a read-only command refuses a missing store instead of creating one', 
     // An empty store is a real answer, not a refusal: exit 0, "no traces".
     expect(process.exitCode).toBe(0);
     expect(noAnsi(out.join('\n'))).toMatch(/No traces found/);
+  });
+});
+
+// ── the store is one directory up ─────────────────────────────────────────
+
+describe('a refusal that names the store the caller actually meant', () => {
+  // Standing in a subdirectory of your own project is the ordinary way to meet
+  // "No trace store at ...". The advice attached to it — run `init` in the
+  // project directory — is right for someone who has no store and actively
+  // wrong for someone who has one two levels up: following it creates a SECOND
+  // store beside their source and splits their traces between the two. The
+  // repo's own rule, written in `openStoreOr`: the real cause is almost always
+  // a wrong working directory, and a refusal that prescribes the wrong cure is
+  // worse than a vague one.
+  //
+  // Resolution is unchanged — nothing walks up to CHOOSE a store, which would
+  // silently change which store every command reads. Only the message looks.
+  let root: string;
+  let deep: string;
+  let cwd: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'ar-above-'));
+    mkdirSync(join(root, '.agent-replay'), { recursive: true });
+    writeFileSync(join(root, '.agent-replay', 'traces.db'), '');
+    deep = join(root, 'src', 'deep');
+    mkdirSync(deep, { recursive: true });
+    cwd = process.cwd();
+  });
+  afterEach(() => {
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('names the ancestor store, with both ways to reach it', () => {
+    process.chdir(deep);
+    const note = storeAboveNote(undefined);
+    expect(note).toContain(join(root, '.agent-replay'));
+    // Both remedies, because a user in a shell wants `cd` and a script wants
+    // `--dir`.
+    expect(note).toContain(root);
+    expect(note).toMatch(/--dir/);
+  });
+
+  it('says nothing when there is no store above', () => {
+    const lonely = mkdtempSync(join(tmpdir(), 'ar-lonely-'));
+    try {
+      expect(storeAboveNote(undefined, lonely)).toBeNull();
+    } finally {
+      rmSync(lonely, { recursive: true, force: true });
+    }
+  });
+
+  it('says nothing when the caller named a directory', () => {
+    // With `--dir` given, the working directory is not the story, and pointing
+    // at an unrelated ancestor store would be a worse guess than silence.
+    process.chdir(deep);
+    expect(storeAboveNote(join(root, 'somewhere-else'))).toBeNull();
+  });
+
+  it('says nothing when AGENT_REPLAY_DIR named one', () => {
+    process.chdir(deep);
+    const prev = process.env.AGENT_REPLAY_DIR;
+    process.env.AGENT_REPLAY_DIR = join(root, 'from-env');
+    try {
+      expect(storeAboveNote(undefined)).toBeNull();
+    } finally {
+      if (prev === undefined) delete process.env.AGENT_REPLAY_DIR;
+      else process.env.AGENT_REPLAY_DIR = prev;
+    }
+  });
+
+  it('does not report the directory the caller is already standing in', () => {
+    // That one has just been established to have no store; echoing it back
+    // would be nonsense.
+    expect(storeAboveNote(undefined, root)).toBeNull();
   });
 });
