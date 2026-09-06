@@ -60,6 +60,28 @@ describe('scenario data validation', () => {
       }
     });
 
+    it(`${name} keeps every step inside its own trace window`, () => {
+      // The sibling of the token invariant below, for the other hand-written
+      // number. A step timestamped before its trace started (or after it ended)
+      // renders as a run that did work before it began — `show`'s timeline and
+      // `list`'s ordering both read from these. The importers carry the same
+      // assertion for the same reason; the demo data is written by hand, so a
+      // typo'd offset is exactly how it would break.
+      const data = fn(now);
+      const start = Date.parse(data.started_at as string);
+      const end = data.ended_at ? Date.parse(data.ended_at as string) : null;
+      expect(Number.isNaN(start)).toBe(false);
+      for (const step of data.steps!) {
+        if (!step.started_at) continue;
+        const at = Date.parse(step.started_at);
+        expect(Number.isNaN(at), `${name} step ${step.step_number} has an unparseable started_at`).toBe(false);
+        expect(at, `${name} step ${step.step_number} starts before its trace`).toBeGreaterThanOrEqual(start);
+        if (end != null) {
+          expect(at, `${name} step ${step.step_number} starts after its trace ended`).toBeLessThanOrEqual(end);
+        }
+      }
+    });
+
     it(`${name} declares a total_tokens that equals the sum of its steps`, () => {
       // Otherwise `show` (which prints the stored total_tokens) and `replay`
       // (which re-sums step tokens_used) display different token counts for the
