@@ -443,6 +443,16 @@ and one-way.
 
 ### Fixed
 
+- **The gate's failure line showed the same text on both sides of the arrow.**
+  `check`'s divergence row cut each value to 60 characters from position 0, and
+  tool-call payloads share a long prefix by nature — same tool, same leading
+  arguments — so a real regression reported
+  `golden {"origin":"SFO","destination":"JFK","date":"2026-03-06","... → got
+  {"origin":"SFO","destination":"JFK","date":"2026-03-06","...`: two identical
+  strings, presented as a difference, on the one line an engineer reads when CI
+  goes red. The values are now windowed around where they first differ, which
+  `diff`'s renderer and the AI summary have both done since the helper existed.
+
 - **A golden baseline could bless a regression without saying so.** `check`
   passes a candidate that reproduces ANY baseline entry for its agent+input key,
   which is right — repeated runs of one scenario are all valid baselines — but

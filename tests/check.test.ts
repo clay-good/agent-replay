@@ -1539,6 +1539,59 @@ describe('the gate can see the agent CHOOSING differently', () => {
 
 // ── export: a trace named by id is exported, whatever its lineage ────────────
 
+describe('the gate SHOWS what diverged, not two identical truncations', () => {
+  // Tool-call payloads share a long prefix by nature — same tool, same leading
+  // arguments — and the divergence row cut both values from position 0 at 60
+  // characters. So the one line an engineer reads when CI goes red printed the
+  // same 60 characters twice and called them a difference. `diff`'s renderer
+  // and the AI summary have windowed around the first difference since the
+  // helper existed; the gate had not.
+  let dir: string;
+
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'ar-check-window-')); });
+  afterEach(() => { resetConnection(); rmSync(dir, { recursive: true, force: true }); });
+
+  const run = (name: string, query: Record<string, unknown>) => ({
+    agent_name: name,
+    input: { task: 'search' },
+    status: 'completed' as const,
+    steps: [{ step_number: 1, step_type: 'tool_call' as const, name: 'search_flights', input: query }],
+  });
+
+  const longPrefix = {
+    origin: 'SFO', destination: 'JFK', date: '2026-03-06', passengers: 1, currency: 'USD',
+  };
+
+  it('windows the values around the first difference', () => {
+    const cdb = ensureDatabase(resolve(dir, 'traces.db'));
+    ingestTrace(cdb, run('gate-bot', { ...longPrefix, class: 'economy' }) as never);
+    const goldenPath = join(dir, 'golden.json');
+    writeFileSync(goldenPath, exportTraces(cdb, {}, 'golden'));
+    // The candidate keeps the whole prefix and changes only the tail.
+    ingestTrace(cdb, run('gate-bot', { ...longPrefix, cabin: 'ECONOMY', flexible_dates: true }) as never);
+
+    const out: string[] = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((m?: unknown) => void out.push(String(m ?? '')));
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      runCheck({ golden: goldenPath, dir, fields: 'tool_inputs' });
+    } finally {
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+    }
+
+    const line = out.map((l) => l.replace(/\x1B\[[0-9;]*m/g, '')).find((l) => l.includes('tool_inputs'));
+    expect(line).toBeTruthy();
+    const [golden, candidate] = line!.split('→').map((half) => half.trim());
+    // The two halves must not be the same text — which is exactly what a
+    // position-0 cut produced.
+    expect(golden).not.toBe(candidate);
+    // ...and each must actually show its own differing tail.
+    expect(golden).toContain('economy');
+    expect(candidate).toContain('flexible_dates');
+  });
+});
+
 describe('export <trace-id> --format golden honors the trace it was given', () => {
   it('exports an explicitly named fork, which the bulk exclusion drops', async () => {
     // Regression: `exportGolden` drops forks so one stray fork on a shared

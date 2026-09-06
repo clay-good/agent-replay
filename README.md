@@ -527,7 +527,10 @@ but it has a quiet consequence: a baseline exported from a store that also holds
 a regressed run blesses that run's shape forever. `export --format golden` says
 so when it writes one (naming how many entries share a key), while re-exporting
 from vetted runs still costs nothing. A divergence report names the trace, the
-step, and the differing field. The summary also reports baseline entries **no candidate exercised** — a scenario whose run crashed or never happened at all, which otherwise leaves a gate green with nothing to say about it. Those count as failures under `--strict`, alongside unmatched runs.
+step, and the differing field, with its two values windowed around where they
+first differ — tool payloads share a long prefix, so cutting from the start
+printed the same characters on both sides of the arrow and called them a
+difference. The summary also reports baseline entries **no candidate exercised** — a scenario whose run crashed or never happened at all, which otherwise leaves a gate green with nothing to say about it. Those count as failures under `--strict`, alongside unmatched runs.
 
 Build the baseline from runs that finished cleanly: `export --format golden` warns when entries did not come from a completed run — a `running` trace bakes in a partial shape the next correct run "regresses" against, and a `failed`/`timeout` one makes reproducing the failure pass green. The warning reports how many of the entries that covers, not which condition each hit; filter with `--tag known-good` or `--status completed`.
 

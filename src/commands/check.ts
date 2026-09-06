@@ -11,7 +11,7 @@ import { parseSinceToIso } from '../utils/time.js';
 import { errorMessage } from '../utils/json.js';
 import { resolveDataDir, storeExists, storeAboveNote } from '../utils/paths.js';
 import { makeRefuse } from '../utils/refuse.js';
-import { escapeForMessage, truncate } from '../utils/json.js';
+import { escapeForMessage, truncate, windowedAround } from '../utils/json.js';
 
 export interface CheckOptions {
   golden?: string;
@@ -444,7 +444,7 @@ export function runCheck(opts: CheckOptions = {}): void {
       console.log(`  ${chalk.redBright('✘')} ${chalk.dim(escapeForMessage(r.trace_id.slice(0, 12)))} ${escapeForMessage(r.agent_name)} — ${chalk.redBright('REGRESSED')}`);
       for (const d of r.divergences) {
         const at = d.step_number != null ? chalk.dim(` @step ${d.step_number}`) : '';
-        console.log(`      ${chalk.white(d.field)}${at}: golden ${chalk.green(short(d.golden))} → got ${chalk.redBright(short(d.candidate))}`);
+        console.log(`      ${chalk.white(d.field)}${at}: golden ${chalk.green(short(d.golden, d.candidate))} → got ${chalk.redBright(short(d.candidate, d.golden))}`);
       }
     }
   }
@@ -476,13 +476,25 @@ export function runCheck(opts: CheckOptions = {}): void {
  * and this value comes from agent data or a downloaded golden file — could
  * forge an extra `✔ … — pass` line into the verdict.
  */
-function short(v: unknown): string {
+function short(v: unknown, other?: unknown): string {
   const s = typeof v === 'string' ? v : JSON.stringify(v);
-  // `truncate`, not a bare slice: the cut is at an arbitrary code-unit offset
-  // over agent data, so it can land between the halves of an astral character
-  // and leave a lone surrogate — which the terminal draws as U+FFFD, and only
-  // at some values, since whether it happens depends on the exact offset.
-  const out = s != null ? truncate(s, 60) : String(s);
+  if (s == null) return escapeForMessage(String(s));
+  // Window around the FIRST DIFFERENCE, not from position 0.
+  //
+  // Tool-call payloads share a long prefix by nature — the same tool, the same
+  // leading arguments — so cutting from the start rendered the two values
+  // BYTE-IDENTICALLY and the gate's own failure line read
+  //   `golden {"origin":"SFO","destination":"JFK","date":"2026-03-06","... →
+  //    got {"origin":"SFO","destination":"JFK","date":"2026-03-06","...`
+  // over a real regression (the demo's own pair produces exactly that). This is
+  // the line an engineer reads when CI goes red, and it showed them nothing.
+  //
+  // `diff`'s renderer and the summary sent to the AI analysis have both windowed
+  // for this reason since the helper existed; the gate did not. `windowedAround`
+  // falls back to a plain truncation when the values differ at the start, and
+  // never splits a surrogate pair either way.
+  const o = other === undefined ? undefined : typeof other === 'string' ? other : JSON.stringify(other);
+  const out = o != null ? windowedAround(s, o, 60) : truncate(s, 60);
   return escapeForMessage(out);
 }
 
