@@ -166,6 +166,38 @@ describe('ingest refuses a golden dataset', () => {
   });
 });
 
+describe('a restore is faithful, including steps that were never closed', () => {
+  // `ingest` is both "load a complete trace after the fact" AND the RESTORE
+  // path for an `export` backup. Those pull in opposite directions for a step
+  // with no `ended_at`: the loader would like to close it (every other capture
+  // path now does, for rows whose subject is complete at write time), and the
+  // restore must not, because a hook capture legitimately ends with steps whose
+  // closing event never arrived — `hook` finalize even counts them. Faithful
+  // wins: a backup that quietly changes the data is not a backup.
+  it('keeps an open step open through export and ingest', () => {
+    const source = ensureDatabase(resolve(dir, 'traces.db'));
+    const trace = ingestTrace(source, {
+      agent_name: 'interrupted', status: 'completed', input: { q: 'x' },
+      steps: [
+        { step_number: 1, step_type: 'tool_call', name: 'finished', started_at: '2026-09-06T10:00:00.000Z', ended_at: '2026-09-06T10:00:01.000Z' },
+        // The harness never sent this one's closing event.
+        { step_number: 2, step_type: 'tool_call', name: 'never-closed', started_at: '2026-09-06T10:00:02.000Z' },
+      ],
+    } as never);
+    const backup = exportTraces(source, {}, 'json');
+    resetConnection();
+
+    runIngest(docFile('backup.json', JSON.parse(backup)), { dir: store });
+    const restored = ensureDatabase(resolve(store, 'traces.db'));
+    const steps = getTrace(restored, listTraces(restored, {}).items[0].id)!.steps;
+    expect(steps.map((st) => [st.name, st.ended_at != null])).toEqual([
+      ['finished', true],
+      ['never-closed', false],
+    ]);
+    expect(trace.id).toBeTruthy();
+  });
+});
+
 describe('ingest reports what it actually restored', () => {
   it('restores stored evals without claiming it cannot', () => {
     const doc = sourceDoc((db, id) => {
