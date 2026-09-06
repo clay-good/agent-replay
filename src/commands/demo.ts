@@ -175,7 +175,7 @@ export async function runDemo(opts: DemoOptions = {}): Promise<void> {
   console.log(`   ${chalk.cyanBright('10.')} ${chalk.white('agent-replay dashboard')}               ${chalk.dim('— Full-screen TUI')}`);
   console.log(`       ${chalk.white('agent-replay stats')}                   ${chalk.dim('— Scriptable summary (--json, --since)')}`);
   console.log('');
-  console.log(chalk.white('  Understand why an agent acted (the travel-assistant trace has decisions):'));
+  console.log(chalk.white('  Understand why an agent acted (three of the six traces record decisions):'));
   console.log('');
   console.log(`   ${chalk.cyanBright('11.')} ${chalk.white('agent-replay decisions <trace-id>')}    ${chalk.dim('— List decision points + rationale')}`);
   console.log(`   ${chalk.cyanBright('12.')} ${chalk.white('agent-replay why <trace-id> --step 8')}  ${chalk.dim('— Walk the causal chain')}`);
@@ -187,10 +187,31 @@ export async function runDemo(opts: DemoOptions = {}): Promise<void> {
   console.log(`       ${chalk.white('agent-replay run -- <command>')}         ${chalk.dim('— Wrap an agent; guard check / hook --enforce block bad calls')}`);
   console.log(`       ${chalk.white('agent-replay check --golden / otel serve')} ${chalk.dim('— CI regression gate; OpenTelemetry ingest')}`);
   console.log('');
+  // The gate, on data that can actually fail it: the two travel-assistant runs
+  // are the same request before and after a model upgrade, so a baseline taken
+  // from the older one catches the newer one.
+  console.log(chalk.white('  Gate a regression (the older travel-assistant run is the baseline):'));
+  console.log('');
+  console.log(`       ${chalk.white('agent-replay export <older-id> --format golden --output golden.json')}`);
+  console.log(`       ${chalk.white('agent-replay check --golden golden.json --agent-exact travel-assistant')}`);
+  console.log(`       ${chalk.dim('— exits 1 on the newer run: same steps, different tool query and choice')}`);
+  console.log('');
 
   if (traces.length > 0) {
-    // Prefer the decision-rich travel-assistant trace for the hint.
-    const showcase = traces.find((t) => t.session_id) ?? traces[0];
+    // Name a trace that actually HAS a decision, since the hint's second half
+    // tells the reader to run `decisions` on it. The old selector took the
+    // first trace carrying a session id — a property every demo scenario has —
+    // so which trace it named was decided by row order, and pointing at one
+    // without a decision step answers "No decision steps recorded in ...".
+    const decisionTrace = db
+      .prepare(
+        `SELECT t.id FROM agent_traces t
+          JOIN agent_trace_steps s ON s.trace_id = t.id
+          WHERE s.step_type = 'decision'
+          ORDER BY t.started_at DESC LIMIT 1`,
+      )
+      .get() as { id: string } | undefined;
+    const showcase = traces.find((t) => t.id === decisionTrace?.id) ?? traces[0];
     console.log(chalk.dim(`  Hint: try ${chalk.white(`agent-replay show ${showcase.id.slice(0, 8)}`)} — then ${chalk.white(`decisions ${showcase.id.slice(0, 8)}`)} to see why it chose what it did!`));
     console.log('');
   }

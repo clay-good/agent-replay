@@ -86,6 +86,16 @@ and one-way.
   narrow by agent. Mutually exclusive with `--agent`, refuses an empty value,
   and rejected alongside a trace id, like the filters beside it.
 
+- **The demo walkthrough now shows the regression gate, and its hint names a
+  trace that has a decision.** With a comparable pair in the data, the
+  walkthrough lists the two commands that turn it into a CI gate (`export
+  --format golden` from the older run, then `check --golden --agent-exact`,
+  which exits 1 on the newer one). The closing hint tells you to run
+  `decisions <id>` on the trace it names, and picked the first trace carrying a
+  session id — a property every demo scenario has — so which trace it named was
+  decided by row order rather than by whether it records a decision at all; it
+  now asks for one that does.
+
 - **A sixth demo trace: the same agent, before and after a model upgrade.**
   `demo` seeded five traces from five different agents, and then told you to run
   `agent-replay diff <id-a> <id-b>` — which compared two unrelated runs. The

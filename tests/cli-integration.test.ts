@@ -1465,6 +1465,28 @@ describe('CLI integration', () => {
     expect(freshOut).not.toContain('will be lost');
   });
 
+  it('the walkthrough hint names a trace that actually has a decision', () => {
+    // The hint's second half says to run `decisions <id>` on the trace it
+    // names. The selector took the first trace carrying a session id — which
+    // every demo scenario has — so which one it named was decided by row order,
+    // and a trace without a decision step answers "No decision steps recorded".
+    const store = mkdtempSync(join(tmpdir(), 'ar-demo-hint-')) + '/.agent-replay';
+    mkdirSync(store, { recursive: true });
+    const walk = spawnSync(process.execPath, [CLI, 'demo', '--dir', store], {
+      encoding: 'utf8', input: '\n'.repeat(12), timeout: 60000,
+    });
+    const hint = (walk.stdout.match(/Hint: try agent-replay show (\S+)/) ?? [])[1];
+    expect(hint).toBeTruthy();
+
+    const doc = JSON.parse(
+      execFileSync(process.execPath, [CLI, 'show', hint, '--json', '--dir', store], { encoding: 'utf8', stdio: 'pipe' }),
+    ) as { steps: Array<{ step_type: string; decision?: unknown }> };
+    const decisions = doc.steps.filter((st) => st.step_type === 'decision');
+    expect(decisions.length).toBeGreaterThan(0);
+    expect(decisions[0].decision).toBeTruthy();
+    rmSync(store, { recursive: true, force: true });
+  }, 70000);
+
   it('demo --reset names what it is about to destroy', () => {
     // Every other --reset guard is about WHERE it deletes; none of them opens
     // the store, so a real captured run, its evaluations and a hand-written
