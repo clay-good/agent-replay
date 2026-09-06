@@ -887,6 +887,14 @@ decision, plus the trace's input, status and error. State snapshots are outside
 it, so two runs whose only difference is the context window report none —
 read those with `show <id> --snapshots`.
 
+**"I see two traces for one session."** Two capture paths recorded it, and none
+of them can see another's work: the hook adapter looks up only its own open
+trace, the OpenTelemetry receiver merges only within its own signal, `import`
+identifies a session by file, and `record` opens a trace when its stream says
+to. Each says so at the time — the receiver on its console, `import` and
+`record` on stderr — so keep one path per session, or expect `stats`, `list` and
+a golden baseline to include both.
+
 **"`guard test` found deny matches and still exited 0."** It is a report, not a
 gate. `guard check` and `hook --enforce` are the paths that answer with an exit
 code.
