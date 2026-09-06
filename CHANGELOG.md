@@ -443,6 +443,16 @@ and one-way.
 
 ### Fixed
 
+- **Enabling the hook AND the OTel exporter silently doubled everything.** Both
+  are documented for the same harness, and a batch deliberately never merges
+  into a trace written by another capture path — their steps and numbering mean
+  different things. So a session captured both ways became two traces with the
+  same agent and session id, and `stats` counted two runs, `list` showed two
+  rows, a golden baseline held two shapes of one session, and `watch` attached
+  to whichever was newer. Nothing said so. The receiver now announces it once
+  per session, on the console of the process the person who configured both is
+  watching.
+
 - **The AI diff was handed two identical lines and asked what differs.** The
   summary sent to `diff --ai` cut each trace's input, output and error to 200
   characters from position 0 — and two runs of one agent share their input

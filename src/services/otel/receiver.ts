@@ -54,6 +54,12 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 export interface OtelStats {
   acceptedSpans: number;
   acceptedTraces: number;
+  /**
+   * Sessions this receiver opened a trace for that ANOTHER capture path had
+   * already recorded. Collected here so the request handler can say it on the
+   * console once per session; see `noteSourceCollision`.
+   */
+  sessionCollisions?: Set<string>;
 }
 
 // Bound the receiver's memory against a runaway or hostile client. An
@@ -207,12 +213,50 @@ function findMergeTarget(db: Database.Database, input: IngestTraceInput): string
  * never stored (and counting them again when the exporter retries).
  */
 function storeOtelBatch(db: Database.Database, traces: MappedOtelTrace[], stats: OtelStats): void {
-  const accepted: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+  // The collisions noticed inside the transaction are merged out only after it
+  // COMMITS, like the counters beside them: a rolled-back batch stored nothing,
+  // so it has no second trace to report.
+  const accepted: OtelStats = { acceptedSpans: 0, acceptedTraces: 0, sessionCollisions: new Set<string>() };
   db.transaction(() => {
     for (const t of traces) upsertOtelTrace(db, t, accepted);
   }).immediate();
   stats.acceptedTraces += accepted.acceptedTraces;
   stats.acceptedSpans += accepted.acceptedSpans;
+  if (stats.sessionCollisions) {
+    for (const sessionId of accepted.sessionCollisions ?? []) stats.sessionCollisions.add(sessionId);
+  }
+}
+
+/**
+ * Notice when this session is ALREADY being captured by another path.
+ *
+ * `findMergeTarget` scopes its lookup by `source_format`, deliberately: an OTLP
+ * batch must not merge into a trace written by a different capture path, whose
+ * steps and numbering mean something else. The consequence is invisible, and
+ * the README documents both paths for the same harness — so a user who turns on
+ * the hook AND points the exporter here gets TWO traces per session, same agent,
+ * same session id. Every store-wide count then doubles: `stats` reports two
+ * runs, `list` shows two rows, a golden baseline holds two shapes of one
+ * session, and `watch` with no id attaches to whichever is newer.
+ *
+ * Reported, not merged: which of the two is "the" trace, and how their steps
+ * interleave, is not something this receiver can decide. Once per session, on
+ * the console, where the person who configured both is looking.
+ */
+function noteSourceCollision(db: Database.Database, input: IngestTraceInput, stats: OtelStats): void {
+  const sessionId = input.session_id;
+  if (!sessionId || !stats.sessionCollisions || stats.sessionCollisions.has(sessionId)) return;
+  const meta = (input.metadata ?? {}) as Record<string, unknown>;
+  const sourceFormat = typeof meta.source_format === 'string' ? meta.source_format : null;
+  const other = db
+    .prepare(
+      `SELECT json_extract(metadata, '$.source_format') AS source FROM agent_traces
+        WHERE session_id = ? AND parent_trace_id IS NULL
+          AND json_extract(metadata, '$.source_format') IS NOT ?
+        LIMIT 1`,
+    )
+    .get(sessionId, sourceFormat) as { source: unknown } | undefined;
+  if (other) stats.sessionCollisions.add(sessionId);
 }
 
 /** Merge a mapped batch into its existing trace, or open a new one. */
@@ -371,6 +415,7 @@ function upsertOtelTrace(db: Database.Database, input: MappedOtelTrace, stats: O
     stats.acceptedSpans += steps?.length ?? 0;
     return;
   }
+  noteSourceCollision(db, input, stats);
   ingestTrace(db, input);
   stats.acceptedTraces++;
   // Counts STEPS STORED, which is how `otel serve` reports it ("Accepted N
@@ -678,6 +723,10 @@ export function startOtelReceiver(db: Database.Database, port: number, stats: Ot
   // Refusals already announced on this server's console, so a repeating
   // exporter is reported once rather than every export interval.
   const announced = new Set<string>();
+  // Sessions another capture path is already recording. The mapper fills this
+  // (see `noteSourceCollision`); the handler drains it after each batch, so the
+  // notice lands on the console of the process the user is watching.
+  stats.sessionCollisions ??= new Set<string>();
   /**
    * Say something on the operator's console the first time a distinct problem
    * happens, and stay quiet about it afterwards.
@@ -718,6 +767,20 @@ export function startOtelReceiver(db: Database.Database, port: number, stats: Ot
     announce(`fail ${status} ${reason}`, [`export failed with ${status}: ${reason} — nothing from that batch was stored.`]);
   };
 
+  /**
+   * Say, once per session, that another capture path already has this session.
+   * The set is filled where the trace is opened; draining it here keeps the
+   * console message in the request path that caused it.
+   */
+  const announceCollisions = (): void => {
+    for (const sessionId of stats.sessionCollisions ?? []) {
+      announce(`collision ${sessionId}`, [
+        `session ${truncate(sessionId, 60)} is already captured by another path — this receiver opened a SECOND trace for it.`,
+        'Two capture paths on one session double every store-wide count. Keep one: turn off the hook, or point the exporter elsewhere.',
+      ]);
+    }
+  };
+
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = req.url ?? '';
     const contentType = req.headers['content-type'] ?? '';
@@ -751,6 +814,7 @@ export function startOtelReceiver(db: Database.Database, port: number, stats: Ot
           ? handleLogsExportProtobuf(db, raw, stats)
           : handleTracesExportProtobuf(db, raw, stats);
         if (status === 200) {
+          announceCollisions();
           res.writeHead(200, { 'content-type': 'application/x-protobuf' }).end(Buffer.alloc(0));
           return;
         }
@@ -767,6 +831,7 @@ export function startOtelReceiver(db: Database.Database, port: number, stats: Ot
       const body = raw.toString('utf-8');
       const { status, payload } = isLogs ? handleLogsExport(db, body, stats) : handleTracesExport(db, body, stats);
       if (status !== 200) announceFailure(status, payload);
+      announceCollisions();
       res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(payload));
     } catch (err) {
       const status = err instanceof HttpError ? err.status : 500;

@@ -140,8 +140,12 @@ Point an exporter at it over HTTP/JSON. Most emitters default to gRPC on port 43
 - **Claude Code** — `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/json`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` (opt into content with `OTEL_LOG_USER_PROMPTS=1`)
 - **Goose / OpenHands** — `OTEL_EXPORTER_OTLP_PROTOCOL=http/json`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318`
 
-These endpoints take a *base* URL and the SDK appends the signal path itself, so a harness with its metrics exporter also on will POST `/v1/metrics` here every export interval. `agent-replay` has no metric target — it maps spans and log events onto traces — so those exports are refused, not stored: the response says so (rather than a bare 404, which reads as a mistyped path), and the receiver's console says so once per path rather than once per interval. Set `OTEL_METRICS_EXPORTER=none` to stop them at the source; trace and log capture work either way. The console reports failures the same
-way: an export the receiver could not store (a store gone read-only, a full
+These endpoints take a *base* URL and the SDK appends the signal path itself, so a harness with its metrics exporter also on will POST `/v1/metrics` here every export interval. `agent-replay` has no metric target — it maps spans and log events onto traces — so those exports are refused, not stored: the response says so (rather than a bare 404, which reads as a mistyped path), and the receiver's console says so once per path rather than once per interval. Set `OTEL_METRICS_EXPORTER=none` to stop them at the source; trace and log capture work either way. If a session is already being captured
+another way — the hook and the OpenTelemetry exporter both on for one Claude
+Code session — the receiver opens a **second** trace for it (the two paths
+record different things and must not be merged) and says so once per session,
+because two capture paths on one session double every store-wide count. The
+console reports failures the same way: an export the receiver could not store (a store gone read-only, a full
 disk, a malformed batch) is announced once per distinct reason, so a receiver
 that is dropping everything does not look like one that is merely quiet.
 

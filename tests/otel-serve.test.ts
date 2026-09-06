@@ -4,6 +4,8 @@ import { createServer } from 'node:net';
 import { request as httpRequest } from 'node:http';
 import { gzipSync } from 'node:zlib';
 import Database from 'better-sqlite3';
+import { runMigrations } from '../src/db/migrations.js';
+import { ingestTrace } from '../src/services/trace-service.js';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -416,6 +418,56 @@ describe('otel serve (end-to-end)', () => {
     const row = db.prepare('SELECT COUNT(*) AS n FROM agent_traces').get() as { n: number };
     db.close();
     expect(row.n).toBe(1);
+  }, 20000);
+
+  it('says when another capture path already has this session', async () => {
+    // The README documents both the hook and the OTel exporter for the same
+    // harness, and `findMergeTarget` scopes its lookup by source_format — for
+    // good reason, since the two paths' steps mean different things. So turning
+    // both on gives TWO traces per session, same agent, same session id, and
+    // every store-wide count doubles. Nothing said so.
+    const { base, stderr } = await startReceiverCapturingStderr();
+    const sessionId = 'sess-two-paths';
+    // A trace from a DIFFERENT capture path, already in the store.
+    const seed = new Database(join(dir, 'traces.db'));
+    seed.pragma('foreign_keys = ON');
+    runMigrations(seed);
+    ingestTrace(seed, {
+      agent_name: 'claude-code', status: 'running', session_id: sessionId,
+      input: { prompt: 'hi' },
+      metadata: { dialect: 'claude-code' },
+      steps: [{ step_number: 1, step_type: 'tool_call', name: 'Bash' }],
+    } as never);
+    seed.close();
+
+    const logs = JSON.stringify({
+      resourceLogs: [{
+        resource: { attributes: [{ key: 'service.name', value: { stringValue: 'claude-code' } }] },
+        scopeLogs: [{ logRecords: [{
+          timeUnixNano: '1750000000000000000',
+          body: { stringValue: 'claude_code.api_request' },
+          attributes: [
+            { key: 'event.name', value: { stringValue: 'claude_code.api_request' } },
+            { key: 'session.id', value: { stringValue: sessionId } },
+            { key: 'model', value: { stringValue: 'claude-opus-5' } },
+            { key: 'input_tokens', value: { intValue: '120' } },
+          ],
+        }] }],
+      }],
+    });
+    for (let i = 0; i < 3; i++) {
+      const res = await fetch(`${base}/v1/logs`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: logs,
+      });
+      expect(res.status).toBe(200);
+    }
+
+    await sleep(300);
+    // Once per session, however many batches arrive.
+    const lines = stderr().split('\n').filter((l) => l.includes('already captured by another path'));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain(sessionId);
+    expect(stderr()).toMatch(/double every store-wide count/);
   }, 20000);
 
   it('announces an export it could not store, once per reason', async () => {
