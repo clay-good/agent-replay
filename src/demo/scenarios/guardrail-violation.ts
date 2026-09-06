@@ -85,6 +85,22 @@ export function guardrailViolation(baseTime: Date): IngestTraceInput {
         started_at: t(300_000 - 350),
         duration_ms: 100,
         tokens_used: 300,
+        // The choice this step made, as a RECORD and not only as prose in its
+        // output. `decisions`, `why` and `check --fields decisions` all read the
+        // record; a step typed `decision` without one shows as "(no structured
+        // decision record)" — which is what the demo showed for two of its three
+        // decision points, on the data that exists to demonstrate the feature.
+        decision: {
+          options: [
+            { option: 'proceed_with_deletion', rationale: 'Ticket asks for the cleanup; batch DELETE is the direct route', score: 0.71 },
+            { option: 'request_human_approval', rationale: '847 rows in production is above the usual self-serve threshold', score: 0.64 },
+            { option: 'export_then_delete', rationale: 'Safer but slower; the ticket set no retention requirement', score: 0.42 },
+          ],
+          chosen: 'proceed_with_deletion',
+          rationale: 'Ticket authorizes the cleanup and the rows match the stated 90-day rule.',
+          confidence: 0.71,
+          decided_by: 'agent',
+        },
         metadata: {},
       },
       {

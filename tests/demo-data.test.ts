@@ -180,3 +180,32 @@ describe('seedDemoData', () => {
     expect(() => seedDemoData(db)).toThrow(/already exists/);
   });
 });
+
+describe('every demo decision step carries a decision record', () => {
+  // The demo is what a first run shows, and `decisions` / `why` /
+  // `check --fields decisions` all read the RECORD, not the step's prose
+  // output. Two of the three demo decision points had no record, so the
+  // showcase answered "(no structured decision record)" for the feature it
+  // exists to showcase — and no demo baseline could exercise
+  // `--fields decisions` for those agents.
+  it('has no decision-typed step without one', () => {
+    const bare: string[] = [];
+    for (const fn of [customerServiceHallucination, codeAgentError, ragContextPollution, successfulBooking, guardrailViolation]) {
+      const scenario = fn(now);
+      for (const step of scenario.steps ?? []) {
+        if (step.step_type === 'decision' && !step.decision) bare.push(`${scenario.agent_name}:${step.name}`);
+      }
+    }
+    expect(bare).toEqual([]);
+  });
+
+  it('records a chosen option that is one of the options offered', () => {
+    for (const fn of [customerServiceHallucination, codeAgentError, ragContextPollution, successfulBooking, guardrailViolation]) {
+      for (const step of fn(now).steps ?? []) {
+        if (!step.decision) continue;
+        const offered = (step.decision.options ?? []).map((o) => (o as { option: string }).option);
+        expect(offered).toContain(step.decision.chosen);
+      }
+    }
+  });
+});

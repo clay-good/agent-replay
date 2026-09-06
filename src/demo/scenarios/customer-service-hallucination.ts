@@ -131,6 +131,20 @@ export function customerServiceHallucination(baseTime: Date): IngestTraceInput {
         started_at: t(3_600_000 - 2470),
         duration_ms: 50,
         tokens_used: 200,
+        // The step that decided to answer instead of escalating — the moment
+        // this scenario is about — recorded so `decisions` and `why` can show
+        // it. The confidence is the agent's own, and it was wrong: that is the
+        // point of the trace.
+        decision: {
+          options: [
+            { option: 'proceed', rationale: 'Self-reported confidence 0.92 is above the 0.7 threshold', score: 0.92 },
+            { option: 'escalate_to_human', rationale: 'No retrieved document actually states the policy', score: 0.31 },
+          ],
+          chosen: 'proceed',
+          rationale: 'Confidence above threshold, so the answer was sent without a human check.',
+          confidence: 0.92,
+          decided_by: 'agent',
+        },
         metadata: {},
       },
       {

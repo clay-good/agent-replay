@@ -419,6 +419,16 @@ and one-way.
 
 ### Fixed
 
+- **Two of the demo's three decision points had no decision record.** `demo` is
+  what a first run shows, and `decisions`, `why` and `check --fields decisions`
+  all read the structured record rather than the step's prose output — so the
+  showcase answered "(no structured decision record)" for the feature it exists
+  to showcase, and no demo baseline could exercise `--fields decisions` for
+  those agents. The two steps that decide the story of their scenario (an agent
+  choosing to run a production DELETE, and one choosing to answer instead of
+  escalating at 0.92 self-reported confidence) now carry the options, rationale
+  and confidence they were already describing in free text.
+
 - **`diff` called a trace that merely STOPPED a divergence.** `divergence_step`
   was pinned by the first step present on one side only, so a run that ends
   early — a fork nobody has explored yet, a run that crashed at step 2 — was
