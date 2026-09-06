@@ -559,9 +559,14 @@ function matchesPolicy(step: TraceStep, policy: GuardrailPolicy): string | null 
 export function noEnabledPolicyReason(
   dbPath: string,
   policies: { enabled: boolean; name: string }[],
-  pointAt: 'check' | 'hook',
+  pointAt: 'check' | 'hook' | 'test',
 ): string {
-  const target = pointAt === 'check' ? 'the check' : 'the hook';
+  const target = pointAt === 'check' ? 'the check' : pointAt === 'hook' ? 'the hook' : 'the report';
+  // `--allow-empty` is a GATE's escape hatch: it means "pass anyway". `guard
+  // test` is a report and has no such flag, so offering it there would send the
+  // reader after an option that does not exist — the class of false statement
+  // this function was written to remove.
+  const unguarded = pointAt === 'test' ? '' : ', or pass --allow-empty to run unguarded';
   if (policies.length > 0) {
     const names = policies.slice(0, 3).map((p) => p.name).join(', ');
     const more = policies.length > 3 ? `, +${policies.length - 3} more` : '';
@@ -569,11 +574,11 @@ export function noEnabledPolicyReason(
       `no enabled guardrail policies in ${dbPath} — ${policies.length} ` +
       `${policies.length === 1 ? 'policy is' : 'policies are'} present but disabled (${names}${more}); ` +
       `re-enable one with "agent-replay guard enable <name>", add another with ` +
-      `"agent-replay guard add", or pass --allow-empty to run unguarded`
+      `"agent-replay guard add"${unguarded}`
     );
   }
   return (
     `no enabled guardrail policies in ${dbPath} — add one with "agent-replay guard add", ` +
-    `point ${target} at the right store with --dir, or pass --allow-empty to run unguarded`
+    `point ${target} at the right store with --dir${unguarded}`
   );
 }

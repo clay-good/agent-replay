@@ -2372,6 +2372,19 @@ and one-way.
   read the identical attribute — so `stats` showed no cost and `list --sort cost`
   was inert for every span-captured trace. It also ignored a reported
   `total_tokens` when the input/output split was absent.
+- `guard test` reported `✔ No policy violations found.` against a store with no
+  enabled policy — a green tick for a check that could not fire. Its two sibling
+  evaluation paths, `guard check` and `hook --enforce`, already refuse to answer
+  green there and share a sentence that says whether the store holds no policies
+  or only disabled ones; this one never asked. It now reports that instead, on
+  stderr so `guard test <id> > findings.txt` still captures findings alone, and
+  a clean run says how many policies it was checked against. `--json` carries
+  `summary.enabled_policies`, since a document reporting `total: 0` was
+  otherwise identical whether the run was clean or nothing was armed to check
+  it. The exit code is unchanged at `0`: this is a report, not a gate.
+- The shared "no enabled policies" sentence offered `--allow-empty`, a gate's
+  escape hatch that `guard test` does not have, so it is omitted there rather
+  than sending the reader after a flag that does not exist.
 - `list` told you to run `agent-replay demo` when a FILTER matched nothing, not
   only when the store was empty — so `list --agent typo` against a store holding
   hundreds of traces read as though they were gone. Only `--source` had been

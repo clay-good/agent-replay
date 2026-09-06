@@ -765,6 +765,71 @@ describe('the guard commands', () => {
     expect(stdout()).toMatch(/1 REQUIRE_REVIEW action\(s\) would block without an approval/);
   });
 
+  it('does not report a clean run when nothing was armed to check it', async () => {
+    // `✔ No policy violations found.` for a store with no enabled policy states
+    // the result of a check that never ran. `guard check` and `hook --enforce`
+    // — the other two evaluation paths — already refuse to answer green here;
+    // this one, their sibling, printed a green tick.
+    const { runGuardTest } = await import('../src/commands/guard.js');
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { join: pjoin } = await import('node:path');
+    const { tmpdir: otmp } = await import('node:os');
+    const bare = mkdtempSync(pjoin(otmp(), 'ar-guardtest-'));
+    const db2 = new Database(`${bare}/traces.db`);
+    let traceId = '';
+    try {
+      db2.pragma('foreign_keys = ON');
+      runMigrations(db2);
+      traceId = ingestTrace(db2, {
+        agent_name: 'a', input: {},
+        steps: [{ step_number: 1, step_type: 'tool_call', name: 'delete_user' }],
+      } as Parameters<typeof ingestTrace>[1]).id;
+    } finally { db2.close(); }
+
+    process.exitCode = 0;
+    runGuardTest(traceId, { dir: bare });
+    // The verdict line rides the spinner, which is stderr — the same stream the
+    // green tick it replaces was written to, so `guard test <id> > findings.txt`
+    // still captures only findings.
+    // The remedy goes to stderr, beside every other note this command writes —
+    // `guard test <id> > findings.txt` must still capture findings alone, and an
+    // absence of findings is not one.
+    const text = stderr();
+    expect(stdout()).not.toMatch(/No policy violations found/);
+    expect(text).toMatch(/no enabled guardrail policies/);
+    expect(text).toMatch(/guard add/);
+    // `--allow-empty` is a GATE's escape hatch; this command has no such flag,
+    // and naming one that does not exist is the same class of false statement.
+    expect(text).not.toMatch(/--allow-empty/);
+    // Still a report, not a gate: the exit code is documented as 0 either way.
+    expect(process.exitCode).toBe(0);
+    rmSync(bare, { recursive: true, force: true });
+  });
+
+  it('says a clean run was checked, and by how many policies', async () => {
+    // The control: with something armed, the green line is earned — and now
+    // says what it was measured over, so it cannot be confused with the case
+    // above.
+    const { runGuardTest } = await import('../src/commands/guard.js');
+    const db2 = new Database(`${dir}/traces.db`);
+    let traceId = '';
+    try {
+      db2.pragma('foreign_keys = ON');
+      addPolicy(db2, { name: 'never-matches', action: 'deny', match_pattern: { name_contains: 'zzz-no-such-tool' } });
+      traceId = ingestTrace(db2, {
+        agent_name: 'a', input: {},
+        steps: [{ step_number: 1, step_type: 'tool_call', name: 'read_file' }],
+      } as Parameters<typeof ingestTrace>[1]).id;
+    } finally { db2.close(); }
+
+    out.length = 0;
+    runGuardTest(traceId, { dir, json: true });
+    const doc = JSON.parse(stdout()) as { summary: { total: number; enabled_policies: number } };
+    expect(doc.summary.total).toBe(0);
+    expect(doc.summary.enabled_policies).toBe(1);
+    expect(stderr()).not.toMatch(/no enabled guardrail policies/);
+  });
+
   it('is a report, not a gate: a deny match still exits 0', async () => {
     // `guard test` answers with findings, not a verdict — `guard check` and
     // `hook --enforce` are the paths that gate. Worth pinning because the exit
@@ -980,7 +1045,7 @@ describe('the guard commands', () => {
     const doc = JSON.parse(stdout()) as {
       trace_id: string;
       matches: Array<{ step_number: number; policy_name: string; action: string; reason: string }>;
-      summary: { total: number; steps_with_matches: number; deny: number; require_review: number; warn: number };
+      summary: { total: number; steps_with_matches: number; enabled_policies: number; deny: number; require_review: number; warn: number };
     };
     expect(doc.trace_id).toBe(t.id);
     expect(doc.matches.map((m) => [m.step_number, m.policy_name, m.action])).toEqual([
@@ -989,7 +1054,10 @@ describe('the guard commands', () => {
     ]);
     // `require_review` blocks too, without an approval: a document reporting
     // only `deny` would let a job read "0" as "nothing would have stopped this".
-    expect(doc.summary).toEqual({ total: 2, steps_with_matches: 2, deny: 1, require_review: 1, warn: 0 });
+    // `enabled_policies` says how many rules could have matched: a document
+    // reporting `total: 0` is otherwise identical whether the run was clean or
+    // nothing was armed to check it.
+    expect(doc.summary).toEqual({ total: 2, steps_with_matches: 2, enabled_policies: 2, deny: 1, require_review: 1, warn: 0 });
     // A report, not a gate — the exit code is 0 whatever it finds.
     expect(process.exitCode).toBe(0);
   });

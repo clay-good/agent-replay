@@ -344,6 +344,14 @@ export function runGuardTest(traceId: string, opts: GuardTestOptions = {}): void
     return;
   }
 
+  // Whether anything could have matched at all. A report is not a gate — this
+  // command exits 0 whatever it finds, by design — but it is still obliged to be
+  // true, and "No policy violations found." for a store with no enabled policy
+  // states the result of a check that never ran. Its two sibling evaluation
+  // paths already refuse to answer green here; this one reported a green tick.
+  const policies = listPolicies(db);
+  const armed = policies.filter((p) => p.enabled).length;
+
   const totalMatches = results.reduce((sum, r) => sum + r.matches.length, 0);
   const stepsWithMatches = results.filter((r) => r.matches.length > 0);
   const every = results.flatMap((r) => r.matches);
@@ -373,6 +381,11 @@ export function runGuardTest(traceId: string, opts: GuardTestOptions = {}): void
           summary: {
             total: totalMatches,
             steps_with_matches: stepsWithMatches.length,
+            // How many policies could have matched. A document reporting
+            // `total: 0` is otherwise identical whether the run was clean or
+            // nothing was armed to check it, and a CI job reading the first as
+            // the second is the whole failure this field exists to prevent.
+            enabled_policies: armed,
             // `require_review` blocks too, without an approval — the human
             // summary says so, and a document that omitted the count would let
             // a CI job read "0 deny" as "nothing would have stopped this".
@@ -388,8 +401,26 @@ export function runGuardTest(traceId: string, opts: GuardTestOptions = {}): void
     return;
   }
 
+  if (armed === 0) {
+    // Reported, not refused: the README documents `guard test` as a report that
+    // exits 0 whatever it finds, and a script gating on that must keep working.
+    // But it is still a report, and "No policy violations found." here states
+    // the result of a check that never ran.
+    //
+    // The verdict rides the spinner, as the green tick it replaces did; the
+    // remedy goes through console.error so it lands beside every other note
+    // this file writes — and so `guard test <id> > findings.txt` still captures
+    // findings alone, an absence of findings not being one. The shared sentence
+    // also distinguishes "no policies at all" from "all of them are disabled",
+    // whose remedies differ.
+    failSpinner(spinner!, 'Nothing to test — no guardrail policy is enabled.');
+    console.error(chalk.dim(`  ${noEnabledPolicyReason(dbPath, policies, 'test')}.`));
+    console.log('');
+    return;
+  }
+
   if (totalMatches === 0) {
-    successSpinner(spinner!, 'No policy violations found.');
+    successSpinner(spinner!, `No policy violations found (${armed} enabled ${armed === 1 ? 'policy' : 'policies'} checked).`);
     console.log('');
     return;
   }
