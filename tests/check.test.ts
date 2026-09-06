@@ -45,6 +45,47 @@ function candidate(input: IngestTraceInput): TraceWithDetails {
   return getTrace(db, t.id)!;
 }
 
+describe('a run that reaches completed is a fix, not a status regression', () => {
+  // `step_errors` is deliberately one-directional — its comment says a symmetric
+  // comparison would report REGRESSED on every green run after a baseline that
+  // caught one flaky failure. The trace-level `status` comparison right beneath
+  // it was symmetric, so that exact scenario played out a level up. `export
+  // --format golden` even warns when a baseline entry is not from a completed
+  // run and names this outcome ("later correct runs then 'regress'"), so the
+  // tool described the defect in one command and produced it in another.
+  function goldenWithStatus(status: string): GoldenEntry[] {
+    const g = makeGolden();
+    (g[0].metadata as { status?: string }).status = status;
+    return g;
+  }
+
+  it.each(['failed', 'timeout', 'running'])('passes a completed run against a %s baseline', (status) => {
+    const report = checkGolden(goldenWithStatus(status), [candidate({ ...baseline, status: 'completed' })]);
+    expect(report.ok).toBe(true);
+    expect(report.failed).toBe(0);
+    expect(report.results[0].divergences.filter((d) => d.field === 'status')).toEqual([]);
+  });
+
+  it.each(['failed', 'timeout'])('still regresses a completed baseline that now ends %s', (status) => {
+    const report = checkGolden(goldenWithStatus('completed'), [candidate({ ...baseline, status })]);
+    expect(report.ok).toBe(false);
+    expect(report.failed).toBe(1);
+    expect(report.results[0].divergences).toContainEqual(
+      expect.objectContaining({ field: 'status', golden: 'completed', candidate: status }),
+    );
+  });
+
+  it('still reports a change of failure mode', () => {
+    // Only arriving at `completed` is exempt. failed → timeout is a different
+    // failure, not a fix, and must stay visible.
+    const report = checkGolden(goldenWithStatus('failed'), [candidate({ ...baseline, status: 'timeout' })]);
+    expect(report.ok).toBe(false);
+    expect(report.results[0].divergences).toContainEqual(
+      expect.objectContaining({ field: 'status', golden: 'failed', candidate: 'timeout' }),
+    );
+  });
+});
+
 // ── Hashing ────────────────────────────────────────────────────────────────
 
 describe('input hashing', () => {

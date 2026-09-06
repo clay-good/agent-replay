@@ -336,6 +336,21 @@ and one-way.
 
 ### Fixed
 
+- **`check --golden` reported a FIX as a regression.** The per-step
+  `step_errors` comparison is deliberately one-directional — a step that stops
+  failing is not a regression, because a baseline that captured one flaky
+  failure would otherwise report REGRESSED on every green run after it — but the
+  trace-level `status` comparison directly beneath it was symmetric, so that
+  exact scenario played out a level up: a baseline exported from a run that
+  failed or timed out once flagged `status: golden failed → got completed` at
+  exit 1 forever, until someone re-exported it. `export --format golden` already
+  warns when a baseline entry is not from a completed run and names this very
+  outcome ("later correct runs then 'regress'"), so the tool was describing the
+  defect in one command and producing it in another. A candidate that reaches
+  `completed` is now never a `status` regression. Every other transition still
+  diverges — `completed` to `failed` or `timeout`, and a change of failure mode
+  such as `failed` to `timeout` — because only arriving at `completed` cannot be
+  a regression.
 - **`check --golden`'s "nothing to compare" refusal explained the wrong cause,
   and for one field prescribed a cure that cannot work.** A single generic hint
   covered every field and named causes belonging to two of them: `--fields

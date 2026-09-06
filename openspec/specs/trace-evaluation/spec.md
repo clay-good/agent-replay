@@ -74,6 +74,12 @@ The gate SHALL refuse rather than report a pass whenever it cannot actually comp
 - **THEN** the command reports a `step_errors` divergence and exits non-zero, even when every other structural field matches
 - **AND** a step that stops failing is NOT reported, since a fix is not a regression
 
+#### Scenario: A run that used to fail now succeeds
+
+- **WHEN** a matched candidate ends `completed` while its golden counterpart recorded `failed`, `timeout` or `running`
+- **THEN** no `status` divergence is reported, for the same reason `step_errors` is one-directional: a baseline that captured one flaky failure would otherwise report REGRESSED on every subsequent green run
+- **AND** every other transition still diverges — `completed` to `failed` or `timeout`, and a change of failure mode such as `failed` to `timeout` — because only arriving at `completed` cannot be a regression
+
 #### Scenario: The model is swapped underneath a passing gate
 
 - **WHEN** a matched candidate ran a step on a different model than its golden counterpart, and `model` is among the compared fields

@@ -363,7 +363,26 @@ function diffAgainstGolden(trace: TraceWithDetails, golden: GoldenEntry, fields:
 
   if (fields.includes('status')) {
     const goldenStatus = (golden.metadata as { status?: string })?.status;
-    if (goldenStatus != null && goldenStatus !== trace.status) {
+    // ONE-DIRECTIONAL, for the same reason `step_errors` is, one block above: a
+    // run that reached `completed` where the baseline did not is a FIX, and a
+    // gate that reports a fix as a regression is the false-positive class this
+    // format exists to avoid.
+    //
+    // The comparison was symmetric here while the step-level one was not, so the
+    // very scenario that comment warns about played out a level up: a baseline
+    // captured from a run that failed or timed out once reported REGRESSED
+    // ("status: golden failed → got completed") on every subsequent green run,
+    // until someone re-exported it. `export --format golden` already warns when
+    // a baseline entry is not from a completed run, and names this outcome
+    // exactly — "an in-flight run bakes in a partial shape (later correct runs
+    // then 'regress')" — so the tool was describing the defect in one command
+    // and producing it in another.
+    //
+    // Every other transition still diverges: completed → failed, completed →
+    // timeout, and a change of failure mode such as failed → timeout. Only
+    // arriving at `completed` is exempt, because only that direction cannot be
+    // a regression.
+    if (goldenStatus != null && goldenStatus !== trace.status && trace.status !== 'completed') {
       divergences.push({ field: 'status', golden: goldenStatus, candidate: trace.status });
     }
   }
