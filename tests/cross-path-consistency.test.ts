@@ -6,6 +6,12 @@ import { join } from 'node:path';
 import { runMigrations } from '../src/db/migrations.js';
 import { applyHookPayload } from '../src/services/hook-adapter.js';
 import { importClaudeTranscript } from '../src/services/importers/claude-transcript.js';
+import { importCodexRollout } from '../src/services/importers/codex-rollout.js';
+import { mapOtlpLogs } from '../src/services/otel/log-events.js';
+import { makeTranslator } from '../src/services/stream-translators.js';
+import { applyEvent } from '../src/services/recorder.js';
+import { ingestTrace } from '../src/services/trace-service.js';
+import type { CaptureEvent } from '../src/services/event-protocol.js';
 import { getTrace, listTraces } from '../src/services/trace-service.js';
 
 /**
@@ -77,6 +83,59 @@ function captureViaImport(sessionId: string): string {
   return importClaudeTranscript(db, path).trace!.id;
 }
 
+/** The same session, as OpenTelemetry log events from the same harness. */
+function captureViaOtelLogs(sessionId: string): string {
+  const record = (event: string, attrs: Record<string, unknown>, nanos: string) => ({
+    timeUnixNano: nanos,
+    body: { stringValue: event },
+    attributes: [
+      { key: 'event.name', value: { stringValue: event } },
+      { key: 'session.id', value: { stringValue: sessionId } },
+      ...Object.entries(attrs).map(([key, v]) => ({
+        key,
+        value: typeof v === 'number' ? { intValue: String(v) } : { stringValue: String(v) },
+      })),
+    ],
+  });
+  const [mapped] = mapOtlpLogs({
+    resourceLogs: [{
+      resource: { attributes: [{ key: 'service.name', value: { stringValue: 'claude-code' } }] },
+      scopeLogs: [{ logRecords: [
+        record('claude_code.user_prompt', { prompt: 'list the files' }, '1750000000000000000'),
+        record('claude_code.tool_result', { tool_name: 'Bash', success: 'true', duration_ms: 40 }, '1750000001000000000'),
+      ] }],
+    }],
+  } as never);
+  return ingestTrace(db, mapped).id;
+}
+
+/** One Codex session, through the stream translator and through its rollout. */
+function captureCodexBothWays(): { stream: string; rollout: string } {
+  const translator = makeTranslator('codex-exec')!;
+  let streamId = '';
+  // `translate` takes the PARSED line, and `finalize` flushes what the stream
+  // left open at EOF — the same two calls `record` makes.
+  for (const line of [
+    { type: 'thread.started', thread_id: 'cx-stream' },
+    { type: 'item.completed', item: { type: 'command_execution', command: 'ls -la', exit_code: 0, aggregated_output: 'a.txt' } },
+    { type: 'turn.completed', usage: { input_tokens: 50, output_tokens: 10 } },
+  ]) {
+    for (const event of translator.translate(line as Record<string, unknown>)) {
+      streamId = applyEvent(db, event as CaptureEvent).traceId;
+    }
+  }
+  for (const event of translator.finalize()) streamId = applyEvent(db, event as CaptureEvent).traceId;
+
+  const path = join(dir, 'rollout.jsonl');
+  writeFileSync(path, [
+    { timestamp: '2026-09-06T10:00:00.000Z', type: 'session_meta', payload: { id: 'cx-roll', cwd: '/tmp' } },
+    { timestamp: '2026-09-06T10:00:01.000Z', type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'list the files' }] } },
+    { timestamp: '2026-09-06T10:00:02.000Z', type: 'response_item', payload: { type: 'function_call', name: 'shell', arguments: '{"command":["ls","-la"]}', call_id: 'c1' } },
+    { timestamp: '2026-09-06T10:00:03.000Z', type: 'response_item', payload: { type: 'function_call_output', call_id: 'c1', output: 'a.txt' } },
+  ].map((r) => JSON.stringify(r)).join('\n'));
+  return { stream: streamId, rollout: importCodexRollout(db, path).trace!.id };
+}
+
 describe('one session captured two ways records the same facts', () => {
   it('agrees on the prompt, the status and the tool step', () => {
     const hook = getTrace(db, captureViaHook('sess-hook'))!;
@@ -111,5 +170,46 @@ describe('one session captured two ways records the same facts', () => {
       .map((t) => (t.metadata as { source_format?: string } | null)?.source_format)
       .sort();
     expect(sources).toEqual(['claude-transcript', 'hook']);
+  });
+});
+
+describe('the other capture pairs agree too', () => {
+  it('the hook and the OTel log receiver record one Claude session the same way', () => {
+    const hook = getTrace(db, captureViaHook('sess-hook-otel'))!;
+    const otel = getTrace(db, captureViaOtelLogs('sess-otel'))!;
+
+    expect(otel.agent_name).toBe(hook.agent_name);
+    expect(otel.input).toEqual(hook.input);
+    expect(otel.status).toBe(hook.status);
+    expect(otel.steps.map((s) => [s.step_type, s.name])).toEqual(hook.steps.map((s) => [s.step_type, s.name]));
+    // Both close what they finished — the log path did not until the mapper
+    // learned that a log record reports the past.
+    for (const t of [hook, otel]) expect(t.steps.filter((s) => !s.ended_at)).toEqual([]);
+  });
+
+  it('the codex stream and the codex rollout agree on everything but the tool NAME', () => {
+    const { stream, rollout } = captureCodexBothWays();
+    const a = getTrace(db, stream)!;
+    const b = getTrace(db, rollout)!;
+
+    expect(b.agent_name).toBe(a.agent_name);
+    expect(b.status).toBe(a.status);
+    expect(b.steps.map((s) => s.step_type)).toEqual(a.steps.map((s) => s.step_type));
+
+    // A documented difference, not a defect: a STREAM carries no prompt — the
+    // harness took it on the command line, which never appears in the stream —
+    // so `record --input` exists to supply one, and `check` refuses to match a
+    // trace with an empty input rather than pairing unrelated runs.
+    expect(a.input).toEqual({});
+    expect(b.input).toEqual({ prompt: 'list the files' });
+    for (const t of [a, b]) expect(t.steps.filter((s) => !s.ended_at)).toEqual([]);
+
+    // The one difference, held here on purpose: the stream names a shell call
+    // after the COMMAND and the rollout after the CALL. `step_names` is a
+    // default gate field, so a baseline from one path reports a regression
+    // against the other — written up as `openspec/changes/align-tool-step-names`
+    // rather than decided here. When it is decided, this expectation is the
+    // thing to change.
+    expect([a.steps[0].name, b.steps[0].name]).toEqual(['ls', 'shell']);
   });
 });
