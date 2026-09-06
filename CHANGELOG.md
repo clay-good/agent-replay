@@ -2829,6 +2829,9 @@ and one-way.
 - A log-derived `llm_call` step now records its model in the `model` column,
   not only in the step name — an `otel serve` capture of Gemini CLI or Claude
   Code previously had no model recorded anywhere, while the span path set it.
+  On the log path such a step comes only from a FAILED model call
+  (`.api_error`), so this covered the failure path alone; the entry above
+  extends it to the steps a successful session produces.
 
 - `show --json` now carries a `step_window` object when `--from-step`/`--to-step`
   narrowed the result. The human output already printed what it omitted; the
