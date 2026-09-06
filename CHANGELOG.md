@@ -450,6 +450,14 @@ and one-way.
 
 ### Fixed
 
+- **`show` printed a 20,000-step trace without mentioning the windowing flags.**
+  80,013 lines, no hint — and real traces reach that size: imported sessions run
+  to thousands of steps, and a 647 MB transcript imports 672,000. `--from-step`
+  and `--to-step` are in `--help` and the README, which is no use to someone
+  whose terminal is already scrolling. A trace over 200 steps now says so before
+  the timeline; smaller ones print nothing extra, and a windowed view still
+  reports what it omitted.
+
 - **`replay`'s totals were sums over a subset, presented as the run's.** A trace
   mixing timed and untimed steps reported `3 steps | 150ms` — the sum of the two
   that carried a duration. An imported session is exactly that shape: its steps

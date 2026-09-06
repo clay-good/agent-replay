@@ -164,9 +164,26 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
     return;
   }
 
+  /** Steps beyond which an unwindowed `show` says how to window it. */
+  const LARGE_TRACE_STEPS = 200;
+
   const windowNote = () => {
     if (omitted > 0) {
       console.log(chalk.dim(`  Showing ${windowed.length} of ${windowed.length + omitted} steps (${omitted} outside the --from-step/--to-step window).`));
+      console.log('');
+      return;
+    }
+    // Nothing was omitted — but on a REAL trace that can mean thousands of
+    // steps about to be printed. A 20,000-step trace filled 80,013 lines with
+    // no hint that the windowing flags exist; imported sessions reach 3,000
+    // steps routinely and a 647 MB transcript imports 672,000. The flags are in
+    // `--help` and the README, which is no use to someone whose terminal is
+    // already scrolling. Say it BEFORE the timeline, and only when the size
+    // warrants it, so an ordinary trace prints nothing extra.
+    if (windowed.length > LARGE_TRACE_STEPS) {
+      console.log(
+        chalk.dim(`  ${windowed.length.toLocaleString()} steps — window a large trace with --from-step/--to-step.`),
+      );
       console.log('');
     }
   };

@@ -216,6 +216,36 @@ describe('replay', () => {
     expect(stdout()).toMatch(/Replay complete: 2 steps/);
   });
 
+  it('tells a reader how to window a very large trace', async () => {
+    // A 20,000-step trace filled 80,013 lines with no hint that the windowing
+    // flags exist — and real traces reach that size: imported sessions run to
+    // thousands of steps, and a 647 MB transcript imports 672,000. The flags
+    // are in `--help` and the README, which is no use to someone whose terminal
+    // is already scrolling, so the note goes BEFORE the timeline.
+    const db = ensureDatabase(resolve(dir, 'traces.db'));
+    const big = ingestTrace(db, {
+      agent_name: 'big', status: 'completed', input: { q: 1 },
+      steps: Array.from({ length: 250 }, (_, i) => ({
+        step_number: i + 1, step_type: 'tool_call' as const, name: `s${i + 1}`,
+      })),
+    } as never).id;
+    out.length = 0;
+    await runShow(big, { dir });
+    expect(out.join('\n')).toMatch(/250 steps — window a large trace/);
+
+    // An ordinary trace prints nothing extra: a hint that always fires is noise.
+    out.length = 0;
+    await runShow(id, { dir });
+    expect(out.join('\n')).not.toMatch(/window a large trace/);
+
+    // And a windowed view keeps saying what it omitted, not the size hint.
+    out.length = 0;
+    await runShow(big, { dir, fromStep: '5', toStep: '8' });
+    const windowed = out.join('\n');
+    expect(windowed).toMatch(/Showing 4 of 250 steps/);
+    expect(windowed).not.toMatch(/window a large trace/);
+  });
+
   it('says what the replay totals were taken over', async () => {
     // A trace mixing timed and untimed steps reported "3 steps | 150ms" — the
     // sum of the two that carried a duration, presented as the run's. An

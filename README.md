@@ -341,7 +341,8 @@ agent-replay show <trace-id> --evals --snapshots
 # Render steps as a hierarchy (subagents/nested calls) with causal links
 agent-replay show <trace-id> --tree
 
-# Window a large trace (real sessions can run to thousands of steps)
+# Window a large trace (real sessions can run to thousands of steps; `show`
+# says so before printing one, since the flags are no use once it scrolls)
 agent-replay show <trace-id> --from-step 100 --to-step 150
 ```
 
