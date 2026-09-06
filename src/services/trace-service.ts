@@ -18,7 +18,7 @@ import type {
 } from '../models/types.js';
 import { DECIDED_BY, STEP_TYPES, TRACE_STATUSES, TRIGGER_TYPES } from '../models/enums.js';
 import { isValidConfidence, validateTraceInput } from '../utils/validators.js';
-import { SINCE_PREDICATE, sinceParams, DURATION_MS_EXPR, julianDayExpr } from '../utils/time.js';
+import { SINCE_PREDICATE, sinceParams, DURATION_MS_EXPR, julianDayExpr, effectiveDurationMs } from '../utils/time.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -1575,6 +1575,18 @@ export function listTraces(
       const trace = rowToTrace(row);
       trace.step_count = (row.step_count as number) ?? 0;
       trace.effective_tokens = (row.effective_tokens as number | null) ?? null;
+      // The number the Duration column shows, so a caller reading the JSON sees
+      // what the table beside it printed.
+      //
+      // Derived in JS through the shared helper rather than by selecting
+      // `DURATION_MS_EXPR`, even though that expression is right there and
+      // already orders `--sort duration`. It computes the fallback from
+      // julianday arithmetic, so a clean ten-second span comes back as
+      // 9999.985992908478 — a fractional millisecond count no clock produced,
+      // and one that would disagree with the exact 30000 `show --json` reports
+      // for the same trace from the same two timestamps. Sorting can live with
+      // sub-millisecond noise; a number in the document cannot.
+      trace.effective_duration_ms = effectiveDurationMs(trace);
       return trace;
     }),
     total: countRow.cnt,

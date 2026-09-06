@@ -2068,6 +2068,79 @@ describe('ingest --format is refused when empty, not silently parsed as JSONL', 
   });
 });
 
+describe('durations agree across every path that reports them', () => {
+  // `list` and `show` have always PRINTED a duration derived from the trace's
+  // own timestamps when the producer set no `total_duration_ms` (every
+  // hook-captured trace, among others), while both `--json` documents carried
+  // only the raw column — so a caller reading `total_duration_ms` got null for a
+  // trace whose table row beside it read "30.0s". `list --json` had already
+  // solved the same problem for tokens with `effective_tokens`; duration was the
+  // twin left behind, on both commands.
+  function seedDuration(agent: string, startedAt: string, endedAt: string | null, total?: number): void {
+    const file = join(dir, `dur-${agent}.json`);
+    writeFileSync(file, JSON.stringify([{
+      agent_name: agent, trigger: 'manual', status: 'completed', input: { prompt: agent },
+      started_at: startedAt,
+      ...(endedAt === null ? {} : { ended_at: endedAt }),
+      ...(total === undefined ? {} : { total_duration_ms: total }),
+      steps: [{ step_number: 1, step_type: 'thought', name: 'x', input: {}, output: 'x' }],
+    }]));
+    expect(run(['ingest', file]).code).toBe(0);
+  }
+  const listedTrace = (agent: string) => {
+    const items = JSON.parse(run(['list', '--json', '--limit', '100']).stdout).items;
+    return items.find((t: { agent_name: string }) => t.agent_name === agent);
+  };
+  const shown = (id: string) => JSON.parse(run(['show', id, '--json']).stdout);
+
+  it('fills in from the timestamps when the trace carries no total', () => {
+    seedDuration('durfill', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:30.000Z');
+    const t = listedTrace('durfill');
+
+    expect(t.total_duration_ms).toBeNull();
+    expect(t.effective_duration_ms).toBe(30_000);
+    // The number the human table prints, from the same trace.
+    const row = run(['list', '--limit', '100']).stdout.split('\n').find((l) => l.includes('durfill'));
+    expect(row).toContain('30.0s');
+    // And `show --json` must not disagree with `list --json` about one trace.
+    expect(shown(t.id).effective_duration_ms).toBe(30_000);
+  });
+
+  it('takes a producer-reported total at face value over the timestamp span', () => {
+    seedDuration('durtotal', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:30.000Z', 1234);
+    const t = listedTrace('durtotal');
+
+    expect(t.total_duration_ms).toBe(1234);
+    expect(t.effective_duration_ms).toBe(1234);
+    expect(shown(t.id).effective_duration_ms).toBe(1234);
+  });
+
+  it('reports null when there is nothing to derive a duration from', () => {
+    // An unmeasured duration must stay distinguishable from a real zero.
+    seedDuration('durnone', '2026-01-01T00:00:00.000Z', null);
+    const t = listedTrace('durnone');
+
+    expect(t.total_duration_ms).toBeNull();
+    expect(t.effective_duration_ms).toBeNull();
+    expect(shown(t.id).effective_duration_ms).toBeNull();
+  });
+
+  it('leaves the STORED column untouched, so the round trip is unchanged', () => {
+    seedDuration('durtrip', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:30.000Z');
+    const t = listedTrace('durtrip');
+    const doc = join(dir, 'durtrip-show.json');
+    writeFileSync(doc, run(['show', t.id, '--json']).stdout);
+
+    // The derived keys are additive: ingest reads `total_*` and ignores the
+    // rest, so re-ingesting must not turn a derived number into a stored one.
+    expect(run(['ingest', doc]).code).toBe(0);
+    const again = JSON.parse(run(['list', '--json', '--limit', '100']).stdout).items
+      .filter((x: { agent_name: string }) => x.agent_name === 'durtrip');
+    expect(again).toHaveLength(2);
+    for (const copy of again) expect(copy.total_duration_ms).toBeNull();
+  });
+});
+
 describe('token totals agree across every path that reports them', () => {
   // The README states the precedence: trace-level totals are taken at face
   // value and never reconciled against the steps, and "only when a total is

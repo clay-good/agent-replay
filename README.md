@@ -905,7 +905,11 @@ A `decision` block:
 >   total disagreeing with its own steps is what `stats` will report. Only when a
 >   total is *absent* do the per-step counts fill in. (The one exception is the
 >   OpenTelemetry receiver's cross-batch merge, which recomputes as it
->   assembles.)
+>   assembles.) The filled-in numbers are what `list` and `show` display, and
+>   both carry them in `--json` as `effective_tokens` and
+>   `effective_duration_ms` — the stored `total_*` columns stay exactly as the
+>   producer wrote them, so a script can tell a reported total from a derived
+>   one, and `null` still means nothing measured it rather than a real zero.
 
 > **Schema migration:** these fields arrived in schema v2; the current schema is v6 (v3 through v6 add indexes only, no columns). Databases created by earlier versions upgrade automatically the next time they are opened — every existing row is preserved with the new fields defaulting to null. The upgrade is one-way (there is no down-migration).
 

@@ -38,6 +38,20 @@ export interface Trace {
    * steps' `tokens_used`. The stored column stays exactly as written.
    */
   effective_tokens?: number | null;
+  /**
+   * Not a stored column — the trace's duration as it should be DISPLAYED:
+   * `total_duration_ms` when the producer reported one, otherwise the span
+   * between `started_at` and `ended_at`. The stored column stays exactly as
+   * written.
+   *
+   * The twin of `effective_tokens`, and it was the one left behind: `list` and
+   * `show` have always PRINTED this fallback (`effectiveDurationMs`), while the
+   * `--json` documents carried only the raw column — so a caller reading
+   * `total_duration_ms` got null for every trace whose producer never set it
+   * (every hook-captured one, among others) while the table beside it showed a
+   * real number derived from that trace's own timestamps.
+   */
+  effective_duration_ms?: number | null;
 }
 
 // ── Decision records ──────────────────────────────────────────────────────

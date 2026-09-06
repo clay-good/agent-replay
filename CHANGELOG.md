@@ -336,6 +336,21 @@ and one-way.
 
 ### Fixed
 
+- **`list --json` and `show --json` could not report the duration the tool
+  itself was printing.** Both commands display a duration derived from the
+  trace's own `started_at`/`ended_at` when the producer set no
+  `total_duration_ms` — which is every hook-captured trace, among others — while
+  the `--json` documents carried only the raw column. A table row read "30.0s"
+  next to a document that said `total_duration_ms: null`, so a script asking how
+  long a run took got nothing for traces the tool was visibly timing.
+  `list --json` had already solved exactly this for tokens by carrying
+  `effective_tokens`; duration was the twin left behind, and `show --json`
+  carried neither. Both now carry `effective_duration_ms` and `effective_tokens`,
+  computed with the same helpers the rendered views use, so the document and the
+  display cannot disagree. The stored `total_*` columns are passed through
+  untouched — a reported total stays distinguishable from a derived one, `null`
+  still means nothing measured it rather than a real zero, and the
+  export → ingest round trip is unchanged.
 - **`run` reported that nothing was lost when a child's events were
   malformed.** The wrapper's closing summary counts the events it could not
   record, but only ones the STORE refused — a line the protocol rejected (bad

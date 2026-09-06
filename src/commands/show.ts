@@ -7,6 +7,8 @@ import { getTrace, getStepSnapshot } from '../services/trace-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { traceHeaderPanel } from '../ui/boxen-panels.js';
 import { truncate } from '../utils/json.js';
+import { effectiveDurationMs } from '../utils/time.js';
+import { effectiveTokens } from '../utils/totals.js';
 import { renderTimeline, renderTree } from '../ui/timeline.js';
 import { evalTable } from '../ui/table.js';
 import { heading, separator, safeText, safeLine } from '../ui/theme.js';
@@ -105,9 +107,29 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
       console.error(chalk.yellow(`  ⚠ ${inert} ${inertFlags.length === 1 ? 'has' : 'have'} no effect with --json.`));
       console.error(chalk.dim('    --json prints the whole trace; `steps` carries parent_step_number and caused_by_step_number to rebuild the tree.'));
     }
+    // The two numbers the human panel prints and the document did not carry.
+    //
+    // `show` renders Duration and Tokens through `effectiveDurationMs` /
+    // `effectiveTokens`, which fall back to the trace's own timestamps and to
+    // the steps' `tokens_used` when the trace-level columns were never set —
+    // and those columns are set only when a producer reports a total, so a
+    // hook-captured or ingested trace shows "30.0s / 700" on screen while
+    // `show --json` answered `total_duration_ms: null, total_tokens: null`.
+    // There was no machine-readable way to read the number the tool itself was
+    // displaying. `list --json` had already solved half of this by carrying
+    // `effective_tokens`; duration was the twin left behind, on both commands.
+    //
+    // Computed with the SAME helpers the panel uses, so the document and the
+    // rendering cannot disagree. Additive: the stored columns are passed
+    // through exactly as written, so `show --json | ingest` still restores the
+    // trace unchanged (`ingest` reads `total_*` and ignores unknown keys).
+    const derived = {
+      effective_duration_ms: effectiveDurationMs(trace),
+      effective_tokens: effectiveTokens(trace as Parameters<typeof effectiveTokens>[0]),
+    };
     const base = omitted > 0
-      ? { ...trace, steps: windowed, step_window: { from: fromStep ?? null, to: toStep ?? null, shown: windowed.length, omitted } }
-      : trace;
+      ? { ...trace, ...derived, steps: windowed, step_window: { from: fromStep ?? null, to: toStep ?? null, shown: windowed.length, omitted } }
+      : { ...trace, ...derived };
     // `--snapshots` reached the human path only, so `show --json --snapshots`
     // answered with a document that had no snapshot data at all: exit 0, no
     // warning, and nothing to read — while the very same trace printed
