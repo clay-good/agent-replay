@@ -5,7 +5,7 @@ import type { TraceStatus } from '../models/enums.js';
 import { formatDuration, formatRelativeTime, parseInstant } from '../utils/time.js';
 import { truncateToWidth } from './width.js';
 import { formatCostUsd, safeText } from './theme.js';
-import { dashboardStats, statusCounts, recentTraces, recentEvalScores } from './dashboard-data.js';
+import { dashboardStats, statusCounts, recentTraces, recentEvalScores, traceStatusCell } from './dashboard-data.js';
 import { renderStatusBars, renderScoreSparkline } from './dashboard-panels.js';
 
 /**
@@ -221,7 +221,7 @@ export class DashboardView {
     const data = rows.map((r) => [
       cell(r.id.slice(0, 12)),
       cell(truncateToWidth(r.agent_name, 18)),
-      r.status,
+      traceStatusCell(r),
       formatRelativeTime(r.started_at),
     ]);
 

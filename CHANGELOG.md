@@ -912,7 +912,7 @@ and one-way.
   on the display path, like `effective_duration_ms`/`effective_tokens`, so it
   never reaches an export or a golden baseline), and on `watch`'s attach line —
   where it matters most, since a tail on a dead trace prints nothing and reads
-  like an agent that is thinking.
+  like an agent that is thinking. The dashboard's trace table was the fourth view of the same trace and is marked too, with the glyph alone — that column sits in a fixed panel, and an over-wide status label is a defect this panel has already had.
 
 - **`diff` called two traces identical when it had not compared them.** The
   unfiltered summary printed "Traces are identical." over a comparison that

@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { TRACE_STATUSES } from '../models/enums.js';
 import { SINCE_PREDICATE, sinceParams, DURATION_MS_EXPR, julianDayExpr } from '../utils/time.js';
+import { isPossiblyAbandoned } from '../services/trace-service.js';
 
 /**
  * Pure data queries behind the dashboard TUI. Kept separate from the blessed
@@ -181,6 +182,20 @@ export interface DashboardTraceRow {
   agent_name: string;
   status: string;
   started_at: string;
+}
+
+/**
+ * The Status cell for the dashboard's trace table.
+ *
+ * `list` and the `show` header mark a run that has been `running` past the
+ * threshold with `⚠ abandoned?`, and this table showed the bare status — the
+ * fourth view of the same trace, disagreeing with the other three. Here the
+ * marker is the glyph alone: this column is inside a fixed panel, and a status
+ * label wide enough to push the row past the box edge is a defect this file has
+ * already had once.
+ */
+export function traceStatusCell(row: { status: string; started_at: string }): string {
+  return isPossiblyAbandoned(row as Parameters<typeof isPossiblyAbandoned>[0]) ? `${row.status} ⚠` : row.status;
 }
 
 /**

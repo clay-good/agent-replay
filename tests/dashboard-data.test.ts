@@ -4,7 +4,7 @@ import { runMigrations } from '../src/db/migrations.js';
 import { forkTrace } from '../src/services/fork-service.js';
 import { ingestTrace, createEval } from '../src/services/trace-service.js';
 import { addPolicy } from '../src/services/guard-service.js';
-import { dashboardStats, statusCounts, agentStats, recentTraces, recentEvalScores } from '../src/ui/dashboard-data.js';
+import { dashboardStats, statusCounts, agentStats, recentTraces, recentEvalScores, traceStatusCell } from '../src/ui/dashboard-data.js';
 import type { IngestTraceInput } from '../src/models/types.js';
 
 /**
@@ -414,5 +414,36 @@ describe('the token and cost totals say what they measured', () => {
     const s = dashboardStats(db);
     expect(s.totalTokens).toBe(42);
     expect(s.totalTokensSample).toBe(1);
+  });
+});
+
+describe('traceStatusCell', () => {
+  // The dashboard's trace table was the fourth view of a trace and the only one
+  // that did not mark a run stuck in `running` — `list`, the `show` header and
+  // `watch` all do. The marker here is the glyph alone because the column lives
+  // in a fixed panel, and a status label wide enough to push the row past the
+  // box edge is a defect this file has already had.
+  it('marks a run that has been running past the threshold', () => {
+    const cell = traceStatusCell({ status: 'running', started_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString() });
+    expect(cell).toBe('running ⚠');
+  });
+
+  it('leaves a fresh run alone', () => {
+    expect(traceStatusCell({ status: 'running', started_at: new Date().toISOString() })).toBe('running');
+  });
+
+  it('leaves a finished run alone, however old', () => {
+    // Only `running` can be abandoned; a completed trace from last year is just
+    // a completed trace.
+    expect(
+      traceStatusCell({ status: 'completed', started_at: new Date(Date.now() - 400 * 24 * 3600 * 1000).toISOString() }),
+    ).toBe('completed');
+  });
+
+  it('stays short enough for the column', () => {
+    // The width lesson from the status-label fix: this cell sits in a fixed
+    // panel beside three others.
+    const cell = traceStatusCell({ status: 'running', started_at: new Date(0).toISOString() });
+    expect(cell.length).toBeLessThanOrEqual('running'.length + 2);
   });
 });
