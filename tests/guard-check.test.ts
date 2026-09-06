@@ -765,6 +765,35 @@ describe('the guard commands', () => {
     expect(stdout()).toMatch(/1 REQUIRE_REVIEW action\(s\) would block without an approval/);
   });
 
+  it('is a report, not a gate: a deny match still exits 0', async () => {
+    // `guard test` answers with findings, not a verdict — `guard check` and
+    // `hook --enforce` are the paths that gate. Worth pinning because the exit
+    // codes section opens with "every command exits non-zero on failure", and a
+    // deny match is not a failure of THIS command: someone gating CI on it
+    // would otherwise be relying on an accident.
+    const { runGuardTest } = await import('../src/commands/guard.js');
+    const db2 = new Database(`${dir}/traces.db`);
+    try {
+      db2.pragma('foreign_keys = ON');
+      addPolicy(db2, { name: 'no-deletes', action: 'deny', match_pattern: { name_contains: 'delete' } });
+      ingestTrace(db2, {
+        agent_name: 'a', input: {},
+        steps: [{ step_number: 1, step_type: 'tool_call', name: 'delete_user' }],
+      } as Parameters<typeof ingestTrace>[1]);
+    } finally { db2.close(); }
+
+    const db3 = new Database(`${dir}/traces.db`);
+    const traceId = (db3.prepare("SELECT id FROM agent_traces ORDER BY rowid DESC LIMIT 1").get() as { id: string }).id;
+    db3.close();
+
+    process.exitCode = 0;
+    runGuardTest(traceId, { dir });
+    // The finding is reported...
+    expect(stdout()).toMatch(/DENY/);
+    // ...and the command still succeeded.
+    expect(process.exitCode).toBe(0);
+  });
+
   it('reports a missing trace as an error, not as a clean run', async () => {
     const { runGuardTest } = await import('../src/commands/guard.js');
     runGuardTest('trc_nope', { dir });
