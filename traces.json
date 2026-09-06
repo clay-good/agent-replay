@@ -1,0 +1,1849 @@
+[
+  {
+    "id": "trc_CfsiCRrCkhfj",
+    "agent_name": "travel-assistant",
+    "agent_version": "4.3.0",
+    "trigger": "user_message",
+    "status": "completed",
+    "input": {
+      "user_message": "Book me a flight from SFO to JFK next Friday, economy class",
+      "user_id": "usr_7823",
+      "preferences": {
+        "airline": "any",
+        "stops": "nonstop_preferred"
+      }
+    },
+    "output": {
+      "booking_confirmation": {
+        "pnr": "XYZ789",
+        "flight": "B6 212",
+        "departure": "SFO 14:00",
+        "arrival": "JFK 22:30",
+        "class": "economy",
+        "price_usd": 299,
+        "stops": 1
+      },
+      "message": "Your flight has been booked! Confirmation: XYZ789, B6 212 SFO→JFK departing 14:00."
+    },
+    "started_at": "2026-09-06T21:48:59.781Z",
+    "ended_at": "2026-09-06T21:49:02.881Z",
+    "total_duration_ms": 3100,
+    "total_tokens": 3600,
+    "total_cost_usd": 0.019,
+    "error": null,
+    "tags": [
+      "travel",
+      "booking",
+      "regression"
+    ],
+    "metadata": {
+      "environment": "production",
+      "channel": "mobile_app",
+      "model_rollout": "gpt-4.1"
+    },
+    "parent_trace_id": null,
+    "forked_from_step": null,
+    "session_id": "sess_demo_travel_02",
+    "created_at": "2026-09-06T21:53:59.839Z",
+    "steps": [
+      {
+        "id": "stp_uXt2cyJIcPb8",
+        "trace_id": "trc_CfsiCRrCkhfj",
+        "step_number": 1,
+        "step_type": "thought",
+        "name": "parse_booking_intent",
+        "input": {
+          "user_message": "Book me a flight from SFO to JFK next Friday, economy class"
+        },
+        "output": {
+          "intent": "flight_booking",
+          "params": {
+            "origin": "SFO",
+            "destination": "JFK",
+            "date": "next_friday",
+            "class": "economy"
+          }
+        },
+        "started_at": "2026-09-06T21:48:59.781Z",
+        "ended_at": null,
+        "duration_ms": 110,
+        "tokens_used": 400,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_Q-sHwqXF6zK6",
+        "trace_id": "trc_CfsiCRrCkhfj",
+        "step_number": 2,
+        "step_type": "tool_call",
+        "name": "resolve_date",
+        "input": {
+          "relative_date": "next Friday"
+        },
+        "output": {
+          "resolved_date": "2026-03-06",
+          "day_of_week": "Friday"
+        },
+        "started_at": "2026-09-06T21:48:59.891Z",
+        "ended_at": null,
+        "duration_ms": 30,
+        "tokens_used": 50,
+        "model": null,
+        "error": null,
+        "metadata": {
+          "tool": "date_resolver"
+        },
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_d8TCTdZ3JfGo",
+        "trace_id": "trc_CfsiCRrCkhfj",
+        "step_number": 3,
+        "step_type": "tool_call",
+        "name": "search_flights",
+        "input": {
+          "origin": "SFO",
+          "destination": "JFK",
+          "date": "2026-03-06",
+          "cabin": "ECONOMY",
+          "flexible_dates": true
+        },
+        "output": {
+          "flights": [
+            {
+              "id": "fl_1",
+              "airline": "United",
+              "flight": "UA 456",
+              "depart": "08:30",
+              "arrive": "17:05",
+              "price": 342.5,
+              "stops": 0
+            },
+            {
+              "id": "fl_2",
+              "airline": "Delta",
+              "flight": "DL 890",
+              "depart": "10:15",
+              "arrive": "19:00",
+              "price": 378,
+              "stops": 0
+            },
+            {
+              "id": "fl_3",
+              "airline": "JetBlue",
+              "flight": "B6 212",
+              "depart": "14:00",
+              "arrive": "22:30",
+              "price": 299,
+              "stops": 1
+            }
+          ],
+          "total_results": 3
+        },
+        "started_at": "2026-09-06T21:48:59.921Z",
+        "ended_at": null,
+        "duration_ms": 470,
+        "tokens_used": 600,
+        "model": null,
+        "error": null,
+        "metadata": {
+          "tool": "flight_api",
+          "provider": "amadeus"
+        },
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_HOL-xQi71qW9",
+        "trace_id": "trc_CfsiCRrCkhfj",
+        "step_number": 4,
+        "step_type": "decision",
+        "name": "rank_options",
+        "input": {
+          "flights": 3,
+          "user_preference": "nonstop_preferred"
+        },
+        "output": {
+          "recommended": "fl_3",
+          "reasoning": "Lowest total price",
+          "ranking": [
+            "fl_3",
+            "fl_1",
+            "fl_2"
+          ]
+        },
+        "started_at": "2026-09-06T21:49:00.391Z",
+        "ended_at": null,
+        "duration_ms": 80,
+        "tokens_used": 300,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": null,
+        "caused_by_step_number": 3,
+        "decision": {
+          "id": "dec_-NPb7PZVGP27",
+          "step_id": "stp_HOL-xQi71qW9",
+          "options": [
+            {
+              "option": "fl_3",
+              "rationale": "JetBlue B6 212 — cheapest at $299.00, one stop",
+              "score": 0.88
+            },
+            {
+              "option": "fl_1",
+              "rationale": "United UA 456 — nonstop, $342.50",
+              "score": 0.62
+            },
+            {
+              "option": "fl_2",
+              "rationale": "Delta DL 890 — nonstop but $378.00",
+              "score": 0.41
+            }
+          ],
+          "chosen": "fl_3",
+          "rationale": "Cheapest fare available for the date.",
+          "confidence": 0.55,
+          "decided_by": "agent"
+        }
+      },
+      {
+        "id": "stp_aXGlS3W8937I",
+        "trace_id": "trc_CfsiCRrCkhfj",
+        "step_number": 5,
+        "step_type": "llm_call",
+        "name": "format_options_message",
+        "input": {
+          "ranked_flights": [
+            "fl_3",
+            "fl_1",
+            "fl_2"
+          ],
+          "recommended": "fl_3"
+        },
+        "output": {
+          "text": "I found 3 flights for you:\n\n✈ **Recommended:** B6 212 — SFO 14:00→JFK 22:30 — $299.00 (1 stop)\n  UA 456 — SFO 08:30→JFK 17:05 — $342.50 (nonstop)\n  DL 890 — SFO 10:15→JFK 19:00 — $378.00 (nonstop)\n\nShall I book B6 212?"
+        },
+        "started_at": "2026-09-06T21:49:00.471Z",
+        "ended_at": null,
+        "duration_ms": 580,
+        "tokens_used": 800,
+        "model": "gpt-4.1",
+        "error": null,
+        "metadata": {
+          "temperature": 0.3
+        },
+        "parent_step_number": 4,
+        "caused_by_step_number": 4
+      },
+      {
+        "id": "stp_4XL4GSg4GYGq",
+        "trace_id": "trc_CfsiCRrCkhfj",
+        "step_number": 6,
+        "step_type": "output",
+        "name": "present_options",
+        "input": {
+          "message_type": "flight_options",
+          "options_count": 3
+        },
+        "output": {
+          "delivered": true,
+          "message_id": "msg_9104"
+        },
+        "started_at": "2026-09-06T21:49:01.051Z",
+        "ended_at": null,
+        "duration_ms": 40,
+        "tokens_used": 50,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": 4,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_6KJsHjG5z56-",
+        "trace_id": "trc_CfsiCRrCkhfj",
+        "step_number": 7,
+        "step_type": "thought",
+        "name": "process_user_confirmation",
+        "input": {
+          "user_response": "ok",
+          "selected_flight": "fl_3"
+        },
+        "output": {
+          "action": "proceed_with_booking",
+          "flight_id": "fl_3"
+        },
+        "started_at": "2026-09-06T21:49:01.091Z",
+        "ended_at": null,
+        "duration_ms": 100,
+        "tokens_used": 200,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_JXPPeNB4L3uK",
+        "trace_id": "trc_CfsiCRrCkhfj",
+        "step_number": 8,
+        "step_type": "tool_call",
+        "name": "create_booking",
+        "input": {
+          "flight_id": "fl_3",
+          "passenger": {
+            "name": "John Doe",
+            "user_id": "usr_7823"
+          },
+          "class": "economy",
+          "payment_method": "card_on_file"
+        },
+        "output": {
+          "success": true,
+          "pnr": "XYZ789",
+          "total_charged": 299,
+          "currency": "USD"
+        },
+        "started_at": "2026-09-06T21:49:01.191Z",
+        "ended_at": null,
+        "duration_ms": 1150,
+        "tokens_used": 400,
+        "model": null,
+        "error": null,
+        "metadata": {
+          "tool": "booking_api"
+        },
+        "parent_step_number": null,
+        "caused_by_step_number": 7
+      },
+      {
+        "id": "stp_DvOvuCgwhNyn",
+        "trace_id": "trc_CfsiCRrCkhfj",
+        "step_number": 9,
+        "step_type": "llm_call",
+        "name": "generate_confirmation",
+        "input": {
+          "pnr": "XYZ789",
+          "flight": "B6 212",
+          "price": 299
+        },
+        "output": {
+          "text": "Your flight has been booked! Confirmation: XYZ789, B6 212 SFO→JFK departing 14:00. Total: $299.00."
+        },
+        "started_at": "2026-09-06T21:49:02.341Z",
+        "ended_at": null,
+        "duration_ms": 390,
+        "tokens_used": 500,
+        "model": "gpt-4.1",
+        "error": null,
+        "metadata": {
+          "temperature": 0.2
+        },
+        "parent_step_number": 8,
+        "caused_by_step_number": 8
+      },
+      {
+        "id": "stp_Wj_1kSzfItXq",
+        "trace_id": "trc_CfsiCRrCkhfj",
+        "step_number": 10,
+        "step_type": "output",
+        "name": "send_confirmation",
+        "input": {
+          "message_type": "booking_confirmation",
+          "pnr": "XYZ789"
+        },
+        "output": {
+          "delivered": true,
+          "message_id": "msg_9105",
+          "push_notification_sent": true
+        },
+        "started_at": "2026-09-06T21:49:02.731Z",
+        "ended_at": null,
+        "duration_ms": 170,
+        "tokens_used": 300,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      }
+    ]
+  },
+  {
+    "id": "trc_dCY5hmWxCtEt",
+    "agent_name": "admin-assistant",
+    "agent_version": "1.8.0",
+    "trigger": "user_message",
+    "status": "completed",
+    "input": {
+      "user_message": "Delete all inactive user accounts that haven't logged in for 90 days",
+      "user_role": "admin",
+      "workspace": "acme-corp"
+    },
+    "output": {
+      "message": "I cannot delete accounts directly due to guardrail policies. Instead, I've generated a report of 847 inactive accounts for your review.",
+      "report_url": "/reports/inactive-users-2026-02-27.csv"
+    },
+    "started_at": "2026-09-06T21:48:59.781Z",
+    "ended_at": "2026-09-06T21:49:02.581Z",
+    "total_duration_ms": 2800,
+    "total_tokens": 3500,
+    "total_cost_usd": 0.014,
+    "error": null,
+    "tags": [
+      "admin",
+      "guardrail-triggered",
+      "graceful-fallback"
+    ],
+    "metadata": {
+      "guardrail_triggered": true,
+      "fallback_used": true
+    },
+    "parent_trace_id": null,
+    "forked_from_step": null,
+    "session_id": null,
+    "created_at": "2026-09-06T21:53:59.845Z",
+    "steps": [
+      {
+        "id": "stp_tJhsBcdjjtB3",
+        "trace_id": "trc_dCY5hmWxCtEt",
+        "step_number": 1,
+        "step_type": "thought",
+        "name": "analyze_request",
+        "input": {
+          "user_message": "Delete all inactive user accounts that haven't logged in for 90 days"
+        },
+        "output": {
+          "intent": "bulk_delete_users",
+          "risk_level": "high",
+          "requires_confirmation": true
+        },
+        "started_at": "2026-09-06T21:48:59.781Z",
+        "ended_at": null,
+        "duration_ms": 150,
+        "tokens_used": 400,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_zchFwPGJEZCI",
+        "trace_id": "trc_dCY5hmWxCtEt",
+        "step_number": 2,
+        "step_type": "tool_call",
+        "name": "query_inactive_users",
+        "input": {
+          "query": "SELECT count(*) FROM users WHERE last_login < NOW() - INTERVAL '90 days'",
+          "database": "acme_production"
+        },
+        "output": {
+          "count": 847,
+          "query_time_ms": 120
+        },
+        "started_at": "2026-09-06T21:48:59.931Z",
+        "ended_at": null,
+        "duration_ms": 200,
+        "tokens_used": 300,
+        "model": null,
+        "error": null,
+        "metadata": {
+          "tool": "database",
+          "read_only": true
+        },
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_TJfSshQrym_c",
+        "trace_id": "trc_dCY5hmWxCtEt",
+        "step_number": 3,
+        "step_type": "decision",
+        "name": "plan_deletion",
+        "input": {
+          "users_to_delete": 847,
+          "risk_level": "high"
+        },
+        "output": {
+          "decision": "proceed_with_deletion",
+          "plan": "Execute batch DELETE in chunks of 100",
+          "requires_tool": "delete_users"
+        },
+        "started_at": "2026-09-06T21:49:00.131Z",
+        "ended_at": null,
+        "duration_ms": 100,
+        "tokens_used": 300,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": null,
+        "caused_by_step_number": null,
+        "decision": {
+          "id": "dec_u9CF3o5jX6D8",
+          "step_id": "stp_TJfSshQrym_c",
+          "options": [
+            {
+              "option": "proceed_with_deletion",
+              "rationale": "Ticket asks for the cleanup; batch DELETE is the direct route",
+              "score": 0.71
+            },
+            {
+              "option": "request_human_approval",
+              "rationale": "847 rows in production is above the usual self-serve threshold",
+              "score": 0.64
+            },
+            {
+              "option": "export_then_delete",
+              "rationale": "Safer but slower; the ticket set no retention requirement",
+              "score": 0.42
+            }
+          ],
+          "chosen": "proceed_with_deletion",
+          "rationale": "Ticket authorizes the cleanup and the rows match the stated 90-day rule.",
+          "confidence": 0.71,
+          "decided_by": "agent"
+        }
+      },
+      {
+        "id": "stp_l3YZK4WPEoVu",
+        "trace_id": "trc_dCY5hmWxCtEt",
+        "step_number": 4,
+        "step_type": "tool_call",
+        "name": "delete_users_batch",
+        "input": {
+          "action": "delete",
+          "filter": {
+            "last_login_before": "90_days_ago"
+          },
+          "batch_size": 100,
+          "confirm": true
+        },
+        "output": null,
+        "started_at": "2026-09-06T21:49:00.231Z",
+        "ended_at": null,
+        "duration_ms": 50,
+        "tokens_used": 200,
+        "model": null,
+        "error": "BLOCKED by guardrail policy \"no-delete-operations\": deny action on tool_call containing \"delete\"",
+        "metadata": {
+          "blocked_by": "no-delete-operations",
+          "policy_action": "deny"
+        },
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_NvXSuH6LwYHS",
+        "trace_id": "trc_dCY5hmWxCtEt",
+        "step_number": 5,
+        "step_type": "guard_check",
+        "name": "policy_enforcement",
+        "input": {
+          "blocked_action": "delete_users_batch",
+          "policy": "no-delete-operations",
+          "severity": "deny"
+        },
+        "output": {
+          "action_taken": "blocked",
+          "fallback_available": true,
+          "fallback_action": "generate_report_instead"
+        },
+        "started_at": "2026-09-06T21:49:00.281Z",
+        "ended_at": null,
+        "duration_ms": 80,
+        "tokens_used": 200,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_aZUoeqQI-eWZ",
+        "trace_id": "trc_dCY5hmWxCtEt",
+        "step_number": 6,
+        "step_type": "thought",
+        "name": "plan_fallback",
+        "input": {
+          "blocked_action": "delete",
+          "available_fallbacks": [
+            "generate_report",
+            "escalate"
+          ]
+        },
+        "output": {
+          "decision": "generate_report",
+          "reasoning": "Cannot delete directly. Generate a CSV report of inactive users for admin review."
+        },
+        "started_at": "2026-09-06T21:49:00.361Z",
+        "ended_at": null,
+        "duration_ms": 200,
+        "tokens_used": 500,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_n9N7nwuuuTJn",
+        "trace_id": "trc_dCY5hmWxCtEt",
+        "step_number": 7,
+        "step_type": "tool_call",
+        "name": "generate_report",
+        "input": {
+          "query": "SELECT id, email, last_login FROM users WHERE last_login < NOW() - INTERVAL '90 days' ORDER BY last_login",
+          "format": "csv",
+          "output_path": "/reports/inactive-users-2026-02-27.csv"
+        },
+        "output": {
+          "rows_exported": 847,
+          "file_path": "/reports/inactive-users-2026-02-27.csv",
+          "file_size_kb": 42
+        },
+        "started_at": "2026-09-06T21:49:00.561Z",
+        "ended_at": null,
+        "duration_ms": 1500,
+        "tokens_used": 800,
+        "model": null,
+        "error": null,
+        "metadata": {
+          "tool": "database",
+          "read_only": true
+        },
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_DaPobazUswG6",
+        "trace_id": "trc_dCY5hmWxCtEt",
+        "step_number": 8,
+        "step_type": "output",
+        "name": "send_response",
+        "input": {
+          "message": "Generated report of inactive accounts",
+          "report_url": "/reports/inactive-users-2026-02-27.csv"
+        },
+        "output": {
+          "delivered": true,
+          "message_id": "msg_9102"
+        },
+        "started_at": "2026-09-06T21:49:02.061Z",
+        "ended_at": null,
+        "duration_ms": 520,
+        "tokens_used": 800,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      }
+    ]
+  },
+  {
+    "id": "trc_wo60DpKd27vV",
+    "agent_name": "travel-assistant",
+    "agent_version": "4.2.0",
+    "trigger": "user_message",
+    "status": "completed",
+    "input": {
+      "user_message": "Book me a flight from SFO to JFK next Friday, economy class",
+      "user_id": "usr_7823",
+      "preferences": {
+        "airline": "any",
+        "stops": "nonstop_preferred"
+      }
+    },
+    "output": {
+      "booking_confirmation": {
+        "pnr": "ABC123",
+        "flight": "UA 456",
+        "departure": "SFO 08:30",
+        "arrival": "JFK 17:05",
+        "class": "economy",
+        "price_usd": 342.5
+      },
+      "message": "Your flight has been booked! Confirmation: ABC123, UA 456 SFO→JFK departing 08:30."
+    },
+    "started_at": "2026-09-06T21:38:59.781Z",
+    "ended_at": "2026-09-06T21:39:02.981Z",
+    "total_duration_ms": 3200,
+    "total_tokens": 3500,
+    "total_cost_usd": 0.018,
+    "error": null,
+    "tags": [
+      "travel",
+      "booking",
+      "success"
+    ],
+    "metadata": {
+      "environment": "production",
+      "channel": "mobile_app"
+    },
+    "parent_trace_id": null,
+    "forked_from_step": null,
+    "session_id": "sess_demo_travel_01",
+    "created_at": "2026-09-06T21:53:59.833Z",
+    "steps": [
+      {
+        "id": "stp_pZjDbXcb-0bc",
+        "trace_id": "trc_wo60DpKd27vV",
+        "step_number": 1,
+        "step_type": "thought",
+        "name": "parse_booking_intent",
+        "input": {
+          "user_message": "Book me a flight from SFO to JFK next Friday, economy class"
+        },
+        "output": {
+          "intent": "flight_booking",
+          "params": {
+            "origin": "SFO",
+            "destination": "JFK",
+            "date": "next_friday",
+            "class": "economy"
+          }
+        },
+        "started_at": "2026-09-06T21:38:59.781Z",
+        "ended_at": null,
+        "duration_ms": 120,
+        "tokens_used": 400,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_QxbUTrFLIFOU",
+        "trace_id": "trc_wo60DpKd27vV",
+        "step_number": 2,
+        "step_type": "tool_call",
+        "name": "resolve_date",
+        "input": {
+          "relative_date": "next Friday"
+        },
+        "output": {
+          "resolved_date": "2026-03-06",
+          "day_of_week": "Friday"
+        },
+        "started_at": "2026-09-06T21:38:59.901Z",
+        "ended_at": null,
+        "duration_ms": 30,
+        "tokens_used": 50,
+        "model": null,
+        "error": null,
+        "metadata": {
+          "tool": "date_resolver"
+        },
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_pss-fsZkoC6X",
+        "trace_id": "trc_wo60DpKd27vV",
+        "step_number": 3,
+        "step_type": "tool_call",
+        "name": "search_flights",
+        "input": {
+          "origin": "SFO",
+          "destination": "JFK",
+          "date": "2026-03-06",
+          "class": "economy"
+        },
+        "output": {
+          "flights": [
+            {
+              "id": "fl_1",
+              "airline": "United",
+              "flight": "UA 456",
+              "depart": "08:30",
+              "arrive": "17:05",
+              "price": 342.5,
+              "stops": 0
+            },
+            {
+              "id": "fl_2",
+              "airline": "Delta",
+              "flight": "DL 890",
+              "depart": "10:15",
+              "arrive": "19:00",
+              "price": 378,
+              "stops": 0
+            },
+            {
+              "id": "fl_3",
+              "airline": "JetBlue",
+              "flight": "B6 212",
+              "depart": "14:00",
+              "arrive": "22:30",
+              "price": 299,
+              "stops": 1
+            }
+          ],
+          "total_results": 3
+        },
+        "started_at": "2026-09-06T21:38:59.931Z",
+        "ended_at": null,
+        "duration_ms": 450,
+        "tokens_used": 600,
+        "model": null,
+        "error": null,
+        "metadata": {
+          "tool": "flight_api",
+          "provider": "amadeus"
+        },
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_bqDfypY7aSn3",
+        "trace_id": "trc_wo60DpKd27vV",
+        "step_number": 4,
+        "step_type": "decision",
+        "name": "rank_options",
+        "input": {
+          "flights": 3,
+          "user_preference": "nonstop_preferred"
+        },
+        "output": {
+          "recommended": "fl_1",
+          "reasoning": "Nonstop, lowest price among nonstop options, early departure",
+          "ranking": [
+            "fl_1",
+            "fl_2",
+            "fl_3"
+          ]
+        },
+        "started_at": "2026-09-06T21:39:00.381Z",
+        "ended_at": null,
+        "duration_ms": 80,
+        "tokens_used": 300,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": null,
+        "caused_by_step_number": 3,
+        "decision": {
+          "id": "dec_MSu_6fFxxaMr",
+          "step_id": "stp_bqDfypY7aSn3",
+          "options": [
+            {
+              "option": "fl_1",
+              "rationale": "United UA 456 — nonstop, $342.50, early departure",
+              "score": 0.92
+            },
+            {
+              "option": "fl_2",
+              "rationale": "Delta DL 890 — nonstop but $35 more",
+              "score": 0.74
+            },
+            {
+              "option": "fl_3",
+              "rationale": "JetBlue B6 212 — cheapest but has a stop",
+              "score": 0.51
+            }
+          ],
+          "chosen": "fl_1",
+          "rationale": "Nonstop matches the user preference; lowest price among nonstops.",
+          "confidence": 0.92,
+          "decided_by": "agent"
+        }
+      },
+      {
+        "id": "stp_PKD29znA3wpp",
+        "trace_id": "trc_wo60DpKd27vV",
+        "step_number": 5,
+        "step_type": "llm_call",
+        "name": "format_options_message",
+        "input": {
+          "ranked_flights": [
+            "fl_1",
+            "fl_2",
+            "fl_3"
+          ],
+          "recommended": "fl_1"
+        },
+        "output": {
+          "text": "I found 3 flights for you:\n\n✈ **Recommended:** UA 456 — SFO 08:30→JFK 17:05 — $342.50 (nonstop)\n  DL 890 — SFO 10:15→JFK 19:00 — $378.00 (nonstop)\n  B6 212 — SFO 14:00→JFK 22:30 — $299.00 (1 stop)\n\nShall I book UA 456?"
+        },
+        "started_at": "2026-09-06T21:39:00.461Z",
+        "ended_at": null,
+        "duration_ms": 600,
+        "tokens_used": 800,
+        "model": "gpt-4-turbo",
+        "error": null,
+        "metadata": {
+          "temperature": 0.3
+        },
+        "parent_step_number": 4,
+        "caused_by_step_number": 4
+      },
+      {
+        "id": "stp_QZOs6KYVK077",
+        "trace_id": "trc_wo60DpKd27vV",
+        "step_number": 6,
+        "step_type": "output",
+        "name": "present_options",
+        "input": {
+          "message_type": "flight_options",
+          "options_count": 3
+        },
+        "output": {
+          "delivered": true,
+          "message_id": "msg_8891"
+        },
+        "started_at": "2026-09-06T21:39:01.061Z",
+        "ended_at": null,
+        "duration_ms": 40,
+        "tokens_used": 50,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": 4,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_gDLETpX3iCkS",
+        "trace_id": "trc_wo60DpKd27vV",
+        "step_number": 7,
+        "step_type": "thought",
+        "name": "process_user_confirmation",
+        "input": {
+          "user_response": "Yes, book the United flight",
+          "selected_flight": "fl_1"
+        },
+        "output": {
+          "action": "proceed_with_booking",
+          "flight_id": "fl_1"
+        },
+        "started_at": "2026-09-06T21:39:01.101Z",
+        "ended_at": null,
+        "duration_ms": 100,
+        "tokens_used": 200,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_v9wokHgx6nRs",
+        "trace_id": "trc_wo60DpKd27vV",
+        "step_number": 8,
+        "step_type": "tool_call",
+        "name": "create_booking",
+        "input": {
+          "flight_id": "fl_1",
+          "passenger": {
+            "name": "John Doe",
+            "user_id": "usr_7823"
+          },
+          "class": "economy",
+          "payment_method": "card_on_file"
+        },
+        "output": {
+          "success": true,
+          "pnr": "ABC123",
+          "total_charged": 342.5,
+          "currency": "USD"
+        },
+        "started_at": "2026-09-06T21:39:01.201Z",
+        "ended_at": null,
+        "duration_ms": 1200,
+        "tokens_used": 400,
+        "model": null,
+        "error": null,
+        "metadata": {
+          "tool": "booking_api"
+        },
+        "parent_step_number": null,
+        "caused_by_step_number": 7
+      },
+      {
+        "id": "stp_xWMo0uRGyEIW",
+        "trace_id": "trc_wo60DpKd27vV",
+        "step_number": 9,
+        "step_type": "llm_call",
+        "name": "generate_confirmation",
+        "input": {
+          "pnr": "ABC123",
+          "flight": "UA 456",
+          "price": 342.5
+        },
+        "output": {
+          "text": "Your flight has been booked! Confirmation: ABC123, UA 456 SFO→JFK departing 08:30. Total: $342.50."
+        },
+        "started_at": "2026-09-06T21:39:02.401Z",
+        "ended_at": null,
+        "duration_ms": 400,
+        "tokens_used": 500,
+        "model": "gpt-4-turbo",
+        "error": null,
+        "metadata": {
+          "temperature": 0.2
+        },
+        "parent_step_number": 8,
+        "caused_by_step_number": 8
+      },
+      {
+        "id": "stp_QdPQ9dVxFNFq",
+        "trace_id": "trc_wo60DpKd27vV",
+        "step_number": 10,
+        "step_type": "output",
+        "name": "send_confirmation",
+        "input": {
+          "message_type": "booking_confirmation",
+          "pnr": "ABC123"
+        },
+        "output": {
+          "delivered": true,
+          "message_id": "msg_8892",
+          "push_notification_sent": true
+        },
+        "started_at": "2026-09-06T21:39:02.801Z",
+        "ended_at": null,
+        "duration_ms": 180,
+        "tokens_used": 200,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      }
+    ]
+  },
+  {
+    "id": "trc_q3mnFdfDAOWk",
+    "agent_name": "research-assistant",
+    "agent_version": "3.0.1",
+    "trigger": "api",
+    "status": "timeout",
+    "input": {
+      "research_query": "Compare renewable energy adoption rates across G7 nations in the last decade",
+      "max_sources": 10,
+      "output_format": "structured_report"
+    },
+    "output": null,
+    "started_at": "2026-09-06T21:23:59.781Z",
+    "ended_at": "2026-09-06T21:24:34.781Z",
+    "total_duration_ms": 35000,
+    "total_tokens": 15800,
+    "total_cost_usd": 0.084,
+    "error": "LLM call timed out after 30s — context window exceeded practical limit",
+    "tags": [
+      "research",
+      "timeout",
+      "context-overflow"
+    ],
+    "metadata": {
+      "model_max_tokens": 128000,
+      "practical_limit": 12000
+    },
+    "parent_trace_id": null,
+    "forked_from_step": null,
+    "session_id": null,
+    "created_at": "2026-09-06T21:53:59.822Z",
+    "steps": [
+      {
+        "id": "stp_BHFDozkosrwd",
+        "trace_id": "trc_q3mnFdfDAOWk",
+        "step_number": 1,
+        "step_type": "thought",
+        "name": "decompose_query",
+        "input": {
+          "query": "Compare renewable energy adoption rates across G7 nations"
+        },
+        "output": {
+          "sub_queries": [
+            "renewable energy statistics USA 2015-2025",
+            "EU renewable energy adoption timeline",
+            "Japan renewable energy policy changes",
+            "G7 renewable energy comparison data"
+          ]
+        },
+        "started_at": "2026-09-06T21:23:59.781Z",
+        "ended_at": null,
+        "duration_ms": 400,
+        "tokens_used": 1000,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_9uMZGlNyBWSM",
+        "trace_id": "trc_q3mnFdfDAOWk",
+        "step_number": 2,
+        "step_type": "retrieval",
+        "name": "search_usa_energy",
+        "input": {
+          "query": "renewable energy statistics USA 2015-2025",
+          "top_k": 8
+        },
+        "output": {
+          "documents": [
+            {
+              "title": "US Energy Information Administration Report 2024",
+              "tokens": 2400
+            },
+            {
+              "title": "DOE Renewable Portfolio Standards",
+              "tokens": 1800
+            },
+            {
+              "title": "State-by-state renewable adoption data",
+              "tokens": 1200
+            }
+          ],
+          "total_tokens_retrieved": 5400
+        },
+        "started_at": "2026-09-06T21:24:00.181Z",
+        "ended_at": null,
+        "duration_ms": 800,
+        "tokens_used": 2200,
+        "model": null,
+        "error": null,
+        "metadata": {
+          "source": "academic_db"
+        },
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_1hfdcSdTQiF3",
+        "trace_id": "trc_q3mnFdfDAOWk",
+        "step_number": 3,
+        "step_type": "retrieval",
+        "name": "search_eu_energy",
+        "input": {
+          "query": "EU renewable energy adoption timeline",
+          "top_k": 8
+        },
+        "output": {
+          "documents": [
+            {
+              "title": "European Green Deal Progress Report",
+              "tokens": 2100
+            },
+            {
+              "title": "Eurostat Energy Statistics 2024",
+              "tokens": 1600
+            },
+            {
+              "title": "REPowerEU Implementation Review",
+              "tokens": 1400
+            }
+          ],
+          "total_tokens_retrieved": 5100
+        },
+        "started_at": "2026-09-06T21:24:00.981Z",
+        "ended_at": null,
+        "duration_ms": 750,
+        "tokens_used": 2000,
+        "model": null,
+        "error": null,
+        "metadata": {
+          "source": "academic_db"
+        },
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_VGprS8fVX4tu",
+        "trace_id": "trc_q3mnFdfDAOWk",
+        "step_number": 4,
+        "step_type": "retrieval",
+        "name": "search_japan_energy",
+        "input": {
+          "query": "Japan renewable energy policy changes",
+          "top_k": 8
+        },
+        "output": {
+          "documents": [
+            {
+              "title": "Japan 6th Strategic Energy Plan",
+              "tokens": 1900
+            },
+            {
+              "title": "METI Renewable Energy Targets",
+              "tokens": 1500
+            }
+          ],
+          "total_tokens_retrieved": 3400
+        },
+        "started_at": "2026-09-06T21:24:01.731Z",
+        "ended_at": null,
+        "duration_ms": 600,
+        "tokens_used": 1800,
+        "model": null,
+        "error": null,
+        "metadata": {
+          "source": "academic_db"
+        },
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_6W8o4IfR5NzW",
+        "trace_id": "trc_q3mnFdfDAOWk",
+        "step_number": 5,
+        "step_type": "retrieval",
+        "name": "search_g7_comparison",
+        "input": {
+          "query": "G7 renewable energy comparison data",
+          "top_k": 8
+        },
+        "output": {
+          "documents": [
+            {
+              "title": "IEA Global Energy Review 2024",
+              "tokens": 3200
+            },
+            {
+              "title": "IRENA Renewable Capacity Statistics",
+              "tokens": 2800
+            },
+            {
+              "title": "G7 Climate Action Tracker",
+              "tokens": 2100
+            },
+            {
+              "title": "World Bank Energy Indicators",
+              "tokens": 1700
+            }
+          ],
+          "total_tokens_retrieved": 9800
+        },
+        "started_at": "2026-09-06T21:24:02.331Z",
+        "ended_at": null,
+        "duration_ms": 900,
+        "tokens_used": 2500,
+        "model": null,
+        "error": null,
+        "metadata": {
+          "source": "academic_db"
+        },
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_17IyfMsRt7us",
+        "trace_id": "trc_q3mnFdfDAOWk",
+        "step_number": 6,
+        "step_type": "thought",
+        "name": "prepare_synthesis_prompt",
+        "input": {
+          "total_retrieved_docs": 12,
+          "total_context_tokens": 9500,
+          "warning": "Context approaching practical limit"
+        },
+        "output": {
+          "decision": "proceed_with_full_context",
+          "reasoning": "All sources are relevant, proceeding with synthesis"
+        },
+        "started_at": "2026-09-06T21:24:03.231Z",
+        "ended_at": null,
+        "duration_ms": 300,
+        "tokens_used": 1500,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_H8UgvEhPUWsP",
+        "trace_id": "trc_q3mnFdfDAOWk",
+        "step_number": 7,
+        "step_type": "llm_call",
+        "name": "synthesize_report",
+        "input": {
+          "instruction": "Synthesize a structured comparison report from all retrieved sources",
+          "context_tokens": 11000,
+          "max_output_tokens": 4000
+        },
+        "output": null,
+        "started_at": "2026-09-06T21:24:03.531Z",
+        "ended_at": null,
+        "duration_ms": 30000,
+        "tokens_used": 3800,
+        "model": "gpt-4-turbo",
+        "error": "Request timed out after 30000ms — context window too large for efficient processing",
+        "metadata": {
+          "timeout_ms": 30000,
+          "temperature": 0.4
+        },
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_n_Zde-3yC2jJ",
+        "trace_id": "trc_q3mnFdfDAOWk",
+        "step_number": 8,
+        "step_type": "thought",
+        "name": "assess_timeout",
+        "input": {
+          "timeout_step": 7,
+          "context_tokens": 14800
+        },
+        "output": {
+          "analysis": "Context window exceeded practical processing limit",
+          "recommendation": "Reduce to top 6 sources and retry"
+        },
+        "started_at": "2026-09-06T21:24:33.531Z",
+        "ended_at": null,
+        "duration_ms": 200,
+        "tokens_used": 800,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_Yhzry-wX12-G",
+        "trace_id": "trc_q3mnFdfDAOWk",
+        "step_number": 9,
+        "step_type": "error",
+        "name": "timeout_abort",
+        "input": {
+          "reason": "LLM synthesis call exceeded 30s timeout"
+        },
+        "output": {
+          "partial_result": null,
+          "tokens_consumed": 15800,
+          "wasted_cost_usd": 0.084
+        },
+        "started_at": "2026-09-06T21:24:33.731Z",
+        "ended_at": null,
+        "duration_ms": 1050,
+        "tokens_used": 200,
+        "model": null,
+        "error": "LLM call timed out after 30s — context window exceeded practical limit",
+        "metadata": {},
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      }
+    ]
+  },
+  {
+    "id": "trc_oST-ycXoXr8z",
+    "agent_name": "customer-service-bot",
+    "agent_version": "2.1.0",
+    "trigger": "api",
+    "status": "failed",
+    "input": {
+      "conversation_id": "conv_8812",
+      "user_message": "What is your return policy? I bought a laptop last week.",
+      "session_context": {
+        "previous_topic": "warranty_discussion"
+      }
+    },
+    "output": {
+      "response": "Great news! We offer a lifetime guarantee on all electronics, including your laptop. You can return it at any time for a full refund!",
+      "confidence": 0.92
+    },
+    "started_at": "2026-09-06T20:53:59.781Z",
+    "ended_at": "2026-09-06T20:54:04.281Z",
+    "total_duration_ms": 4500,
+    "total_tokens": 12000,
+    "total_cost_usd": 0.048,
+    "error": "Response contained hallucinated policy information (lifetime guarantee)",
+    "tags": [
+      "customer-service",
+      "hallucination",
+      "production"
+    ],
+    "metadata": {
+      "environment": "production",
+      "region": "us-east-1"
+    },
+    "parent_trace_id": null,
+    "forked_from_step": null,
+    "session_id": null,
+    "created_at": "2026-09-06T21:53:59.799Z",
+    "steps": [
+      {
+        "id": "stp_ZqQX4hP7K-ye",
+        "trace_id": "trc_oST-ycXoXr8z",
+        "step_number": 1,
+        "step_type": "thought",
+        "name": "analyze_intent",
+        "input": {
+          "user_message": "What is your return policy? I bought a laptop last week."
+        },
+        "output": {
+          "intent": "return_policy_inquiry",
+          "product": "laptop",
+          "urgency": "medium"
+        },
+        "started_at": "2026-09-06T20:53:59.781Z",
+        "ended_at": null,
+        "duration_ms": 150,
+        "tokens_used": 800,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_0lh9mbFQnGU7",
+        "trace_id": "trc_oST-ycXoXr8z",
+        "step_number": 2,
+        "step_type": "retrieval",
+        "name": "search_knowledge_base",
+        "input": {
+          "query": "return policy electronics laptop",
+          "top_k": 5
+        },
+        "output": {
+          "documents": [
+            {
+              "id": "doc_101",
+              "title": "30-Day Return Policy",
+              "relevance": 0.95
+            },
+            {
+              "id": "doc_102",
+              "title": "Warranty Information",
+              "relevance": 0.72
+            },
+            {
+              "id": "doc_103",
+              "title": "Lifetime Membership Benefits",
+              "relevance": 0.45
+            }
+          ]
+        },
+        "started_at": "2026-09-06T20:53:59.931Z",
+        "ended_at": null,
+        "duration_ms": 320,
+        "tokens_used": 1200,
+        "model": null,
+        "error": null,
+        "metadata": {
+          "source": "vector_db"
+        },
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_lp6OeFDQt1-F",
+        "trace_id": "trc_oST-ycXoXr8z",
+        "step_number": 3,
+        "step_type": "thought",
+        "name": "evaluate_context",
+        "input": {
+          "retrieved_docs": 3,
+          "previous_topic": "warranty_discussion"
+        },
+        "output": {
+          "selected_docs": [
+            "doc_101",
+            "doc_103"
+          ],
+          "reasoning": "User mentioned laptop and warranty context from previous conversation. Including lifetime membership doc for completeness."
+        },
+        "started_at": "2026-09-06T20:54:00.251Z",
+        "ended_at": null,
+        "duration_ms": 200,
+        "tokens_used": 1500,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_VRomdUBYV9fU",
+        "trace_id": "trc_oST-ycXoXr8z",
+        "step_number": 4,
+        "step_type": "llm_call",
+        "name": "generate_response",
+        "input": {
+          "system_prompt": "You are a helpful customer service agent.",
+          "context": "Return policy: 30-day return window. Lifetime Membership: exclusive benefits for premium members.",
+          "user_query": "What is your return policy?",
+          "previous_context": "warranty_discussion"
+        },
+        "output": {
+          "text": "Great news! We offer a lifetime guarantee on all electronics, including your laptop. You can return it at any time for a full refund!",
+          "finish_reason": "stop"
+        },
+        "started_at": "2026-09-06T20:54:00.451Z",
+        "ended_at": null,
+        "duration_ms": 1800,
+        "tokens_used": 5500,
+        "model": "gpt-4-turbo",
+        "error": null,
+        "metadata": {
+          "temperature": 0.3
+        },
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_12Z4ABG2_cyf",
+        "trace_id": "trc_oST-ycXoXr8z",
+        "step_number": 5,
+        "step_type": "decision",
+        "name": "confidence_check",
+        "input": {
+          "response_confidence": 0.92,
+          "threshold": 0.7
+        },
+        "output": {
+          "decision": "proceed",
+          "confidence": 0.92
+        },
+        "started_at": "2026-09-06T20:54:02.251Z",
+        "ended_at": null,
+        "duration_ms": 50,
+        "tokens_used": 200,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": null,
+        "caused_by_step_number": null,
+        "decision": {
+          "id": "dec_acAF4hFYz8qF",
+          "step_id": "stp_12Z4ABG2_cyf",
+          "options": [
+            {
+              "option": "proceed",
+              "rationale": "Self-reported confidence 0.92 is above the 0.7 threshold",
+              "score": 0.92
+            },
+            {
+              "option": "escalate_to_human",
+              "rationale": "No retrieved document actually states the policy",
+              "score": 0.31
+            }
+          ],
+          "chosen": "proceed",
+          "rationale": "Confidence above threshold, so the answer was sent without a human check.",
+          "confidence": 0.92,
+          "decided_by": "agent"
+        }
+      },
+      {
+        "id": "stp_UJBinQrxiWNd",
+        "trace_id": "trc_oST-ycXoXr8z",
+        "step_number": 6,
+        "step_type": "output",
+        "name": "send_response",
+        "input": {
+          "text": "Great news! We offer a lifetime guarantee on all electronics...",
+          "channel": "chat_widget"
+        },
+        "output": {
+          "delivered": true,
+          "message_id": "msg_4421"
+        },
+        "started_at": "2026-09-06T20:54:02.301Z",
+        "ended_at": null,
+        "duration_ms": 80,
+        "tokens_used": 100,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp__YA9OVRuRh11",
+        "trace_id": "trc_oST-ycXoXr8z",
+        "step_number": 7,
+        "step_type": "guard_check",
+        "name": "fact_verification",
+        "input": {
+          "claim": "lifetime guarantee on all electronics",
+          "source_docs": [
+            "doc_101",
+            "doc_103"
+          ]
+        },
+        "output": {
+          "passed": false,
+          "violations": [
+            {
+              "claim": "lifetime guarantee",
+              "evidence": "Policy doc_101 states 30-day return window only",
+              "severity": "high"
+            }
+          ]
+        },
+        "started_at": "2026-09-06T20:54:02.381Z",
+        "ended_at": null,
+        "duration_ms": 1500,
+        "tokens_used": 2200,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_U_zp_707BgaA",
+        "trace_id": "trc_oST-ycXoXr8z",
+        "step_number": 8,
+        "step_type": "error",
+        "name": "post_send_alert",
+        "input": {
+          "violation_type": "hallucination",
+          "severity": "high"
+        },
+        "output": {
+          "alert_sent": true,
+          "ticket_id": "INC-2847"
+        },
+        "started_at": "2026-09-06T20:54:03.881Z",
+        "ended_at": null,
+        "duration_ms": 400,
+        "tokens_used": 500,
+        "model": null,
+        "error": "Response contained hallucinated policy information (lifetime guarantee)",
+        "metadata": {
+          "escalated": true
+        },
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      }
+    ]
+  },
+  {
+    "id": "trc_TqzyPOQPnM1o",
+    "agent_name": "code-pilot",
+    "agent_version": "1.4.2",
+    "trigger": "user_message",
+    "status": "failed",
+    "input": {
+      "task": "Add a logging utility to src/utils/logger.ts",
+      "workspace": "/home/dev/my-project",
+      "language": "typescript"
+    },
+    "output": {
+      "files_modified": [
+        "tsconfig.json"
+      ],
+      "error": "write_file targeted wrong path — overwrote tsconfig.json"
+    },
+    "started_at": "2026-09-06T19:53:59.781Z",
+    "ended_at": "2026-09-06T19:54:05.981Z",
+    "total_duration_ms": 6200,
+    "total_tokens": 8200,
+    "total_cost_usd": 0.033,
+    "error": "write_file targeted wrong path — overwrote tsconfig.json",
+    "tags": [
+      "coding",
+      "tool-error",
+      "file-write"
+    ],
+    "metadata": {
+      "ide": "vscode",
+      "extension_version": "3.1.0"
+    },
+    "parent_trace_id": null,
+    "forked_from_step": null,
+    "session_id": null,
+    "created_at": "2026-09-06T21:53:59.809Z",
+    "steps": [
+      {
+        "id": "stp_nfTYP3kZWZ-C",
+        "trace_id": "trc_TqzyPOQPnM1o",
+        "step_number": 1,
+        "step_type": "thought",
+        "name": "plan_implementation",
+        "input": {
+          "task": "Add a logging utility to src/utils/logger.ts"
+        },
+        "output": {
+          "plan": [
+            "Read existing project structure",
+            "Generate logger.ts with log levels",
+            "Write file to src/utils/logger.ts",
+            "Update barrel export in src/utils/index.ts"
+          ]
+        },
+        "started_at": "2026-09-06T19:53:59.781Z",
+        "ended_at": null,
+        "duration_ms": 300,
+        "tokens_used": 1200,
+        "model": null,
+        "error": null,
+        "metadata": {},
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_rL4Y47uy79X0",
+        "trace_id": "trc_TqzyPOQPnM1o",
+        "step_number": 2,
+        "step_type": "tool_call",
+        "name": "read_directory",
+        "input": {
+          "path": "/home/dev/my-project",
+          "recursive": false
+        },
+        "output": {
+          "entries": [
+            "src/",
+            "tests/",
+            "tsconfig.json",
+            "package.json",
+            ".gitignore"
+          ]
+        },
+        "started_at": "2026-09-06T19:54:00.081Z",
+        "ended_at": null,
+        "duration_ms": 120,
+        "tokens_used": 400,
+        "model": null,
+        "error": null,
+        "metadata": {
+          "tool": "filesystem"
+        },
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_1bmMG9DWse_J",
+        "trace_id": "trc_TqzyPOQPnM1o",
+        "step_number": 3,
+        "step_type": "tool_call",
+        "name": "read_file",
+        "input": {
+          "path": "/home/dev/my-project/src/utils/index.ts"
+        },
+        "output": {
+          "content": "export * from './helpers.js';\nexport * from './validators.js';\n",
+          "size_bytes": 64
+        },
+        "started_at": "2026-09-06T19:54:00.201Z",
+        "ended_at": null,
+        "duration_ms": 80,
+        "tokens_used": 300,
+        "model": null,
+        "error": null,
+        "metadata": {
+          "tool": "filesystem"
+        },
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_N_4npQNFHoNy",
+        "trace_id": "trc_TqzyPOQPnM1o",
+        "step_number": 4,
+        "step_type": "llm_call",
+        "name": "generate_logger_code",
+        "input": {
+          "instruction": "Generate a TypeScript logging utility with debug, info, warn, error levels",
+          "existing_exports": "export * from './helpers.js';\nexport * from './validators.js';"
+        },
+        "output": {
+          "code": "import chalk from 'chalk';\n\nexport type LogLevel = 'debug' | 'info' | 'warn' | 'error';\n\nconst LEVEL_COLORS = { debug: chalk.dim, info: chalk.blue, warn: chalk.yellow, error: chalk.red };\n\nexport function log(level: LogLevel, message: string): void {\n  const prefix = LEVEL_COLORS[level](`[${level.toUpperCase()}]`);\n  console.log(`${prefix} ${message}`);\n}\n",
+          "language": "typescript"
+        },
+        "started_at": "2026-09-06T19:54:00.281Z",
+        "ended_at": null,
+        "duration_ms": 2800,
+        "tokens_used": 3500,
+        "model": "claude-3-sonnet",
+        "error": null,
+        "metadata": {
+          "temperature": 0.2
+        },
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_uNBQCjusKaEg",
+        "trace_id": "trc_TqzyPOQPnM1o",
+        "step_number": 5,
+        "step_type": "tool_call",
+        "name": "write_file",
+        "input": {
+          "path": "/home/dev/my-project/tsconfig.json",
+          "content": "import chalk from 'chalk';\n\nexport type LogLevel = ..."
+        },
+        "output": {
+          "bytes_written": 312,
+          "path": "/home/dev/my-project/tsconfig.json"
+        },
+        "started_at": "2026-09-06T19:54:03.081Z",
+        "ended_at": null,
+        "duration_ms": 150,
+        "tokens_used": 200,
+        "model": null,
+        "error": "File written to wrong path — tsconfig.json overwritten with TypeScript source code",
+        "metadata": {
+          "tool": "filesystem",
+          "intended_path": "src/utils/logger.ts"
+        },
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_b3jUgGZZI2M2",
+        "trace_id": "trc_TqzyPOQPnM1o",
+        "step_number": 6,
+        "step_type": "tool_call",
+        "name": "run_build",
+        "input": {
+          "command": "npm run build",
+          "cwd": "/home/dev/my-project"
+        },
+        "output": {
+          "exit_code": 1,
+          "stderr": "error TS5024: Compiler option 'module' requires a value of type string."
+        },
+        "started_at": "2026-09-06T19:54:03.231Z",
+        "ended_at": null,
+        "duration_ms": 2400,
+        "tokens_used": 1800,
+        "model": null,
+        "error": "Build failed: tsconfig.json is no longer valid JSON",
+        "metadata": {
+          "tool": "shell"
+        },
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      },
+      {
+        "id": "stp_zfdV7qQmRKKo",
+        "trace_id": "trc_TqzyPOQPnM1o",
+        "step_number": 7,
+        "step_type": "error",
+        "name": "abort_with_error",
+        "input": {
+          "build_exit_code": 1,
+          "file_overwritten": "tsconfig.json"
+        },
+        "output": {
+          "error_type": "wrong_file_target",
+          "recovery_suggestion": "Restore tsconfig.json from git and retry write to src/utils/logger.ts"
+        },
+        "started_at": "2026-09-06T19:54:05.631Z",
+        "ended_at": null,
+        "duration_ms": 350,
+        "tokens_used": 800,
+        "model": null,
+        "error": "write_file targeted wrong path — overwrote tsconfig.json",
+        "metadata": {
+          "recoverable": true
+        },
+        "parent_step_number": null,
+        "caused_by_step_number": null
+      }
+    ]
+  }
+]

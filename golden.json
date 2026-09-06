@@ -1,0 +1,82 @@
+[
+  {
+    "id": "trc_oST-ycXoXr8z",
+    "agent_name": "customer-service-bot",
+    "input": {
+      "conversation_id": "conv_8812",
+      "user_message": "What is your return policy? I bought a laptop last week.",
+      "session_context": {
+        "previous_topic": "warranty_discussion"
+      }
+    },
+    "expected_output": {
+      "response": "Great news! We offer a lifetime guarantee on all electronics, including your laptop. You can return it at any time for a full refund!",
+      "confidence": 0.92
+    },
+    "steps_summary": [
+      {
+        "step_number": 1,
+        "step_type": "thought",
+        "name": "analyze_intent",
+        "failed": false
+      },
+      {
+        "step_number": 2,
+        "step_type": "retrieval",
+        "name": "search_knowledge_base",
+        "failed": false
+      },
+      {
+        "step_number": 3,
+        "step_type": "thought",
+        "name": "evaluate_context",
+        "failed": false
+      },
+      {
+        "step_number": 4,
+        "step_type": "llm_call",
+        "name": "generate_response",
+        "model": "gpt-4-turbo",
+        "failed": false
+      },
+      {
+        "step_number": 5,
+        "step_type": "decision",
+        "name": "confidence_check",
+        "decision": "proceed",
+        "failed": false
+      },
+      {
+        "step_number": 6,
+        "step_type": "output",
+        "name": "send_response",
+        "failed": false
+      },
+      {
+        "step_number": 7,
+        "step_type": "guard_check",
+        "name": "fact_verification",
+        "failed": false
+      },
+      {
+        "step_number": 8,
+        "step_type": "error",
+        "name": "post_send_alert",
+        "failed": true
+      }
+    ],
+    "eval_criteria": [],
+    "metadata": {
+      "environment": "production",
+      "region": "us-east-1",
+      "status": "failed",
+      "total_duration_ms": 4500,
+      "total_tokens": 12000,
+      "tags": [
+        "customer-service",
+        "hallucination",
+        "production"
+      ]
+    }
+  }
+]
