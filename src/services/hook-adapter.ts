@@ -385,6 +385,22 @@ function soleOpenAnchor(db: Database.Database, traceId: string): number | undefi
   return rows.length === 1 ? rows[0].step_number : undefined;
 }
 
+/** `true`, `1`, `"true"`, `"TRUE"` — the shapes a JSON harness writes for a flag. */
+function isTrueish(v: unknown): boolean {
+  if (v === true || v === 1) return true;
+  if (typeof v !== 'string') return false;
+  const t = v.trim().toLowerCase();
+  return t === 'true' || t === '1';
+}
+
+/** The mirror, for a flag that reports SUCCESS: false, 0, "false", "FALSE". */
+function isFalseish(v: unknown): boolean {
+  if (v === false || v === 0) return true;
+  if (typeof v !== 'string') return false;
+  const t = v.trim().toLowerCase();
+  return t === 'false' || t === '0';
+}
+
 /**
  * Failure text carried by a tool RESULT payload, or undefined when it succeeded.
  *
@@ -402,8 +418,13 @@ function toolResultFailure(result: Record<string, unknown> | undefined): string 
   if (!result) return undefined;
   const text = (): string | undefined =>
     errorText(result.error) ?? str(result.stderr) ?? str(result.message) ?? str(result.content) ?? str(result.stdout);
-  if (result.is_error === true || result.is_error === 'true') return text() ?? 'tool failed';
-  if (result.success === false || result.success === 'false') return text() ?? 'tool reported failure';
+  // `isTrueish`/`isFalseish`, not a bare equality: these values arrive as JSON
+  // from a harness, and `"True"`, `"TRUE"` and `1` all mean what they say. The
+  // stream translator has read `is_error` this way since it was written, and a
+  // stricter test here would miss a failure — the expensive direction for a
+  // failure flag, and the reason this whole function exists.
+  if (isTrueish(result.is_error)) return text() ?? 'tool failed';
+  if (isFalseish(result.success)) return text() ?? 'tool reported failure';
   const code = typeof result.exit_code === 'number' ? result.exit_code : Number(result.exit_code);
   if (Number.isFinite(code) && code !== 0) return text() ?? `exited with code ${code}`;
   if (result.error != null) return errorText(result.error) ?? 'tool failed';

@@ -614,6 +614,30 @@ describe('a tool that failed is recorded as failed', () => {
     expect(close('f3', { exit_code: 2, stderr: 'boom' }).error).toBe('boom');
   });
 
+  it('reads the flag variants a JSON harness actually writes', () => {
+    // `"TRUE"`, `1`, `"FALSE"`, `0` all mean what they say. The stream
+    // translator has read `is_error` through `isTrueish` since it was written;
+    // a stricter equality here would MISS a failure, which is the expensive
+    // direction for a failure flag.
+    expect(close('v1', { is_error: 'TRUE', error: 'boom' }).error).toBe('boom');
+    expect(close('v2', { is_error: 1, stderr: 'boom1' }).error).toBe('boom1');
+    expect(close('v3', { success: 'FALSE', message: 'nope' }).error).toBe('nope');
+    expect(close('v4', { success: 0, message: 'nope0' }).error).toBe('nope0');
+    // ...and a value that does not say "failed" is not read as one.
+    expect(close('v5', { is_error: 'no' }).error).toBeNull();
+    expect(close('v6', { success: 'TRUE' }).error).toBeNull();
+  });
+
+  it('survives a tool_response of any shape, since a producer writes it', () => {
+    // A note is never worth a crash, and this runs inside the agent's own turn.
+    for (const [session, response] of [
+      ['s1', 'a string'], ['s2', [1, 2, 3]], ['s3', null],
+      ['s4', { is_error: { nested: true } }], ['s5', { exit_code: 'abc' }],
+    ] as const) {
+      expect(() => close(session, response as never)).not.toThrow();
+    }
+  });
+
   it('says something usable when the failure carries no text', () => {
     expect(close('f4', { is_error: true }).error).toBe('tool failed');
   });
