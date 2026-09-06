@@ -336,6 +336,17 @@ and one-way.
 
 ### Fixed
 
+- **`ingest --format jsonl` on a JSON file reported the symptom thousands of
+  times instead of the cause.** Every line of a pretty-printed array is a
+  fragment, so an ordinary `--format json` export produced 5,664 "Invalid JSON
+  on line N" warnings and a validation error per element — without once saying
+  that `--format jsonl` had been pointed at a `--format json` file. A JSONL
+  record is an object, so a file whose first meaningful line opens a bracket is
+  an array; `ingest` now says exactly that and names both ways out (drop
+  `--format` to auto-detect, or pass `--format json`), each verified to read
+  the same file. A real JSONL file is unaffected — the tell is the leading
+  bracket, not the flag.
+
 - **`ingest` accepted a golden dataset and manufactured empty traces from it.**
   A golden entry carries `agent_name` and `input`, so validation passed and the
   command reported "Ingested 20 trace(s) successfully" — while storing 20

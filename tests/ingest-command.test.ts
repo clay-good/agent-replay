@@ -70,6 +70,58 @@ function sourceDoc(build: (db: ReturnType<typeof ensureDatabase>, id: string) =>
   }
 }
 
+describe('ingest names a --format mismatch instead of the symptom', () => {
+  // A JSON array read as JSONL answered with an "Invalid JSON on line N"
+  // warning for every line of the pretty-printed file (5,664 of them for one
+  // ordinary export) plus a validation error per element, and never once said
+  // that --format jsonl had been pointed at a --format json file.
+  const traces = [
+    { agent_name: 'a', status: 'completed', input: { q: 'x' }, steps: [{ step_number: 1, step_type: 'output', name: 'done' }] },
+  ];
+
+  it('says the file is a JSON array, and how to read it', () => {
+    // The parse failure is reported through the spinner, which writes straight
+    // to process.stderr rather than console.error.
+    const written: string[] = [];
+    const writeSpy = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation((chunk: unknown) => { written.push(String(chunk)); return true; });
+    try {
+      runIngest(docFile('array.json', traces), { dir: store, format: 'jsonl' });
+    } finally {
+      writeSpy.mockRestore();
+    }
+    const text = noAnsi([...written, ...out].join('\n'));
+    expect(text).toMatch(/JSON array, but --format jsonl was given/);
+    // Both remedies it offers must actually resolve the case it names.
+    expect(text).toMatch(/--format json/);
+    expect(text).toMatch(/auto-detect/);
+    // And the symptom-storm it replaced must be gone.
+    expect(text).not.toMatch(/Invalid JSON on line/);
+    // Nothing was stored from a file it could not read.
+    const db = ensureDatabase(resolve(store, 'traces.db'));
+    expect(listTraces(db, {}).total).toBe(0);
+  });
+
+  it('reads the same file when the format is right, and when it is omitted', () => {
+    const file = docFile('array2.json', traces);
+    runIngest(file, { dir: store, format: 'json' });
+    const db = ensureDatabase(resolve(store, 'traces.db'));
+    expect(listTraces(db, {}).total).toBe(1);
+    runIngest(file, { dir: store });
+    expect(listTraces(db, {}).total).toBe(2);
+  });
+
+  it('still reads a real JSONL file', () => {
+    // The cry-wolf guard: the tell is a leading bracket, not the flag itself.
+    const p = join(dir, 'real.jsonl');
+    writeFileSync(p, traces.map((t) => JSON.stringify(t)).join('\n') + '\n');
+    runIngest(p, { dir: store, format: 'jsonl' });
+    const db = ensureDatabase(resolve(store, 'traces.db'));
+    expect(listTraces(db, {}).total).toBe(1);
+  });
+});
+
 describe('ingest refuses a golden dataset', () => {
   // A golden entry carries `agent_name` and `input`, so validation passed and
   // ingest reported "Ingested 20 trace(s) successfully" -- while storing 20

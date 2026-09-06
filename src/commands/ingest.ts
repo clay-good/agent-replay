@@ -260,6 +260,25 @@ function parseTraces(raw: string, format: 'json' | 'jsonl', parseWarnings: strin
     return Array.isArray(parsed) ? parsed : [parsed];
   }
 
+  // A JSON ARRAY read as JSONL answered with thousands of "Invalid JSON on
+  // line N" warnings and a validation error per element — 5,664 bad lines and
+  // 56 "Input must be an object" for one ordinary `--format json` export —
+  // without once naming the cause, which is simply that `--format jsonl` was
+  // pointed at a `--format json` file. Every line of a pretty-printed array is
+  // a fragment, so the report describes the symptom thousands of times over.
+  // A JSONL record is an object, so a file whose first meaningful line opens a
+  // bracket is an array, not JSONL. Say so, the way the golden-dataset guard
+  // above does, instead of burying it.
+  const firstMeaningful = raw
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => l.length > 0 && !l.startsWith('//'));
+  if (firstMeaningful?.startsWith('[')) {
+    throw new Error(
+      'file is a JSON array, but --format jsonl was given. Drop --format to auto-detect, or pass --format json.',
+    );
+  }
+
   // JSONL: one JSON object per line. Track the true file line number *before*
   // dropping blank/comment lines, so a parse error names the line the user sees
   // in their editor rather than a post-filter index.
