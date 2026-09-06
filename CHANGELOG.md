@@ -393,6 +393,16 @@ and one-way.
 
 ### Fixed
 
+- **`otel serve` dropped every export in silence when the store broke.** A
+  mistyped path was announced on the receiver's console; a batch that could not
+  be STORED was not. A store gone read-only, a full disk or a damaged file
+  answers every export with a 4xx/5xx the exporter sees and the operator does
+  not — so a receiver that had captured nothing for hours looked exactly like a
+  quiet one, and the only console line about it (`Accepted 0 trace(s)`) came at
+  Ctrl-C, after the run it was meant to capture. Failures are now announced once
+  per distinct reason, sharing the refusals' bound on how many distinct problems
+  are reported.
+
 - **`init --force` threw away your API keys without saying so.** `--force`
   rewrites `config.json` from the defaults, and that file is where the keys
   live — so a stored Anthropic key and a chosen `ai.model` went silently, under

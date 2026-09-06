@@ -418,6 +418,46 @@ describe('otel serve (end-to-end)', () => {
     expect(row.n).toBe(1);
   }, 20000);
 
+  it('announces an export it could not store, once per reason', async () => {
+    // A mistyped path was announced; a DROPPED batch was not. A store that has
+    // gone read-only (or a full disk) answers every export with a 500 the
+    // exporter sees and the operator does not, so a receiver that has stored
+    // nothing for hours looks exactly like a quiet one — the only console line
+    // was at Ctrl-C, after the run it was meant to capture.
+    const { base, stderr } = await startReceiverCapturingStderr();
+    // Break the store under the running receiver, the way a read-only mount, a
+    // full disk or a damaged file does — dropping the table the insert needs is
+    // the deterministic version of all three, and reaches the same code path.
+    const breaker = new Database(join(dir, 'traces.db'));
+    breaker.exec('DROP TABLE agent_traces');
+    breaker.close();
+    {
+      for (let i = 0; i < 3; i++) {
+        const res = await fetch(`${base}/v1/traces`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: OTLP_PAYLOAD,
+        });
+        expect(res.status).toBe(500);
+      }
+      // A different failure is its own reason, and gets its own line.
+      const bad = await fetch(`${base}/v1/traces`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: 'not json',
+      });
+      expect(bad.status).toBe(400);
+
+      await sleep(300);
+      const failures = stderr().split('\n').filter((l) => l.includes('export failed'));
+      // Three identical failures, one line — the exporter retries on an interval.
+      expect(failures).toHaveLength(2);
+      expect(failures[0]).toMatch(/500: .*agent_traces/);
+      expect(failures[0]).toMatch(/nothing from that batch was stored/);
+      expect(failures[1]).toMatch(/400/);
+    }
+  }, 20000);
+
   it('does not double count a batch an exporter redelivers', async () => {
     // An OTLP exporter retries a batch it did not get a 200 for. The identity
     // ROOT was already guarded against re-adding itself, but the batch's CHILD

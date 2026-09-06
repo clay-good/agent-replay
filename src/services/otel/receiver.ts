@@ -678,9 +678,45 @@ export function startOtelReceiver(db: Database.Database, port: number, stats: Ot
   // Refusals already announced on this server's console, so a repeating
   // exporter is reported once rather than every export interval.
   const announced = new Set<string>();
+  /**
+   * Say something on the operator's console the first time a distinct problem
+   * happens, and stay quiet about it afterwards.
+   *
+   * Bounded for the same reason the refusal announcements are: a port scanner,
+   * or an exporter whose every batch fails differently, would otherwise grow
+   * this set for the life of the process and scroll the console.
+   */
+  const announce = (key: string, lines: string[]): void => {
+    if (announced.has(key)) return;
+    if (announced.size < MAX_ANNOUNCED_REFUSALS) {
+      announced.add(key);
+      for (const line of lines) console.error(`agent-replay otel: ${line}`);
+    } else if (!announced.has(CAP_REACHED)) {
+      announced.add(CAP_REACHED);
+      console.error(
+        `agent-replay otel: over ${MAX_ANNOUNCED_REFUSALS} distinct problems reported; further ones are handled without a notice.`,
+      );
+    }
+  };
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     void handle(req, res);
   });
+
+  /**
+   * Announce an export this receiver could not store.
+   *
+   * A mistyped path was already announced, and a batch that is DROPPED was not:
+   * a store that has gone read-only, a full disk or a malformed exporter answers
+   * every batch with a 4xx/5xx the client sees and the operator does not, so a
+   * receiver that has stored nothing for hours looks exactly like a quiet one.
+   * The only console line was at Ctrl-C ("Accepted 0 trace(s)"), which arrives
+   * after the run it was supposed to capture. Same rule as the refusals: one
+   * line per distinct reason, since the exporter retries on a fixed interval.
+   */
+  const announceFailure = (status: number, payload: Record<string, unknown>): void => {
+    const reason = typeof payload.error === 'string' ? payload.error : 'no reason given';
+    announce(`fail ${status} ${reason}`, [`export failed with ${status}: ${reason} — nothing from that batch was stored.`]);
+  };
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = req.url ?? '';
@@ -700,16 +736,7 @@ export function startOtelReceiver(db: Database.Database, port: number, stats: Ot
       // console. An operator's misconfigured exporter needs one or two entries;
       // past the cap, say once that the rest are silent rather than stopping
       // without a word.
-      const key = `${req.method} ${url}`;
-      if (!announced.has(key)) {
-        if (announced.size < MAX_ANNOUNCED_REFUSALS) {
-          announced.add(key);
-          for (const line of notice) console.error(`agent-replay otel: ${line}`);
-        } else if (!announced.has(CAP_REACHED)) {
-          announced.add(CAP_REACHED);
-          console.error(`agent-replay otel: over ${MAX_ANNOUNCED_REFUSALS} distinct unroutable requests; further ones are refused without a notice.`);
-        }
-      }
+      announce(`${req.method} ${url}`, notice);
       res.writeHead(status, { 'content-type': 'application/json', ...headers }).end(JSON.stringify(payload));
       return;
     }
@@ -733,14 +760,17 @@ export function startOtelReceiver(db: Database.Database, port: number, stats: Ot
         // and its operator had nothing to go on. The JSON path returns the
         // reason, and the catch below already answers a protobuf request with a
         // JSON error body; this was the one failure path that said nothing.
+        announceFailure(status, payload);
         res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(payload));
         return;
       }
       const body = raw.toString('utf-8');
       const { status, payload } = isLogs ? handleLogsExport(db, body, stats) : handleTracesExport(db, body, stats);
+      if (status !== 200) announceFailure(status, payload);
       res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(payload));
     } catch (err) {
       const status = err instanceof HttpError ? err.status : 500;
+      announceFailure(status, { error: (err as Error).message });
       // Close the connection after an error response. In the oversized-body case
       // the client may still be streaming a body we stopped reading; `Connection:
       // close` makes Node flush this response and then tear the socket down,
