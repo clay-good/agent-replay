@@ -122,7 +122,11 @@ export function runGuardList(opts: GuardListOptions = {}): void {
   // Enabled state is deliberately not part of the test: enabling one of these
   // later would not make it block either.
   if (inert.length > 0) {
-    const names = inert.map((p) => p.name).join(', ');
+    // Escaped for the same reason `guard enable` escapes the name it echoes:
+    // these are STORED names read back from the database, and the table above
+    // already neutralizes them. A message beside a safe table must not be the
+    // one place a value reaches the terminal raw.
+    const names = inert.map((p) => safeLine(p.name)).join(', ');
     console.log(chalk.yellow(`  ⚠ ${inert.length} blocking ${inert.length === 1 ? 'policy matches' : 'policies match'} on output, so ${inert.length === 1 ? 'it cannot' : 'they cannot'} block live: ${names}`));
     console.log(chalk.dim('    Enforcement runs before a tool call, when there is no output yet;'));
     console.log(chalk.dim(`    ${inert.length === 1 ? 'it still matches' : 'they still match'} in \`guard test\` and recorded traces.`));

@@ -765,6 +765,29 @@ describe('the guard commands', () => {
     expect(stdout()).toMatch(/1 REQUIRE_REVIEW action\(s\) would block without an approval/);
   });
 
+  it('escapes a stored policy name in the messages, as the table already does', async () => {
+    // A policy name is stored text that reaches a terminal and a CI log.
+    // `guard list`'s table neutralizes it and `guard enable` escapes the name it
+    // echoes back — these two messages were the only places it went out raw:
+    // the "present but disabled" sentence shared by `guard check`,
+    // `hook --enforce` and `guard test`, and the inert-policy warning.
+    const evil = `pol${String.fromCharCode(27)}[31mRED${String.fromCharCode(27)}[0m${String.fromCharCode(13)}OVERWRITTEN`;
+    const db2 = new Database(`${dir}/traces.db`);
+    try {
+      db2.pragma('foreign_keys = ON');
+      const p = addPolicy(db2, { name: evil, action: 'deny', match_pattern: { name_contains: 'rm' } });
+      setPolicyEnabled(db2, p.id, false);
+    } finally { db2.close(); }
+
+    const db3 = new Database(`${dir}/traces.db`);
+    const policies = listPolicies(db3);
+    db3.close();
+    const reason = noEnabledPolicyReason('/tmp/x/traces.db', policies, 'check');
+    expect(reason).toContain('present but disabled');
+    expect(reason).not.toContain(String.fromCharCode(27));
+    expect(reason).not.toContain(String.fromCharCode(13));
+  });
+
   it('does not report a clean run when nothing was armed to check it', async () => {
     // `✔ No policy violations found.` for a store with no enabled policy states
     // the result of a check that never ran. `guard check` and `hook --enforce`

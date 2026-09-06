@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import type { GuardrailPolicy, TraceStep } from '../models/types.js';
 import type { GuardAction } from '../models/enums.js';
 import { STEP_TYPES } from '../models/enums.js';
-import { safeRegex } from '../utils/json.js';
+import { safeRegex, escapeForMessage } from '../utils/json.js';
 import { generateId } from '../utils/id.js';
 import { rowToStep } from './trace-service.js';
 
@@ -568,7 +568,11 @@ export function noEnabledPolicyReason(
   // this function was written to remove.
   const unguarded = pointAt === 'test' ? '' : ', or pass --allow-empty to run unguarded';
   if (policies.length > 0) {
-    const names = policies.slice(0, 3).map((p) => p.name).join(', ');
+    // Escaped: this sentence goes to a terminal (and to a CI log) from three
+    // callers — `guard check`, `hook --enforce`, `guard test` — and a policy
+    // name is stored text. `guard list`'s table and `guard enable`'s echo
+    // already neutralize it; this was the one place it went out raw.
+    const names = policies.slice(0, 3).map((p) => escapeForMessage(p.name)).join(', ');
     const more = policies.length > 3 ? `, +${policies.length - 3} more` : '';
     return (
       `no enabled guardrail policies in ${dbPath} — ${policies.length} ` +

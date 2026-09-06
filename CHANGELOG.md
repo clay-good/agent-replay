@@ -2999,6 +2999,13 @@ and one-way.
   `guard test`, the eval table beside the panel that was already escaped, and the
   dashboard, where the bytes also corrupt blessed's width math for the whole
   layout.
+- Two `guard` messages printed a stored policy name unescaped: the "N policies
+  are present but disabled (<names>)" sentence shared by `guard check`,
+  `hook --enforce` and `guard test`, and the warning that names blocking
+  policies which match on output and so cannot fire live. `guard list`'s table
+  already neutralized the same value, and `guard enable` already escaped the
+  name it echoes back — these two were the only places it reached a terminal, or
+  a CI log, raw.
 - The two lines `list` prints when a filter matches nothing echoed producer
   values to the terminal unescaped — the agent names present, and the capture
   paths present. A trace is written by the agent under test, which chooses its
