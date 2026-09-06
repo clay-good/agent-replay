@@ -450,6 +450,12 @@ and one-way.
 
 ### Fixed
 
+- **`diff` printed 3,000 rows without mentioning `--compact`.** Two 3,000-step
+  traces produce 6,018 lines of table, and the flag that prints the summary
+  alone is in `--help` — no use once the terminal is scrolling. A comparison
+  with more than 200 differences now names `--compact` and `--fields` before the
+  table; an ordinary one prints nothing extra.
+
 - **`replay` gave no warning before a very long replay.** The twin of the `show`
   case below, and worse: it prints every step AND sleeps through them, so a
   100-step trace of 1-second steps takes about 20 seconds at the default 5x,

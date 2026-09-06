@@ -10,6 +10,9 @@ import { truncateToWidth } from './width.js';
 /**
  * Render a side-by-side trace diff with prominent divergence indicator.
  */
+/** Differences beyond which the view names `--compact`, matching `show`/`replay`. */
+const LARGE_DIFF_ROWS = 200;
+
 export function renderDiff(
   diff: TraceDiffResult,
   leftTrace: Trace,
@@ -113,6 +116,16 @@ export function renderDiff(
         : `  ${diff.diffs.length} difference(s) found:`,
     ),
   );
+  // Name the summary view before printing thousands of rows.
+  //
+  // Two 3,000-step traces produce 3,000 differences and 6,018 lines of table,
+  // and `--compact` exists for exactly that reader. Same reasoning as `show`'s
+  // and `replay`'s size notes: the flag is in `--help`, which is no use once
+  // the terminal is scrolling. Only past the point where the table stops being
+  // readable, so an ordinary comparison prints nothing extra.
+  if (diff.diffs.length > LARGE_DIFF_ROWS) {
+    lines.push(chalk.dim(`  --compact prints the summary alone; --fields narrows what is compared.`));
+  }
   lines.push('');
 
   const table = new Table({

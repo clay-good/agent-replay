@@ -236,6 +236,27 @@ describe('renderDiff', () => {
     expect(noAnsi(traceHeaderPanel(t))).not.toMatch(/compaction/);
   });
 
+  it('names the summary view when the table is enormous', () => {
+    // Two 3,000-step traces produce 3,000 differences and 6,018 lines of table.
+    // `--compact` exists for that reader, and `--help` is no use once the
+    // terminal is scrolling — the same reasoning as `show`'s and `replay`'s
+    // size notes.
+    const many = diffResult({
+      divergence_step: 1, left_step_count: 300, right_step_count: 300,
+      diffs: Array.from({ length: 300 }, (_, i) => ({
+        step_number: i + 1, field: 'input', left_value: `a${i}`, right_value: `b${i}`,
+      })),
+    });
+    expect(noAnsi(renderDiff(many, trace(), trace()))).toMatch(/--compact prints the summary alone/);
+
+    // An ordinary comparison prints nothing extra.
+    const few = diffResult({
+      divergence_step: 1, left_step_count: 2, right_step_count: 2,
+      diffs: [{ step_number: 1, field: 'input', left_value: 'a', right_value: 'b' }],
+    });
+    expect(noAnsi(renderDiff(few, trace(), trace()))).not.toMatch(/--compact prints/);
+  });
+
   it('says a trace STOPPED rather than diverged when it is a prefix of the other', () => {
     // A fresh fork is a copy that has not run yet: it agrees with its parent on
     // every step it has and then stops. `fork` prints `diff <parent> <fork>` as
