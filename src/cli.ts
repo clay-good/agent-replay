@@ -337,7 +337,8 @@ guardCmd
 
 guardCmd
   .command('test <trace-id>')
-  .description('Run all policies against a trace')
+  .description('Run all policies against a trace (a report, not a gate; scriptable with --json)')
+  .option('--json', 'Output raw JSON')
   .option('--dir <path>', 'Custom data directory')
   .action(async (traceId, opts) => {
     const { runGuardTest } = await import('./commands/guard.js');

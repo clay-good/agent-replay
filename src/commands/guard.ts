@@ -305,18 +305,20 @@ export function runGuardToggle(policyId: string, enabled: boolean, opts: GuardTo
 
 export interface GuardTestOptions {
   dir?: string;
+  json?: boolean;
 }
 
 export function runGuardTest(traceId: string, opts: GuardTestOptions = {}): void {
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
+  const refuse = makeRefuse(opts.json);
   // Same rule as `guard list` above: a store this command CREATES can only
   // answer "policy not found", which names the wrong problem.
   if (!storeExists(resolveDataDir(opts.dir))) {
-    console.error(chalk.red(`  No trace store at ${dbPath}.`));
-    console.error(chalk.dim('  Run "agent-replay init" in the project directory, or pass --dir <path>.'));
     const above = storeAboveNote(opts.dir);
-    if (above) console.error(chalk.dim(`  ${above}`));
-    process.exitCode = 2;
+    refuse(2, `No trace store at ${dbPath}.`, [
+      'Run "agent-replay init" in the project directory, or pass --dir <path>.',
+      ...(above ? [above] : []),
+    ]);
     return;
   }
   const db = ensureDatabase(dbPath);
@@ -324,33 +326,76 @@ export function runGuardTest(traceId: string, opts: GuardTestOptions = {}): void
   // Resolve trace
   const trace = getTrace(db, traceId);
   if (!trace) {
-    console.error(chalk.red(`  Trace not found: ${traceId}`));
-    process.exitCode = 1;
+    refuse(1, `Trace not found: ${traceId}`);
     return;
   }
 
-  const spinner = startSpinner(`Testing policies against ${safeText(trace.id.slice(0, 12))}...`);
+  // No spinner under --json: the progress line goes to stderr, but a document
+  // reader has nothing to look at and the run should be quiet.
+  const spinner = opts.json ? null : startSpinner(`Testing policies against ${safeText(trace.id.slice(0, 12))}...`);
 
   let results: StepPolicyResult[];
   try {
     results = testPolicies(db, trace.id);
   } catch (err) {
-    failSpinner(spinner, `Test failed: ${errorMessage(err)}`);
+    if (spinner) failSpinner(spinner, `Test failed: ${errorMessage(err)}`);
+    else refuse(1, `Test failed: ${errorMessage(err)}`);
     process.exitCode = 1;
     return;
   }
 
   const totalMatches = results.reduce((sum, r) => sum + r.matches.length, 0);
   const stepsWithMatches = results.filter((r) => r.matches.length > 0);
+  const every = results.flatMap((r) => r.matches);
+  const tally = (action: string) => every.filter((m) => m.action === action).length;
+
+  if (opts.json) {
+    // The audit of a recorded run, as a document. `guard test` is the report
+    // this tool tells you to capture (`guard test <id> > findings.txt`), and a
+    // capture that has to be scraped is not one a CI job can act on. Exit stays
+    // 0 whatever is found — a report, not a gate; `guard check` and
+    // `hook --enforce` are the paths that answer with an exit code.
+    console.log(
+      JSON.stringify(
+        {
+          trace_id: trace.id,
+          matches: stepsWithMatches.flatMap((r) =>
+            r.matches.map((m) => ({
+              step_number: r.step.step_number,
+              step_type: r.step.step_type,
+              step_name: r.step.name,
+              policy_id: m.policy.id,
+              policy_name: m.policy.name,
+              action: m.action,
+              reason: m.reason,
+            })),
+          ),
+          summary: {
+            total: totalMatches,
+            steps_with_matches: stepsWithMatches.length,
+            // `require_review` blocks too, without an approval — the human
+            // summary says so, and a document that omitted the count would let
+            // a CI job read "0 deny" as "nothing would have stopped this".
+            deny: tally('deny'),
+            require_review: tally('require_review'),
+            warn: tally('warn'),
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
 
   if (totalMatches === 0) {
-    successSpinner(spinner, 'No policy violations found.');
+    successSpinner(spinner!, 'No policy violations found.');
     console.log('');
     return;
   }
 
   successSpinner(
-    spinner,
+    spinner!,
     `Found ${totalMatches} policy match(es) across ${stepsWithMatches.length} step(s).`,
   );
   console.log('');
@@ -378,10 +423,9 @@ export function runGuardTest(traceId: string, opts: GuardTestOptions = {}): void
   console.log(separator());
   console.log('');
 
-  const all = results.flatMap((r) => r.matches);
-  const denies = all.filter((m) => m.action === 'deny').length;
-  const reviews = all.filter((m) => m.action === 'require_review').length;
-  const warns = all.filter((m) => m.action === 'warn').length;
+  const denies = tally('deny');
+  const reviews = tally('require_review');
+  const warns = tally('warn');
 
   if (denies > 0) {
     console.log(chalk.redBright(`  ${denies} DENY action(s) would block execution.`));

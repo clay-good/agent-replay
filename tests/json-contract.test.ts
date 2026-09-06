@@ -100,6 +100,10 @@ describe('the --json documents keep their shape', () => {
     expect(keysOf(payload(['guard', 'list', '--json']))).toEqual(['policies', 'warnings']);
   });
 
+  it('guard test', () => {
+    expect(keysOf(payload(['guard', 'test', traceA, '--json']))).toEqual(['matches', 'summary', 'trace_id']);
+  });
+
   it('decisions', () => {
     expect(keysOf(payload(['decisions', traceA, '--json']))).toEqual(['decisions', 'trace_id']);
   });

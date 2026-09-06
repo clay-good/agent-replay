@@ -86,6 +86,14 @@ and one-way.
   narrow by agent. Mutually exclusive with `--agent`, refuses an empty value,
   and rejected alongside a trace id, like the filters beside it.
 
+- **`guard test --json`, so an audit can be acted on.** `guard test` is the
+  report this tool tells you to capture (`guard test <id> > findings.txt`), and
+  a capture a CI job has to scrape is not one it can act on. It answers
+  `{ trace_id, matches, summary }` — every match with its step, policy and
+  reason, and a summary counting `deny`, `require_review` and `warn`
+  separately, since `require_review` blocks too without an approval. Still
+  exits `0` whatever it finds: a report, not a gate.
+
 - **`guard list --json`.** A policy set is configuration, and configuration is
   what a CI job wants to assert on ("this rule is present", "no blocking policy
   is disabled") — but `guard list` printed a table only, so the check had to

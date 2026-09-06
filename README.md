@@ -595,6 +595,10 @@ gate**: the matches go to stdout (so `guard test <id> > findings.txt` captures
 them, while the progress line stays on stderr) and it exits `0` whatever it
 finds, including a `deny` that matched every step. Gate on `guard check` or
 `hook --enforce`, which are the paths that answer with an exit code.
+`guard test --json` gives the same report as a document —
+`{ trace_id, matches, summary }`, where `summary` counts `deny`,
+`require_review` (which blocks too, without an approval) and `warn` — so a job
+can act on the findings instead of scraping them. It exits `0` either way.
 
 Every guard subcommand that reads or changes an existing policy refuses a directory with no store (exit `2`) instead of creating one — otherwise `guard list` answers "No guardrail policies found" about a project whose policies are one directory up, and names the store it found there. `guard add` may create the store it writes into, but says when that store is a second one below a project that already has one, since a policy the enforcement path never opens is a guardrail that cannot fire.
 

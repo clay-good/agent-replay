@@ -955,6 +955,45 @@ describe('the guard commands', () => {
     expect(doc.warnings[0].policies).toEqual(['leak-audit']);
   });
 
+  it('answers guard test --json with the matches and the blocking tallies', async () => {
+    // `guard test` is the report this tool tells you to capture
+    // (`guard test <id> > findings.txt`), and a capture a CI job has to scrape
+    // is not one it can act on.
+    const { runGuardTest, runGuardAdd } = await import('../src/commands/guard.js');
+    runGuardAdd({ name: 'no-delete', pattern: '{"name_contains":"delete"}', action: 'deny', dir });
+    runGuardAdd({ name: 'review-writes', pattern: '{"name_contains":"write"}', action: 'require_review', dir });
+    const { join } = await import('node:path');
+    const db2 = new Database(join(dir, 'traces.db'));
+    db2.pragma('foreign_keys = ON');
+    const t = ingestTrace(db2, {
+      agent_name: 'bot', status: 'completed', input: { q: 1 },
+      steps: [
+        { step_number: 1, step_type: 'tool_call', name: 'delete_user' },
+        { step_number: 2, step_type: 'tool_call', name: 'write_file' },
+        { step_number: 3, step_type: 'output', name: 'done' },
+      ],
+    });
+    db2.close();
+    out.length = 0;
+    runGuardTest(t.id, { dir, json: true });
+
+    const doc = JSON.parse(stdout()) as {
+      trace_id: string;
+      matches: Array<{ step_number: number; policy_name: string; action: string; reason: string }>;
+      summary: { total: number; steps_with_matches: number; deny: number; require_review: number; warn: number };
+    };
+    expect(doc.trace_id).toBe(t.id);
+    expect(doc.matches.map((m) => [m.step_number, m.policy_name, m.action])).toEqual([
+      [1, 'no-delete', 'deny'],
+      [2, 'review-writes', 'require_review'],
+    ]);
+    // `require_review` blocks too, without an approval: a document reporting
+    // only `deny` would let a job read "0" as "nothing would have stopped this".
+    expect(doc.summary).toEqual({ total: 2, steps_with_matches: 2, deny: 1, require_review: 1, warn: 0 });
+    // A report, not a gate — the exit code is 0 whatever it finds.
+    expect(process.exitCode).toBe(0);
+  });
+
   it('answers --json with an empty set rather than prose, and refuses in JSON', async () => {
     const { runGuardList } = await import('../src/commands/guard.js');
     runGuardList({ dir, json: true });

@@ -20,6 +20,11 @@ The subcommands that READ or MODIFY an existing policy (`list`, `remove`, `enabl
 - **WHEN** a user runs `agent-replay guard add --name no-deletes --pattern '{"step_type":"tool_call","name_contains":"delete"}' --action deny`
 - **THEN** the policy is stored, enabled, and visible in `guard list`
 
+#### Scenario: A CI job captures an audit of a recorded run
+
+- **WHEN** `agent-replay guard test <trace-id> --json` is run against a trace with a `deny` and a `require_review` match
+- **THEN** it prints the matches with their step, policy and action, a summary counting both, and exits 0
+
 #### Scenario: A CI job asserts on the policy set
 
 - **WHEN** `agent-replay guard list --json` is run
@@ -33,7 +38,7 @@ The system SHALL match steps against pattern fields — `step_type` (exact), `na
 
 A blocking policy (`deny` or `require_review`) that matches only on `output_contains` cannot fire during enforcement, which runs BEFORE a tool call when there is no output yet. `guard add` SHALL say so at write time, and `guard list` SHALL repeat it, naming the offending policies — the listing is the durable record an audit reads, and the row reads `DENY / Enabled: Yes`, an armed kill switch that is inert. The warning SHALL be silent when every blocking policy can fire, and SHALL NOT flag a `warn` policy on output, which is a legitimate post-hoc rule.
 
-`guard list` SHALL also answer `--json`, since a policy set is configuration and a CI job is the natural reader of it, and the JSON SHALL carry the same warnings the table prints (as `warnings[]`, naming the policies) rather than leaving them in the rendering — a reader told `DENY / enabled` about a rule that can never fire live has been misled whether it is reading a table or a document. A missing store SHALL be refused in the caller's shape, as it is for every other reading command.
+`guard test` SHALL answer `--json` with `{ trace_id, matches, summary }`, where the summary counts `deny`, `require_review` and `warn` separately — `require_review` blocks without an approval, so a document reporting only `deny` would let a job read zero as "nothing would have stopped this" — and SHALL still exit 0 whatever it finds, being a report rather than a gate. `guard list` SHALL also answer `--json`, since a policy set is configuration and a CI job is the natural reader of it, and the JSON SHALL carry the same warnings the table prints (as `warnings[]`, naming the policies) rather than leaving them in the rendering — a reader told `DENY / enabled` about a rule that can never fire live has been misled whether it is reading a table or a document. A missing store SHALL be refused in the caller's shape, as it is for every other reading command.
 
 #### Scenario: A blocking policy that can never block
 
