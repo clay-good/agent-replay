@@ -549,6 +549,46 @@ describe('enforcement fails closed on a call it cannot evaluate', () => {
   });
 });
 
+describe('a subagent stop that names no agent, and what finalize says', () => {
+  // The harness's stop payload does not always carry `agent_id`, and without one
+  // the anchor stayed open for the life of the trace — `show` rendering a
+  // subagent still running under a finished session.
+  it('closes the anchor when exactly one is open', () => {
+    apply({ hook_event_name: 'UserPromptSubmit', session_id: 'sa1', prompt: 'go' });
+    apply({ hook_event_name: 'SubagentStart', session_id: 'sa1', agent_type: 'Explore' });
+    const stop = apply({ hook_event_name: 'SubagentStop', session_id: 'sa1' });
+    expect(stop.note).toBe('closed subagent anchor');
+    const trace = getTrace(db, stop.traceId!)!;
+    expect(trace.steps.filter((st) => !st.ended_at)).toEqual([]);
+  });
+
+  it('leaves them alone when several are open, and says why', () => {
+    // Closing one would pair a subagent's end with another's start.
+    apply({ hook_event_name: 'UserPromptSubmit', session_id: 'sa2', prompt: 'go' });
+    apply({ hook_event_name: 'SubagentStart', session_id: 'sa2', agent_type: 'A' });
+    apply({ hook_event_name: 'SubagentStart', session_id: 'sa2', agent_type: 'B' });
+    const stop = apply({ hook_event_name: 'SubagentStop', session_id: 'sa2' });
+    expect(stop.note).toMatch(/anchor left open/);
+    expect(getTrace(db, stop.traceId!)!.steps.filter((st) => !st.ended_at)).toHaveLength(2);
+  });
+
+  it('finalize says how many steps were never closed', () => {
+    // A tool call the harness never closed is left as it is — its end was never
+    // observed, and stamping one would invent a duration — so the trace is
+    // `completed` while holding steps that are not. Say so.
+    apply({ hook_event_name: 'UserPromptSubmit', session_id: 'sa3', prompt: 'go' });
+    apply({ hook_event_name: 'PreToolUse', session_id: 'sa3', tool_name: 'Bash', tool_input: { command: 'sleep 999' } });
+    const done = apply({ hook_event_name: 'Stop', session_id: 'sa3' });
+    expect(done.note).toBe('trace finalized (1 step(s) never closed)');
+
+    // A clean session says nothing extra.
+    apply({ hook_event_name: 'UserPromptSubmit', session_id: 'sa4', prompt: 'go' });
+    apply({ hook_event_name: 'PreToolUse', session_id: 'sa4', tool_name: 'Bash', tool_input: { command: 'ls' } });
+    apply({ hook_event_name: 'PostToolUse', session_id: 'sa4', tool_name: 'Bash', tool_input: { command: 'ls' }, tool_response: { stdout: 'x' } });
+    expect(apply({ hook_event_name: 'Stop', session_id: 'sa4' }).note).toBe('trace finalized');
+  });
+});
+
 describe('the guard_check audit step is closed when it is written', () => {
   // It records a decision that is already made, and nothing emits a PostToolUse
   // for a guard check — so left open it stays open forever: `show` renders an

@@ -443,6 +443,19 @@ and one-way.
 
 ### Fixed
 
+- **A subagent anchor stayed open when the stop event named no agent, and a
+  finalized trace never said what it left open.** The harness's `SubagentStop`
+  payload does not always carry `agent_id`, and without one the adapter had
+  nothing to match, so the anchor stayed in flight for the life of the trace —
+  `show` rendering a subagent still running under a finished session. A stop
+  that names nothing now closes the anchor when exactly one is open (not a
+  guess: the only thing the event can mean), and leaves them alone when several
+  are, saying so. Separately, `Stop` now reports how many steps were never
+  closed — an interrupted turn or a crashed tool leaves steps whose end nobody
+  observed, and they stay open on purpose rather than being stamped with an
+  invented duration, so the count is what explains a `completed` trace that
+  `show` draws as unfinished.
+
 - **Every enforcement decision left an open step behind.** `hook --enforce`
   writes a `guard_check` step recording the verdict, and wrote it with no
   `ended_at` — but nothing ever emits a closing event for a guard check, so the

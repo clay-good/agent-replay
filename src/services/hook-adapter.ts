@@ -361,6 +361,24 @@ function findOpenToolStep(
     .get(...params) as { step_number: number; started_at: string } | undefined;
 }
 
+/**
+ * The one open subagent anchor, when there is exactly one.
+ *
+ * Returns undefined for zero (nothing to close) and for two or more (closing
+ * either would pair one subagent's end with another's start).
+ */
+function soleOpenAnchor(db: Database.Database, traceId: string): number | undefined {
+  const rows = db
+    .prepare(
+      `SELECT step_number FROM agent_trace_steps
+       WHERE trace_id = ? AND ended_at IS NULL
+         AND json_extract(metadata, '$.hook_anchor') = 1
+       ORDER BY step_number ASC LIMIT 2`,
+    )
+    .all(traceId) as Array<{ step_number: number }>;
+  return rows.length === 1 ? rows[0].step_number : undefined;
+}
+
 /** The open subagent anchor step for an agent_id, if any. */
 function findAnchor(db: Database.Database, traceId: string, agentId: string): number | undefined {
   const row = db
@@ -404,7 +422,21 @@ export function applyHookPayload(
     const row = db.prepare(OPEN_SESSION_TRACE_SQL).get(sessionId) as { id: string } | undefined;
     if (!row) return { action, dialect, traceId: null, note: 'no open trace to finalize' };
     updateTrace(db, row.id, { status: 'completed', ended_at: isoNow() });
-    return { action, dialect, traceId: row.id, note: 'trace finalized' };
+    // Say what is still open. A tool call the harness never closed — an
+    // interrupted turn, a crashed tool, a subagent whose stop named no id — is
+    // left as it is (its end was never observed, and stamping one would invent
+    // a duration), so the trace is `completed` while holding steps that are
+    // not. `show` renders them as in flight, and without this line the reader
+    // has no idea why.
+    const open = (db
+      .prepare('SELECT COUNT(*) AS n FROM agent_trace_steps WHERE trace_id = ? AND ended_at IS NULL')
+      .get(row.id) as { n: number }).n;
+    return {
+      action,
+      dialect,
+      traceId: row.id,
+      note: open > 0 ? `trace finalized (${open} step(s) never closed)` : 'trace finalized',
+    };
   }
 
   let traceId: string;
@@ -615,9 +647,24 @@ export function applyHookPayload(
     }
 
     case 'subagent_stop': {
-      if (!agentId) return { action, dialect, traceId, note: 'subagent_stop without agent_id' };
-      const anchor = findAnchor(db, traceId, agentId);
-      if (anchor == null) return { action, dialect, traceId, note: 'no matching subagent anchor' };
+      // A stop that names its agent closes exactly that anchor. One that names
+      // nothing closes the anchor ONLY when there is exactly one open — then it
+      // is not a guess, it is the only thing the event can mean. With several
+      // open, closing one would pair a subagent's end with another's start, so
+      // they are left alone and the reason is said out loud.
+      //
+      // Without this, an anchor stayed open for the life of the trace whenever
+      // the harness's stop payload omitted the id, and `show` rendered a
+      // subagent still running under a finished session.
+      const anchor = agentId ? findAnchor(db, traceId, agentId) : soleOpenAnchor(db, traceId);
+      if (anchor == null) {
+        return {
+          action,
+          dialect,
+          traceId,
+          note: agentId ? 'no matching subagent anchor' : 'subagent_stop without agent_id — anchor left open',
+        };
+      }
       updateStep(db, traceId, anchor, { ended_at: isoNow() });
       return { action, dialect, traceId, note: 'closed subagent anchor' };
     }
