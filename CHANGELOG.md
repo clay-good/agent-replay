@@ -890,6 +890,19 @@ and one-way.
   the one headline command that had not adopted it. A literal `null` is
   untouched: it remains the documented no-op that keeps the original value.
 
+- **`config` reported a database that nothing opens.** `init` records an
+  absolute `database` path, and no command has ever opened the store through it
+  — every one resolves `<data dir>/traces.db` itself. So a project that was
+  copied, moved, or cloned onto another machine went on naming the store it was
+  created beside, and `config list` / `config get database` answered with it.
+  The harmful shape is not a path that has gone missing but one that still
+  exists: the single question the field is there to answer — which database am I
+  looking at — came back with a real, wrong, plausible file, next to commands
+  reading a different one. The value is now derived from the directory in use,
+  as the trace model already derives what it displays, and a stored path that
+  disagrees is reported as ignored (with how to stop it being reported) rather
+  than silently swapped.
+
 - **The published TypeScript types did not resolve for a consumer.**
   `dist/index.d.ts` opens with `import Database from 'better-sqlite3'` — the
   store handle is the first argument of most of the public API — but

@@ -669,7 +669,9 @@ The `--json` shape is `{ since, overall, by_status, by_agent }`. `overall` carri
 ### Configuration
 
 ```bash
-# Show current config
+# Show current config (`database` is reported as the store this directory
+# actually resolves to — a config copied from another project keeps naming
+# the original, and `config list` says so rather than answering with it)
 agent-replay config list
 
 # Set an API key for AI-powered evaluation

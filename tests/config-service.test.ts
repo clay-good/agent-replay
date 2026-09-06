@@ -286,7 +286,10 @@ describe('a hand-edited config cannot disable the spend cap', () => {
   function write(ai: unknown): void {
     writeFileSync(
       join(dir, 'config.json'),
-      JSON.stringify({ version: '0.1.0', database: 'x', created_at: 'now', ai }),
+      // A real store path for this directory: `database` is now derived and a
+      // stored value that disagrees is reported as ignored, so a placeholder
+      // here would add a problem these AI-config assertions do not mean to test.
+      JSON.stringify({ version: '0.1.0', database: join(dir, 'traces.db'), created_at: 'now', ai }),
     );
   }
 
@@ -430,5 +433,55 @@ describe('a blank value is not a value', () => {
 
     expect(explicit!.model).not.toBe('');
     expect(explicit!.model).toBe(auto!.model); // the two paths now agree
+  });
+});
+
+describe('a config file that names a store somewhere else', () => {
+  // `init` writes an absolute `database` path and NOTHING opens the store
+  // through it — every command resolves `<data dir>/traces.db` itself. So the
+  // moment a project is copied, moved, or cloned onto another machine (the very
+  // thing the AI-key sanitizing above exists for), the file went on naming a
+  // store belonging to somewhere else and `config list` / `config get database`
+  // answered with it. The dangerous case is not a path that has gone missing:
+  // it is one that still EXISTS, so "which database am I looking at?" — the one
+  // question this field answers — came back with a real, wrong, plausible file.
+  const DIR = join(tmpdir(), `ar-config-moved-${Date.now()}`);
+  const ELSEWHERE = '/somewhere/else/.agent-replay/traces.db';
+  beforeEach(() => {
+    mkdirSync(DIR, { recursive: true });
+    writeFileSync(
+      join(DIR, 'config.json'),
+      JSON.stringify({ version: '0.2.0', database: ELSEWHERE, created_at: new Date().toISOString(), ai: { provider: 'auto' } }),
+    );
+  });
+  afterEach(() => rmSync(DIR, { recursive: true, force: true }));
+
+  it('reports the store this directory actually uses, not the stored path', () => {
+    const config = loadConfig(DIR);
+    expect(config?.database).toBe(join(DIR, 'traces.db'));
+    expect(getConfigValue(config as AgentReplayConfig, 'database')).toBe(join(DIR, 'traces.db'));
+  });
+
+  it('says the stored path is being ignored, rather than swapping it silently', () => {
+    // Same rule as the AI keys: a value that does not take effect is reported,
+    // so a hand-edited path cannot look effective.
+    const problems = configProblems(DIR);
+    const stale = problems.find((p) => p.key === 'database');
+    expect(stale, 'no problem reported for a stale database path').toBeDefined();
+    expect(stale?.message).toContain(ELSEWHERE);
+    expect(stale?.message).toContain(join(DIR, 'traces.db'));
+    // A note about a state that persists has to say how to end it, or it is a
+    // nag on every `config list` for the life of the project.
+    expect(stale?.message).toMatch(/Remove the field|init --force/);
+  });
+
+  it('is silent when the stored path is the store in use', () => {
+    // The guard has to stay quiet in the ordinary case, or it is noise on every
+    // `config list` a normal project runs.
+    writeFileSync(
+      join(DIR, 'config.json'),
+      JSON.stringify({ version: '0.2.0', database: join(DIR, 'traces.db'), created_at: new Date().toISOString(), ai: {} }),
+    );
+    expect(configProblems(DIR).some((p) => p.key === 'database')).toBe(false);
   });
 });

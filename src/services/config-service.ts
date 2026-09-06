@@ -112,7 +112,31 @@ export function loadRawConfig(dir?: string): AgentReplayConfig | null {
  * broken config is never reported as a missing one.
  */
 export function loadConfig(dir?: string): AgentReplayConfig | null {
-  return sanitizeConfig(loadRawConfig(dir));
+  const config = sanitizeConfig(loadRawConfig(dir));
+  // `database` is DERIVED, never read back from the file.
+  //
+  // `init` writes an absolute path, and nothing has ever opened the store
+  // through it — every command resolves `<data dir>/traces.db` itself. So the
+  // moment a project is copied, moved, or cloned onto another machine (which
+  // `sanitizeConfig` above already names as the thing that happens to config
+  // files), the file went on naming a store belonging to somewhere else, and
+  // `config list` / `config get database` answered with it. The dangerous shape
+  // is not the missing file: it is the path that still EXISTS, so the one
+  // question this field is here to answer — "which database am I looking at?" —
+  // was answered with a real, wrong, plausible store.
+  //
+  // Same rule as `effective_tokens` and the displayed duration in the trace
+  // model: a value the tool can compute exactly is reported as computed, not as
+  // whatever an old copy of a file says. `configProblems` reports the
+  // disagreement so an edited value is visibly ignored rather than silently
+  // swapped.
+  if (config) config.database = storePath(dir);
+  return config;
+}
+
+/** The store every command opens for this data directory. */
+export function storePath(dir?: string): string {
+  return join(resolve(resolveDataDir(dir)), 'traces.db');
 }
 
 /**
@@ -139,10 +163,18 @@ function sanitizeConfig(config: AgentReplayConfig | null): AgentReplayConfig | n
   return config;
 }
 
-export interface ConfigProblem {
+/** A value inside `ai` that the loader drops — the key is deleted by name. */
+export interface AiConfigProblem {
   key: 'max_tokens' | 'provider';
   message: string;
 }
+
+/**
+ * Anything the file says that the tool does not act on. `database` joins the
+ * `ai` keys here for the same reason they are reported: a value that looks
+ * effective and is not.
+ */
+export type ConfigProblem = AiConfigProblem | { key: 'database'; message: string };
 
 /**
  * Unusable `ai` values, named. Dropping them keeps the tool working, but a
@@ -150,9 +182,9 @@ export interface ConfigProblem {
  * `config test-ai` report these so the diagnostic commands stay honest about
  * what is actually in effect.
  */
-export function aiConfigProblems(ai: AiConfig | undefined): ConfigProblem[] {
+export function aiConfigProblems(ai: AiConfig | undefined): AiConfigProblem[] {
   if (!ai || typeof ai !== 'object') return [];
-  const problems: ConfigProblem[] = [];
+  const problems: AiConfigProblem[] = [];
   const t = ai.max_tokens;
   if (t != null && !(typeof t === 'number' && Number.isInteger(t) && t > 0)) {
     problems.push({
@@ -176,7 +208,22 @@ export function configProblems(dir?: string): ConfigProblem[] {
   if (!existsSync(path)) return [];
   try {
     const raw = JSON.parse(readFileSync(path, 'utf-8')) as AgentReplayConfig;
-    return aiConfigProblems(raw?.ai);
+    const problems: ConfigProblem[] = [...aiConfigProblems(raw?.ai)];
+    // A stored `database` that is not the store in use: nothing opens it, so
+    // leaving it unmentioned would make a hand-edited value look effective and
+    // a copied project's stale value look current.
+    const inUse = storePath(dir);
+    if (typeof raw?.database === 'string' && raw.database !== inUse) {
+      problems.push({
+        key: 'database',
+        message:
+          `config "database" says ${raw.database}, but this directory's store is ${inUse}. ` +
+          'Nothing opens the stored path — it is a record of where the store was when `init` ran, ' +
+          'and a copied or moved project keeps naming the original. Remove the field, or re-run ' +
+          '`agent-replay init --force`, to stop this being reported.',
+      });
+    }
+    return problems;
   } catch {
     return [];
   }

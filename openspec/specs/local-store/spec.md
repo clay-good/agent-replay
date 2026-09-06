@@ -47,12 +47,19 @@ The system SHALL distinguish a config file that is ABSENT from one that exists b
 
 Unusable values SHALL be dropped on READ so that one bad key cannot make the whole config unreadable, and SHALL be reported by the diagnostic commands. A WRITER SHALL start from the file as it actually is: `config set` must change only the named key and must not persist the sanitized copy, which would destroy the very value the user is being warned about.
 
+The config's `database` field SHALL be reported as the store the data directory resolves to, not as whatever the file records. `init` writes an absolute path there and no command opens the store through it, so a copied, moved, or cloned project keeps naming the store it was created beside — and a stored path that still EXISTS answers "which database am I looking at" with a real, wrong file. A stored value that disagrees SHALL be reported as ignored, with how to stop it being reported, rather than silently replaced.
+
 `config set` SHALL refuse an empty value. A blank stored value looks set — a blank API key renders as `***` — while every check downstream treats it as absent.
 
 #### Scenario: Damaged config file
 
 - **WHEN** `config.json` contains a trailing comma and a user runs `agent-replay config list`
 - **THEN** the command reports that the file is not valid JSON, names it, and exits 2
+
+#### Scenario: A config file copied from another project
+
+- **WHEN** a project directory is copied and `agent-replay config get database` is run in the copy
+- **THEN** the answer is the copy's own `traces.db` — the store every command in that directory reads — and `config list` reports that the stored path is not used and how to stop reporting it
 
 #### Scenario: Setting one key preserves another
 
