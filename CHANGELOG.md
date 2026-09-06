@@ -443,6 +443,15 @@ and one-way.
 
 ### Fixed
 
+- **Every enforcement decision left an open step behind.** `hook --enforce`
+  writes a `guard_check` step recording the verdict, and wrote it with no
+  `ended_at` — but nothing ever emits a closing event for a guard check, so the
+  step stayed in flight for the life of the trace: `show` rendered it as
+  unfinished under a `completed` run, once per decision. The denied `tool_call`
+  step beside it is closed at exactly that moment for exactly this reason. It is
+  now written closed, with a zero duration rather than an invented span — the
+  decision's cost belongs to the tool call it explains.
+
 - **An import never showed the token total it had just computed.** A Claude
   transcript's usage is dominated by `cache_read_input_tokens`, which the
   importer sums on purpose — that is what the session consumed — so a real

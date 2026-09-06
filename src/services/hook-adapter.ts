@@ -529,6 +529,20 @@ export function applyHookPayload(
           name: `guard:${verdict.policy ?? 'policy'}`,
           output: { action: verdict.action, policy: verdict.policy, reason: verdict.reason },
           caused_by_step: toolStepNumber,
+          // CLOSED as it is written. This step records a decision that is
+          // already made — there is no later event that could close it, since
+          // nothing emits a PostToolUse for a guard check. Left open it sat in
+          // the trace forever: `show` rendered an in-flight step under a
+          // COMPLETED trace, and every enforcement decision left one behind. The
+          // denied tool_call right above is closed for the same reason, in the
+          // same way; this is that rule at its neighbour.
+          //
+          // `duration_ms: 0`, not a measured span: the decision's cost is the
+          // hook's own runtime, which belongs to the tool_call step this one
+          // explains, and inventing a duration here would put time in the trace
+          // that no clock measured.
+          ended_at: isoNow(),
+          duration_ms: 0,
           metadata: { policy: verdict.policy, action: verdict.action, reason: verdict.reason },
         }));
       } catch (err) {

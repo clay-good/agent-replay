@@ -549,6 +549,33 @@ describe('enforcement fails closed on a call it cannot evaluate', () => {
   });
 });
 
+describe('the guard_check audit step is closed when it is written', () => {
+  // It records a decision that is already made, and nothing emits a PostToolUse
+  // for a guard check — so left open it stays open forever: `show` renders an
+  // in-flight step under a COMPLETED trace, once per enforcement decision. The
+  // denied tool_call beside it is closed for exactly this reason.
+  it('leaves no open step behind after a deny', () => {
+    addPolicy(db, { name: 'no-bash', match_pattern: { step_type: 'tool_call', name_contains: 'Bash' }, action: 'deny' });
+    apply({ hook_event_name: 'UserPromptSubmit', session_id: 'gc1', prompt: 'go' });
+    const res = apply(
+      { hook_event_name: 'PreToolUse', session_id: 'gc1', tool_name: 'Bash', tool_input: { command: 'rm -rf /' } },
+      { enforce: true },
+    );
+    expect(res.enforcement?.action).toBe('deny');
+    apply({ hook_event_name: 'Stop', session_id: 'gc1' });
+
+    const trace = getTrace(db, res.traceId!)!;
+    expect(trace.status).toBe('completed');
+    const guard = trace.steps.find((st) => st.step_type === 'guard_check')!;
+    expect(guard).toBeTruthy();
+    expect(guard.ended_at).toBeTruthy();
+    // The decision's cost belongs to the tool_call it explains; no invented span.
+    expect(guard.duration_ms).toBe(0);
+    // ...and the trace holds no open step at all.
+    expect(trace.steps.filter((st) => !st.ended_at)).toEqual([]);
+  });
+});
+
 describe('a closing event finds the run that is waiting for it', () => {
   it('prefers the trace holding a matching open step over merely the newest', () => {
     // session_id is not exclusive to the hook path — `otel serve` merges on it
