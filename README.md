@@ -40,7 +40,9 @@ npm install -g agent-replay
 
 agent-replay init                  # creates .agent-replay/ with SQLite database
                                    #   (--force overwrites an existing config)
-agent-replay demo                  # loads 5 sample traces + 3 guardrail policies
+agent-replay demo                  # loads 6 sample traces + 3 guardrail policies
+                                   #   (two are the same agent before and after a
+                                   #    model upgrade — diff and check them)
                                    #   (--reset clears the store first;
                                    #    --no-interactive just loads the data,
                                    #    which is what you want in a script)

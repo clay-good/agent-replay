@@ -81,7 +81,7 @@ jobs:
           ./node_modules/.bin/agent-replay demo --no-interactive --dir ./store
           ./node_modules/.bin/agent-replay list --json --dir ./store > list.json
           ./node_modules/.bin/agent-replay stats --json --dir ./store > stats.json
-          node -e "const n=require('fs');const d=JSON.parse(n.readFileSync('list.json','utf8'));if(d.items.length!==5)throw new Error('expected 5 demo traces, got '+d.items.length)"
+          node -e "const n=require('fs');const d=JSON.parse(n.readFileSync('list.json','utf8'));if(d.items.length!==6)throw new Error('expected 6 demo traces, got '+d.items.length)"
       - name: Both module paths load from the installed package
         working-directory: ${{ runner.temp }}/consumer
         run: |

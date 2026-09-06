@@ -6,20 +6,28 @@ import { codeAgentError } from './scenarios/code-agent-error.js';
 import { ragContextPollution } from './scenarios/rag-context-pollution.js';
 import { successfulBooking } from './scenarios/successful-booking.js';
 import { guardrailViolation } from './scenarios/guardrail-violation.js';
+import { bookingRegression } from './scenarios/booking-regression.js';
 
 /**
- * Seed all 5 demo scenarios and 3 guardrail policies into the database.
+ * Seed all 6 demo scenarios and 3 guardrail policies into the database.
  * Timestamps are relative to "now" so the demo always looks fresh.
+ *
+ * Two of the six are the SAME agent on the SAME request, before and after a
+ * model upgrade. Without that pair the demo could not show the thing this tool
+ * is for: `diff` compared two unrelated agents, and `check --golden` could
+ * never report a regression, because every baseline had exactly one candidate
+ * and it matched itself.
  */
 export function seedDemoData(db: Database.Database): void {
   const now = new Date();
 
-  // ── Insert 5 demo traces ───────────────────────────────────────────────
+  // ── Insert 6 demo traces ───────────────────────────────────────────────
   const scenarios = [
     customerServiceHallucination(now),
     codeAgentError(now),
     ragContextPollution(now),
     successfulBooking(now),
+    bookingRegression(now),
     guardrailViolation(now),
   ];
 

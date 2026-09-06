@@ -9,6 +9,7 @@ import { codeAgentError } from '../src/demo/scenarios/code-agent-error.js';
 import { ragContextPollution } from '../src/demo/scenarios/rag-context-pollution.js';
 import { successfulBooking } from '../src/demo/scenarios/successful-booking.js';
 import { guardrailViolation } from '../src/demo/scenarios/guardrail-violation.js';
+import { bookingRegression } from '../src/demo/scenarios/booking-regression.js';
 import { validateTraceInput } from '../src/utils/validators.js';
 
 let db: Database.Database;
@@ -33,6 +34,7 @@ describe('scenario data validation', () => {
     { name: 'ragContextPollution', fn: ragContextPollution },
     { name: 'successfulBooking', fn: successfulBooking },
     { name: 'guardrailViolation', fn: guardrailViolation },
+    { name: 'bookingRegression', fn: bookingRegression },
   ];
 
   for (const { name, fn } of scenarios) {
@@ -135,10 +137,33 @@ describe('scenario characteristics', () => {
 // ── seedDemoData ─────────────────────────────────────────────────────────
 
 describe('seedDemoData', () => {
-  it('inserts 5 traces into the database', () => {
+  it('inserts 6 traces into the database', () => {
     seedDemoData(db);
     const { total } = listTraces(db);
-    expect(total).toBe(5);
+    expect(total).toBe(6);
+  });
+
+  it('seeds two runs of ONE agent on the same input, so diff and check have something to compare', () => {
+    // Five traces from five different agents left `diff <a> <b>` — which the
+    // demo itself suggests running next — comparing unrelated runs, and made a
+    // `check --golden` regression impossible to demonstrate: every baseline had
+    // exactly one candidate, which matched it trivially.
+    seedDemoData(db);
+    const { items } = listTraces(db, { limit: 25 });
+    const travel = items.filter((t) => t.agent_name === 'travel-assistant');
+    expect(travel).toHaveLength(2);
+    const inputs = travel.map((t) => JSON.stringify(t.input));
+    expect(inputs[0]).toBe(inputs[1]);
+    // Same shape, different decision and different tool arguments: the silent
+    // kind of regression, which the default structural fields cannot see.
+    const full = travel.map((t) => getTrace(db, t.id)!);
+    expect(full[0].steps.length).toBe(full[1].steps.length);
+    expect(full.map((f) => f.steps.map((s) => s.name).join(','))).toEqual([
+      full[0].steps.map((s) => s.name).join(','),
+      full[0].steps.map((s) => s.name).join(','),
+    ]);
+    const chosen = full.map((f) => f.steps.find((s) => s.step_type === 'decision')?.decision?.chosen);
+    expect(new Set(chosen).size).toBe(2);
   });
 
   it('inserts 3 guardrail policies', () => {
@@ -151,7 +176,7 @@ describe('seedDemoData', () => {
     seedDemoData(db);
     const { items } = listTraces(db, { limit: 25 });
     const statuses = items.map(t => t.status).sort();
-    expect(statuses).toEqual(['completed', 'completed', 'failed', 'failed', 'timeout']);
+    expect(statuses).toEqual(['completed', 'completed', 'completed', 'failed', 'failed', 'timeout']);
   });
 
   it('all seeded traces have steps', () => {
@@ -190,7 +215,7 @@ describe('every demo decision step carries a decision record', () => {
   // `--fields decisions` for those agents.
   it('has no decision-typed step without one', () => {
     const bare: string[] = [];
-    for (const fn of [customerServiceHallucination, codeAgentError, ragContextPollution, successfulBooking, guardrailViolation]) {
+    for (const fn of [customerServiceHallucination, codeAgentError, ragContextPollution, successfulBooking, guardrailViolation, bookingRegression]) {
       const scenario = fn(now);
       for (const step of scenario.steps ?? []) {
         if (step.step_type === 'decision' && !step.decision) bare.push(`${scenario.agent_name}:${step.name}`);
@@ -200,7 +225,7 @@ describe('every demo decision step carries a decision record', () => {
   });
 
   it('records a chosen option that is one of the options offered', () => {
-    for (const fn of [customerServiceHallucination, codeAgentError, ragContextPollution, successfulBooking, guardrailViolation]) {
+    for (const fn of [customerServiceHallucination, codeAgentError, ragContextPollution, successfulBooking, guardrailViolation, bookingRegression]) {
       for (const step of fn(now).steps ?? []) {
         if (!step.decision) continue;
         const offered = (step.decision.options ?? []).map((o) => (o as { option: string }).option);

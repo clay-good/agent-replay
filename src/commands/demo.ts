@@ -128,7 +128,7 @@ export async function runDemo(opts: DemoOptions = {}): Promise<void> {
     const spinner = startSpinner('Loading demo scenarios...');
     try {
       seedDemoData(db);
-      successSpinner(spinner, 'Loaded 5 demo traces + 3 guardrail policies.');
+      successSpinner(spinner, 'Loaded 6 demo traces + 3 guardrail policies.');
     } catch (err) {
       failSpinner(spinner, `Seed error: ${errorMessage(err)}`);
       process.exitCode = 1;
@@ -162,7 +162,11 @@ export async function runDemo(opts: DemoOptions = {}): Promise<void> {
   console.log(`    ${chalk.cyanBright('2.')} ${chalk.white('agent-replay list --status failed')}    ${chalk.dim('— Filter failed traces')}`);
   console.log(`    ${chalk.cyanBright('3.')} ${chalk.white('agent-replay show <trace-id>')}         ${chalk.dim('— Detailed trace view')}`);
   console.log(`    ${chalk.cyanBright('4.')} ${chalk.white('agent-replay replay <trace-id>')}       ${chalk.dim('— Animated step replay')}`);
-  console.log(`    ${chalk.cyanBright('5.')} ${chalk.white('agent-replay diff <id-a> <id-b>')}      ${chalk.dim('— Compare two traces')}`);
+  // Name the PAIR. "diff <id-a> <id-b>" over five traces from five different
+  // agents compares two unrelated runs and prints a wall of one-sided rows;
+  // the two travel-assistant runs are the same request before and after a
+  // model upgrade, which is the comparison this command is for.
+  console.log(`    ${chalk.cyanBright('5.')} ${chalk.white('agent-replay diff <travel-assistant ids>')} ${chalk.dim('— The same booking, before and after a model upgrade')}`);
   console.log(`    ${chalk.cyanBright('6.')} ${chalk.white('agent-replay fork <id> --from-step 3')} ${chalk.dim('— Fork at step 3')}`);
   console.log(`    ${chalk.cyanBright('7.')} ${chalk.white('agent-replay eval <id> --preset hallucination-check')}`);
   console.log(`       ${chalk.dim('— Run hallucination evaluator')}`);

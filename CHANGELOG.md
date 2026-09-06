@@ -86,6 +86,20 @@ and one-way.
   narrow by agent. Mutually exclusive with `--agent`, refuses an empty value,
   and rejected alongside a trace id, like the filters beside it.
 
+- **A sixth demo trace: the same agent, before and after a model upgrade.**
+  `demo` seeded five traces from five different agents, and then told you to run
+  `agent-replay diff <id-a> <id-b>` — which compared two unrelated runs. The
+  regression gate could not be demonstrated at all: every baseline had exactly
+  one candidate, matching it trivially. (The `successful-booking` scenario had
+  described itself as "the good trace for diffing against scenario 1" since it
+  was written; scenario 1 is a different agent.) The new run is the same
+  `travel-assistant` on the same request: identical step count, names, types and
+  final status, but the newer model rewrote its flight search query and picked
+  the cheapest itinerary — with a stop — for a user who asked for nonstop. So
+  `diff` now shows a real divergence between two runs of one agent, and gating
+  the newer run against a baseline of the older reports REGRESSED at exit 1,
+  caught by `tool_inputs` and `decisions` exactly as the README describes.
+
 - **`guard test --json`, so an audit can be acted on.** `guard test` is the
   report this tool tells you to capture (`guard test <id> > findings.txt`), and
   a capture a CI job has to scrape is not one it can act on. It answers
