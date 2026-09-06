@@ -890,6 +890,22 @@ and one-way.
   the one headline command that had not adopted it. A literal `null` is
   untouched: it remains the documented no-op that keeps the original value.
 
+- **The package's `require` entry point threw on load.** `main` and the
+  `require` condition both pointed at a bundled `dist/index.cjs`, and that file
+  could not be loaded on any supported Node: esbuild's CommonJS interop compiles
+  `import chalk from 'chalk'` to `require('chalk').default`, which under Node's
+  require(ESM) support is the module *namespace* rather than the chalk function,
+  so the bundle threw `Cannot read properties of undefined (reading 'bold')`
+  before exporting anything (on a Node without require(ESM) the same line threw
+  `ERR_REQUIRE_ESM`). Every dependency doing the colouring, spinners and boxes is
+  ESM-only, so the CJS artifact could not be produced correctly at all. Nothing
+  in the suite loaded it — the smoke test imported `dist/index.js` by relative
+  path — so it shipped broken with every test green. The package is now ESM only
+  and both fields point at `dist/index.js`, which Node 20.19+/22.12+ loads from
+  `require()` directly: `require('agent-replay')` works where it previously
+  crashed, and on an older Node it fails with the standard `ERR_REQUIRE_ESM`
+  rather than a TypeError from inside a dependency. `import` is unchanged.
+
 - **`otel serve` dropped a whole OTLP signal without telling either side.**
   A request the receiver does not route — an unknown path, or any method other
   than `POST` — was answered with a bodyless `404`/`405` and nothing on the

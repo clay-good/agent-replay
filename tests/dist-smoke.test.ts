@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import Database from 'better-sqlite3';
 
 /**
@@ -21,6 +22,65 @@ const DIST = new URL('../dist/index.js', import.meta.url);
 beforeAll(() => {
   if (!existsSync(fileURLToPath(DIST)))
     throw new Error(`built library not found at ${fileURLToPath(DIST)}; run "npm run build" first`);
+});
+
+/**
+ * Every path package.json advertises as a runtime entry point, loaded the way
+ * the field that names it means it to be loaded.
+ *
+ * This file's own docstring claimed to cover "the package `exports` map", and
+ * it did not: it imported `dist/index.js` by relative URL, which is true of the
+ * file whatever package.json says about it. The gap shipped a real break —
+ * `main` and the `require` condition both pointed at a `dist/index.cjs` that
+ * threw on load (esbuild's CJS interop dereferences an ESM-only dependency's
+ * namespace as if it were the default export), and nothing in the suite ever
+ * loaded that file. `import` was fine, so every test stayed green.
+ */
+describe('package entry points', () => {
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+    main?: string;
+    module?: string;
+    exports?: Record<string, Record<string, string>>;
+  };
+  const root = new URL('../', import.meta.url);
+  // `types` is a compile-time target, not a module to load; everything else in
+  // these fields is something a consumer's runtime will resolve.
+  const advertised: { field: string; target: string }[] = [];
+  if (pkg.main) advertised.push({ field: 'main', target: pkg.main });
+  if (pkg.module) advertised.push({ field: 'module', target: pkg.module });
+  for (const [key, value] of Object.entries(pkg.exports?.['.'] ?? {})) {
+    if (key !== 'types') advertised.push({ field: `exports["."].${key}`, target: value });
+  }
+
+  it('advertises at least the library entry', () => {
+    expect(advertised.length).toBeGreaterThan(0);
+  });
+
+  it.each(advertised)('$field ($target) exists', ({ target }) => {
+    expect(existsSync(fileURLToPath(new URL(target, root)))).toBe(true);
+  });
+
+  it.each(advertised)('$field ($target) loads and exposes the API', async ({ target }) => {
+    const api = (await import(new URL(target, root).href)) as Record<string, unknown>;
+    expect(api.TraceRecorder).toBeDefined();
+  });
+
+  it.each(advertised)('$field ($target) is requirable, or fails the standard way', ({ target }) => {
+    // A CommonJS consumer resolves `main` and the `require` condition with
+    // `require()`. This package is ESM, so on Node >= 20.19/22.12 that succeeds
+    // through require(ESM) and on an older Node it throws ERR_REQUIRE_ESM — a
+    // documented, comprehensible failure a caller can act on. What it must
+    // never do is what the shipped CJS bundle did: load far enough to throw a
+    // TypeError out of a dependency's innards.
+    const require_ = createRequire(new URL('../package.json', import.meta.url));
+    try {
+      const api = require_(fileURLToPath(new URL(target, root))) as Record<string, unknown>;
+      expect(api.TraceRecorder).toBeDefined();
+    } catch (err) {
+      expect((err as NodeJS.ErrnoException).code, `unexpected failure loading ${target}: ${(err as Error).message}`)
+        .toBe('ERR_REQUIRE_ESM');
+    }
+  });
 });
 
 describe('published library entry (dist/index.js)', () => {
