@@ -769,6 +769,61 @@ names), which also removes `config.json` and the API keys in it. `demo --reset`
 clears a store before reloading the samples, and refuses a directory that does
 not look like one it created.
 
+## Troubleshooting
+
+Every entry here is a real answer the tool gives, and the section that explains it.
+
+**"I captured a run, but `list` shows nothing."** Store resolution follows the
+working directory, so this is almost always a different store — you are in a
+subdirectory, or a hook fired from one. The refusal names the store it looked
+for, and names one it finds in an ancestor. If capture already ran there, it
+said so at the time: it creates the store rather than losing the run, and prints
+which one it created and which one the project has. See
+[Configuration](#configuration) for where the store lives and what is beside it.
+
+**"`import` says nothing is importable, but the file is full of records."**
+`--format` defaults to `claude-transcript`, so a Codex rollout passed without
+the flag is read by the wrong parser. The failure names the format that would
+have read the file. See [Import](#import-existing-session-logs).
+
+**"My OpenTelemetry capture has traces but no metrics."** There are no metrics:
+this receiver maps spans and log events onto traces and has no metric target, so
+`/v1/metrics` is refused — once, on the console, with the exporter-side setting
+that stops the exports. Traces and logs are unaffected. See
+[OpenTelemetry ingest](#opentelemetry-ingest).
+
+**"`check --golden` went red and my agent didn't change."** `tool_inputs` is in
+the default field set and is compared verbatim, so a tool argument the model
+rephrases (`{"query":"weather in Paris today"}` against
+`{"query":"Paris weather today"}`) is a divergence. Gate on the rest with
+`--fields step_count,step_types,step_names,step_errors,status`. See
+[Regression check](#regression-check-ci).
+
+**"`check` exits 2 saying it has nothing to compare."** The gate refuses rather
+than passing green when it cannot do its job. The message distinguishes the two
+causes, because their cures are opposite: no baseline entry records that field
+(use a capture path that does), or only some matched runs record it (narrow with
+`--agent`).
+
+**"`eval --rubric` fails a run that did exactly what I asked."** A criterion's
+`pattern` is a case-insensitive regular expression, not a literal string:
+`"$5.00"` cannot match the text `$5.00`. Escape it — `\$5\.00`. See
+[Custom rubrics](#custom-rubrics).
+
+**"`watch` sits there printing nothing."** Either the run is finished but was
+never finalized — `watch` says so at attach, and `list`/`show` mark it
+`⚠ abandoned?` — or the trace is in another store (see the first entry).
+
+**"`diff` says there are no differences, but the runs behave differently."** The
+comparison covers each step's type, name, input, output, model, error and
+decision, plus the trace's input, status and error. State snapshots are outside
+it, so two runs whose only difference is the context window report none —
+read those with `show <id> --snapshots`.
+
+**"`guard test` found deny matches and still exited 0."** It is a report, not a
+gate. `guard check` and `hook --enforce` are the paths that answer with an exit
+code.
+
 ## Exit codes
 
 Every command exits non-zero on failure, so it drops cleanly into scripts and CI:
