@@ -42,6 +42,16 @@ abstract class BaseTranslator implements StreamTranslator {
   // `result`). If so, reaching EOF without it means the run was interrupted.
   protected expectsTerminalEvent = false;
   protected sawTerminal = false;
+  /**
+   * The run's cost, when the stream states one.
+   *
+   * Only Claude Code publishes it (`total_cost_usd` on its `result` record);
+   * the codex and gemini streams report no cost at all, so this stays null for
+   * them. Both OTel mappers already carry the field and `stats` sums it into
+   * the store's spend, which is a number the tool would otherwise be unable to
+   * report for a capture whose harness had handed it over.
+   */
+  protected totalCost: number | null = null;
   /** Set by a translator when it drops a line; read and cleared by `lastSkip`. */
   protected skipReason: string | null = null;
 
@@ -162,6 +172,7 @@ abstract class BaseTranslator implements StreamTranslator {
         // `trace_output` divergence for one identical run.
         output: this.finalOutput ? { text: this.finalOutput } : null,
         total_tokens: this.totalTokens || null,
+        total_cost_usd: this.totalCost,
       },
     ];
   }
@@ -651,6 +662,11 @@ export class ClaudeStreamTranslator extends BaseTranslator {
       // kind (`error_max_turns`, `error_during_execution`). A `subtype` that is
       // not "success" counts as a failure on its own, since a run can end in an
       // error subtype without the boolean.
+      // The cost this run reported. `0` is a real value (a fully cached turn),
+      // so it is kept — hence an explicit finite/non-negative test rather than
+      // `toNum`, which clamps at zero and would turn it into "not reported".
+      const cost = toCost(obj.total_cost_usd ?? obj.cost_usd);
+      if (cost != null) this.totalCost = cost;
       const subtype = str(obj.subtype);
       if (isTrueish(obj.is_error) || (subtype != null && subtype !== 'success')) {
         this.failed = true;
@@ -703,6 +719,19 @@ function blockText(content: unknown): string {
       .join('\n');
   }
   return '';
+}
+
+/**
+ * A cost from a producer value, or null when it did not report one.
+ *
+ * Distinct from `toNum` on purpose: that clamps at zero, and a zero cost is a
+ * real reading here (a fully cache-served turn), not an absence. A negative or
+ * unparseable value IS an absence — `ingest` rejects such a total, so storing
+ * one would write a trace this store's own export could not restore.
+ */
+function toCost(v: unknown): number | null {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+  return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
 /** A finite number from a producer value, or 0 — never a string to concatenate. */

@@ -895,3 +895,37 @@ describe('claude-stream and the transcript importer agree', () => {
     }
   });
 });
+
+describe('the cost a claude-stream run reports', () => {
+  const init = { type: 'system', subtype: 'init', session_id: 's1' };
+
+  it('records the cost the result states', () => {
+    const t = makeTranslator('claude-stream')!;
+    const id = run(t, [init, { type: 'result', subtype: 'success', total_cost_usd: 0.0412 }]);
+    expect(getTrace(db, id)!.total_cost_usd).toBeCloseTo(0.0412, 6);
+  });
+
+  it('keeps a zero cost, which a fully cached turn really reports', () => {
+    const t = makeTranslator('claude-stream')!;
+    const id = run(t, [init, { type: 'result', subtype: 'success', total_cost_usd: 0 }]);
+    expect(getTrace(db, id)!.total_cost_usd).toBe(0);
+  });
+
+  it('records no cost when the stream states none, rather than a zero', () => {
+    const t = makeTranslator('claude-stream')!;
+    const id = run(t, [init, { type: 'result', subtype: 'success' }]);
+    expect(getTrace(db, id)!.total_cost_usd).toBeNull();
+  });
+
+  it('ignores an unusable cost rather than storing one ingest would reject', () => {
+    const t = makeTranslator('claude-stream')!;
+    const id = run(t, [init, { type: 'result', subtype: 'success', total_cost_usd: -3 }]);
+    expect(getTrace(db, id)!.total_cost_usd).toBeNull();
+  });
+
+  it('leaves the codex and gemini streams costless, since they report none', () => {
+    const c = makeTranslator('codex-exec')!;
+    const cid = run(c, [{ type: 'thread.started', thread_id: 'th' }, { type: 'turn.completed', usage: {} }]);
+    expect(getTrace(db, cid)!.total_cost_usd).toBeNull();
+  });
+});

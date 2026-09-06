@@ -82,7 +82,7 @@ The system SHALL accept a versioned JSONL event stream on stdin via `agent-repla
 
 ### Requirement: Native harness stream dialects
 
-The system SHALL translate the documented non-interactive event streams of the major CLIs via `record --format`: `claude-stream` for Claude Code's `--output-format stream-json` (`system`/`init` → trace with `session_id`; `assistant` content blocks → `text` output steps, `thinking` thought steps and `tool_use` tool_call steps; `user` `tool_result` blocks → those steps' output and, when `is_error`, their error; `result` → finalization, with a non-success subtype failing the trace), `codex-exec` for OpenAI Codex CLI's `codex exec --json` stream (`thread.started` with `thread_id` → trace with `session_id`; `item.completed` items such as `agent_message`, `reasoning`, `command_execution`, `mcp_tool_call`, `file_change`, `web_search` → typed steps; `turn.completed` `usage` → token totals) and `gemini-stream` for Gemini CLI's `--output-format stream-json` (`init` → trace; `tool_use`/`tool_result` → tool_call steps; `message` → output steps; `result` → finalization).
+The system SHALL translate the documented non-interactive event streams of the major CLIs via `record --format`: `claude-stream` for Claude Code's `--output-format stream-json` (`system`/`init` → trace with `session_id`; `assistant` content blocks → `text` output steps, `thinking` thought steps and `tool_use` tool_call steps; `user` `tool_result` blocks → those steps' output and, when `is_error`, their error; `result` → finalization, carrying `total_cost_usd` onto the trace, with a non-success subtype failing the trace), `codex-exec` for OpenAI Codex CLI's `codex exec --json` stream (`thread.started` with `thread_id` → trace with `session_id`; `item.completed` items such as `agent_message`, `reasoning`, `command_execution`, `mcp_tool_call`, `file_change`, `web_search` → typed steps; `turn.completed` `usage` → token totals) and `gemini-stream` for Gemini CLI's `--output-format stream-json` (`init` → trace; `tool_use`/`tool_result` → tool_call steps; `message` → output steps; `result` → finalization).
 
 The system SHALL record, on the steps a translated stream produces, the model any record of that stream names — read from the record, its `item`, or its `session` — tracking it as a running value so a session that changes model mid-run labels each step with the model in effect at its own time. A stream that names no model SHALL leave the field unset rather than guessing one.
 
@@ -125,7 +125,7 @@ The system SHALL record a codex tool item's arguments as its step's input — a 
 #### Scenario: Claude Code headless run captured
 
 - **WHEN** a user pipes `claude -p "..." --output-format stream-json` into `agent-replay record --format claude-stream`
-- **THEN** one trace is recorded whose `session_id` is the Claude session id, with `tool_use`/`tool_result` pairs stored as `tool_call` steps carrying the result's failure on their error field, and token totals that include both cache fields
+- **THEN** one trace is recorded whose `session_id` is the Claude session id, with `tool_use`/`tool_result` pairs stored as `tool_call` steps carrying the result's failure on their error field, token totals that include both cache fields, and the cost the run reported
 
 #### Scenario: Codex exec run captured
 

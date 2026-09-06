@@ -74,7 +74,10 @@ and one-way.
   two paths stay in step — `text` becomes an `output` step, `thinking` a
   `thought` step, and a `tool_use`/`tool_result` pair one `tool_call` step
   whose `is_error` result lands on the step's error field. Token totals include
-  both cache fields, an interrupted run is left open rather than reported
+  both cache fields, and the `total_cost_usd` the run reports is recorded, so
+  `stats` can report the store's real spend for a piped capture — a zero cost
+  is kept as the real reading a fully cached turn gives, and an unusable one is
+  treated as absent. An interrupted run is left open rather than reported
   completed, and a non-success `result` subtype (`error_max_turns`) fails the
   trace on its own.
 - **`record --agent-name <name>`, so two piped workflows are not one agent.**
