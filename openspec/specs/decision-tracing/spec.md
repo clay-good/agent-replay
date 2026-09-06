@@ -15,7 +15,7 @@ The system SHALL support an optional `parent_step` (step number) on every step, 
 #### Scenario: Invalid parent reference rejected
 
 - **WHEN** a step declares `parent_step: 9` but the trace has no step 9 earlier than it
-- **THEN** ingestion fails with a validation error naming the offending step
+- **THEN** ingestion fails (exit `1`) with a validation error naming the offending step, and reporting both faults where both apply: that the reference is not earlier, and that no such step exists
 
 ### Requirement: Causal links
 
@@ -40,10 +40,10 @@ The system SHALL store, for a step of ANY type, an optional structured decision 
 - **WHEN** a harness reports that the user approved a tool call at a permission prompt
 - **THEN** it can be stored as a decision step with `decided_by: "user"` and `chosen: "allow"`
 
-#### Scenario: Decision record on a tool call rejected
+#### Scenario: Decision record on a tool call accepted
 
 - **WHEN** a `tool_call` step carries a `decision` block
-- **THEN** ingestion fails with a validation error
+- **THEN** it is stored and listed by `decisions` like any other, since the step that made the choice is often the one that acted on it
 
 ### Requirement: Session grouping
 
@@ -58,6 +58,8 @@ The system SHALL support an optional `session_id` on traces so that multiple tra
 
 The system SHALL provide `agent-replay why <trace-id> --step N`, walking the causal chain backward from step N (following `caused_by_step`, falling back to `parent_step`, then to the nearest earlier decision step) and printing each hop; decision hops SHALL include the chosen option and rationale. `--json` SHALL emit the chain as structured data.
 
+Each hop SHALL name HOW it was reached — `caused_by`, `parent`, `prior_decision`, or `origin` for the step asked about — so a chain assembled from a fallback is not presented as a recorded causal link. `why` SHALL refuse a step number the trace does not have, at exit `1`, naming the step and how many the trace has.
+
 #### Scenario: Explain a failing step
 
 - **WHEN** a user runs `agent-replay why <id> --step 7` and step 7 was caused by decision step 4
@@ -66,6 +68,8 @@ The system SHALL provide `agent-replay why <trace-id> --step N`, walking the cau
 ### Requirement: Decision listing
 
 The system SHALL provide `agent-replay decisions <trace-id>` listing every decision step with its options, chosen option, confidence, and rationale, with `--json` output.
+
+A trace with no decision steps is not an error: `decisions` SHALL say so and exit `0`.
 
 #### Scenario: List decision points
 
