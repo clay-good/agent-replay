@@ -648,13 +648,20 @@ export async function runGuardCheck(opts: GuardCheckOptions = {}): Promise<void>
   // JSON verdict to stdout (the reason also goes to stderr for deny/warn).
   console.log(JSON.stringify({ action: final, policy: verdict.policy, reason: verdict.reason }));
 
+  // The policy NAME and the match reason are stored text, and this line is the
+  // gate's human output — it lands in a CI log. The JSON on stdout is safe
+  // because `JSON.stringify` escapes; this line had nothing. A name carrying an
+  // ESC or a bare CR could colour the log or return the cursor to column 0 and
+  // overwrite the line above, which on a BLOCK verdict is the worst place in
+  // the tool to let a stored value forge output.
+  const policyLabel = safeLine(String(verdict.policy ?? 'policy'));
   if (final === 'deny') {
     const why = verdict.action === 'require_review'
-      ? `review required${isTty ? ' (declined)' : ' (no TTY — failed closed)'}: ${verdict.reason ?? ''}`
-      : verdict.reason ?? 'blocked by policy';
-    console.error(chalk.redBright(`  DENY [${verdict.policy ?? 'policy'}]: ${why}`));
+      ? `review required${isTty ? ' (declined)' : ' (no TTY — failed closed)'}: ${safeLine(verdict.reason ?? '')}`
+      : safeLine(verdict.reason ?? 'blocked by policy');
+    console.error(chalk.redBright(`  DENY [${policyLabel}]: ${why}`));
   } else if (final === 'warn') {
-    console.error(chalk.yellow(`  WARN [${verdict.policy ?? 'policy'}]: ${verdict.reason ?? ''}`));
+    console.error(chalk.yellow(`  WARN [${policyLabel}]: ${safeLine(verdict.reason ?? '')}`));
   }
 
   process.exitCode = exitCode;

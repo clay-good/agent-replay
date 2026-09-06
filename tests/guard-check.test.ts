@@ -765,6 +765,29 @@ describe('the guard commands', () => {
     expect(stdout()).toMatch(/1 REQUIRE_REVIEW action\(s\) would block without an approval/);
   });
 
+  it("escapes the gate's own DENY line, which lands in a CI log", async () => {
+    // `guard check` is the CI gate: this line is its human output. The JSON on
+    // stdout is safe because JSON.stringify escapes, but the stderr verdict
+    // interpolated the stored policy name and match reason raw — and a BLOCK
+    // verdict is the worst place in the tool to let stored text forge output,
+    // since a bare CR returns the cursor to column 0 and overwrites the line
+    // above it.
+    const evil = `pol${String.fromCharCode(27)}[31mRED${String.fromCharCode(27)}[0m${String.fromCharCode(13)}ALLOWED`;
+    const db2 = new Database(`${dir}/traces.db`);
+    try {
+      db2.pragma('foreign_keys = ON');
+      addPolicy(db2, { name: evil, action: 'deny', match_pattern: { name_contains: 'del' } });
+    } finally { db2.close(); }
+
+    await check({ step_type: 'tool_call', name: 'delete_user', input: {} });
+    const err = stderr();
+    expect(err).toMatch(/DENY/);
+    expect(err).not.toContain(String.fromCharCode(27));
+    expect(err).not.toContain(String.fromCharCode(13));
+    // The machine-readable verdict is unchanged, and still carries the real name.
+    expect(process.exitCode).toBe(2);
+  });
+
   it('escapes a stored policy name in the messages, as the table already does', async () => {
     // A policy name is stored text that reaches a terminal and a CI log.
     // `guard list`'s table neutralizes it and `guard enable` escapes the name it

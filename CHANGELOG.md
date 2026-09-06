@@ -2999,6 +2999,13 @@ and one-way.
   `guard test`, the eval table beside the panel that was already escaped, and the
   dashboard, where the bytes also corrupt blessed's width math for the whole
   layout.
+- `guard check`'s own DENY/WARN line — the CI gate's human output — printed the
+  matched policy's name and reason raw. The JSON verdict on stdout was safe
+  (`JSON.stringify` escapes), but the stderr line that lands in a CI log had
+  nothing, and a BLOCK verdict is the worst place in the tool to let stored text
+  forge output: a bare carriage return there returns the cursor to column 0 and
+  overwrites the line above it. Now escaped; the exit code and the JSON are
+  unchanged.
 - Two `guard` messages printed a stored policy name unescaped: the "N policies
   are present but disabled (<names>)" sentence shared by `guard check`,
   `hook --enforce` and `guard test`, and the warning that names blocking
