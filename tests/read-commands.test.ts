@@ -247,6 +247,24 @@ describe('replay', () => {
     await runReplay(timed, { dir, speed: '0' });
     expect(out.join('\n')).toMatch(/30ms/);
     expect(out.join('\n')).not.toMatch(/over \d+ of/);
+
+    // TOKENS get no such note, on purpose: a step without a duration was not
+    // measured, while a step without tokens usually did not SPEND any — a tool
+    // call is not a model call. The ordinary trace below has one llm_call among
+    // six other steps, and "1 of 7" there would report the shape of a run as if
+    // it were a coverage problem.
+    const ordinary = ingestTrace(db, {
+      agent_name: 'ordinary', status: 'completed', input: { q: 3 },
+      steps: [
+        { step_number: 1, step_type: 'llm_call', name: 'plan', duration_ms: 800, tokens_used: 1200 },
+        ...[2, 3, 4, 5, 6].map((n) => ({ step_number: n, step_type: 'tool_call' as const, name: `t${n}`, duration_ms: 40 })),
+        { step_number: 7, step_type: 'output', name: 'answer', duration_ms: 10 },
+      ],
+    } as never).id;
+    out.length = 0;
+    await runReplay(ordinary, { dir, speed: '0' });
+    expect(out.join('\n')).toMatch(/1,200 tokens/);
+    expect(out.join('\n')).not.toMatch(/over \d+ of/);
   });
 
   it('says a range holds no steps rather than replaying nothing silently', async () => {

@@ -456,7 +456,10 @@ and one-way.
   are finished but undurated, because a transcript records when a record was
   written, not how long a tool took. The line now says `150ms (over 2 of 3)`,
   and says nothing extra when everything was measured — the same disclosure
-  `stats` makes and `eval` now makes for a criterion with nothing to check.
+  `stats` makes and `eval` now makes for a criterion with nothing to check. The
+  TOKEN total gets no such note: a step without a duration was not measured,
+  while a step without tokens usually did not spend any, so "1 of 7" on an
+  ordinary trace would report the shape of a run as a coverage problem.
 
 - **An evaluator reported 100% for criteria that measured nothing.** A criterion
   with nothing to check — no retrieval steps to ground an answer against, no

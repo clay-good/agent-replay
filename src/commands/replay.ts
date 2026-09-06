@@ -184,23 +184,27 @@ export async function runReplay(
   const totalTokens = counted.length ? counted.reduce((sum, s) => sum + (s.tokens_used as number), 0) : null;
   const errorSteps = steps.filter((s) => s.error);
 
-  // Say what each total was taken OVER when it is a sum over a subset.
+  // Say what the DURATION was taken over when it is a sum over a subset.
   //
   // A trace mixing timed and untimed steps reported "3 steps | 150ms" — the sum
   // of the two steps that carried a duration, presented as the run's. An
   // imported session is exactly this shape: its steps are finished but
   // undurated, because a transcript records when a record was written and not
-  // how long a tool took. Same disclosure `stats` makes with "(over N of M)"
-  // and `eval` now makes for a criterion that measured nothing: the number
-  // stands, the reader is told what it covers.
-  const over = (measured: number): string =>
-    measured === steps.length ? '' : ` (over ${measured} of ${steps.length})`;
+  // how long a tool took. Same disclosure `stats` makes with "(over N of M)".
+  //
+  // TOKENS get no such note, deliberately. A step without a duration was not
+  // measured; a step without tokens usually did not SPEND any — a tool call is
+  // not a model call. Noting "1 of 7" on an ordinary trace whose single
+  // llm_call is the only step with tokens would report a coverage problem that
+  // is really just the shape of a run, and a disclosure that fires on
+  // everything stops being read.
+  const over = timed.length === steps.length ? '' : ` (over ${timed.length} of ${steps.length})`;
 
   console.log(
     colors.primary('  Replay complete: ') +
       chalk.white(`${steps.length} steps`) +
-      chalk.dim(totalMs != null ? ` | ${formatDuration(totalMs)}${over(timed.length)}` : '') +
-      chalk.dim(totalTokens != null ? ` | ${totalTokens.toLocaleString()} tokens${over(counted.length)}` : '') +
+      chalk.dim(totalMs != null ? ` | ${formatDuration(totalMs)}${over}` : '') +
+      chalk.dim(totalTokens != null ? ` | ${totalTokens.toLocaleString()} tokens` : '') +
       (errorSteps.length > 0 ? chalk.redBright(` | ${errorSteps.length} error(s)`) : ''),
   );
   console.log('');
