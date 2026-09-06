@@ -547,6 +547,8 @@ agent-replay guard remove <policy-id>
 would have blocked it (`deny`, and `require_review`, which fails closed unless
 someone approves it) and how many would only have warned.
 
+Every guard subcommand that reads or changes an existing policy refuses a directory with no store (exit `2`) instead of creating one — otherwise `guard list` answers "No guardrail policies found" about a project whose policies are one directory up, and names the store it found there. `guard add` may create the store it writes into, but says when that store is a second one below a project that already has one, since a policy the enforcement path never opens is a guardrail that cannot fire.
+
 A disabled policy stays in `guard list` (with `Enabled: No`) and is skipped by
 every evaluation path — `hook --enforce`, `guard check`, and `guard test` — so
 you can silence a noisy rule for a run without losing its id, priority, or

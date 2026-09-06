@@ -8,6 +8,13 @@ Define kill-switch policies that pattern-match trace steps and prescribe actions
 
 The system SHALL manage guardrail policies via `agent-replay guard add|list|remove|enable|disable`, where each policy has a unique name, an action (`allow`, `deny`, `warn`, `require_review`), a priority, an enabled flag, and a JSON match pattern.
 
+The subcommands that READ or MODIFY an existing policy (`list`, `remove`, `enable`, `disable`, and `guard test`) SHALL refuse a missing store at exit 2 rather than create one, as every trace-reading command does. Creating it makes `guard list` report "No guardrail policies found." at exit 0 — for a policy set a worse answer than for traces, since the reader concludes the project is ungoverned while its policies sit one directory up — and leaves the other three able only to report an id that a store they just created could never hold. `guard add` MAY create the store it writes into, but SHALL say when it is creating one below a project that already has a store, because a policy stored where the enforcement path will not look is a guardrail that cannot fire.
+
+#### Scenario: A guard command run where there is no store
+
+- **WHEN** `agent-replay guard list` is run in a directory with no store
+- **THEN** it reports that there is no store, exits 2, and creates nothing — naming the store above, if the project has one
+
 #### Scenario: Add a deny policy
 
 - **WHEN** a user runs `agent-replay guard add --name no-deletes --pattern '{"step_type":"tool_call","name_contains":"delete"}' --action deny`

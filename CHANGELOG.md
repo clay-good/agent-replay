@@ -890,6 +890,21 @@ and one-way.
   the one headline command that had not adopted it. A literal `null` is
   untouched: it remains the documented no-op that keeps the original value.
 
+- **`guard list` created a store and told you the project had no guardrails.**
+  The rule the twelve trace-reading commands adopted — refuse a missing store
+  rather than create one — never reached the guard subcommands. `guard list`
+  wrote a store nobody asked for and answered "No guardrail policies found." at
+  exit `0`, which for a policy set is worse than for traces: the reader
+  concludes the project is ungoverned while a full set sits one directory up,
+  and the next run finds a store that now genuinely exists and is genuinely
+  empty. `guard remove`, `guard disable`/`enable` and `guard test` did the same
+  and could then only report that the id was not found — again the wrong
+  problem. All four now refuse at exit `2`, name the store above when there is
+  one, and write nothing. `guard add` still creates the store it writes into,
+  since that is a write, but says when it is doing so below a project that
+  already has one — a policy stored where the enforcement path will never look
+  is a guardrail that cannot fire.
+
 - **Capture reported success while splitting a session across two stores.** A
   hook fires from wherever the agent is standing, and store resolution is
   relative to the working directory — so `agent-replay hook` in a subdirectory

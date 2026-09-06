@@ -604,6 +604,16 @@ describe('a read-only command refuses a missing store instead of creating one', 
     ['export', async (d: string) => (await import('../src/commands/export.js')).runExport(undefined, { dir: d })],
     ['fork', async (d: string) => (await import('../src/commands/fork.js')).runFork('trc_x', { fromStep: '1', dir: d })],
     ['replay', async (d: string) => (await import('../src/commands/replay.js')).runReplay('trc_x', { dir: d })],
+    // The guard subcommands that READ were left out of the original sweep and
+    // had the defect in its sharpest form: `guard list` created a store and
+    // reported "No guardrail policies found." at exit 0, so a reader concluded
+    // the project had no guardrails while a full set sat one directory up.
+    // `remove`/`disable`/`test` name an id that a store they just created can
+    // never hold, so the refusal they printed was always the wrong one.
+    ['guard list', async (d: string) => (await import('../src/commands/guard.js')).runGuardList({ dir: d })],
+    ['guard remove', async (d: string) => (await import('../src/commands/guard.js')).runGuardRemove('pol_x', { dir: d })],
+    ['guard disable', async (d: string) => (await import('../src/commands/guard.js')).runGuardToggle('pol_x', false, { dir: d })],
+    ['guard test', async (d: string) => (await import('../src/commands/guard.js')).runGuardTest('trc_x', { dir: d })],
     // The live views read the store too: `watch` would otherwise tail an empty
     // store forever, indistinguishable from an agent that never started.
     // `dashboard` is the same rule but needs its own case below, because it

@@ -21,7 +21,7 @@ import { isValidStepType } from '../utils/validators.js';
 import { openSync, readSync, closeSync } from 'node:fs';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage, safeParseInt, truncate} from '../utils/json.js';
-import { resolveDataDir, storeExists, storeAboveNote } from '../utils/paths.js';
+import { resolveDataDir, storeExists, storeAboveNote, storeSplitNote } from '../utils/paths.js';
 
 // ── guard list ───────────────────────────────────────────────────────────
 
@@ -31,6 +31,22 @@ export interface GuardListOptions {
 
 export function runGuardList(opts: GuardListOptions = {}): void {
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
+  // Refused, not created — the rule the twelve trace-reading commands adopted
+  // and this one never did. `ensureDatabase` CREATES what it does not find, so
+  // `guard list` from the wrong directory wrote a store nobody asked for and
+  // then answered "No guardrail policies found." at exit 0: the wrong problem,
+  // stated confidently, and concealed permanently, because the next run finds a
+  // store that now genuinely exists and is genuinely empty. For a policy set
+  // that is worse than for traces — the reader concludes the project has no
+  // guardrails when it has a full set, one directory up.
+  if (!storeExists(resolveDataDir(opts.dir))) {
+    console.error(chalk.red(`  No trace store at ${dbPath}.`));
+    console.error(chalk.dim('  Run "agent-replay init" in the project directory, or pass --dir <path>.'));
+    const above = storeAboveNote(opts.dir);
+    if (above) console.error(chalk.dim(`  ${above}`));
+    process.exitCode = 2;
+    return;
+  }
   const db = ensureDatabase(dbPath);
 
   const policies = listPolicies(db);
@@ -89,6 +105,12 @@ export interface GuardAddOptions {
 
 export function runGuardAdd(opts: GuardAddOptions): void {
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
+  // `add` is a WRITE and may create the store it writes into — but a policy
+  // written to a store the enforcement path never opens is a guardrail that
+  // cannot fire, so say when this is a second store below a project that has
+  // one. Same note the capture commands print, for a sharper reason.
+  const splitNote = storeSplitNote(opts.dir, dbPath);
+  if (splitNote) console.error(chalk.yellow(`  ⚠ ${splitNote}`));
   const db = ensureDatabase(dbPath);
 
   // Parse pattern JSON
@@ -182,6 +204,16 @@ export interface GuardRemoveOptions {
 
 export function runGuardRemove(policyId: string, opts: GuardRemoveOptions = {}): void {
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
+  // Same rule as `guard list` above: a store this command CREATES can only
+  // answer "policy not found", which names the wrong problem.
+  if (!storeExists(resolveDataDir(opts.dir))) {
+    console.error(chalk.red(`  No trace store at ${dbPath}.`));
+    console.error(chalk.dim('  Run "agent-replay init" in the project directory, or pass --dir <path>.'));
+    const above = storeAboveNote(opts.dir);
+    if (above) console.error(chalk.dim(`  ${above}`));
+    process.exitCode = 2;
+    return;
+  }
   const db = ensureDatabase(dbPath);
 
   try {
@@ -207,6 +239,16 @@ export interface GuardToggleOptions {
  */
 export function runGuardToggle(policyId: string, enabled: boolean, opts: GuardToggleOptions = {}): void {
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
+  // Same rule as `guard list` above: a store this command CREATES can only
+  // answer "policy not found", which names the wrong problem.
+  if (!storeExists(resolveDataDir(opts.dir))) {
+    console.error(chalk.red(`  No trace store at ${dbPath}.`));
+    console.error(chalk.dim('  Run "agent-replay init" in the project directory, or pass --dir <path>.'));
+    const above = storeAboveNote(opts.dir);
+    if (above) console.error(chalk.dim(`  ${above}`));
+    process.exitCode = 2;
+    return;
+  }
   const db = ensureDatabase(dbPath);
 
   try {
@@ -229,6 +271,16 @@ export interface GuardTestOptions {
 
 export function runGuardTest(traceId: string, opts: GuardTestOptions = {}): void {
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
+  // Same rule as `guard list` above: a store this command CREATES can only
+  // answer "policy not found", which names the wrong problem.
+  if (!storeExists(resolveDataDir(opts.dir))) {
+    console.error(chalk.red(`  No trace store at ${dbPath}.`));
+    console.error(chalk.dim('  Run "agent-replay init" in the project directory, or pass --dir <path>.'));
+    const above = storeAboveNote(opts.dir);
+    if (above) console.error(chalk.dim(`  ${above}`));
+    process.exitCode = 2;
+    return;
+  }
   const db = ensureDatabase(dbPath);
 
   // Resolve trace
