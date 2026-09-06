@@ -1,0 +1,10 @@
+# No spec deltas yet, on purpose.
+#
+# This change is a PROPOSAL: it raises a measured gap and the tradeoff that
+# decides it (see design.md, "Open Questions"). Writing requirements now would
+# be writing the decision it exists to ask for.
+#
+# When the shape is chosen, drop `skip_specs` and add the deltas under
+# `specs/<capability>/spec.md` in this directory.
+schema: spec-driven
+skip_specs: true
