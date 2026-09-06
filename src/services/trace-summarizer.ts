@@ -118,13 +118,20 @@ export function summarizeDiffForLlm(
   lines.push(`TRACE A: ${left.agent_name}${leftVer} [${left.status.toUpperCase()}] (${left.steps.length} steps${leftDur != null ? `, ${formatDuration(leftDur)}` : ''})`);
   lines.push(`TRACE B: ${right.agent_name}${rightVer} [${right.status.toUpperCase()}] (${right.steps.length} steps${rightDur != null ? `, ${formatDuration(rightDur)}` : ''})`);
 
-  // Input comparison
-  lines.push(`\nINPUT A: ${truncObj(left.input, 200)}`);
-  lines.push(`INPUT B: ${truncObj(right.input, 200)}`);
+  // Input and output comparison, windowed against each OTHER.
+  //
+  // These are the pair the model is asked to explain, and they were each cut
+  // from position 0: two runs of one agent share their input almost entirely
+  // (identically, when the pair is the same request before and after a change),
+  // and their outputs share a long prefix too. So the model was handed two
+  // byte-identical lines labelled A and B and asked what differs — the same
+  // defect `windowedJson` was written for one function below, applied to the
+  // step values but not to the trace's own.
+  lines.push(`\nINPUT A: ${windowedJson(left.input, right.input, 200)}`);
+  lines.push(`INPUT B: ${windowedJson(right.input, left.input, 200)}`);
 
-  // Output comparison
-  if (hasRenderableContent(left.output)) lines.push(`OUTPUT A: ${truncObj(left.output, 200)}`);
-  if (hasRenderableContent(right.output)) lines.push(`OUTPUT B: ${truncObj(right.output, 200)}`);
+  if (hasRenderableContent(left.output)) lines.push(`OUTPUT A: ${windowedJson(left.output, right.output, 200)}`);
+  if (hasRenderableContent(right.output)) lines.push(`OUTPUT B: ${windowedJson(right.output, left.output, 200)}`);
 
   // Divergence — or the truth, when one trace is a prefix of the other.
   //
@@ -169,8 +176,11 @@ export function summarizeDiffForLlm(
   }
 
   // Errors
-  if (left.error) lines.push(`\nERROR A: ${truncate(left.error, 200)}`);
-  if (right.error) lines.push(`ERROR B: ${truncate(right.error, 200)}`);
+  // Same rule for the errors, and it bites hardest here: two runs of one agent
+  // fail with the same stack shape, so the difference is usually deep in the
+  // string — a different line number, a different call, a different value.
+  if (left.error) lines.push(`\nERROR A: ${windowedAround(left.error, right.error ?? '', 200)}`);
+  if (right.error) lines.push(`ERROR B: ${windowedAround(right.error, left.error ?? '', 200)}`);
 
   const text = lines.join('\n');
   return {

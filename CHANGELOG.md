@@ -443,6 +443,15 @@ and one-way.
 
 ### Fixed
 
+- **The AI diff was handed two identical lines and asked what differs.** The
+  summary sent to `diff --ai` cut each trace's input, output and error to 200
+  characters from position 0 — and two runs of one agent share their input
+  almost entirely (identically, for the same request before and after a change),
+  their outputs by prefix, and their stack traces by shape. So `INPUT A` and
+  `INPUT B` rendered byte-identically above a prompt asking why the traces
+  diverged. The step values in that same file have been windowed around the
+  first difference since the helper was written; the trace's own values had not.
+
 - **The gate's failure line showed the same text on both sides of the arrow.**
   `check`'s divergence row cut each value to 60 characters from position 0, and
   tool-call payloads share a long prefix by nature — same tool, same leading

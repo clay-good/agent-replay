@@ -24,6 +24,8 @@ The system SHALL compare two traces via `agent-replay diff <a> <b>`, pairing ste
 
 The system SHALL, when `--ai` is passed and an API key is configured, produce an AI-generated explanation of why the two traces diverged.
 
+The summary handed to the model SHALL window every PAIRED value — the two traces' inputs, outputs and errors, as well as each step's — around the point where the pair first differs. Two runs of one agent share their input almost entirely and their outputs and stack traces by prefix, so cutting from position 0 hands the model two byte-identical lines labelled A and B and asks what differs.
+
 The analysis SHALL be resolved before a `--json` document is written, so `--ai --json` answers in the requested shape rather than dropping the flag: the document carries an `ai_analysis` key, and a misconfiguration that exits 1 interactively SHALL exit 1 in automation too, as a refusal document, rather than exiting 0 with a null analysis.
 
 #### Scenario: No API key

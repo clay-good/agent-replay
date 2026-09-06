@@ -517,6 +517,34 @@ describe('trace summarizer', () => {
     expect(summary.estimated_tokens).toBeGreaterThan(0);
   });
 
+  it('windows the trace input, output and error against the other side', () => {
+    // The model is asked WHY the two diverged, and these are the pair it reads.
+    // Cut from position 0 they render byte-identically for two runs of one
+    // agent — which share their input almost entirely, and their output's
+    // prefix — so the summary showed no difference at all. `windowedJson` was
+    // already applied to the STEP values in this file, and not to the trace's.
+    const db = createTestDb();
+    const shared = 'x'.repeat(240);
+    const mk = (tail: string, err: string) => ({
+      agent_name: 'a', status: 'failed' as const,
+      input: { prompt: `${shared}${tail}` },
+      output: { text: `${shared}${tail}` },
+      error: `${shared}${err}`,
+      steps: [{ step_number: 1, step_type: 'output' as const, name: 'o' }],
+    });
+    const l = getTrace(db, ingestTrace(db, mk('LEFT-ONLY', 'ERR-LEFT') as never).id)!;
+    const r = getTrace(db, ingestTrace(db, mk('RIGHT-ONLY', 'ERR-RIGHT') as never).id)!;
+
+    const text = summarizeDiffForLlm(diffTraces(db, l.id, r.id), l, r).text;
+    for (const marker of ['LEFT-ONLY', 'RIGHT-ONLY', 'ERR-LEFT', 'ERR-RIGHT']) {
+      expect(text).toContain(marker);
+    }
+    // ...and the two sides are not the same line.
+    const inputA = text.split('\n').find((x) => x.startsWith('INPUT A:'))!.slice(8);
+    const inputB = text.split('\n').find((x) => x.startsWith('INPUT B:'))!.slice(8);
+    expect(inputA).not.toBe(inputB);
+  });
+
   it('tells the model a trace STOPPED rather than asking why it diverged', () => {
     // The prompt asks "WHY did the traces diverge", so handing it
     // "DIVERGES AT STEP 3" for a run that simply ends invites a confabulated
