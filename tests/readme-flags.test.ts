@@ -78,3 +78,29 @@ describe('README and cli.ts agree about the flags', () => {
     expect(declared, `README shows "agent-replay ... ${flag}", which cli.ts does not declare`).toContain(flag);
   });
 });
+
+describe('a command description does not promise opt-in content', () => {
+  // The one-line description is the first thing `--help` prints, and two of
+  // them named data the command does not produce by default: `show` promised
+  // "steps, evals, and snapshots" (state snapshots need `--snapshots`) and
+  // `export` promised "traces and evaluation results" (evals need
+  // `--with-evals`). Same rule the rest of the CLI follows: never claim what
+  // was not done.
+  const descriptionOf = (command: string): string => {
+    // The `.description('...')` that follows this command's `.command('...')`.
+    const at = cli.indexOf(`.command('${command}`);
+    expect(at).toBeGreaterThan(-1);
+    const m = cli.slice(at).match(/\.description\('([^']+)'\)/);
+    return m ? m[1] : '';
+  };
+
+  it.each([
+    ['show', 'snapshot', '--snapshots'],
+    ['export', 'eval', '--with-evals'],
+  ])('%s names the flag when its description mentions %s', (command, noun, flag) => {
+    const description = descriptionOf(command);
+    if (new RegExp(noun, 'i').test(description)) {
+      expect(description).toContain(flag);
+    }
+  });
+});

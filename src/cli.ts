@@ -173,7 +173,7 @@ program
 // --- show ---
 program
   .command('show <trace-id>')
-  .description('Show detailed view of a trace with steps, evals, and snapshots')
+  .description('Show a trace: its steps, and its evaluations when it has any (state snapshots with --snapshots)')
   .option('--json', 'Output raw JSON')
   .option('--steps-only', 'Only show the step timeline')
   .option('--tree', 'Render steps as a hierarchy (parent/child + causal links)')
@@ -361,7 +361,7 @@ guardCmd
 // --- export ---
 program
   .command('export')
-  .description('Export traces and evaluation results')
+  .description('Export traces (add --with-evals / --with-snapshots to carry those too)')
   .argument('[trace-id]', 'Export only this trace (mutually exclusive with the filter flags)')
   .option('--format <format>', 'Export format: json, jsonl, golden', 'json')
   .option('--status <status>', 'Filter by status')
