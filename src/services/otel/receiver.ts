@@ -7,6 +7,8 @@ import { mapOtlpTraces, type MappedOtelTrace } from './semconv.js';
 import { mapOtlpLogs, countRecognizedLogRecords} from './log-events.js';
 import { decodeTracesData, decodeLogsData } from './protobuf.js';
 import { julianDayExpr } from '../../utils/time.js';
+import { truncate } from '../../utils/json.js';
+import { safeLine } from '../../ui/theme.js';
 
 /**
  * Local OTLP/HTTP receiver. Accepts `POST /v1/traces` and `POST /v1/logs` in
@@ -604,8 +606,78 @@ function ingestOtlpLogs(
   return { status: 200, payload: {} };
 }
 
+/**
+ * The refusal for a request this receiver does not route — an unknown path, or
+ * a method other than POST.
+ *
+ * Both used to be answered with a bodyless `res.writeHead(404).end()`, which is
+ * the one failure shape this file argues against everywhere else ("A failure
+ * says why", on the protobuf 400 path). The case that makes it matter is not a
+ * typo: the exporters this README tells you to point here are configured with a
+ * BASE endpoint (`OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318`), and the
+ * SDK appends the signal path itself — so a harness with its metrics exporter
+ * left on `otlp` posts `/v1/metrics` every export interval, forever, and both
+ * sides say nothing. The operator watching `otel serve` sees an idle receiver;
+ * the exporter sees an empty 404 it cannot explain.
+ *
+ * Status codes are unchanged (404/405 are correct); this only gives them the
+ * body and the `Allow` header an HTTP client can act on. `/v1/metrics` is named
+ * explicitly because "not found" is misleading for it — the path is a real OTLP
+ * signal that this receiver deliberately does not ingest, there being no metric
+ * target in a trace model, and the cure is on the exporter's side.
+ */
+export function unroutedRequest(
+  rawMethod: string,
+  rawPath: string,
+): { status: number; payload: Record<string, unknown>; headers: Record<string, string>; notice: string[] } {
+  const accepts = ['POST /v1/traces', 'POST /v1/logs'];
+  // The method and path come off the wire and are echoed into a response body
+  // and onto the operator's terminal, so they get the same treatment as any
+  // other value this tool did not generate: escaped, and bounded in length so a
+  // long request target cannot push the explanation off the screen. Match on
+  // the raw path, though — the escaped copy is for display only.
+  const method = safeLine(truncate(rawMethod, 16));
+  const path = safeLine(truncate(rawPath, 120));
+  if (rawMethod !== 'POST') {
+    return {
+      status: 405,
+      headers: { allow: 'POST' },
+      payload: { error: `${method} is not accepted; OTLP exports are POSTed.`, accepts },
+      notice: [`refused ${method} ${path} — OTLP exports are POSTed.`],
+    };
+  }
+  if (rawPath.startsWith('/v1/metrics')) {
+    return {
+      status: 404,
+      headers: {},
+      payload: {
+        error: 'This receiver ingests traces and log events, not metrics: there is no metric target in a trace model, so a metrics export is dropped rather than stored.',
+        accepts,
+      },
+      notice: [
+        'refused POST /v1/metrics — this receiver has no metric target, so these exports are dropped, not stored.',
+        'Traces and log events are unaffected. To stop the exporter sending metrics, set OTEL_METRICS_EXPORTER=none (Claude Code, Goose, OpenHands).',
+      ],
+    };
+  }
+  return {
+    status: 404,
+    headers: {},
+    payload: { error: `No OTLP endpoint at ${path}.`, accepts },
+    notice: [`refused POST ${path} — no OTLP endpoint there; this receiver accepts ${accepts.join(' and ')}.`],
+  };
+}
+
+/** How many distinct unroutable requests are announced before the console goes quiet. */
+const MAX_ANNOUNCED_REFUSALS = 20;
+/** Sentinel key: the cap notice itself has been printed. */
+const CAP_REACHED = '\u0000cap';
+
 /** Start the OTLP/HTTP receiver. Resolves once listening. */
 export function startOtelReceiver(db: Database.Database, port: number, stats: OtelStats): Promise<OtelReceiverHandle> {
+  // Refusals already announced on this server's console, so a repeating
+  // exporter is reported once rather than every export interval.
+  const announced = new Set<string>();
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     void handle(req, res);
   });
@@ -614,14 +686,31 @@ export function startOtelReceiver(db: Database.Database, port: number, stats: Ot
     const url = req.url ?? '';
     const contentType = req.headers['content-type'] ?? '';
 
-    if (req.method !== 'POST') {
-      res.writeHead(405).end();
-      return;
-    }
     const isTraces = url.startsWith('/v1/traces');
     const isLogs = url.startsWith('/v1/logs');
-    if (!isTraces && !isLogs) {
-      res.writeHead(404).end();
+    if (req.method !== 'POST' || (!isTraces && !isLogs)) {
+      const { status, payload, headers, notice } = unroutedRequest(req.method ?? '', url);
+      // Announce each distinct refusal ONCE. A metrics exporter posts on a
+      // fixed interval for the life of the session, so a line per request
+      // would bury the trace/log activity this console exists to show — but
+      // saying nothing at all is how the drop stays invisible for hours. One
+      // line per method+path is enough for the operator to act on.
+      // Bounded: a port scanner hitting a new path every request would
+      // otherwise grow this set for the life of the process and scroll the
+      // console. An operator's misconfigured exporter needs one or two entries;
+      // past the cap, say once that the rest are silent rather than stopping
+      // without a word.
+      const key = `${req.method} ${url}`;
+      if (!announced.has(key)) {
+        if (announced.size < MAX_ANNOUNCED_REFUSALS) {
+          announced.add(key);
+          for (const line of notice) console.error(`agent-replay otel: ${line}`);
+        } else if (!announced.has(CAP_REACHED)) {
+          announced.add(CAP_REACHED);
+          console.error(`agent-replay otel: over ${MAX_ANNOUNCED_REFUSALS} distinct unroutable requests; further ones are refused without a notice.`);
+        }
+      }
+      res.writeHead(status, { 'content-type': 'application/json', ...headers }).end(JSON.stringify(payload));
       return;
     }
     const isProtobuf = contentType.includes('application/x-protobuf');

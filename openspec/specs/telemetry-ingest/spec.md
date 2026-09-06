@@ -5,7 +5,7 @@ Beyond hooks and session files, the third capture surface the ecosystem has stan
 ## Requirements
 ### Requirement: Local OTLP/HTTP receiver
 
-The system SHALL provide `agent-replay otel serve [--port 4318]`, a local OTLP/HTTP receiver accepting `POST /v1/traces` and `POST /v1/logs` in both `application/x-protobuf` and `application/json` encodings (responding in the encoding received, honoring the OTLP/JSON deviations: lowerCamelCase fields, hex-encoded `traceId`/`spanId`, integer enums, string-encoded int64s) with gzip support, returning 200 with an empty response on full success and 200 with `partial_success` details when records are rejected. Received telemetry SHALL be written to the trace store live. When the spans or log events of one logical trace arrive across multiple export batches (as a `BatchSpanProcessor` flushes completed child spans before the root span ends), the receiver SHALL assemble them into a single trace — merging later batches into the existing trace by OTel trace id (or, for log events, by emitter session id) rather than opening a new trace per batch — while still storing each batch immediately so the trace stays queryable mid-session. A rootless synthetic trace SHALL be upgraded in place (agent name, input/output, synthetic flag cleared) once the batch carrying the agent root arrives.
+The system SHALL provide `agent-replay otel serve [--port 4318]`, a local OTLP/HTTP receiver accepting `POST /v1/traces` and `POST /v1/logs` in both `application/x-protobuf` and `application/json` encodings (responding in the encoding received, honoring the OTLP/JSON deviations: lowerCamelCase fields, hex-encoded `traceId`/`spanId`, integer enums, string-encoded int64s) with gzip support, returning 200 with an empty response on full success and 200 with `partial_success` details when records are rejected. Received telemetry SHALL be written to the trace store live. When the spans or log events of one logical trace arrive across multiple export batches (as a `BatchSpanProcessor` flushes completed child spans before the root span ends), the receiver SHALL assemble them into a single trace — merging later batches into the existing trace by OTel trace id (or, for log events, by emitter session id) rather than opening a new trace per batch — while still storing each batch immediately so the trace stays queryable mid-session. A rootless synthetic trace SHALL be upgraded in place (agent name, input/output, synthetic flag cleared) once the batch carrying the agent root arrives. A request the receiver does not route SHALL explain itself rather than answer with an empty body: an unknown path 404s with a JSON body listing the accepted endpoints, a non-POST method 405s with an `Allow: POST` header and the same list, and `/v1/metrics` — a real OTLP signal the receiver deliberately does not ingest, there being no metric target in a trace model — is named as such and distinguished from a mistyped path. Because an exporter repeats a refused export for the life of the session, the server console SHALL announce each refused method+path once.
 
 #### Scenario: Gemini CLI exports to agent-replay
 
@@ -16,6 +16,12 @@ The system SHALL provide `agent-replay otel serve [--port 4318]`, a local OTLP/H
 
 - **WHEN** an export batch contains some undecodable spans
 - **THEN** the receiver stores the valid spans and responds 200 with `partial_success.rejected_spans` and an `error_message`, so compliant SDK clients do not retry the batch
+
+#### Scenario: A signal the receiver does not ingest is refused in the open
+
+- **WHEN** an exporter configured with a base endpoint (`OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318`) also has its metrics exporter enabled, and so POSTs `/v1/metrics` every export interval
+- **THEN** each request is answered 404 with a JSON body naming metrics as a signal this receiver has no target for and listing the endpoints it does accept, and the server console reports the dropped exports ONCE — with the exporter-side setting that stops them — rather than repeating a line per interval
+- **AND** trace and log ingest on the same receiver is unaffected
 
 #### Scenario: Spans split across export batches assemble into one trace
 

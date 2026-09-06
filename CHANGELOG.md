@@ -890,6 +890,21 @@ and one-way.
   the one headline command that had not adopted it. A literal `null` is
   untouched: it remains the documented no-op that keeps the original value.
 
+- **`otel serve` dropped a whole OTLP signal without telling either side.**
+  A request the receiver does not route — an unknown path, or any method other
+  than `POST` — was answered with a bodyless `404`/`405` and nothing on the
+  server console. The case that made it matter is not a typo: the exporters the
+  README configures take a *base* endpoint (`OTEL_EXPORTER_OTLP_ENDPOINT`) and
+  append the signal path themselves, so a harness whose metrics exporter is on
+  POSTs `/v1/metrics` every export interval for the life of the session. The
+  operator saw an idle receiver and the exporter saw an empty `404` it could not
+  explain. Unrouted requests now carry a JSON body listing the endpoints that do
+  exist (`405` also carries `Allow: POST`), `/v1/metrics` is named as a signal
+  this receiver has no target for rather than reported as "not found", and the
+  console announces each refused method+path once — with the exporter-side
+  setting that stops the exports — rather than a line per interval. Trace and
+  log ingest are unchanged, as are the status codes.
+
 - **`otel serve` rejected a bad protobuf body with no reason at all.** The
   request handler took only the status from the protobuf path and answered a
   failure with zero bytes — the reason ("invalid protobuf body") had already

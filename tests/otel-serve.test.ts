@@ -101,6 +101,30 @@ async function startReceiver(): Promise<string> {
   throw new Error('otel receiver did not start');
 }
 
+/**
+ * Same, but with the receiver's stderr captured — for the console notices the
+ * server prints about requests it refuses. `stdio: 'ignore'` in `startReceiver`
+ * would throw them away.
+ */
+async function startReceiverCapturingStderr(): Promise<{ base: string; stderr: () => string }> {
+  const port = await freePort();
+  let err = '';
+  server = spawn(process.execPath, [CLI, 'otel', 'serve', '--port', String(port), '--dir', dir], {
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  server.stderr?.on('data', (c: Buffer) => { err += c.toString(); });
+  const base = `http://localhost:${port}`;
+  for (let i = 0; i < 50; i++) {
+    try {
+      const probe = await fetch(`${base}/v1/traces`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+      if (probe.ok) return { base, stderr: () => err };
+    } catch {
+      await sleep(100);
+    }
+  }
+  throw new Error('otel receiver did not start');
+}
+
 describe('otel serve (end-to-end)', () => {
   it('accepts an OTLP/JSON export over HTTP and records it as a trace', async () => {
     const url = await startReceiver();
@@ -315,6 +339,83 @@ describe('otel serve (end-to-end)', () => {
 
     // An empty OTLP object is still a valid (empty) batch → 200.
     expect((await post(json, '{}')).status).toBe(200);
+  }, 20000);
+
+  it('explains a request it does not route, instead of a bodyless 404/405', async () => {
+    // Regression: an unknown path and a non-POST method were both answered with
+    // `res.writeHead(404).end()` — zero bytes, no `Allow`, and nothing on the
+    // server console. The case that makes it matter is not a typo: the
+    // exporters the README configures take a BASE endpoint and append the
+    // signal path themselves, so a harness with its metrics exporter left on
+    // `otlp` POSTs /v1/metrics every interval into silence on both sides.
+    const url = await startReceiver();
+    const base = url.replace('/v1/traces', '');
+
+    const metrics = await fetch(`${base}/v1/metrics`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{"resourceMetrics":[]}',
+    });
+    expect(metrics.status).toBe(404);
+    const metricsBody = await metrics.json() as { error: string; accepts: string[] };
+    // Named, not merely "not found": /v1/metrics is a real OTLP signal this
+    // receiver deliberately does not ingest, and the reader must be able to
+    // tell that from a mistyped path.
+    expect(metricsBody.error).toMatch(/metrics/i);
+    expect(metricsBody.error).toMatch(/dropped/i);
+    expect(metricsBody.accepts).toEqual(['POST /v1/traces', 'POST /v1/logs']);
+
+    // A path that is simply not an endpoint says so, and says what is.
+    const typo = await fetch(`${base}/v1/trace`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(typo.status).toBe(404);
+    const typoBody = await typo.json() as { error: string; accepts: string[] };
+    expect(typoBody.error).toContain('/v1/trace');
+    expect(typoBody.error).not.toMatch(/metrics/i);
+    expect(typoBody.accepts).toEqual(['POST /v1/traces', 'POST /v1/logs']);
+
+    // A wrong METHOD on a real endpoint carries `Allow`, which a bare 405 owes
+    // an HTTP client and did not have.
+    const get = await fetch(`${base}/v1/traces`);
+    expect(get.status).toBe(405);
+    expect(get.headers.get('allow')).toBe('POST');
+    expect(((await get.json()) as { error: string }).error).toMatch(/POST/);
+  }, 20000);
+
+  it('announces a repeating refused export once, and keeps ingesting traces', async () => {
+    // A metrics exporter posts on a fixed interval for the life of the session.
+    // The operator has to learn the exports are being dropped, but a line per
+    // request would bury the trace activity this console exists to show — so
+    // the notice is once per method+path, and nothing else is disturbed.
+    const { base, stderr } = await startReceiverCapturingStderr();
+    for (let i = 0; i < 3; i++) {
+      const res = await fetch(`${base}/v1/metrics`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{"resourceMetrics":[]}',
+      });
+      expect(res.status).toBe(404);
+    }
+    // A real export on the same receiver still lands.
+    const ok = await fetch(`${base}/v1/traces`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: OTLP_PAYLOAD,
+    });
+    expect(ok.status).toBe(200);
+
+    await sleep(300);
+    const lines = stderr().split('\n').filter((l) => l.includes('/v1/metrics'));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/no metric target/);
+    // The notice has to leave the reader able to act, not just informed.
+    expect(stderr()).toMatch(/OTEL_METRICS_EXPORTER=none/);
+
+    server?.kill('SIGTERM');
+    await sleep(300);
+    const db = new Database(join(dir, 'traces.db'), { readonly: true });
+    const row = db.prepare('SELECT COUNT(*) AS n FROM agent_traces').get() as { n: number };
+    db.close();
+    expect(row.n).toBe(1);
   }, 20000);
 
   it('does not double count a batch an exporter redelivers', async () => {

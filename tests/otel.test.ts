@@ -3,7 +3,7 @@ import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
 import { ingestTrace, getTrace, listTraces } from '../src/services/trace-service.js';
 import { mapOtlpTraces, attrsToMap, decodeAnyValue } from '../src/services/otel/semconv.js';
-import { handleTracesExport, startOtelReceiver, type OtelStats } from '../src/services/otel/receiver.js';
+import { handleTracesExport, startOtelReceiver, unroutedRequest, type OtelStats } from '../src/services/otel/receiver.js';
 import { validateTraceInput } from '../src/utils/validators.js';
 import { forkTrace } from '../src/services/fork-service.js';
 
@@ -587,6 +587,39 @@ describe('OTLP receiver', () => {
 });
 
 // ── OpenLLMetry (traceloop.*) fallback ─────────────────────────────────────
+
+describe('unroutedRequest', () => {
+  it('names /v1/metrics as a signal with no target, not a missing path', () => {
+    const r = unroutedRequest('POST', '/v1/metrics');
+    expect(r.status).toBe(404);
+    expect(r.payload.error).toMatch(/metrics/i);
+    expect(r.payload.accepts).toEqual(['POST /v1/traces', 'POST /v1/logs']);
+    // The notice has to leave the operator able to act, not merely informed.
+    expect(r.notice.join(' ')).toMatch(/OTEL_METRICS_EXPORTER=none/);
+  });
+
+  it('offers Allow: POST on a wrong method, which a bare 405 owes an HTTP client', () => {
+    const r = unroutedRequest('GET', '/v1/traces');
+    expect(r.status).toBe(405);
+    expect(r.headers.allow).toBe('POST');
+  });
+
+  it('escapes and bounds the method and path it echoes back', () => {
+    // Both come off the wire and are printed to the operator's terminal and
+    // returned in a body, so they get the same treatment as any other value
+    // this tool did not generate — the rule every render site in the CLI
+    // follows. A long target must not push the explanation off the screen.
+    const r = unroutedRequest('POST', '/v1/\u001b[2Jwiped');
+    expect(String(r.payload.error)).not.toContain('\u001b');
+    expect(r.notice.join(' ')).not.toContain('\u001b');
+
+    const long = unroutedRequest('POST', '/v1/' + 'a'.repeat(500));
+    expect(String(r.payload.error).length).toBeLessThan(300);
+    expect(String(long.payload.error).length).toBeLessThan(300);
+    // Matching still happens on the RAW path; the escaped copy is display only.
+    expect(unroutedRequest('POST', '/v1/metrics?x=' + 'b'.repeat(500)).payload.error).toMatch(/metrics/i);
+  });
+});
 
 describe('mapOtlpTraces — an unrenderable span timestamp', () => {
   // The end/start sets were built from RAW nanos while the formatter rejects a

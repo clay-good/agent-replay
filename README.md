@@ -138,6 +138,8 @@ Point an exporter at it over HTTP/JSON. Most emitters default to gRPC on port 43
 - **Claude Code** — `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/json`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` (opt into content with `OTEL_LOG_USER_PROMPTS=1`)
 - **Goose / OpenHands** — `OTEL_EXPORTER_OTLP_PROTOCOL=http/json`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318`
 
+These endpoints take a *base* URL and the SDK appends the signal path itself, so a harness with its metrics exporter also on will POST `/v1/metrics` here every export interval. `agent-replay` has no metric target — it maps spans and log events onto traces — so those exports are refused, not stored: the response says so (rather than a bare 404, which reads as a mistyped path), and the receiver's console says so once per path rather than once per interval. Set `OTEL_METRICS_EXPORTER=none` to stop them at the source; trace and log capture work either way.
+
 Both CLIs redact prompt/response content unless you opt in on their side (Gemini `telemetry.logPrompts`, Claude Code `OTEL_LOG_USER_PROMPTS=1`); `agent-replay` records whatever they send.
 
 > GenAI, OpenInference, and OpenLLMetry span dialects are all recognized, including their prompt/response content. Both `/v1/traces` and `/v1/logs` accept OTLP/JSON and OTLP/protobuf, so an exporter left on its default protobuf protocol works without reconfiguring it to JSON.
