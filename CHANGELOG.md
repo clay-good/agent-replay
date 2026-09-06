@@ -394,7 +394,12 @@ and one-way.
   ("N event(s) could not be recorded"). `record`, which consumes the same
   protocol, has always counted them. Blank and `//` comment lines are legal
   protocol and are still not counted, and neither is an event validation kept
-  while ignoring one unusable field — that is a repair, not a loss.
+  while ignoring one unusable field — that is a repair, not a loss. (This
+  supersedes the narrower fix earlier in this cycle, which added the tally for
+  events the store refused — a child recording several sub-traces through one
+  channel collides on the per-trace step numbering and loses everything after
+  the first, while the count lived only in stderr lines and the summary still
+  read "N event(s) recorded".)
 - **An OpenTelemetry log capture recorded the model nowhere, so
   `check --golden --fields model` could not gate it.** Every
   `claude_code.api_request` and `gemini_cli.api_response` record states the
@@ -2458,10 +2463,6 @@ and one-way.
   runs — read as `$0.0000`. It now uses the same `formatCostUsd` `stats` uses.
 
 
-- `run`'s summary says when events could not be stored. A child recording
-  several sub-traces through one channel collides on the per-trace step
-  numbering and loses everything after the first, but the count lived only in
-  stderr lines while the summary still read "N event(s) recorded".
 
 - `diff` compares the trace's own `input`. It never did, so the one field
   `fork --modify-input` changes was invisible — and `fork` closes by telling you
