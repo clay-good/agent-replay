@@ -16,6 +16,7 @@ export interface ExportOptions {
   status?: string;
   tag?: string;
   agent?: string;
+  agentExact?: string;
   since?: string;
   withEvals?: boolean;
   withSnapshots?: boolean;
@@ -54,12 +55,28 @@ export function runExport(traceId: string | undefined, opts: ExportOptions = {})
 
   const filter: ListTracesFilter = {};
 
+  // `--agent` is a SUBSTRING match, which is right for browsing and wrong for
+  // building a gate: `--agent checkout` also selects `checkout-v2`, so a golden
+  // baseline is written from runs of an agent nobody named, and every later
+  // `check` compares against them. `check` has carried `--agent-exact` for
+  // exactly this reason; the command that WRITES the baseline did not, which
+  // left the fuzzy flag as the only way to scope one — including when `check`'s
+  // own mixed-run refusal tells the reader to narrow by agent.
+  if (opts.agent && opts.agentExact) {
+    console.error(chalk.red('  --agent and --agent-exact are mutually exclusive.'));
+    console.error(chalk.dim('  Use --agent for a substring match, --agent-exact to name one agent.'));
+    process.exitCode = 2;
+    return;
+  }
+
   if (traceId) {
-    const conflicting = ['status', 'agent', 'tag', 'since'] as const;
+    const conflicting = ['status', 'agent', 'agentExact', 'tag', 'since'] as const;
     const used = conflicting.filter((k) => opts[k] != null);
     if (used.length > 0) {
+      // `agentExact` is the option NAME; the flag is spelled with a dash.
+      const flagOf = (k: string) => `--${k === 'agentExact' ? 'agent-exact' : k}`;
       console.error(
-        chalk.red(`  A trace id can't be combined with filter flags (${used.map((k) => `--${k}`).join(', ')}).`),
+        chalk.red(`  A trace id can't be combined with filter flags (${used.map(flagOf).join(', ')}).`),
       );
       console.error(chalk.dim('  Pass a trace id to export one trace, or filters to export a set — not both.'));
       process.exitCode = 2;
@@ -98,6 +115,7 @@ export function runExport(traceId: string | undefined, opts: ExportOptions = {})
   for (const [flag, value] of [
     ['--status', opts.status],
     ['--agent', opts.agent],
+    ['--agent-exact', opts.agentExact],
     ['--tag', opts.tag],
     ['--since', opts.since],
   ] as const) {
@@ -123,7 +141,8 @@ export function runExport(traceId: string | undefined, opts: ExportOptions = {})
     return;
   }
 
-  if (opts.agent) filter.agent_name = opts.agent;
+  if (opts.agentExact) filter.agent_name_exact = opts.agentExact;
+  else if (opts.agent) filter.agent_name = opts.agent;
   if (opts.tag) filter.tag = opts.tag;
   if (opts.since) {
     try {

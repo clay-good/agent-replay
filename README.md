@@ -289,7 +289,7 @@ result.
 `travel-assistant` alike; `--session` matches by **prefix**, like a trace id.
 Convenient for browsing, but worth knowing wherever the selection decides a
 verdict: `check --golden --agent travel-bot` in a store that also holds
-`travel-bot-v2` traces checks both. For a CI gate, prefer **`check --agent-exact <name>`**, which selects only that agent — a substring is right for browsing and wrong for a gate, because under `--strict` an unrelated agent that happens to contain the term decides the verdict. Pair it with a baseline exported for the same agent, or the other baselines count as unexercised. The two flags are mutually exclusive.
+`travel-bot-v2` traces checks both. For a CI gate, prefer **`check --agent-exact <name>`**, which selects only that agent — a substring is right for browsing and wrong for a gate, because under `--strict` an unrelated agent that happens to contain the term decides the verdict. Pair it with a baseline exported for the same agent — `export --format golden --agent-exact <name>`, which scopes the baseline the same way, since a baseline built with the substring form holds the lookalike's runs and every later `check` gates on them. The two flags are mutually exclusive, on both commands.
 
 With no `--sort` at all, traces are listed newest first. Passing `--sort` orders
 ascending; prefix the field with `-` for descending. So "my ten most expensive

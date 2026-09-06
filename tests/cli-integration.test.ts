@@ -2347,6 +2347,27 @@ describe('export says how many traces it wrote', () => {
     expect(readFileSync(out, 'utf8').trim().split('\n')).toHaveLength(2);
   });
 
+  it('scopes a golden baseline to ONE agent with --agent-exact', () => {
+    // `--agent` is a substring match, which is right for browsing and wrong for
+    // building a gate: `--agent checkout` also takes `checkout-v2`, so the
+    // baseline holds runs of an agent nobody named and every later `check`
+    // compares against them. `check` has had `--agent-exact` for exactly this
+    // reason; the command that WRITES the baseline had only the fuzzy flag.
+    seedTrace('checkout');
+    seedTrace('checkout-v2');
+    const names = (args: string[]): string[] => {
+      const rows = JSON.parse(ex(args).stdout) as Array<{ agent_name: string }>;
+      return [...new Set(rows.map((r) => r.agent_name))].sort();
+    };
+    expect(names(['export', '--format', 'golden', '--agent', 'checkout'])).toEqual(['checkout', 'checkout-v2']);
+    expect(names(['export', '--format', 'golden', '--agent-exact', 'checkout'])).toEqual(['checkout']);
+
+    // The same guards the other filters carry: the two flags disagree, and an
+    // empty value is a usage error rather than "no filter".
+    expect(ex(['export', '--format', 'golden', '--agent', 'a', '--agent-exact', 'b']).code).toBe(2);
+    expect(ex(['export', '--format', 'golden', '--agent-exact', '  ']).code).toBe(2);
+  });
+
   it('warns when a filter matched nothing, instead of reporting a bare success', () => {
     const out = join(dir, 'empty.json');
     const r = ex(['export', '--agent', 'no-such-agent', '--output', out]);

@@ -366,6 +366,7 @@ program
   .option('--status <status>', 'Filter by status')
   .option('--tag <tag>', 'Filter by tag')
   .option('--agent <name>', 'Filter by agent name')
+  .option('--agent-exact <name>', 'Filter by exactly this agent name (a golden baseline should name one agent)')
   .option('--since <duration>', 'Filter by time window')
   .option('--with-evals', 'Include evaluation results')
   .option('--with-snapshots', 'Include full snapshots')

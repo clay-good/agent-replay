@@ -77,6 +77,15 @@ and one-way.
 
 ### Added
 
+- **`export --agent-exact <name>`, so a golden baseline can name ONE agent.**
+  `--agent` matches by substring, which is right for browsing and wrong for
+  building a gate: `--agent checkout` also writes `checkout-v2`'s runs into the
+  baseline, and every later `check` compares against runs nobody named. `check`
+  has carried `--agent-exact` for exactly this reason — the flag was missing at
+  the command that WRITES the file, including when `check`'s own advice is to
+  narrow by agent. Mutually exclusive with `--agent`, refuses an empty value,
+  and rejected alongside a trace id, like the filters beside it.
+
 - **`guard list --json`.** A policy set is configuration, and configuration is
   what a CI job wants to assert on ("this rule is present", "no blocking policy
   is disabled") — but `guard list` printed a table only, so the check had to
