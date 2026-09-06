@@ -133,6 +133,23 @@ describe('evalTable / policyTable', () => {
 });
 
 describe('renderTimeline edge cases', () => {
+  it('an empty WINDOW is not an empty trace', () => {
+    // `show --from-step 999` printed "Showing 0 of 10 steps (10 outside the
+    // --from-step/--to-step window)" and then, directly beneath it, "No steps
+    // recorded." — two adjacent claims, one of them false, and the false one is
+    // what a reader scrolling to the end takes away.
+    const msg = 'No steps in this window — the trace has 10.';
+    expect(noAnsi(renderTimeline([], { emptyMessage: msg }))).toContain(msg);
+    expect(noAnsi(renderTimeline([], { emptyMessage: msg }))).not.toMatch(/No steps recorded/);
+    // `--tree` renders through the other entry point and said the same thing.
+    expect(noAnsi(renderTree([], { emptyMessage: msg }))).toContain(msg);
+  });
+
+  it('still says a genuinely stepless trace has no steps', () => {
+    expect(noAnsi(renderTimeline([]))).toMatch(/No steps recorded/);
+    expect(noAnsi(renderTree([]))).toMatch(/No steps recorded/);
+  });
+
   it('reports no steps for an empty trace', () => {
     expect(noAnsi(renderTimeline([]))).toMatch(/No steps/i);
   });

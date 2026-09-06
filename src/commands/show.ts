@@ -194,7 +194,13 @@ export function runShow(traceId: string, opts: ShowOptions = {}): void {
   // trace-level `Tokens:` line — beside a trace-level `Duration:`, and differing
   // from what `list`/`stats` report for the same trace. `replay` already keeps
   // the two separate.
-  const renderSteps = () => (opts.tree ? renderTree(windowed) : renderTimeline(windowed));
+  // An empty window is not an empty trace. Without this the renderer's default
+  // ("No steps recorded.") contradicted the line printed just above it, which
+  // correctly said how many steps the window had excluded.
+  const timelineOpts = windowed.length === 0 && trace.steps.length > 0
+    ? { emptyMessage: `No steps in this window — the trace has ${trace.steps.length.toLocaleString()}. Widen or drop --from-step/--to-step.` }
+    : {};
+  const renderSteps = () => (opts.tree ? renderTree(windowed, timelineOpts) : renderTimeline(windowed, timelineOpts));
 
   // Steps-only mode
   if (opts.stepsOnly) {

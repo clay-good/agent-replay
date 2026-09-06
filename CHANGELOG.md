@@ -2372,6 +2372,13 @@ and one-way.
   read the identical attribute — so `stats` showed no cost and `list --sort cost`
   was inert for every span-captured trace. It also ignored a reported
   `total_tokens` when the input/output split was absent.
+- `show --from-step`/`--to-step` with a window matching no step printed "No
+  steps recorded." — directly beneath its own accurate line, "Showing 0 of 10
+  steps (10 outside the --from-step/--to-step window)". Two adjacent claims, one
+  of them false, and the false one is what a reader scrolling to the end takes
+  away. The empty timeline now says the window is empty and how many steps the
+  trace has; a genuinely stepless trace is unchanged. `--tree` said the same
+  thing and is fixed with it.
 - A fork restored from a backup came back as an ordinary trace. `ingest` mints
   fresh ids, so a `parent_trace_id` written by `export` points into the store the
   document came from, and the link was dropped. But a fork is a never-executed

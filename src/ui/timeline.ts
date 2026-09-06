@@ -12,6 +12,16 @@ export interface TimelineOptions {
   showSnapshots?: boolean;
   highlightStep?: number;
   maxWidth?: number;
+  /**
+   * What an empty list MEANS, when the caller narrowed it.
+   *
+   * The default says the trace has no steps, which is a statement about the
+   * TRACE — and it was printed for `show --from-step 999`, directly under a
+   * line reading "Showing 0 of 10 steps (10 outside the --from-step/--to-step
+   * window)". Two adjacent claims, one of them false, and the false one is the
+   * one a reader scrolling to the end takes away.
+   */
+  emptyMessage?: string;
 }
 
 /**
@@ -44,7 +54,7 @@ export function renderTimeline(
   } = options;
 
   if (steps.length === 0) {
-    return chalk.dim('  No steps recorded.');
+    return chalk.dim(`  ${options.emptyMessage ?? 'No steps recorded.'}`);
   }
 
   const lines: string[] = [];
@@ -162,7 +172,7 @@ const MAX_TREE_INDENT = 40;
 
 export function renderTree(steps: TraceStep[], options: TimelineOptions = {}): string {
   if (steps.length === 0) {
-    return chalk.dim('  No steps recorded.');
+    return chalk.dim(`  ${options.emptyMessage ?? 'No steps recorded.'}`);
   }
 
   const hasCausalStructure = steps.some(
