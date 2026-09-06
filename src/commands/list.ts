@@ -13,6 +13,7 @@ import { makeRefuse, openStoreOr } from '../utils/refuse.js';
 export interface ListOptions {
   status?: string;
   agent?: string;
+  source?: string;
   tag?: string;
   session?: string;
   since?: string;
@@ -43,6 +44,7 @@ export function runList(opts: ListOptions = {}): void {
     ['--agent', opts.agent],
     ['--tag', opts.tag],
     ['--session', opts.session],
+    ['--source', opts.source],
     ['--since', opts.since],
   ] as const) {
     if (value != null && value.trim() === '') {
@@ -54,6 +56,7 @@ export function runList(opts: ListOptions = {}): void {
   const filter: ListTracesFilter = {};
 
   if (opts.status) filter.status = opts.status;
+  if (opts.source) filter.source_format = opts.source;
   if (opts.agent) filter.agent_name = opts.agent;
   if (opts.tag) filter.tag = opts.tag;
   if (opts.session) filter.session_id = opts.session;
@@ -120,6 +123,25 @@ export function runList(opts: ListOptions = {}): void {
   if (traces.length === 0) {
     console.log('');
     console.log(chalk.dim('  No traces found.'));
+    // Name the sources the store actually holds. A capture path is a value the
+    // user has to spell exactly (`record:codex-exec`, not `record`), and the
+    // difference between "nothing was captured that way" and "I typed it wrong"
+    // is one line the store can answer.
+    if (opts.source) {
+      const present = (db
+        .prepare(
+          `SELECT DISTINCT json_extract(metadata, '$.source_format') AS source FROM agent_traces
+            WHERE json_extract(metadata, '$.source_format') IS NOT NULL ORDER BY source`,
+        )
+        .all() as Array<{ source: string }>).map((r) => r.source);
+      console.log(
+        chalk.dim(
+          present.length > 0
+            ? `  This store holds: ${present.join(', ')}.`
+            : '  No trace in this store records which capture path produced it.',
+        ),
+      );
+    }
     console.log(
       chalk.dim('  Run ') +
         chalk.white('agent-replay demo') +

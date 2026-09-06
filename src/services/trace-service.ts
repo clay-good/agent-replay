@@ -1542,6 +1542,13 @@ export function listTraces(
     conditions.push("agent_name LIKE ? ESCAPE '\\'");
     params.push(`%${escaped}%`);
   }
+  if (filter.source_format) {
+    // Which capture path recorded it. Exact: the formats are short identifiers
+    // that prefix one another (`record:native`, `record:codex-exec`), so a
+    // substring match would answer a narrower question than it was asked.
+    conditions.push(`json_extract(metadata, '$.source_format') = ?`);
+    params.push(filter.source_format);
+  }
   if (filter.tag) {
     // SQLite JSON: check if the tags array contains the tag
     conditions.push("EXISTS (SELECT 1 FROM json_each(tags) WHERE json_each.value = ?)");

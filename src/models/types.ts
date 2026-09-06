@@ -296,6 +296,13 @@ export interface ListTracesFilter {
   agent_name_exact?: string;
   tag?: string;
   session_id?: string;
+  /**
+   * Exact `metadata.source_format` — which capture path recorded the trace
+   * (`hook`, `record:codex-exec`, `claude-transcript`, `otel-genai`, …).
+   * EXACT, not substring: a filter that silently widens is the mistake
+   * `agent_name_exact` exists to avoid.
+   */
+  source_format?: string;
   since?: string;
   sort_by?: string;
   sort_order?: 'asc' | 'desc';

@@ -502,6 +502,36 @@ describe('an abandoned-looking trace says so everywhere, not just in the listing
     expect(doc.possibly_abandoned).toBe(true);
   });
 
+  it('filters by capture path, and names the paths present when nothing matches', () => {
+    // Every path now stamps `metadata.source_format`, and the case that needs
+    // it is the one the tool reports out loud: a session with two traces. The
+    // filter is EXACT, because the formats prefix one another
+    // (`record:native`, `record:codex-exec`) and a substring match would answer
+    // a narrower question than it was asked — so a typo has to be tellable from
+    // "nothing was captured that way".
+    const db = ensureDatabase(resolve(dir, 'traces.db'));
+    ingestTrace(db, {
+      agent_name: 'a', status: 'completed', input: { q: 1 }, metadata: { source_format: 'hook' },
+      steps: [{ step_number: 1, step_type: 'output', name: 'o' }],
+    } as never);
+    ingestTrace(db, {
+      agent_name: 'b', status: 'completed', input: { q: 2 }, metadata: { source_format: 'record:native' },
+      steps: [{ step_number: 1, step_type: 'output', name: 'o' }],
+    } as never);
+
+    out.length = 0;
+    runList({ dir, source: 'hook', json: true });
+    const doc = JSON.parse(out.join('\n')) as { items: Array<{ agent_name: string }> };
+    expect(doc.items.map((t) => t.agent_name)).toEqual(['a']);
+
+    // A prefix is not a match, and the refusal names what the store has.
+    out.length = 0;
+    runList({ dir, source: 'record' });
+    const text = out.join('\n').replace(/\x1B\[[0-9;]*m/g, '');
+    expect(text).toMatch(/No traces found/);
+    expect(text).toMatch(/This store holds: hook, record:native/);
+  });
+
   it('reports possibly_abandoned in list --json, where a scan for stuck runs happens', () => {
     // The listing draws "⚠ abandoned?" and the document said nothing, so a
     // script had to re-implement the threshold to find what the table was

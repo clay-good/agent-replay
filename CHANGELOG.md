@@ -110,6 +110,13 @@ and one-way.
   the newer run against a baseline of the older reports REGRESSED at exit 1,
   caught by `tool_inputs` and `decisions` exactly as the README describes.
 
+- **`list --source <format>`, to see one capture path's traces.** Every path now
+  stamps which one it is, and the case that needs the filter is the one the tool
+  reports out loud: a session captured two ways, where the question is which
+  trace came from where. Exact match, because the names prefix one another
+  (`record:native`, `record:codex-exec`); a value that matches nothing prints
+  the paths the store holds, so a typo is tellable from an absence.
+
 - **`guard test --json`, so an audit can be acted on.** `guard test` is the
   report this tool tells you to capture (`guard test <id> > findings.txt`), and
   a capture a CI job has to scrape is not one it can act on. It answers

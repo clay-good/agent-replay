@@ -160,6 +160,7 @@ program
   .option('--agent <name>', 'Filter by agent name')
   .option('--tag <tag>', 'Filter by tag')
   .option('--session <id>', 'Filter by session ID (prefix matching)')
+  .option('--source <format>', 'Filter by capture path (hook, record:<fmt>, claude-transcript, otel-genai, …)')
   .option('--since <duration>', 'Filter by time window (e.g. 1h, 7d, 30m)')
   .option('--sort <field>', 'Sort by: started_at, duration, tokens, cost, agent_name (ascending; prefix with - for descending)')
   .option('--limit <n>', 'Max results (default 25)', '25')

@@ -895,7 +895,11 @@ decision, plus the trace's input, status and error. State snapshots are outside
 it, so two runs whose only difference is the context window report none —
 read those with `show <id> --snapshots`.
 
-**"Which capture path produced this trace?"** `show` names it — `Source: hook
+**"Which capture path produced this trace?"** `show` names it, and
+`list --source <format>` lists the traces from one path (`hook`,
+`record:codex-exec`, `claude-transcript`, `otel-genai`, `claude-code-logs`).
+The match is exact — the names prefix one another — and a value that matches
+nothing prints the paths the store actually holds — `Source: hook
 (claude-code)`, `record:codex-exec`, `claude-transcript`, `otel-genai`,
 `claude-code-logs` — because a store usually holds several, and the path
 explains what a trace can and cannot carry (a hook capture records no model; an
