@@ -794,7 +794,7 @@ agent-replay config get ai.provider
 
 You can also set API keys via environment variables: `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `OPENAI_API_KEY`. Environment variables take priority over config file values.
 
-`ai.max_tokens` caps the model's reply on every AI path — `eval --ai` and `diff --ai` alike (default 1024) — and is what the `--max-cost` estimate prices, so raising it raises both the ceiling and the quoted cost. `ai.model` is only applied to a provider it belongs to — a `claude-*` model is never sent to OpenAI.
+`ai.max_tokens` caps the model's reply on every AI path — `eval --ai` and `diff --ai` alike (default 1024) — and is what the `--max-cost` estimate prices, so raising it raises both the ceiling and the quoted cost. `ai.model` is only applied to a provider it belongs to — a `claude-*` model is never sent to OpenAI. Cost figures are priced from a small built-in rate table that covers the three default models; set `ai.model` to anything else and both the estimate and the recorded cost fall back to the highest rate in that table, which — since all three defaults are cheap-tier — is a **floor, not a ceiling**. `eval --ai --max-cost` says so out loud when that happens, and warns that the budget may not hold; a stored result carries `cost_usd_rate_unknown`.
 
 `config set` refuses an **empty** value (exit `2`): a blank key was stored, then
 displayed as `***` by `config get` — looking set — while every check downstream
@@ -872,6 +872,16 @@ than passing green when it cannot do its job. The message distinguishes the two
 causes, because their cures are opposite: no baseline entry records that field
 (use a capture path that does), or only some matched runs record it (narrow with
 `--agent`).
+
+**"`diff --ai` said `Better trace: unknown`."** The model gave no verdict this
+tool could read — `unknown` is not one of the three answers it is offered, so
+it can't be confused with `neither` ("the two runs are equivalent"). If the
+reasoning says the answer was cut off at the token ceiling, re-run with a
+larger `--max-tokens` (or `config set ai.max_tokens`); a long comparison
+routinely needs more than the 1024 default. An AI *eval* whose judge was cut
+off stores `truncated_at_max_tokens` beside its `score: 0`, for the same
+reason: the gate fails closed, and the zero should be readable as "never
+finished" rather than "failed the run".
 
 **"An AI evaluator scored a long run and I don't trust the number."** Check the
 panel: when the trace did not fit the summary sent to the model, it says
