@@ -8,7 +8,7 @@
 
 - TypeScript (ESM), Node.js >= 20.12
 - CLI: commander; terminal UI: blessed/blessed-contrib, boxen, chalk, cli-table3, ora
-- Storage: better-sqlite3 (single local file, `.agent-replay/traces.db`)
+- Storage: better-sqlite3, WAL mode (`.agent-replay/traces.db`, plus `-wal`/`-shm` sidecars while a writer is attached)
 - Build: tsup; Tests: vitest; IDs: nanoid
 - AI evaluation: direct HTTPS calls to Anthropic / Google / OpenAI (bring-your-own-key, cheapest models by default)
 
@@ -32,7 +32,9 @@
 ### Testing Strategy
 
 - vitest against in-memory/temp SQLite databases; no mocking of the DB layer
+- `tests/cli-integration.test.ts` spawns the BUILT `dist/cli.js`, so `npm run build` must precede a bare `npx vitest run` or it tests a stale binary
 - `npm run verify` = typecheck + build + test; must pass before merge
+- CI runs `verify` on Node 20/22/24/26 and, separately, packs the tarball, installs it into an empty project and uses it from there — packaging breaks (a broken `require` entry, published types that do not resolve) are invisible to a test run against the repo
 
 ### Git Workflow
 
@@ -57,7 +59,7 @@
 
 - 100% local, offline-first: no cloud dependency, no telemetry; AI features are opt-in with user-supplied keys
 - Framework-agnostic: any agent that can emit JSON can integrate
-- Single-writer SQLite: concurrent writers must go through one process (relevant for live capture)
+- Concurrent writers are supported and expected: the store opens in WAL mode with a 10 s `busy_timeout`, because live capture is inherently multi-process — a hook fires once per event, a `record` may be streaming, and the OTel receiver may be running, all against one store. (Verified: five `record` processes writing 100 events into one store lose nothing.) A writer still must not hold a transaction open across an await
 - Backward compatibility of the ingest JSON format — only `agent_name` is required
 
 ## External Dependencies

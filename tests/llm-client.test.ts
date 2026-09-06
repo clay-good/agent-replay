@@ -321,7 +321,15 @@ describe('a 4xx is our request, not the provider', () => {
     } as unknown as Response);
     vi.stubGlobal('fetch', spy);
     await expect(
-      callLlm({ provider: 'anthropic', api_key: 'k', model: 'claude-haiku-4-5-20251001' }, { system: 's', user: 'u' }),
+      // `retry_base_delay_ms: 1`, as every other test in this file passes: this
+      // one is ABOUT the retry, so it must really retry — but at the 500 ms
+      // default it slept through two doubling backoffs and was the slowest test
+      // here at 1.5 s. The assertion (it called fetch more than once) is
+      // unchanged; only the waiting is gone.
+      callLlm(
+        { provider: 'anthropic', api_key: 'k', model: 'claude-haiku-4-5-20251001', retry_base_delay_ms: 1 },
+        { system: 's', user: 'u' },
+      ),
     ).rejects.toThrow(/Server error/);
     expect(spy.mock.calls.length).toBeGreaterThan(1);
   }, 60000);
