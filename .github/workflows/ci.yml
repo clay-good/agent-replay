@@ -62,6 +62,9 @@ jobs:
       - name: Build and pack
         run: |
           npm run build
+          # npm does not create --pack-destination itself; without this the pack
+          # silently lands in the repo root and the install below is an ENOENT.
+          mkdir -p "$RUNNER_TEMP/pkg"
           npm pack --pack-destination "$RUNNER_TEMP/pkg"
       - name: Install the tarball into a clean project
         working-directory: ${{ runner.temp }}
