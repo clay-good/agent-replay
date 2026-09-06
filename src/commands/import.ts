@@ -255,6 +255,40 @@ export function runImport(filePath: string, opts: ImportOptions = {}): void {
     }
   }
 
+  // Say when this session is ALREADY in the store from another capture path.
+  //
+  // The identity check above keys on session id AND source format AND source
+  // file, so it can only recognize a previous IMPORT. A live capture of the same
+  // session — the hook adapter, or the OTel receiver — carries no source_format
+  // and never matches, so importing the transcript of a session you also
+  // captured live adds a second trace with the same agent and session id, and
+  // every store-wide count doubles: `stats` reports two runs, `list` shows two
+  // rows, a golden baseline holds two shapes of one session. The receiver says
+  // this on its console for its own half of the problem; the import path said
+  // nothing at all.
+  //
+  // A note and not a refusal: both traces are legitimate and hold different
+  // things — the transcript has the full turn-by-turn record, the live capture
+  // has decisions and guard checks the file never sees.
+  const liveCaptures = sessionId
+    ? (db
+        .prepare(
+          `SELECT id FROM agent_traces
+            WHERE session_id = ? AND id != ? AND parent_trace_id IS NULL
+              AND json_extract(metadata, '$.source_format') IS NULL
+            ORDER BY ${julianDayExpr('started_at')} ASC, started_at ASC`,
+        )
+        .all(sessionId, report.trace.id) as Array<{ id: string }>)
+    : [];
+  if (liveCaptures.length > 0) {
+    console.error(
+      chalk.yellow(
+        `  Note: this session was already captured live as ${liveCaptures.map((t) => t.id).join(', ')} — the store now holds ${liveCaptures.length + 1} traces for it.`,
+      ),
+    );
+    console.error(chalk.dim('  Both are kept (a transcript and a live capture record different things), but every store-wide count includes both.'));
+  }
+
   console.log('');
   console.log(
     summaryPanel('Import Summary', {

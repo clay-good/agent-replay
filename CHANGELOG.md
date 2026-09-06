@@ -443,6 +443,15 @@ and one-way.
 
 ### Fixed
 
+- **Importing a session you also captured live doubled it, silently.** The
+  import identity is the session id, source format and source filename together,
+  so it recognizes a previous import and cannot recognize a LIVE capture — the
+  hook adapter and the OTel receiver stamp no source format. Importing the
+  transcript of a session the hook had already recorded therefore added a second
+  trace with the same agent and session id, and said nothing. It now reports the
+  live trace by id and that the store holds two for that session. Both are kept:
+  a transcript and a live capture record different things.
+
 - **Enabling the hook AND the OTel exporter silently doubled everything.** Both
   are documented for the same harness, and a batch deliberately never merges
   into a trace written by another capture path — their steps and numbering mean

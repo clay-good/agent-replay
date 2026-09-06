@@ -7,7 +7,7 @@ import { runMigrations } from '../src/db/migrations.js';
 import { ensureDatabase, resetConnection } from '../src/db/index.js';
 import { runImport } from '../src/commands/import.js';
 import { forkTrace } from '../src/services/fork-service.js';
-import { getTrace, createEval } from '../src/services/trace-service.js';
+import { getTrace, createEval, ingestTrace, listTraces } from '../src/services/trace-service.js';
 import { importClaudeTranscript } from '../src/services/importers/claude-transcript.js';
 
 let db: Database.Database;
@@ -826,6 +826,43 @@ describe('the stored prompt is what the person asked', () => {
     // and the OTLP mapper, and a turn that came BEFORE the prompt is not one.
     expect(trace.metadata.preamble_prompts).toEqual(['<command-name>/goal</command-name>\n<command-message>goal</command-message>']);
     expect(trace.metadata.follow_up_prompts).toBeUndefined();
+  });
+
+  it('says when the session was already captured live', () => {
+    // The identity check keys on session id AND source format AND source file,
+    // so it only recognizes a previous IMPORT. A live capture of the same
+    // session — the hook adapter, or the OTel receiver — carries no
+    // source_format and never matches, so importing the transcript of a session
+    // you also captured live silently doubles it: two traces, same agent, same
+    // session id, and every store-wide count includes both.
+    const sessionId = 'sess-live-and-file';
+    // Seed the store `runImport` will open, not the in-memory one above.
+    const store = ensureDatabase(resolve(dir, 'traces.db'));
+    ingestTrace(store, {
+      agent_name: 'claude-code', status: 'running', session_id: sessionId,
+      input: { prompt: 'fix the bug' },
+      metadata: { dialect: 'claude-code' },
+      steps: [{ step_number: 1, step_type: 'tool_call', name: 'Bash' }],
+    } as never);
+
+    const path = fixture([
+      { type: 'user', sessionId, message: { content: 'fix the bug' } },
+      { type: 'assistant', sessionId, message: { content: [{ type: 'text', text: 'done' }] } },
+    ]);
+    const errs: string[] = [];
+    const errSpy = vi.spyOn(console, 'error').mockImplementation((m?: unknown) => void errs.push(String(m ?? '')));
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      runImport(path, { dir });
+    } finally {
+      errSpy.mockRestore();
+      logSpy.mockRestore();
+    }
+    expect(errs.join('\n')).toMatch(/already captured live/);
+    expect(errs.join('\n')).toMatch(/2 traces for it/);
+    // Both are kept: the transcript and the live capture record different things.
+    expect(listTraces(store, {}).items.filter((t) => t.session_id === sessionId)).toHaveLength(2);
+    resetConnection();
   });
 
   it('skips the compaction summary and records that the session was continued', () => {
