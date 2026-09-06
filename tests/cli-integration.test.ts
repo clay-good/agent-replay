@@ -1489,6 +1489,17 @@ describe('CLI integration', () => {
     expect(diff.divergence_step).toBe(3);
     expect(diff.diffs.length).toBeGreaterThan(0);
 
+    // The decision commands are runnable too: a real id, and a step that exists.
+    const whyMatch = walk.stdout.replace(/\x1B\[[0-9;]*m/g, '').match(/agent-replay why (\S+) --step (\d+)/);
+    expect(whyMatch).toBeTruthy();
+    const [, whyId, whyStep] = whyMatch!;
+    const chain = JSON.parse(
+      execFileSync(process.execPath, [CLI, 'why', whyId, '--step', whyStep, '--json', '--dir', store], { encoding: 'utf8', stdio: 'pipe' }),
+    ) as { chain: unknown[] };
+    // More than one hop: the point of the command is the walk, and `--step 8`
+    // was a placeholder that happened to exist in the scenarios of the day.
+    expect(chain.chain.length).toBeGreaterThan(1);
+
     // ...and the gate line's own id makes a baseline the newer run fails.
     const exportId = walk.stdout.replace(/\x1B\[[0-9;]*m/g, '').match(/agent-replay export (\S+) --format golden/)![1];
     const golden = join(store, 'golden.json');

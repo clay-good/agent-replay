@@ -174,6 +174,23 @@ export async function runDemo(opts: DemoOptions = {}): Promise<void> {
   const older = pair[0]?.id.slice(0, 8);
   const newer = pair[1]?.id.slice(0, 8);
 
+  // A trace that HAS a decision, and its last step — the two values the
+  // `decisions` and `why` lines need to be runnable. `--step 8` was a
+  // placeholder that happens to exist in today's scenarios; the last step
+  // always does, and gives the deepest chain the trace can show.
+  const decisionTrace = db
+    .prepare(
+      `SELECT t.id AS id, MAX(s2.step_number) AS last_step
+         FROM agent_traces t
+         JOIN agent_trace_steps s ON s.trace_id = t.id AND s.step_type = 'decision'
+         JOIN agent_trace_steps s2 ON s2.trace_id = t.id
+        GROUP BY t.id
+        ORDER BY t.started_at DESC LIMIT 1`,
+    )
+    .get() as { id: string; last_step: number } | undefined;
+  const decisionId = decisionTrace?.id.slice(0, 8);
+  const decisionStep = decisionTrace?.last_step;
+
   console.log(separator());
   console.log('');
   console.log(colors.primary.bold('  Interactive Walkthrough'));
@@ -201,8 +218,12 @@ export async function runDemo(opts: DemoOptions = {}): Promise<void> {
   console.log('');
   console.log(chalk.white('  Understand why an agent acted (three of the six traces record decisions):'));
   console.log('');
-  console.log(`   ${chalk.cyanBright('11.')} ${chalk.white('agent-replay decisions <trace-id>')}    ${chalk.dim('— List decision points + rationale')}`);
-  console.log(`   ${chalk.cyanBright('12.')} ${chalk.white('agent-replay why <trace-id> --step 8')}  ${chalk.dim('— Walk the causal chain')}`);
+  console.log(
+    `   ${chalk.cyanBright('11.')} ${chalk.white(`agent-replay decisions ${decisionId ?? '<trace-id>'}`)}      ${chalk.dim('— List decision points + rationale')}`,
+  );
+  console.log(
+    `   ${chalk.cyanBright('12.')} ${chalk.white(`agent-replay why ${decisionId ?? '<trace-id>'} --step ${decisionStep ?? 8}`)}  ${chalk.dim('— Walk the causal chain')}`,
+  );
   console.log(`   ${chalk.cyanBright('13.')} ${chalk.white('agent-replay show <trace-id> --tree')}   ${chalk.dim('— Hierarchical step view')}`);
   console.log('');
   console.log(chalk.white('  Capture live and enforce guardrails (see the README for setup):'));
@@ -227,14 +248,6 @@ export async function runDemo(opts: DemoOptions = {}): Promise<void> {
     // first trace carrying a session id — a property every demo scenario has —
     // so which trace it named was decided by row order, and pointing at one
     // without a decision step answers "No decision steps recorded in ...".
-    const decisionTrace = db
-      .prepare(
-        `SELECT t.id FROM agent_traces t
-          JOIN agent_trace_steps s ON s.trace_id = t.id
-          WHERE s.step_type = 'decision'
-          ORDER BY t.started_at DESC LIMIT 1`,
-      )
-      .get() as { id: string } | undefined;
     const showcase = traces.find((t) => t.id === decisionTrace?.id) ?? traces[0];
     console.log(chalk.dim(`  Hint: try ${chalk.white(`agent-replay show ${showcase.id.slice(0, 8)}`)} — then ${chalk.white(`decisions ${showcase.id.slice(0, 8)}`)} to see why it chose what it did!`));
     console.log('');
