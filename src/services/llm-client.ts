@@ -198,16 +198,13 @@ function callProvider(
 }
 
 /**
- * Resolve the per-1M-token rate for a model.
+ * The published rate for a model, or `null` when this build does not know one.
  *
  * Real model ids are versioned variants of a base id (`gpt-5.4-nano-2025-12-01`,
  * `claude-haiku-4-5` without the date), so after an exact lookup we try a
- * family/prefix match. A genuinely unknown model falls back to the most
- * expensive known rate — never a rate of 0. A 0 would make `estimateCost`
- * report a misleading "$0.00" and, worse, silently defeat the `eval --max-cost`
- * budget cap (which gates on `estimate > cap`, and 0 never exceeds it).
+ * family/prefix match.
  */
-function resolveModelRate(model: string): { input: number; output: number } {
+function lookupModelRate(model: string): { input: number; output: number } | null {
   const exact = COST_TABLE[model];
   if (exact) return exact;
   // A family match may only borrow a rate when one id extends the other at a
@@ -220,6 +217,39 @@ function resolveModelRate(model: string): { input: number; output: number } {
   for (const [key, rate] of Object.entries(COST_TABLE)) {
     if (isVersionExtension(model, key) || isVersionExtension(key, model)) return rate;
   }
+  return null;
+}
+
+/**
+ * Whether this build knows a published rate for `model`.
+ *
+ * `COST_TABLE` holds the three DEFAULT models and nothing else, so anyone who
+ * runs `config set ai.model` with a larger model — an Opus, a Sonnet, a GPT-5,
+ * a Gemini Pro — is priced by the fallback below. Callers that show a cost, or
+ * decide something with one, are expected to say when that is what happened.
+ */
+export function modelRateIsKnown(model: string): boolean {
+  return lookupModelRate(model) != null;
+}
+
+/**
+ * Resolve the per-1M-token rate for a model, falling back for an unknown one to
+ * the most expensive rate in the table — never a rate of 0. A 0 would make
+ * `estimateCost` report a misleading "$0.00" and, worse, silently defeat the
+ * `eval --max-cost` budget cap (which gates on `estimate > cap`, and 0 never
+ * exceeds it).
+ *
+ * THE FALLBACK IS NOT AN UPPER BOUND ON REALITY, only on what is listed. This
+ * comment used to say "never cheaper than reality", which held when every
+ * plausible model was in the table and stopped holding once the table shrank to
+ * the three cheap defaults: an unlisted model priced above all of them — which
+ * is most of them — is estimated far too low, and `--max-cost` then clears a
+ * run that costs many times the cap. That is why `modelRateIsKnown` exists and
+ * why the pre-gate says so out loud rather than quietly guessing.
+ */
+function resolveModelRate(model: string): { input: number; output: number } {
+  const known = lookupModelRate(model);
+  if (known) return known;
   const rates = Object.values(COST_TABLE);
   return {
     input: Math.max(...rates.map((r) => r.input)),
@@ -234,8 +264,10 @@ function isVersionExtension(long: string, short: string): boolean {
 
 /**
  * Estimate the cost of a request given an approximate input token count.
- * An unknown model is priced conservatively (see resolveModelRate), so the
- * estimate errs high rather than reporting a false zero.
+ * An unknown model is priced at the highest rate this build KNOWS (see
+ * resolveModelRate) rather than at a false zero — which is a floor, not a
+ * ceiling. Ask `modelRateIsKnown` before presenting the number as the model's
+ * price or deciding a budget with it.
  */
 export function estimateCost(
   model: string,

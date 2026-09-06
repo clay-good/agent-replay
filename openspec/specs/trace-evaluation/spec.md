@@ -31,10 +31,17 @@ The system SHALL evaluate traces against user-supplied YAML/JSON rubric files (`
 
 The system SHALL provide AI presets (`ai-root-cause`, `ai-quality-review`, `ai-security-audit`, `ai-optimization`) using the configured provider's default cheap-tier model (currently `claude-haiku-4-5-20251001`, `gemini-2.5-flash-lite`, `gpt-5.4-nano` per provider), honoring a `--max-cost` budget in USD and failing gracefully when no key is configured.
 
+A cost figure priced WITHOUT a published rate for the model SHALL say so. The rate table covers the three default models; any other model — which is every larger one a user would configure — is priced at the highest rate the build knows, and since all three defaults are cheap-tier that is a FLOOR, not a ceiling. Presented unqualified it read as the model's price, and `--max-cost` cleared runs that cost many times the cap. The `--max-cost` pre-gate SHALL name the unpriced model and warn that the limit may not hold, and a stored AI eval SHALL record that its cost came from the fallback, so a figure can still be interpreted later. Neither SHALL appear for a model whose rate is known.
+
 #### Scenario: Cost budget exceeded
 
 - **WHEN** an AI eval would exceed the `--max-cost` budget
 - **THEN** the evaluation stops before the call and reports the budget constraint
+
+#### Scenario: A budget priced off a model with no published rate
+
+- **WHEN** `eval --ai --max-cost` runs with a configured model the rate table does not cover
+- **THEN** the estimate is shown with a warning naming the model, saying the real cost may be higher and the budget limit may not hold
 
 ### Requirement: Eval result persistence
 

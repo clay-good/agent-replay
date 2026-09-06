@@ -11,6 +11,7 @@ import {
   AI_PRESET_NAMES,
 } from '../services/eval-service.js';
 import { loadConfig, resolveProvider } from '../services/config-service.js';
+import { modelRateIsKnown } from '../services/llm-client.js';
 import { ensureDatabase } from '../db/index.js';
 import { evalTable } from '../ui/table.js';
 import { aiEvalPanel } from '../ui/boxen-panels.js';
@@ -259,6 +260,17 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
       );
       if (maxCost < Infinity) {
         console.log(chalk.dim(`  Budget limit: $${maxCost.toFixed(4)}`));
+      }
+      // The estimate above is only as good as the rate behind it, and this
+      // build knows a rate for three models. Anything else is priced at the
+      // highest rate in that table — a FLOOR, not a ceiling, since most larger
+      // models cost more than all three. Silently, the budget cap then cleared
+      // runs that cost many times it. Printed only for an unpriced model, so it
+      // stays a signal rather than a banner on every run.
+      if (!modelRateIsKnown(resolved.model)) {
+        console.log(chalk.yellow(
+          `  No published rate for ${resolved.model} is known, so this estimate uses the highest rate this build has. The real cost may be higher${maxCost < Infinity ? ', and the budget limit may not hold' : ''}.`,
+        ));
       }
       console.log('');
     }

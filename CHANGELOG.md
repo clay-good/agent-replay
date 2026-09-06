@@ -2372,6 +2372,17 @@ and one-way.
   read the identical attribute — so `stats` showed no cost and `list --sort cost`
   was inert for every span-captured trace. It also ignored a reported
   `total_tokens` when the input/output split was absent.
+- An AI cost estimate for a model with no published rate was presented as the
+  model's price. The rate table covers the three default models; anything else
+  — `config set ai.model claude-opus-5`, a Sonnet, a GPT-5, a Gemini Pro — is
+  priced at the highest rate in that table, and since all three defaults are
+  cheap-tier that is a FLOOR, not the ceiling the code claimed ("never cheaper
+  than reality", true only when the table was larger). The same run estimated
+  $0.0182 whether the model was Haiku or Opus, so `--max-cost` cleared runs
+  that cost many times the cap. The pre-gate now names the unpriced model and
+  says the limit may not hold, and a stored AI eval records
+  `cost_usd_rate_unknown` so the figure can be read later. Neither appears for
+  a model whose rate is known.
 - `diff --ai` printed `Better trace: neither` when it could not parse the
   model's reply — but `neither` is one of the three verdicts the model is
   offered ("the two runs are equivalent"), so a reply that gave no answer was

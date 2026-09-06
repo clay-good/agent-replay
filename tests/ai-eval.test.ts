@@ -5,7 +5,7 @@ import { ingestTrace, createEval, getTrace, attachDecision } from '../src/servic
 import { AI_PRESETS, AI_PRESET_NAMES, PRESETS, estimateAiEvalCost, extractJson, fenceTraceContent, runAiEval, runCustomRubric, runEval } from '../src/services/eval-service.js';
 import { summarizeTrace, summarizeDiffForLlm } from '../src/services/trace-summarizer.js';
 import { diffTraces } from '../src/services/diff-service.js';
-import { estimateCost, COST_TABLE, LlmError } from '../src/services/llm-client.js';
+import { estimateCost, COST_TABLE, LlmError, modelRateIsKnown } from '../src/services/llm-client.js';
 import { aiEvalPanel } from '../src/ui/boxen-panels.js';
 import type { IngestTraceInput } from '../src/models/types.js';
 
@@ -1193,6 +1193,51 @@ function llmTruncated(text: string): Response {
     json: async () => ({ content: [{ text }], usage: { input_tokens: 50, output_tokens: 20 }, stop_reason: 'max_tokens' }),
   } as unknown as Response;
 }
+
+describe('a cost priced off an unknown model says so', () => {
+  const opts = { provider: 'anthropic' as const, api_key: 'k', model: 'claude-haiku-4-5-20251001' };
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('knows a rate only for the models in the table', () => {
+    // The table holds the three DEFAULT models and nothing else, so anyone who
+    // runs `config set ai.model` with a larger one is priced by the fallback.
+    for (const known of Object.keys(COST_TABLE)) expect(modelRateIsKnown(known)).toBe(true);
+    // A version/date extension of a known id borrows its rate, as before.
+    expect(modelRateIsKnown('gpt-5.4-nano-2025-12-01')).toBe(true);
+    expect(modelRateIsKnown('claude-opus-5')).toBe(false);
+    expect(modelRateIsKnown('gemini-2.5-pro')).toBe(false);
+  });
+
+  it("prices an unknown model at the table's highest rate — a floor, not a ceiling", () => {
+    // Documenting the property the comment used to get wrong: the fallback is
+    // the most expensive rate KNOWN, and every rate known here is a small
+    // model's. It is not an upper bound on what an unlisted model really costs.
+    const rates = Object.values(COST_TABLE);
+    const maxIn = Math.max(...rates.map((r) => r.input));
+    const maxOut = Math.max(...rates.map((r) => r.output));
+    expect(estimateCost('claude-opus-5', 1_000_000, 1_000_000)).toBeCloseTo(maxIn + maxOut, 9);
+  });
+
+  it('marks a stored AI eval cost that was priced by the fallback', async () => {
+    const db = createTestDb();
+    const trace = ingestTrace(db, makeTrace());
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(llmText(JSON.stringify({
+      root_cause: 'wrong path', failing_step: 3, confidence: 0.9, severity: 'high',
+    }))));
+    const result = await runAiEval(db, trace.id, 'ai-root-cause', { ...opts, model: 'claude-opus-5' });
+    expect((result.details as Record<string, unknown>).cost_usd_rate_unknown).toBe(true);
+  });
+
+  it('leaves a priced model unmarked', async () => {
+    const db = createTestDb();
+    const trace = ingestTrace(db, makeTrace());
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(llmText(JSON.stringify({
+      root_cause: 'wrong path', failing_step: 3, confidence: 0.9, severity: 'high',
+    }))));
+    const result = await runAiEval(db, trace.id, 'ai-root-cause', opts);
+    expect((result.details as Record<string, unknown>).cost_usd_rate_unknown).toBeUndefined();
+  });
+});
 
 describe('an answer the model never finished is not reported as a verdict', () => {
   const opts = { provider: 'anthropic' as const, api_key: 'k', model: 'claude-haiku-4-5-20251001' };

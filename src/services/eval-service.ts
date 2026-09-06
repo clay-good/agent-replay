@@ -4,7 +4,7 @@ import type { EvalType } from '../models/enums.js';
 import { createEval, getTrace } from './trace-service.js';
 import { safeRegex, hasRenderableContent, truncate } from '../utils/json.js';
 import type { LlmClientOptions } from './llm-client.js';
-import { callLlm, estimateCost } from './llm-client.js';
+import { callLlm, estimateCost, modelRateIsKnown } from './llm-client.js';
 import { summarizeTrace } from './trace-summarizer.js';
 
 // ── Evaluator interfaces ──────────────────────────────────────────────────
@@ -981,6 +981,12 @@ export async function runAiEval(
   parsed.details.input_tokens = response.input_tokens;
   parsed.details.output_tokens = response.output_tokens;
   parsed.details.cost_usd = response.cost_estimate_usd;
+  // Whether that figure is the model's own rate or the fallback. This build
+  // knows a rate for three models, so a stored cost for anything else is a
+  // floor priced at the cheapest-of-the-large-models assumption — and a stored
+  // number nobody can qualify later is the kind this tool does not print.
+  // Recorded only when it is a guess, so an ordinary run's details are unchanged.
+  if (!modelRateIsKnown(response.model)) parsed.details.cost_usd_rate_unknown = true;
   parsed.details.latency_ms = response.latency_ms;
 
   return createEval(db, traceId, {
