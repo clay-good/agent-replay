@@ -31,6 +31,38 @@ export interface ApplyResult {
    * left `why` and `show --tree` disagreeing about the same trace.
    */
   warning?: string;
+  /**
+   * Something the caller should SAY, though nothing was repaired or dropped —
+   * so it must not be counted as a warning. Today: this stream opened a trace
+   * for a session the store already has one for.
+   */
+  note?: string;
+}
+
+/**
+ * Other root traces already recorded for this session, as a note.
+ *
+ * Bounded: the ids of the first few, because a session with many is a
+ * configuration mistake and a console line naming fifty ids helps nobody.
+ */
+function otherSessionTraces(db: Database.Database, sessionId: unknown, selfId: string): string | undefined {
+  // Typed `unknown`, and checked: this value came off an untrusted stream, and
+  // a producer that sends `session_id: {nested: 1}` is a case this file already
+  // stores defensively rather than crashing on. Handing that object to a bound
+  // parameter throws `RangeError: Too few parameter values were provided` —
+  // which would take down a capture over a NOTE, the least important thing here.
+  if (typeof sessionId !== 'string' || sessionId === '') return undefined;
+  const rows = db
+    .prepare(
+      `SELECT id FROM agent_traces
+        WHERE session_id = ? AND id != ? AND parent_trace_id IS NULL
+        ORDER BY started_at ASC LIMIT 4`,
+    )
+    .all(sessionId, selfId) as Array<{ id: string }>;
+  if (rows.length === 0) return undefined;
+  const ids = rows.slice(0, 3).map((r) => r.id).join(', ');
+  const more = rows.length > 3 ? ', …' : '';
+  return `session ${sessionId} already has a trace in this store (${ids}${more}); this stream opened another, and every store-wide count includes both.`;
 }
 
 /**
@@ -56,7 +88,18 @@ export function applyEvent(db: Database.Database, event: CaptureEvent): ApplyRes
         },
         { id: event.trace_id },
       );
-      return { traceId: trace.id };
+      // Say when this session is already in the store.
+      //
+      // Nothing correlates capture paths: the hook adapter finds its OWN open
+      // trace for a session, the OTel receiver merges only within its own source
+      // format, and this recorder opens a trace unconditionally. So a stream
+      // carrying the session id of a run captured another way — the hook on a
+      // live session, a previous `record` of the same session — adds a second
+      // trace with the same session id, and every store-wide count includes
+      // both. A note, not a warning: nothing was repaired or dropped, and the
+      // two captures may hold different things.
+      const note = otherSessionTraces(db, event.session_id, trace.id);
+      return { traceId: trace.id, ...(note ? { note } : {}) };
     }
 
     case 'step_start': {

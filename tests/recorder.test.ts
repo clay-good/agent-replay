@@ -1026,3 +1026,61 @@ describe('a trace written through the SDK re-ingests from its own export', () =>
     }
   });
 });
+
+describe('a stream that opens a session the store already has', () => {
+  // Nothing correlates capture paths: the hook adapter finds its OWN open trace
+  // for a session, the OTel receiver merges only within its own source format,
+  // and the recorder opens a trace unconditionally. So a stream carrying the
+  // session id of a run captured another way adds a second trace with the same
+  // session id, and every store-wide count includes both.
+  it('returns a note naming the trace already there', () => {
+    const first = ingestTrace(db, {
+      agent_name: 'claude-code', status: 'running', session_id: 'sess-dup',
+      input: { prompt: 'x' },
+      steps: [{ step_number: 1, step_type: 'tool_call', name: 'Bash' }],
+    } as never);
+
+    const result = applyEvent(db, {
+      v: 1, type: 'trace_start', trace_id: 'trc_streamdup01', agent_name: 'claude-code', session_id: 'sess-dup',
+    } as CaptureEvent);
+
+    expect(result.note).toContain('sess-dup');
+    expect(result.note).toContain(first.id);
+    // A note is not a warning: nothing was repaired or dropped, and the
+    // `record` summary's tally (and its "nothing was recorded" rule) key on
+    // warnings.
+    expect(result.warning).toBeUndefined();
+  });
+
+  it('says nothing for a session the store has never seen', () => {
+    const result = applyEvent(db, {
+      v: 1, type: 'trace_start', trace_id: 'trc_streamnew01', agent_name: 'a', session_id: 'sess-fresh',
+    } as CaptureEvent);
+    expect(result.note).toBeUndefined();
+  });
+
+  it('does not crash the capture when the producer sends a non-string session id', () => {
+    // The lookup binds this value, and a producer that sends
+    // `session_id: {nested: 1}` — a case this file already stores defensively —
+    // would otherwise throw `RangeError: Too few parameter values were
+    // provided` and take down the capture over a NOTE.
+    ingestTrace(db, {
+      agent_name: 'a', status: 'running', session_id: 'sess-x', input: { p: 1 },
+      steps: [{ step_number: 1, step_type: 'output', name: 'o' }],
+    } as never);
+    const ev = {
+      v: 1, type: 'trace_start', trace_id: 'trc_streambad01', agent_name: 'a', session_id: { nested: 1 },
+    } as unknown as CaptureEvent;
+    expect(() => applyEvent(db, ev)).not.toThrow();
+    expect(applyEvent(db, { ...ev, trace_id: 'trc_streambad02' } as CaptureEvent).note).toBeUndefined();
+  });
+
+  it('says nothing when the stream carries no session id at all', () => {
+    ingestTrace(db, {
+      agent_name: 'a', status: 'running', input: { prompt: 'x' },
+      steps: [{ step_number: 1, step_type: 'output', name: 'o' }],
+    } as never);
+    const result = applyEvent(db, { v: 1, type: 'trace_start', trace_id: 'trc_streamnos01', agent_name: 'a' } as CaptureEvent);
+    expect(result.note).toBeUndefined();
+  });
+});

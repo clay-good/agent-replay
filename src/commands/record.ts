@@ -133,7 +133,7 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
       event.tags = [...own, ...extraTags];
     }
     try {
-      const { traceId, warning: applyWarning } = applyEvent(db, event);
+      const { traceId, warning: applyWarning, note } = applyEvent(db, event);
       touched.add(traceId);
       if (event.type === 'trace_start') opened.add(traceId);
       applied++;
@@ -145,6 +145,10 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
         warnings++;
         console.error(chalk.yellow(`  ⚠ ${applyWarning}`));
       }
+      // A note is not a warning: nothing was repaired or dropped, so it must not
+      // enter the tally the summary reports (or the "nothing was recorded"
+      // rule, which keys on warnings).
+      if (note) console.error(chalk.dim(`  ${note}`));
       if (event.type === 'step' || event.type === 'step_start') totalSteps++;
     } catch (err) {
       warnings++;

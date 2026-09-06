@@ -228,6 +228,11 @@ agent-replay import <same-file> --replace    # re-import it (use this when the t
                                              # and refuses outright if forks derive from it)
 ```
 
+The same applies to a live capture that opens a session another already has:
+`record` says so when its stream's `session_id` is already in the store (the
+hook adapter, or a previous `record`), for the same reason — nothing correlates
+capture paths, so the store would simply hold two traces for one session.
+
 That identity is the session id, the format and the file — so it recognizes a
 previous **import**, and cannot recognize a **live** capture of the same session
 (the hook and the OTel receiver stamp no source format). Importing the

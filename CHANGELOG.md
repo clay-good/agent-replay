@@ -443,6 +443,14 @@ and one-way.
 
 ### Fixed
 
+- **`record` opened a second trace for a session already being captured, without
+  saying so.** The third of the same family: nothing correlates capture paths,
+  so a stream whose `trace_start` carries the session id of a hook-captured run
+  (or of a previous `record` of the same session) simply added another trace.
+  It now says which trace is already there. A note rather than a warning —
+  nothing was repaired or dropped, and the summary's tally, along with its
+  "nothing was recorded" rule, keys on warnings.
+
 - **A span-captured trace named no session, so the two OTLP signals of one
   session could not be correlated.** The span mapper read only
   `gen_ai.conversation.id`; the harnesses stamp `session.id`, the general OTel
