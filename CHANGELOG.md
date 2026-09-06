@@ -890,6 +890,20 @@ and one-way.
   the one headline command that had not adopted it. A literal `null` is
   untouched: it remains the documented no-op that keeps the original value.
 
+- **Capture reported success while splitting a session across two stores.** A
+  hook fires from wherever the agent is standing, and store resolution is
+  relative to the working directory — so `agent-replay hook` in a subdirectory
+  created a brand-new store under `src/deep/.agent-replay`, answered "prompt
+  recorded", and left half the session invisible to a `list` run from the
+  project root. `record`, `run`, `ingest`, `import` and `otel serve` all did the
+  same. None of them may refuse — losing a run is worse than recording it
+  somewhere unexpected — so each now says, once, that it is creating a store
+  while a project above already has one, and names both stores and both ways to
+  record into the right one. Capture stays exactly as harmless as before: `hook`
+  still writes nothing to stdout and still exits `0`. Silent once a local store
+  exists, since an ancestor store beside a local one is a deliberate nested
+  project rather than a mistake.
+
 - **"No trace store here" sent you to create a second one.** Standing in a
   subdirectory of your own project is the ordinary way to meet that refusal —
   store resolution is relative to the working directory, and a hook fires from

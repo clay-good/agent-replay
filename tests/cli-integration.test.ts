@@ -2636,3 +2636,51 @@ describe('gating a codex-exec capture', () => {
     }
   });
 });
+
+describe('capture from a subdirectory says where it recorded', () => {
+  // A hook fires from wherever the agent is standing. With no store in that
+  // directory it CREATES one and records — it may not refuse, since losing the
+  // event is worse — and it used to answer "prompt recorded" in silence, so the
+  // session was split across two stores and the half written in the
+  // subdirectory was invisible to a `list` run from the project root.
+  //
+  // Spawned directly rather than through `run()`: this needs a specific working
+  // directory and the stderr of a SUCCESSFUL exit, which the helper's
+  // execFileSync cannot give (it returns stdout alone on success).
+  it('warns, still exits 0, and still records', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'ar-split-cli-'));
+    try {
+      const deep = join(projectRoot, 'src', 'deep');
+      mkdirSync(deep, { recursive: true });
+      const init = spawnSync(process.execPath, [CLI, 'init'], { cwd: projectRoot, encoding: 'utf8' });
+      expect(init.status).toBe(0);
+
+      const hook = spawnSync(process.execPath, [CLI, 'hook'], {
+        cwd: deep,
+        encoding: 'utf8',
+        input: JSON.stringify({ session_id: 's1', hook_event_name: 'UserPromptSubmit', prompt: 'hello' }),
+      });
+
+      // Never affects the host agent, whatever it has to say.
+      expect(hook.status).toBe(0);
+      expect(hook.stdout).toBe('');
+      // It says the store it is creating AND the one the project already has.
+      expect(hook.stderr).toContain(join(deep, '.agent-replay', 'traces.db'));
+      expect(hook.stderr).toContain(join(projectRoot, '.agent-replay'));
+      // ...and the event is still recorded, which is the point of not refusing.
+      expect(hook.stderr).toMatch(/recorded/);
+      expect(existsSync(join(deep, '.agent-replay', 'traces.db'))).toBe(true);
+
+      // From the project root there is nothing to say.
+      const clean = spawnSync(process.execPath, [CLI, 'hook'], {
+        cwd: projectRoot,
+        encoding: 'utf8',
+        input: JSON.stringify({ session_id: 's2', hook_event_name: 'UserPromptSubmit', prompt: 'hi' }),
+      });
+      expect(clean.status).toBe(0);
+      expect(clean.stderr).not.toMatch(/Creating a new trace store/);
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  }, 30000);
+});

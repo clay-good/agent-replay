@@ -104,6 +104,29 @@ export function storeAboveNote(dir?: string, from: string = process.cwd()): stri
 }
 
 /**
+ * The line to print when a command is about to CREATE a store while a project
+ * ABOVE the working directory already has one.
+ *
+ * A capture command may not refuse — losing the event is worse than recording
+ * it somewhere unexpected — so it creates the store and records. What it must
+ * not do is report success and say nothing: `agent-replay hook` run from a
+ * subdirectory answered "prompt recorded" while writing a brand-new store into
+ * `src/deep/.agent-replay`, so the session was split across two stores and half
+ * of it was invisible to a `list` run from the project root. Same for `record`,
+ * `run`, `ingest`, `import` and `otel serve`.
+ *
+ * Returns null unless this is the moment of creation: an ancestor store that
+ * has been there all along, next to a local store that also exists, is a
+ * deliberate nested project — warning about it on every event would be noise.
+ */
+export function storeSplitNote(dir: string | undefined, dbPath: string): string | null {
+  if (existsSync(dbPath)) return null;
+  const above = storeAboveNote(dir);
+  if (!above) return null;
+  return `Creating a new trace store at ${dbPath}. ${above.replace(/^A store does exist at /, 'A project above already has one at ')}`;
+}
+
+/**
  * Whether a trace store already exists at `dir`.
  *
  * Enforcement must never CREATE one. `ensureDatabase` makes what it does not

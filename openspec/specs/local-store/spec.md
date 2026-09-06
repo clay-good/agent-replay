@@ -33,6 +33,8 @@ A destructive command SHALL gate on the same decision, not on the raw option: a 
 
 ### Requirement: Store confidentiality
 
+A command that CREATES a store implicitly (`record`, `run`, `ingest`, `import`, `otel serve`, and capture-mode `hook`) SHALL report that it is doing so when a project above the working directory already has one, naming both stores, because the alternative is a session silently split in two with the half written here invisible from the project root. It SHALL NOT refuse — losing a run is worse than recording it somewhere unexpected — and capture-mode `hook` SHALL remain side-effect-free (nothing on stdout, exit 0). The report belongs to the moment of creation only: an ancestor store beside a local store that already exists is a deliberate nested project.
+
 A refusal for a missing store SHALL name a store found in an ancestor of the working directory, when the caller named no directory, so that "run `init` here" cannot be followed into creating a second store for a project that already has one. Resolution SHALL NOT walk up — which store a command reads is decided by `--dir`, `AGENT_REPLAY_DIR`, or the working directory alone.
 
 The system SHALL create `traces.db` and `config.json` owner-only (`0600`), because a trace holds prompts, tool inputs and tool outputs, and the config holds API keys in plaintext. A directory the system creates for itself SHALL be `0700`.

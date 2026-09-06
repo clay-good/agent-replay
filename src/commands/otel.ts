@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import { ensureDatabase } from '../db/index.js';
 import { startOtelReceiver, type OtelStats } from '../services/otel/receiver.js';
 import { heading } from '../ui/theme.js';
-import { resolveDataDir } from '../utils/paths.js';
+import { resolveDataDir, storeSplitNote } from '../utils/paths.js';
 
 export interface OtelServeOptions {
   port?: string;
@@ -34,6 +34,12 @@ export async function runOtelServe(opts: OtelServeOptions = {}): Promise<void> {
     port = p;
   }
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
+  // Record, but say where: creating a store here while a project above has
+  // one splits the capture in two, and the half written here is invisible to a
+  // command run from the project root. Never a refusal — losing the run is
+  // worse than recording it somewhere unexpected.
+  const splitNote = storeSplitNote(opts.dir, dbPath);
+  if (splitNote) console.error(chalk.yellow(`  ⚠ ${splitNote}`));
   const db = ensureDatabase(dbPath);
 
   const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };

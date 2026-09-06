@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import chalk from 'chalk';
 import { ensureDatabase } from '../db/index.js';
 import { runWrapped } from '../services/harness-service.js';
-import { resolveDataDir } from '../utils/paths.js';
+import { resolveDataDir, storeSplitNote } from '../utils/paths.js';
 
 export interface RunOptions {
   agentName?: string;
@@ -33,6 +33,10 @@ export async function runRun(parts: string[] = [], opts: RunOptions = {}): Promi
 
   const [command, ...args] = parts;
   const dbDir = resolve(resolveDataDir(opts.dir));
+  // As `record`/`hook`: create and run, but say so, or the wrapper's trace
+  // lands in a store the project root cannot see.
+  const runSplitNote = storeSplitNote(opts.dir, resolve(dbDir, 'traces.db'));
+  if (runSplitNote) console.error(chalk.yellow(`  ⚠ ${runSplitNote}`));
   const db = ensureDatabase(resolve(dbDir, 'traces.db'));
   const tags = (opts.tags ?? '').split(',').map((s) => s.trim()).filter(Boolean);
 

@@ -7,7 +7,7 @@ import { importCodexRollout } from '../services/importers/codex-rollout.js';
 import { summaryPanel } from '../ui/boxen-panels.js';
 import { errorMessage } from '../utils/json.js';
 import { julianDayExpr } from '../utils/time.js';
-import { resolveDataDir } from '../utils/paths.js';
+import { resolveDataDir, storeSplitNote } from '../utils/paths.js';
 
 export interface ImportOptions {
   format?: string;
@@ -42,6 +42,12 @@ export function runImport(filePath: string, opts: ImportOptions = {}): void {
 
   const absPath = resolve(filePath);
   const dbPath = resolve(resolveDataDir(opts.dir), 'traces.db');
+  // Record, but say where: creating a store here while a project above has
+  // one splits the capture in two, and the half written here is invisible to a
+  // command run from the project root. Never a refusal — losing the run is
+  // worse than recording it somewhere unexpected.
+  const splitNote = storeSplitNote(opts.dir, dbPath);
+  if (splitNote) console.error(chalk.yellow(`  ⚠ ${splitNote}`));
   const db = ensureDatabase(dbPath);
 
   const tags = (opts.tags ?? '').split(',').map((s) => s.trim()).filter(Boolean);

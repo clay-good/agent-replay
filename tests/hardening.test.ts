@@ -16,7 +16,7 @@ import {
   ingestTrace,
 } from '../src/services/trace-service.js';
 import { validateEvent } from '../src/services/event-protocol.js';
-import { storeAboveNote } from '../src/utils/paths.js';
+import { storeAboveNote, storeSplitNote } from '../src/utils/paths.js';
 import { applyEvent } from '../src/services/recorder.js';
 import { mapOtlpTraces } from '../src/services/otel/semconv.js';
 import { applyHookPayload } from '../src/services/hook-adapter.js';
@@ -735,5 +735,62 @@ describe('a refusal that names the store the caller actually meant', () => {
     // That one has just been established to have no store; echoing it back
     // would be nonsense.
     expect(storeAboveNote(undefined, root)).toBeNull();
+  });
+});
+
+describe('creating a store below a project that already has one', () => {
+  // A capture command may not refuse — losing the event is worse than recording
+  // it somewhere unexpected — so it creates the store and records. What it must
+  // not do is report success in silence: `agent-replay hook` from a
+  // subdirectory answered "prompt recorded" while writing a brand-new store
+  // into `src/deep/.agent-replay`, splitting the session across two stores with
+  // the half written there invisible to a `list` run from the project root.
+  let root: string;
+  let deep: string;
+  let cwd: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'ar-split-'));
+    mkdirSync(join(root, '.agent-replay'), { recursive: true });
+    writeFileSync(join(root, '.agent-replay', 'traces.db'), '');
+    deep = join(root, 'src', 'deep');
+    mkdirSync(deep, { recursive: true });
+    cwd = process.cwd();
+    process.chdir(deep);
+  });
+  afterEach(() => {
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('names both stores and both ways to record into the right one', () => {
+    const note = storeSplitNote(undefined, join(deep, '.agent-replay', 'traces.db'));
+    expect(note).toContain(join(deep, '.agent-replay', 'traces.db'));
+    expect(note).toContain(join(root, '.agent-replay'));
+    expect(note).toMatch(/--dir/);
+  });
+
+  it('is silent once the local store exists — a nested project is deliberate', () => {
+    // The note belongs to the MOMENT of creation. An ancestor store that has
+    // been there all along, beside a local store that also exists, is someone's
+    // deliberate layout, and warning on every event would be noise.
+    const local = join(deep, '.agent-replay');
+    mkdirSync(local, { recursive: true });
+    writeFileSync(join(local, 'traces.db'), '');
+    expect(storeSplitNote(undefined, join(local, 'traces.db'))).toBeNull();
+  });
+
+  it('is silent when the caller named a directory', () => {
+    expect(storeSplitNote(join(root, 'chosen'), join(deep, '.agent-replay', 'traces.db'))).toBeNull();
+  });
+
+  it('is silent when no project above has a store', () => {
+    const lonely = mkdtempSync(join(tmpdir(), 'ar-lonely2-'));
+    try {
+      process.chdir(lonely);
+      expect(storeSplitNote(undefined, join(lonely, '.agent-replay', 'traces.db'))).toBeNull();
+    } finally {
+      rmSync(lonely, { recursive: true, force: true });
+    }
   });
 });

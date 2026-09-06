@@ -146,7 +146,7 @@ Both CLIs redact prompt/response content unless you opt in on their side (Gemini
 
 #### Hook capture
 
-`agent-replay hook` plugs into the stdin-JSON hook convention shared by Claude Code, OpenAI Codex CLI, and Gemini CLI. It's stateless — each invocation correlates to a trace by the payload's `session_id` — and auto-detects the dialect, so no flag is needed. Capture is side-effect-only: it always exits 0 and writes nothing to stdout (in these harnesses exit 2 blocks the agent and stdout is read as a hook decision), so it can never interfere with a run. Add `--no-input` to drop prompt text and tool inputs on shared machines.
+`agent-replay hook` plugs into the stdin-JSON hook convention shared by Claude Code, OpenAI Codex CLI, and Gemini CLI. It's stateless — each invocation correlates to a trace by the payload's `session_id` — and auto-detects the dialect, so no flag is needed. The store is resolved from the working directory, which for a hook is wherever the agent is standing: if that directory has no store and a project above it does, the hook records where it can and says so on stderr, naming both — it never refuses, since losing the event would be worse. Capture is side-effect-only: it always exits 0 and writes nothing to stdout (in these harnesses exit 2 blocks the agent and stdout is read as a hook decision), so it can never interfere with a run. Add `--no-input` to drop prompt text and tool inputs on shared machines.
 
 **Claude Code** — `~/.claude/settings.json`:
 

@@ -5,7 +5,7 @@ import { applyHookPayload, formatEnforcementResponse, resolveHookRouting, enforc
 import type { HookDialect } from '../services/hook-adapter.js';
 import { listPolicies, noEnabledPolicyReason } from '../services/guard-service.js';
 import { errorMessage } from '../utils/json.js';
-import { resolveDataDir, storeExists, storeAboveNote } from '../utils/paths.js';
+import { resolveDataDir, storeExists, storeAboveNote, storeSplitNote } from '../utils/paths.js';
 
 export interface HookOptions {
   noInput?: boolean;
@@ -174,6 +174,14 @@ export async function runHook(eventArg: string | undefined, opts: HookOptions = 
       );
       return;
     }
+    // Capture must never refuse — losing the event is worse than recording it
+    // somewhere unexpected — but it must not report success in silence either.
+    // A hook fires from wherever the agent is, so this wrote a brand-new store
+    // into a subdirectory and answered "prompt recorded" while the session was
+    // split in two, the half written here invisible to a `list` run from the
+    // project root.
+    const splitNote = storeSplitNote(opts.dir, dbPath);
+    if (splitNote) console.error(`agent-replay hook: ${splitNote}`);
     const db = ensureDatabase(dbPath);
 
     // A store that EXISTS but holds no enabled policy is the same failure with
