@@ -70,10 +70,17 @@ The config's `database` field SHALL be reported as the store the data directory 
 
 `config set` SHALL refuse an empty value. A blank stored value looks set — a blank API key renders as `***` — while every check downstream treats it as absent.
 
+`init --force` rewrites `config.json` from the defaults, so it SHALL name what that discards — the providers whose API keys are stored, and any `ai.*` setting that is not a default — before writing. The key VALUES SHALL NOT be printed. Several diagnostics send the user to `init --force` to repair a config, so the routine repair is the case that loses the keys; guidance that recommends it SHALL say that it rewrites the whole file. Settings SHALL be named rather than carried across: `--force` means reinitialize.
+
 #### Scenario: Damaged config file
 
 - **WHEN** `config.json` contains a trailing comma and a user runs `agent-replay config list`
 - **THEN** the command reports that the file is not valid JSON, names it, and exits 2
+
+#### Scenario: Reinitializing over a configured store
+
+- **WHEN** `init --force` is run where `config.json` holds an API key and a chosen `ai.model`
+- **THEN** the provider and the setting names are reported as lost before the file is rewritten, the key value is not shown, and the file is still rewritten
 
 #### Scenario: A config file copied from another project
 

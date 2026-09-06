@@ -737,7 +737,9 @@ You can also set API keys via environment variables: `ANTHROPIC_API_KEY`, `GOOGL
 `config set` refuses an **empty** value (exit `2`): a blank key was stored, then
 displayed as `***` by `config get` — looking set — while every check downstream
 treated it as unset, so `test-ai` told you to set the key you had just set. To
-clear a value, re-run `agent-replay init --force`.
+clear a value, re-run `agent-replay init --force` — which rewrites the whole
+config file, so it clears any stored API keys too, and says which ones before it
+does.
 
 A config file that exists but **cannot be parsed** is reported as its own error,
 naming the file and the parse position, rather than as "no configuration found"

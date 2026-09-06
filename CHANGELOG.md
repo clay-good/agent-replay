@@ -393,6 +393,17 @@ and one-way.
 
 ### Fixed
 
+- **`init --force` threw away your API keys without saying so.** `--force`
+  rewrites `config.json` from the defaults, and that file is where the keys
+  live — so a stored Anthropic key and a chosen `ai.model` went silently, under
+  the same "agent-replay initialized!" panel a first run prints. Five places in
+  the tool send you here ("Fix the file, or start over with: `agent-replay init
+  --force`"; "To restore defaults, re-run: ..."), so the routine repair was the
+  case that lost them. It now names what the rewrite discards first —
+  `1 stored API key (anthropic), ai.model will be lost` — by provider and
+  setting name, never printing a key value, and `config set`'s own advice to
+  reach for `--force` now says it rewrites the whole file.
+
 - **`demo --reset` deleted a real store under one line reading "Cleared
   existing data."** Every guard on `--reset` is about WHERE it deletes — a
   store named only by `AGENT_REPLAY_DIR`, a directory whose name is not one of

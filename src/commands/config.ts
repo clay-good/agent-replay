@@ -190,7 +190,10 @@ export function runConfigSet(key: string, value: string, opts: ConfigOptions = {
   // empty narrowing flag — a value that quietly means its opposite is refused.
   if (value.trim() === '') {
     console.error(chalk.red(`  ${key} was given an empty value.`));
+    // Say what that costs: `--force` rewrites the whole file, so the advice
+    // for clearing ONE value also clears every stored API key.
     console.error(chalk.dim('  Pass a value. To restore defaults, re-run: agent-replay init --force'));
+    console.error(chalk.dim('  (that rewrites the whole config, including any stored API keys)'));
     process.exitCode = 2;
     return;
   }

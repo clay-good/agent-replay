@@ -1,4 +1,4 @@
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { VERSION } from '../utils/version.js';
 import { join, resolve } from 'node:path';
 import chalk from 'chalk';
@@ -12,6 +12,45 @@ export interface InitOptions {
 }
 
 
+
+/**
+ * What an existing config.json holds that a `--force` rewrite discards, as
+ * phrases for the warning line.
+ *
+ * Best-effort and value-free: a config that cannot be read or parsed has
+ * nothing to report (and is the very case `--force` exists to repair), and an
+ * API key is reported by PROVIDER only — the point is to tell the user what
+ * they must set again, never to print a secret.
+ */
+function discardedSettings(configPath: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(configPath, 'utf8'));
+  } catch {
+    return [];
+  }
+  if (parsed === null || typeof parsed !== 'object') return [];
+  const ai = (parsed as { ai?: unknown }).ai;
+  if (ai === null || typeof ai !== 'object') return [];
+  const out: string[] = [];
+  const keys = (ai as { api_keys?: unknown }).api_keys;
+  if (keys !== null && typeof keys === 'object') {
+    const providers = Object.entries(keys as Record<string, unknown>)
+      .filter(([, v]) => typeof v === 'string' && v.trim() !== '')
+      .map(([k]) => k);
+    if (providers.length > 0) {
+      out.push(`${providers.length} stored API ${providers.length === 1 ? 'key' : 'keys'} (${providers.join(', ')})`);
+    }
+  }
+  const settings = (['provider', 'model', 'max_tokens'] as const).filter((k) => {
+    const v = (ai as Record<string, unknown>)[k];
+    // `provider: auto` is the default this rewrite would restore anyway.
+    if (k === 'provider' && v === 'auto') return false;
+    return v !== undefined && v !== null && v !== '';
+  });
+  for (const k of settings) out.push(`ai.${k}`);
+  return out;
+}
 
 /**
  * `agent-replay init` — create project directory, initialize SQLite database,
@@ -28,6 +67,28 @@ export function runInit(opts: InitOptions = {}): void {
       chalk.yellow(`Already initialized at ${baseDir}. Use --force to reinitialize.`),
     );
     return;
+  }
+
+  // Say what --force is about to overwrite, before overwriting it.
+  //
+  // `--force` rewrites config.json from the defaults, and that file is where
+  // the API keys live: a stored Anthropic key and a chosen `ai.model` went
+  // silently, under the same "agent-replay initialized!" panel a first run
+  // prints. That is not an exotic path — five places in the tool send a user
+  // here ("Fix the file, or start over with: agent-replay init --force",
+  // "To restore defaults, re-run: ..."), so the routine repair is what loses
+  // the keys.
+  //
+  // Named rather than kept: `--force` means reinitialize, and quietly carrying
+  // settings across would make it something else. The providers are named
+  // because that is what the user has to type back; the key VALUES are never
+  // printed.
+  if (opts.force && existsSync(configPath)) {
+    const lost = discardedSettings(configPath);
+    if (lost.length > 0) {
+      console.log(chalk.yellow(`  Overwriting ${configPath} — ${lost.join(', ')} will be lost.`));
+      console.log(chalk.dim('  Re-run "agent-replay config set <key> <value>" to restore them.'));
+    }
   }
 
   // Initialize database (creates the directory AND file, then runs migrations).

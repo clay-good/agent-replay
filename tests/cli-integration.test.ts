@@ -1414,6 +1414,38 @@ describe('CLI integration', () => {
     rmSync(parent, { recursive: true, force: true });
   });
 
+  it('init --force names the API keys it is about to overwrite', () => {
+    // config.json is where the API keys live, and `--force` rewrites it from
+    // the defaults. Five places in the tool send a user here ("Fix the file, or
+    // start over with: agent-replay init --force"), so the routine repair was
+    // what silently threw the keys away, under the same "initialized!" panel a
+    // first run prints.
+    const store = mkdtempSync(join(tmpdir(), 'ar-initforce-')) + '/.agent-replay';
+    const run = (...args: string[]): string =>
+      execFileSync(process.execPath, [CLI, ...args, '--dir', store], { encoding: 'utf8', stdio: 'pipe' });
+    run('init');
+    run('config', 'set', 'ai.api_keys.anthropic', 'sk-ant-secret');
+    run('config', 'set', 'ai.model', 'claude-x');
+
+    const out = run('init', '--force');
+
+    expect(out).toMatch(/1 stored API key \(anthropic\)/);
+    expect(out).toContain('ai.model');
+    // The secret itself is never printed back.
+    expect(out).not.toContain('sk-ant-secret');
+    // Still a rewrite, not a refusal.
+    expect(JSON.parse(readFileSync(join(store, 'config.json'), 'utf8')).ai).toEqual({ provider: 'auto' });
+
+    // A config holding nothing but the defaults has nothing to warn about.
+    const fresh = mkdtempSync(join(tmpdir(), 'ar-initforce-fresh-')) + '/.agent-replay';
+    execFileSync(process.execPath, [CLI, 'init', '--dir', fresh], { encoding: 'utf8', stdio: 'pipe' });
+    const freshOut = execFileSync(process.execPath, [CLI, 'init', '--force', '--dir', fresh], {
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+    expect(freshOut).not.toContain('will be lost');
+  });
+
   it('demo --reset names what it is about to destroy', () => {
     // Every other --reset guard is about WHERE it deletes; none of them opens
     // the store, so a real captured run, its evaluations and a hand-written
