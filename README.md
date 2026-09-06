@@ -289,10 +289,11 @@ review into a block.
 # reports the full count, and --limit raises the page size)
 agent-replay list
 
-# Filter by status, agent, tag, or time
+# Filter by status, agent, tag, time, or capture path
 agent-replay list --status failed
 agent-replay list --agent travel-bot --since 7d
 agent-replay list --tag production --sort -tokens --limit 10
+agent-replay list --source hook          # only what the hook captured
 
 # JSON output for piping
 agent-replay list --json
