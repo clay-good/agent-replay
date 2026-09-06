@@ -2372,6 +2372,15 @@ and one-way.
   read the identical attribute — so `stats` showed no cost and `list --sort cost`
   was inert for every span-captured trace. It also ignored a reported
   `total_tokens` when the input/output split was absent.
+- `eval`'s live progress line reported `✔ 100%` for an evaluation that measured
+  nothing. Both shapes that reach that state score 1.0 and pass so they cannot
+  fail a gate on a trace they do not apply to — an AI preset its `applicable`
+  predicate skipped, and a deterministic preset every one of whose criteria was
+  n/a (a trace with no retrieval steps against `hallucination-check`) — and both
+  printed with the same badge and percentage as a real verdict. The results
+  table and the run summary already distinguished them; the line the user
+  actually watches disagreed with both. All four call sites now render through
+  one helper, so a preset that checked anything at all still shows its score.
 - An AI cost estimate for a model with no published rate was presented as the
   model's price. The rate table covers the three default models; anything else
   — `config set ai.model claude-opus-5`, a Sonnet, a GPT-5, a Gemini Pro — is

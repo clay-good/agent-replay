@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { traceTable, evalTable, policyTable } from '../src/ui/table.js';
 import { traceHeaderPanel, summaryPanel, aiEvalPanel, aiDiffPanel } from '../src/ui/boxen-panels.js';
-import { formatScorePct, formatCostUsd, safeText, safeLine } from '../src/ui/theme.js';
+import { formatScorePct, formatCostUsd, safeText, safeLine, evalProgressLine } from '../src/ui/theme.js';
 import { formatDuration } from '../src/utils/time.js';
 import { renderTimeline, renderTree } from '../src/ui/timeline.js';
 import stringWidth from 'string-width';
@@ -1149,5 +1149,41 @@ describe('aiDiffPanel discloses a partial analysis', () => {
       cost: { tokens_used: 10, cost_usd: 0.001 },
     }));
     expect(out).not.toMatch(/Analyzed/);
+  });
+});
+
+
+describe('an evaluation that measured nothing does not report full marks', () => {
+  // Both shapes score 1.0 and pass so they cannot fail a gate on a trace they
+  // do not apply to — and the progress line printed "✔ 100%" for both, which
+  // reads as a judge that looked at the run and gave it top marks. The results
+  // table and the run summary already say otherwise; this line disagreed.
+  it('says so for an AI preset its applicability predicate skipped', () => {
+    const line = evalProgressLine('ai-root-cause', {
+      score: 1, passed: true, details: { skipped: true, reason: 'Not applicable to this trace' },
+    });
+    expect(line).toContain('nothing to check');
+    expect(line).not.toContain('100%');
+  });
+
+  it('says so when every criterion of a deterministic preset was n/a', () => {
+    const line = evalProgressLine('hallucination-check', {
+      score: 1, passed: true,
+      details: { criteria: [{ name: 'a', score: 1, not_applicable: true }, { name: 'b', score: 1, not_applicable: true }] },
+    });
+    expect(line).toContain('nothing to check');
+    expect(line).not.toContain('100%');
+  });
+
+  it('still reports a real verdict, including one where only SOME criteria were n/a', () => {
+    // The disclosure must not swallow a measured result: a preset that checked
+    // anything at all has a score worth printing.
+    const measured = evalProgressLine('completeness-check', {
+      score: 1, passed: true,
+      details: { criteria: [{ name: 'a', score: 1 }, { name: 'b', score: 1, not_applicable: true }] },
+    });
+    expect(measured).toContain('100%');
+    const failing = evalProgressLine('safety-check', { score: 0.4, passed: false, details: {} });
+    expect(failing).toContain('40%');
   });
 });

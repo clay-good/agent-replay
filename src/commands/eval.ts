@@ -15,7 +15,7 @@ import { modelRateIsKnown } from '../services/llm-client.js';
 import { ensureDatabase } from '../db/index.js';
 import { evalTable } from '../ui/table.js';
 import { aiEvalPanel } from '../ui/boxen-panels.js';
-import { heading, formatScorePct, safeText } from '../ui/theme.js';
+import { heading, safeText, evalProgressLine } from '../ui/theme.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage, safeRegex } from '../utils/json.js';
 import type { EvalResult } from '../models/types.js';
@@ -172,8 +172,7 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
       try {
         const result = runEval(db, trace.id, preset);
         results.push(result);
-        const icon = result.passed ? chalk.greenBright('\u2714') : chalk.redBright('\u2718');
-        successSpinner(spinner, `${preset}: ${icon} ${formatScorePct(result.score)}`);
+        successSpinner(spinner, evalProgressLine(preset, result));
       } catch (err) {
         failSpinner(spinner, `${preset}: ${errorMessage(err)}`);
         failures.push(`${preset}: ${errorMessage(err)}`);
@@ -196,8 +195,7 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
     try {
       const result = runEval(db, trace.id, opts.preset);
       results.push(result);
-      const icon = result.passed ? chalk.greenBright('\u2714') : chalk.redBright('\u2718');
-      successSpinner(spinner, `${opts.preset}: ${icon} ${formatScorePct(result.score)}`);
+      successSpinner(spinner, evalProgressLine(opts.preset, result));
     } catch (err) {
       const msg = `${opts.preset}: ${errorMessage(err)}`;
       if (opts.json) {
@@ -310,8 +308,7 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
       try {
         const result = await runAiEval(db, trace.id, presetName, llmOpts);
         results.push(result);
-        const icon = result.passed ? chalk.greenBright('\u2714') : chalk.redBright('\u2718');
-        successSpinner(spinner, `${presetName}: ${icon} ${formatScorePct(result.score)}`);
+        successSpinner(spinner, evalProgressLine(presetName, result));
 
         cumulativeCost += Number(result.details?.cost_usd ?? 0);
 
@@ -345,8 +342,7 @@ export async function runEvalCommand(traceId: string, opts: EvalOptions = {}): P
       try {
         const result = runEval(db, trace.id, preset);
         results.push(result);
-        const icon = result.passed ? chalk.greenBright('\u2714') : chalk.redBright('\u2718');
-        successSpinner(spinner, `${preset}: ${icon} ${formatScorePct(result.score)}`);
+        successSpinner(spinner, evalProgressLine(preset, result));
       } catch (err) {
         failSpinner(spinner, `${preset}: ${errorMessage(err)}`);
         failures.push(`${preset}: ${errorMessage(err)}`);

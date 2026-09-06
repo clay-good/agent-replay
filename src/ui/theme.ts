@@ -131,6 +131,35 @@ export function safeLine(text: string): string {
   return escapeForMessage(text);
 }
 
+/**
+ * The one-line result an evaluator reports as it finishes.
+ *
+ * An evaluation that measured NOTHING still scores 1.0 and passes, so that it
+ * cannot fail a gate on a trace it does not apply to — and printed with the
+ * same badge and percentage as a real verdict, it read as a run that earned
+ * full marks. Two shapes reach that state, and both used to render "✔ 100%":
+ * an AI preset whose `applicable` predicate said no (stored `skipped`), and a
+ * deterministic preset every one of whose criteria was `not_applicable` — a
+ * trace with no retrieval steps against `hallucination-check`, say. The results
+ * table and the run summary already distinguish both ("Not applicable",
+ * "Nothing to check on this trace"); this is the line the user actually
+ * watches, and it disagreed with them.
+ */
+export function evalProgressLine(
+  name: string,
+  result: { score: number; passed: boolean; details?: Record<string, unknown> | null },
+): string {
+  const criteria = result.details?.criteria;
+  const nothingMeasured =
+    result.details?.skipped === true ||
+    (Array.isArray(criteria) &&
+      criteria.length > 0 &&
+      criteria.every((c) => (c as { not_applicable?: boolean }).not_applicable === true));
+  if (nothingMeasured) return `${name}: ${chalk.dim('nothing to check on this trace')}`;
+  const icon = result.passed ? chalk.greenBright('\u2714') : chalk.redBright('\u2718');
+  return `${name}: ${icon} ${formatScorePct(result.score)}`;
+}
+
 export function scoreBadge(score: number): string {
   const display = formatScorePct(score);
   if (score >= 0.8) return chalk.greenBright.bold(display);
