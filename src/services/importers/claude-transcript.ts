@@ -189,6 +189,18 @@ export function importClaudeTranscript(
   }
 
   let sessionId: string | undefined;
+
+  // In order, deduped: a session usually reports one branch, and 19 of 600
+
+  // real sessions reported more than one (a detached HEAD that later resolved,
+
+  // or a genuine switch). Storing a single branch for those would state
+
+  // something the transcript does not.
+
+  const gitBranches: string[] = [];
+
+  let cwd: string | undefined;
   let input: Record<string, unknown> | undefined;
   /** Every user turn, in order; split into prompt + follow-ups after the loop. */
   const userTurns: UserTurn[] = [];
@@ -231,6 +243,15 @@ export function importClaudeTranscript(
   for (const rec of records) {
     const type = rec.type as string | undefined;
     if (typeof rec.sessionId === 'string' && !sessionId) sessionId = rec.sessionId;
+    // The run's git context, which the codex-rollout importer already records
+    // from its `session_meta` (`metadata.git`) and this one dropped — though
+    // EVERY Claude record carries it. Which branch a run came from is how a
+    // reader tells two runs of one agent apart, and `check --golden` compares
+    // runs across branches by design.
+    if (typeof rec.gitBranch === 'string' && rec.gitBranch && !gitBranches.includes(rec.gitBranch)) {
+      gitBranches.push(rec.gitBranch);
+    }
+    if (typeof rec.cwd === 'string' && rec.cwd && !cwd) cwd = rec.cwd;
     if (rec.isCompactSummary === true || (type === 'system' && rec.subtype === 'compact_boundary')) {
       compacted = true;
     }
@@ -523,6 +544,15 @@ export function importClaudeTranscript(
       // a Claude Code subagent sidecar carries the SAME sessionId as its parent
       // transcript, so session id alone made the two collide.
       source_file: basename(filePath),
+      // Same key the codex-rollout importer writes, so one question ("what
+      // branch was this run on?") has one answer whichever importer produced
+      // the trace. Only what the records state: no commit hash is invented,
+      // and a session that reported several branches lists them rather than
+      // being reduced to its first.
+      ...(gitBranches.length > 0
+        ? { git: { branch: gitBranches[0], ...(gitBranches.length > 1 ? { branches: gitBranches } : {}) } }
+        : {}),
+      ...(cwd ? { cwd } : {}),
       ...(compacted ? { compacted: true } : {}),
       ...(selected.followUps.length > 0 ? { follow_up_prompts: selected.followUps } : {}),
       ...(selected.preamble.length > 0 ? { preamble_prompts: selected.preamble } : {}),

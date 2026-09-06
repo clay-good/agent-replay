@@ -860,6 +860,46 @@ describe('the stored prompt is what the person asked', () => {
     expect(trace.input).toEqual({ prompt: 'Continue from where you left off.' });
   });
 
+  it('records the git branch and cwd, as the codex importer already does', () => {
+    // The codex-rollout importer stores `metadata.git` from its `session_meta`,
+    // and this one dropped the equivalent — though EVERY Claude record carries
+    // `gitBranch` and `cwd`. Which branch a run came from is how a reader tells
+    // two runs of one agent apart, and `check --golden` compares runs across
+    // branches by design. Same key, so one question has one answer whichever
+    // importer produced the trace.
+    const path = fixture([
+      { type: 'user', sessionId: 'g', gitBranch: 'feature/x', cwd: '/repo/wt', message: { content: 'go' } },
+      { type: 'assistant', sessionId: 'g', gitBranch: 'feature/x', cwd: '/repo/wt', message: { content: [{ type: 'text', text: 'ok' }] } },
+    ]);
+    const trace = getTrace(db, importClaudeTranscript(db, path).trace!.id)!;
+    expect(trace.metadata.git).toEqual({ branch: 'feature/x' });
+    expect(trace.metadata.cwd).toBe('/repo/wt');
+  });
+
+  it('lists every branch a session reported, rather than claiming the first', () => {
+    // Measured on 600 real sessions: 19 report more than one branch (a detached
+    // HEAD that later resolved, or a genuine switch). Reducing those to a single
+    // branch would state something the transcript does not.
+    const path = fixture([
+      { type: 'user', sessionId: 'g2', gitBranch: 'HEAD', message: { content: 'go' } },
+      { type: 'assistant', sessionId: 'g2', gitBranch: 'feature/y', message: { content: [{ type: 'text', text: 'ok' }] } },
+    ]);
+    const trace = getTrace(db, importClaudeTranscript(db, path).trace!.id)!;
+    expect(trace.metadata.git).toEqual({ branch: 'HEAD', branches: ['HEAD', 'feature/y'] });
+  });
+
+  it('records no git key when the transcript states none', () => {
+    // No commit hash is invented and no branch is guessed: a transcript without
+    // the field gets no `git` metadata at all.
+    const path = fixture([
+      { type: 'user', sessionId: 'g3', message: { content: 'go' } },
+      { type: 'assistant', sessionId: 'g3', message: { content: [{ type: 'text', text: 'ok' }] } },
+    ]);
+    const trace = getTrace(db, importClaudeTranscript(db, path).trace!.id)!;
+    expect(trace.metadata.git).toBeUndefined();
+    expect(trace.metadata.cwd).toBeUndefined();
+  });
+
   it('closes what the transcript proves finished, and only that', () => {
     // A hook-captured session closes its tool_call on PostToolUse; an imported
     // one left every step open, so the SAME session captured the two ways

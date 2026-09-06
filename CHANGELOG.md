@@ -2372,6 +2372,15 @@ and one-way.
   read the identical attribute — so `stats` showed no cost and `list --sort cost`
   was inert for every span-captured trace. It also ignored a reported
   `total_tokens` when the input/output split was absent.
+- `import --format claude-transcript` dropped the run's git context, which every
+  Claude record carries (`gitBranch`, `cwd`) and which the codex-rollout
+  importer already stores as `metadata.git`. Which branch a run came from is how
+  a reader tells two runs of one agent apart, and `check --golden` compares runs
+  across branches by design. Now recorded under the same key, so the question
+  has one answer whichever importer produced the trace — with only what the
+  records state: no commit hash is inferred, and a session that reported several
+  branches lists them instead of being reduced to its first (19 of 600 real
+  sessions do, usually a detached `HEAD` that later resolved).
 - `import --format claude-transcript` stored harness machinery as the question a
   session was asked. The prompt is chosen by SHAPE — a turn starting with `<`,
   plus a few known notices — which was measured over the whole corpus and is
