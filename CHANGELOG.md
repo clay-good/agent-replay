@@ -443,6 +443,17 @@ and one-way.
 
 ### Fixed
 
+- **Every step of an OpenTelemetry LOG capture stayed open forever.** A log
+  record reports something that already happened — `tool_result`,
+  `api_request`, `tool_decision` — and no second record will ever arrive to
+  close the step it produced, but the mapper set only `started_at`. So `show`
+  drew a finished `completed` session as though its tools were still running,
+  and a `tool_result` carried a measured `duration_ms: 40` beside a null
+  `ended_at`: a step with a duration and no end. Steps are now closed at
+  `started_at + duration_ms`, or at the record's own instant when it measured
+  none — in which case the duration stays null rather than becoming a
+  fabricated zero.
+
 - **A subagent anchor stayed open when the stop event named no agent, and a
   finalized trace never said what it left open.** The harness's `SubagentStop`
   payload does not always carry `agent_id`, and without one the adapter had

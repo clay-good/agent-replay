@@ -3,6 +3,7 @@ import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
 import { ingestTrace, getTrace, listTraces } from '../src/services/trace-service.js';
 import { mapOtlpTraces, attrsToMap, decodeAnyValue } from '../src/services/otel/semconv.js';
+import { mapOtlpLogs } from '../src/services/otel/log-events.js';
 import { handleTracesExport, startOtelReceiver, unroutedRequest, type OtelStats } from '../src/services/otel/receiver.js';
 import { validateTraceInput } from '../src/utils/validators.js';
 import { forkTrace } from '../src/services/fork-service.js';
@@ -1322,6 +1323,48 @@ describe('the /v1/traces endpoint rejects nothing, and says so by answering a ba
     }
     // An empty batch is well-formed, not a rejection.
     expect(handleTracesExport(db, JSON.stringify({ resourceSpans: [] }), stats)).toEqual({ status: 200, payload: {} });
+  });
+});
+
+describe('log-derived steps are closed, because a log record is a report', () => {
+  // `tool_result`, `api_request`, `tool_decision` — each describes something
+  // that ALREADY happened, and no second record will ever arrive to close the
+  // step it produced. Left open, every step of every log-captured session sat
+  // in flight for the life of the trace, and a `tool_result` carried a measured
+  // `duration_ms` beside a null `ended_at`: a step with a duration and no end.
+  const logs = (records: unknown[]) => ({
+    resourceLogs: [{
+      resource: { attributes: [{ key: 'service.name', value: { stringValue: 'claude-code' } }] },
+      scopeLogs: [{ logRecords: records }],
+    }],
+  });
+  const record = (event: string, attrs: Record<string, unknown>, nanos = '1750000000000000000') => ({
+    timeUnixNano: nanos,
+    body: { stringValue: event },
+    attributes: [
+      { key: 'event.name', value: { stringValue: event } },
+      { key: 'session.id', value: { stringValue: 'closed-steps' } },
+      ...Object.entries(attrs).map(([key, v]) => ({
+        key,
+        value: typeof v === 'number' ? { intValue: String(v) } : { stringValue: String(v) },
+      })),
+    ],
+  });
+
+  it('ends a measured step at start + duration', () => {
+    const [trace] = mapOtlpLogs(logs([record('claude_code.tool_result', { tool_name: 'Bash', success: 'true', duration_ms: 40 })]) as never);
+    const step = trace.steps![0];
+    expect(step.ended_at).toBeTruthy();
+    expect(Date.parse(step.ended_at as string) - Date.parse(step.started_at as string)).toBe(40);
+    expect(step.duration_ms).toBe(40);
+  });
+
+  it('ends an unmeasured step at its own instant, without inventing a duration', () => {
+    const [trace] = mapOtlpLogs(logs([record('claude_code.tool_result', { tool_name: 'Read', success: 'true' })]) as never);
+    const step = trace.steps![0];
+    expect(step.ended_at).toBe(step.started_at);
+    // "finished, duration unknown" — not a fabricated zero.
+    expect(step.duration_ms ?? null).toBeNull();
   });
 });
 

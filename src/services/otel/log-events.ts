@@ -360,7 +360,7 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
         ...(currentModel ? { model: currentModel } : {}),
         ...(followUpPrompts.length > 0 ? { follow_up_prompts: followUpPrompts } : {}),
       },
-      steps,
+      steps: closeLogSteps(steps),
     });
   }
 
@@ -426,6 +426,35 @@ function num(v: unknown): number {
  */
 function usage(n: number): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * Close every log-derived step. A LOG RECORD IS A REPORT OF SOMETHING THAT
+ * ALREADY HAPPENED — `tool_result`, `api_request`, `tool_decision` — so a step
+ * built from one is finished the moment it is written, and nothing will ever
+ * arrive to close it: there is no second record for the same event.
+ *
+ * Left open, every step of every log-captured session sat in flight for the
+ * life of the trace (`show` drawing a finished `completed` session as if its
+ * tools were still running), and a `tool_result` even carried a measured
+ * `duration_ms: 40` beside a null `ended_at` — a step with a duration and no
+ * end.
+ *
+ * The end is `started_at + duration_ms` when the record measured one, and the
+ * record's own instant otherwise. Nothing is invented in either case: a
+ * duration the record did not carry stays null, so a consumer reads "finished,
+ * duration unknown" rather than a fabricated zero. Same rule the hook adapter
+ * applies to its `guard_check` audit row.
+ */
+function closeLogSteps(steps: IngestStepInput[]): IngestStepInput[] {
+  for (const step of steps) {
+    if (step.ended_at || !step.started_at) continue;
+    const start = Date.parse(step.started_at);
+    if (Number.isNaN(start)) continue;
+    const span = typeof step.duration_ms === 'number' && Number.isFinite(step.duration_ms) ? step.duration_ms : 0;
+    step.ended_at = new Date(start + span).toISOString();
+  }
+  return steps;
 }
 
 /**
