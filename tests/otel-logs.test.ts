@@ -4,7 +4,7 @@ import { runMigrations } from '../src/db/migrations.js';
 import { getTrace, listTraces } from '../src/services/trace-service.js';
 import { mapOtlpLogs } from '../src/services/otel/log-events.js';
 import { ingestTrace } from '../src/services/trace-service.js';
-import { handleLogsExport, type OtelStats } from '../src/services/otel/receiver.js';
+import { handleLogsExport, handleTracesExport, type OtelStats } from '../src/services/otel/receiver.js';
 import { effectiveDurationMs } from '../src/utils/time.js';
 import { mapOtlpTraces } from '../src/services/otel/semconv.js';
 import { mergeBatchIntoTrace } from '../src/services/trace-service.js';
@@ -701,5 +701,102 @@ describe('mapOtlpLogs — per-step model', () => {
     const trace = getTrace(db, ingestTrace(db, t).id)!;
 
     expect(trace.steps.every((s) => s.model == null)).toBe(true);
+  });
+});
+
+describe('a log session keeps its model across batch boundaries', () => {
+  // The mapper only sees one batch, and batches are cut mid-session constantly —
+  // an `api_request` in one flush and the `tool_result` it led to in the next is
+  // the ordinary live shape, not an edge case. Assembling a session from N
+  // batches must yield the same per-step models as receiving it in one.
+  const send = (db: Database.Database, records: unknown[], stats: OtelStats) =>
+    handleLogsExport(db, JSON.stringify(otlpLogs(records)), stats);
+
+  it('gives a step the model an EARLIER batch reported', () => {
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    send(db, [
+      logRecord('claude_code.user_prompt', { 'session.id': 'x1', prompt: 'go' }, 1_000_000),
+      logRecord('claude_code.api_request', { 'session.id': 'x1', model: 'claude-opus-4-5', input_tokens: 10, output_tokens: 5 }, 2_000_000),
+    ], stats);
+    send(db, [
+      logRecord('claude_code.tool_result', { 'session.id': 'x1', tool_name: 'Read', success: true }, 3_000_000),
+    ], stats);
+
+    const t = getTrace(db, listTraces(db, { session_id: 'x1' }).items[0].id)!;
+    expect(t.steps.find((s) => s.name === 'Read')!.model).toBe('claude-opus-4-5');
+  });
+
+  it('gives a step the model a LATER batch reported, when none came before', () => {
+    // A receiver started mid-session, or an out-of-order flush.
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    send(db, [
+      logRecord('claude_code.tool_result', { 'session.id': 'x2', tool_name: 'Read', success: true }, 1_000_000),
+    ], stats);
+    send(db, [
+      logRecord('claude_code.api_request', { 'session.id': 'x2', model: 'claude-opus-4-5', input_tokens: 10, output_tokens: 5 }, 2_000_000),
+    ], stats);
+
+    const t = getTrace(db, listTraces(db, { session_id: 'x2' }).items[0].id)!;
+    expect(t.steps.find((s) => s.name === 'Read')!.model).toBe('claude-opus-4-5');
+  });
+
+  it('does not relabel an earlier batch when a later one falls back to another model', () => {
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    send(db, [
+      logRecord('claude_code.api_request', { 'session.id': 'x3', model: 'claude-opus-4-5', input_tokens: 10, output_tokens: 5 }, 1_000_000),
+      logRecord('claude_code.tool_result', { 'session.id': 'x3', tool_name: 'Read', success: true }, 2_000_000),
+    ], stats);
+    send(db, [
+      logRecord('claude_code.api_request', { 'session.id': 'x3', model: 'claude-haiku-4-5', input_tokens: 10, output_tokens: 5 }, 3_000_000),
+      logRecord('claude_code.tool_result', { 'session.id': 'x3', tool_name: 'Write', success: true }, 4_000_000),
+    ], stats);
+
+    const t = getTrace(db, listTraces(db, { session_id: 'x3' }).items[0].id)!;
+    const byName = Object.fromEntries(t.steps.map((s) => [s.name, s.model]));
+    expect(byName.Read).toBe('claude-opus-4-5');
+    expect(byName.Write).toBe('claude-haiku-4-5');
+  });
+
+  it('uses the model in effect, not the session\'s first, after a batch-boundary fallback', () => {
+    // The batch that falls back to another model carries no tool step of its own,
+    // and the step it affects arrives in a THIRD batch. Freezing the trace's model
+    // at the first one reported would label that step with a model the session had
+    // already stopped using.
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    send(db, [logRecord('claude_code.api_request', { 'session.id': 'x5', model: 'claude-opus-4-5', input_tokens: 10, output_tokens: 5 }, 1_000_000)], stats);
+    send(db, [logRecord('claude_code.api_request', { 'session.id': 'x5', model: 'claude-haiku-4-5', input_tokens: 10, output_tokens: 5 }, 2_000_000)], stats);
+    send(db, [logRecord('claude_code.tool_result', { 'session.id': 'x5', tool_name: 'Read', success: true }, 3_000_000)], stats);
+
+    const t = getTrace(db, listTraces(db, { session_id: 'x5' }).items[0].id)!;
+    expect(t.steps.find((s) => s.name === 'Read')!.model).toBe('claude-haiku-4-5');
+  });
+
+  it('leaves every step model-less when no batch ever reports one', () => {
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    send(db, [logRecord('claude_code.user_prompt', { 'session.id': 'x4', prompt: 'go' }, 1_000_000)], stats);
+    send(db, [logRecord('claude_code.tool_result', { 'session.id': 'x4', tool_name: 'Read', success: true }, 2_000_000)], stats);
+
+    const t = getTrace(db, listTraces(db, { session_id: 'x4' }).items[0].id)!;
+    expect(t.steps.every((s) => s.model == null)).toBe(true);
+  });
+
+  it('does not let a span step inherit a neighbour model it never declared', () => {
+    // A span without a model attribute is stating it had none. Only the log
+    // path infers, and only within its own session.
+    const spans = (arr: unknown[]) => ({ resourceSpans: [{ scopeSpans: [{ spans: arr }] }] });
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    handleTracesExport(db, JSON.stringify(spans([
+      { traceId: 'tm', spanId: '01', name: 'invoke_agent research', startTimeUnixNano: '1000000', endTimeUnixNano: '2000000',
+        attributes: [attr('gen_ai.operation.name', 'invoke_agent'), attr('gen_ai.agent.name', 'research'), attr('gen_ai.request.model', 'gpt-5')] },
+      { traceId: 'tm', spanId: '02', parentSpanId: '01', name: 'chat', startTimeUnixNano: '1100000', endTimeUnixNano: '1500000',
+        attributes: [attr('gen_ai.operation.name', 'chat'), attr('gen_ai.request.model', 'gpt-5')] },
+    ])), stats);
+    handleTracesExport(db, JSON.stringify(spans([
+      { traceId: 'tm', spanId: '03', parentSpanId: '01', name: 'execute_tool', startTimeUnixNano: '1600000', endTimeUnixNano: '1700000',
+        attributes: [attr('gen_ai.operation.name', 'execute_tool'), attr('gen_ai.tool.name', 'search')] },
+    ])), stats);
+
+    const t = getTrace(db, listTraces(db, {}).items[0].id)!;
+    expect(t.steps.find((s) => s.step_type === 'tool_call')!.model).toBeNull();
   });
 });

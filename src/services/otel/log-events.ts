@@ -335,6 +335,13 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
       total_cost_usd: totalCost || null,
       metadata: {
         source_format: isGemini ? 'gemini-cli-logs' : 'claude-code-logs',
+        // The model the session was last reported on, the way the span path
+        // carries its root's model — a log session has no root span whose model
+        // is definitional, and no trace-level model column, so without this a
+        // batch of nothing but model-call events (which produce no steps) 
+        // recorded the model nowhere at all. The receiver also reads it as the
+        // model in effect when the NEXT batch opens.
+        ...(currentModel ? { model: currentModel } : {}),
         ...(followUpPrompts.length > 0 ? { follow_up_prompts: followUpPrompts } : {}),
       },
       steps,

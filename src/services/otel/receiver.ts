@@ -217,6 +217,11 @@ function storeOtelBatch(db: Database.Database, traces: MappedOtelTrace[], stats:
 function upsertOtelTrace(db: Database.Database, input: MappedOtelTrace, stats: OtelStats): void {
   const target = findMergeTarget(db, input);
   if (target) {
+    // Read BEFORE the merge: this is the model in effect when this batch opened,
+    // and the merge is about to move the cursor on to this batch's own.
+    const priorModel = (db
+      .prepare(`SELECT json_extract(metadata, '$.model') AS model FROM agent_traces WHERE id = ?`)
+      .get(target) as { model: unknown } | undefined)?.model;
     // If the target already has a real identity root, this batch's own root has
     // no identity left to define — and merging inserts only `steps`, so the span
     // used to produce no row at all. Keep it as a step: whether a span survives
@@ -360,6 +365,7 @@ function upsertOtelTrace(db: Database.Database, input: MappedOtelTrace, stats: O
       ...totals,
       steps: steps ?? [],
     });
+    if (!isSpanBatch) fillLogStepModels(db, target, priorModel, batchModel(input));
     stats.acceptedSpans += steps?.length ?? 0;
     return;
   }
@@ -369,6 +375,94 @@ function upsertOtelTrace(db: Database.Database, input: MappedOtelTrace, stats: O
   // trace(s), M step(s)"). The identity root became the trace itself, not a
   // step, so it is deliberately not counted here — the trace it opened is.
   stats.acceptedSpans += input.steps?.length ?? 0;
+}
+
+/**
+ * Carry a log session's model across the batch boundary.
+ *
+ * The log mapper can only see one batch, so it stamps a step with a model only
+ * when the SAME batch carried a model-bearing record. Batches are cut mid-session
+ * constantly — the mapper's own note calls a flush window of only model-call
+ * events "very common between tool calls" — so the ordinary live shape is an
+ * `api_request` in one batch and the `tool_result` it led to in the next, which
+ * left the step with no model at all and put `check --golden --fields model`
+ * straight back to the "no baseline entry carries that data" refusal it was just
+ * taught to avoid. A within-batch-only fix is inert against a real receiver.
+ *
+ * The invariant this restores: assembling a session from N batches yields the
+ * same per-step models as receiving the whole session in one batch.
+ *
+ * Two scoped statements rather than a walk over the trace in JS. Steps are
+ * renumbered by start time on merge, so `step_number` order IS time order, and
+ * the fill is the mapper's own rule expressed over the assembled trace: take the
+ * nearest model-bearing step BEFORE this one, and failing that (a step that ran
+ * before the session ever reported a model) the session's first. The merge path
+ * deliberately avoids O(trace) work per batch, so this stays in SQL, indexed by
+ * `(trace_id, step_number)`, instead of pulling every step into JS.
+ *
+ * A trace that has no model anywhere leaves both subqueries NULL, so every step
+ * stays null: an absent model still stays absent rather than becoming an
+ * invented one. `decision` steps are excluded for the same reason as in the
+ * mapper — a tool decision is the user's or the policy's call, not the model's.
+ *
+ * Span batches are excluded: a span carries its own model attribute, and a span
+ * without one is stating that it had none rather than inheriting a neighbour's.
+ */
+function batchModel(input: MappedOtelTrace): string | undefined {
+  const m = input.metadata?.model;
+  return typeof m === 'string' && m ? m : undefined;
+}
+
+function fillLogStepModels(
+  db: Database.Database,
+  traceId: string,
+  priorModel: unknown,
+  thisBatchModel: string | undefined,
+): void {
+  // 1. The nearest model-bearing step BEFORE this one — the mapper's own rule,
+  //    expressed over the assembled trace.
+  db.prepare(
+    `UPDATE agent_trace_steps
+        SET model = (SELECT p.model FROM agent_trace_steps p
+                      WHERE p.trace_id = agent_trace_steps.trace_id AND p.model IS NOT NULL
+                        AND p.step_number < agent_trace_steps.step_number
+                      ORDER BY p.step_number DESC LIMIT 1)
+      WHERE trace_id = ? AND model IS NULL AND step_type IN ('tool_call', 'llm_call')
+        AND EXISTS (SELECT 1 FROM agent_trace_steps p
+                     WHERE p.trace_id = agent_trace_steps.trace_id AND p.model IS NOT NULL
+                       AND p.step_number < agent_trace_steps.step_number)`,
+  ).run(traceId);
+
+  const fillRemaining = (model: string) =>
+    db
+      .prepare(
+        `UPDATE agent_trace_steps SET model = ?
+          WHERE trace_id = ? AND model IS NULL AND step_type IN ('tool_call', 'llm_call')`,
+      )
+      .run(model, traceId);
+
+  // 2. Otherwise the model in effect when this batch opened. These are the steps
+  //    that ran before this batch reported a model of its own — almost always the
+  //    ordinary case, since the model-call records that would have stamped them
+  //    were flushed in an earlier batch and produce no step to inherit from.
+  if (typeof priorModel === 'string' && priorModel) fillRemaining(priorModel);
+
+  // 3. Otherwise this batch's model, for steps that ran before the session had
+  //    reported any model at all (a receiver started mid-session, an out-of-order
+  //    flush). The same backward seed the mapper applies inside one batch.
+  //    A session that has never reported a model reaches neither branch, so its
+  //    steps stay null — an absent model stays absent rather than invented.
+  if (thisBatchModel) fillRemaining(thisBatchModel);
+
+  // Move the cursor on. The metadata merge lets EXISTING keys win (so an upgrade
+  // cannot rewrite a root's identity), which would freeze this at the session's
+  // first model and then label a step that ran after a fallback with the model
+  // the session no longer used. This key is the receiver's own running value, so
+  // it is written explicitly.
+  if (thisBatchModel) {
+    db.prepare(`UPDATE agent_traces SET metadata = json_set(metadata, '$.model', ?) WHERE id = ?`)
+      .run(thisBatchModel, traceId);
+  }
 }
 
 function ingestOtlpTraces(

@@ -350,7 +350,16 @@ and one-way.
   labelled with the earlier model rather than being relabelled wholesale. A
   session that never reports a model still stores none — an absent model stays
   absent rather than becoming an invented one. `decision` steps are left alone:
-  a tool decision is the user's or the policy's call, not the model's.
+  a tool decision is the user's or the policy's call, not the model's. The model
+  also survives the batch boundary, which is what makes this work against a real
+  receiver: a log processor flushes constantly, so an `api_request` in one batch
+  and the `tool_result` it led to in the next is the ordinary shape rather than
+  an edge case — and those model-call records produce no step of their own, so
+  there was nothing on the trace for the next batch to inherit from. A log
+  session now carries the model it was last reported on (the way a span trace
+  carries its root's), so assembling a session from any number of batches gives
+  the same per-step models as receiving it in one, including a session that falls
+  back to a smaller model between flushes.
 - **`ingest --format jsonl` on a JSON file reported the symptom thousands of
   times instead of the cause.** Every line of a pretty-printed array is a
   fragment, so an ordinary `--format json` export produced 5,664 "Invalid JSON
