@@ -902,6 +902,22 @@ and one-way.
   the one headline command that had not adopted it. A literal `null` is
   untouched: it remains the documented no-op that keeps the original value.
 
+- **`import` told you a Codex rollout had nothing importable in it.**
+  `--format` defaults to `claude-transcript`, so pointing `import` at a Codex
+  session without the flag ran the Claude parser over it: every record was
+  skipped and the message named a cause the reader can disprove with the file in
+  their hand. Reproduced against a real `~/.codex` rollout — 12,604 records
+  "skipped", then 2,452 steps imported with `--format codex-rollout`. A failed
+  import now names the format that would have read the file, in either
+  direction, from the record shapes each one uses (a Codex rollout wraps
+  everything as `{type: session_meta|response_item|event_msg|turn_context,
+  payload}`; a Claude transcript's records are `{type: user|assistant,
+  message}`). Suggestion only, on a run that already failed, and only on
+  unambiguous evidence — the rule `record`'s stream-format suggester already
+  follows, since sending the reader to a second format that also imports
+  nothing is worse than saying nothing. Only the head of the file is read, so a
+  failed import does not pay for a second pass over a 600 MB transcript.
+
 - **`watch` tailed a trace that had been deleted, forever.** The tick's status
   read returns nothing when the row is gone — `import --replace` drops the prior
   copies of a session it is re-importing, and `deleteTrace` is part of the

@@ -197,6 +197,13 @@ The system SHALL import existing on-disk session logs via `agent-replay import <
 
 Importing SHALL be idempotent: a session already in the store is reported and left unchanged, and `--replace` re-imports it. A session's identity SHALL be its session id, source format and source filename together — a subagent sidecar shares its parent transcript's session id, so the filename is required to tell them apart. The first user turn SHALL become the trace input and later turns SHALL be retained in `metadata.follow_up_prompts`, with any harness preamble preceding the chosen prompt retained in `metadata.preamble_prompts`; the prompt SHALL be the first turn that is not a harness envelope. The trace's `ended_at` SHALL be taken from the last timestamped record. Each STEP SHALL carry the timestamp of the record that produced it, and a record carrying none SHALL inherit the last timestamp seen, seeded with the trace's own start — the store defaults an absent step timestamp to the current time, which would place an imported session's steps outside the window of the trace they belong to. Step DURATIONS SHALL NOT be inferred from the interval between records, which includes time the user was away and is not a measurement of the step. Transcripts SHALL be read incrementally rather than loaded whole, so peak memory tracks the trace being built rather than the file size, and a single line exceeding 64 MB SHALL be refused as not being JSONL.
 
+An import that produced NO trace SHALL name the supported format whose record shapes the file actually carries, when they unambiguously belong to one and it is not the format being used. `--format` defaults to `claude-transcript`, so a Codex rollout passed without the flag is read by the Claude parser and skips every record — "nothing importable" is then a cause the reader can disprove with the file in their hand. The suggestion SHALL be made only on a run that already failed and only on unambiguous evidence, since a wrong one sends the reader to a second format that also imports nothing.
+
+#### Scenario: A session log passed without its format
+
+- **WHEN** `agent-replay import ~/.codex/sessions/.../rollout.jsonl` is run with no `--format`
+- **THEN** the import reports that nothing was importable AND names `--format codex-rollout` as the format those records belong to
+
 #### Scenario: Import a Claude Code transcript
 
 - **WHEN** a user runs `agent-replay import ~/.claude/projects/myproj/3f2a….jsonl --format claude-transcript`

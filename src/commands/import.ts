@@ -7,6 +7,7 @@ import { importCodexRollout } from '../services/importers/codex-rollout.js';
 import { summaryPanel } from '../ui/boxen-panels.js';
 import { errorMessage } from '../utils/json.js';
 import { julianDayExpr } from '../utils/time.js';
+import { readJsonlLines } from '../services/importers/jsonl-reader.js';
 import { resolveDataDir, storeSplitNote } from '../utils/paths.js';
 
 export interface ImportOptions {
@@ -17,6 +18,9 @@ export interface ImportOptions {
 }
 
 const SUPPORTED = ['claude-transcript', 'codex-rollout'];
+
+/** How many records the format sniffer reads before answering. */
+const SNIFF_RECORDS = 50;
 
 /**
  * `agent-replay import <path> --format <fmt>` — best-effort conversion of an
@@ -32,6 +36,56 @@ const SUPPORTED = ['claude-transcript', 'codex-rollout'];
  * reported and left alone; `--replace` re-imports it, which is also how a
  * transcript that has GROWN since the last import is refreshed.
  */
+/**
+ * The `--format` that reads this file, or null when its records do not clearly
+ * belong to one.
+ *
+ * Keyed on record shapes that are UNAMBIGUOUS between the two formats, taken
+ * from real files of each: a Codex rollout wraps everything as
+ * `{type: session_meta|response_item|event_msg|turn_context, payload}`, while a
+ * Claude transcript's records are `{type: user|assistant, message, sessionId}`.
+ * Neither vocabulary appears in the other.
+ *
+ * Only the head of the file is read — the answer is in the first records, and a
+ * failed import must not pay for a second full pass over a 600 MB transcript.
+ * Silence is the right answer when nothing is distinctive: sending the reader
+ * to a second format that also imports nothing is worse than saying nothing.
+ */
+function formatForFile(absPath: string, current: string): string | null {
+  const votes = new Map<string, number>();
+  const vote = (fmt: string) => votes.set(fmt, (votes.get(fmt) ?? 0) + 1);
+  let read = 0;
+  try {
+    for (const line of readJsonlLines(absPath)) {
+      if (read >= SNIFF_RECORDS) break;
+      let rec: unknown;
+      try {
+        rec = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (rec === null || typeof rec !== 'object' || Array.isArray(rec)) continue;
+      read++;
+      const r = rec as Record<string, unknown>;
+      const type = typeof r.type === 'string' ? r.type : '';
+      if (type === 'session_meta' || type === 'response_item' || type === 'event_msg' || type === 'turn_context') {
+        vote('codex-rollout');
+      } else if ((type === 'user' || type === 'assistant') && r.message != null) {
+        vote('claude-transcript');
+      }
+    }
+  } catch {
+    // Unreadable now for the same reason the import failed; nothing to add.
+    return null;
+  }
+  // A single winner only: a file that voted for both is telling us the shapes
+  // are shared, not that one of them is right.
+  const ranked = [...votes.entries()].sort((a, b) => b[1] - a[1]);
+  if (ranked.length !== 1) return null;
+  const [best] = ranked[0];
+  return best === current ? null : best;
+}
+
 export function runImport(filePath: string, opts: ImportOptions = {}): void {
   const format = opts.format ?? 'claude-transcript';
   if (!SUPPORTED.includes(format)) {
@@ -66,6 +120,19 @@ export function runImport(filePath: string, opts: ImportOptions = {}): void {
     // Producing no trace is a failed import (wrong/corrupt/empty file), not a
     // no-op success — exit non-zero so `import X && use-trace` doesn't proceed.
     console.error(chalk.yellow(`  Nothing importable found in ${absPath} (${report.skipped} record(s) skipped).`));
+    // ...and say when the file is plainly the OTHER supported format.
+    //
+    // `--format` defaults to `claude-transcript`, so pointing `import` at a
+    // Codex rollout without the flag runs the Claude parser over it: every
+    // record is skipped and the reader is told nothing is importable about a
+    // file that imports 2,452 steps with the right flag. That refusal names a
+    // cause the reader can disprove with the file in their hand. Same remedy
+    // `record` already gives for its four stream formats: suggest, only on a
+    // run that already failed, and only on unambiguous evidence.
+    const suggestion = formatForFile(absPath, format);
+    if (suggestion) {
+      console.error(chalk.yellow(`  These records look like the ${suggestion} format — try --format ${suggestion}.`));
+    }
     process.exitCode = 1;
     return;
   }

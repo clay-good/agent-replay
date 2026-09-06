@@ -195,6 +195,10 @@ To pull in history that already exists on disk, `import` converts a Claude Code 
 ```bash
 agent-replay import ~/.claude/projects/my-project/<session-uuid>.jsonl --format claude-transcript
 agent-replay import ~/.codex/sessions/2026/07/02/rollout-abc.jsonl      --format codex-rollout
+
+# `--format` defaults to claude-transcript: pass the flag for a Codex
+# rollout, or the Claude parser reads none of it. An import that finds
+# nothing names the format that would have read the file.
 ```
 
 For Claude Code, `tool_use`/`tool_result` blocks become paired `tool_call` steps (a result flagged `is_error` records its message on the step's error field, so a failed tool call stays distinguishable from a successful one), `thinking` blocks become `thought` steps, every step records the `model` that produced it — its tool calls and thinking as well as its replies, since all three come from the same assistant record (a subagent keeps its own, which is often a different one), and `usage` counts aggregate into token totals — including the two cache fields, which is where most of a real session's consumption lives. For Codex, `session_meta` supplies identity and git metadata, both tool families (`function_call`/`function_call_output` and the freeform `custom_tool_call`/`custom_tool_call_output`, each paired by `call_id`) become `tool_call` steps with a non-zero exit code or an explicit failure recorded on the step's error field, `reasoning` becomes `thought` steps, `turn_context` supplies the model each turn ran on (it is per turn, so a session that switches models mid-run is recorded that way), and `token_count` supplies the session token total.

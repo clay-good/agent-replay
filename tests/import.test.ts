@@ -1037,3 +1037,91 @@ describe('a subagent sidecar is not the same import as its parent session', () =
     expect((sdb.prepare('SELECT COUNT(*) as c FROM agent_traces').get() as { c: number }).c).toBe(1);
   });
 });
+
+describe('import points at the format that would have read the file', () => {
+  // `--format` defaults to `claude-transcript`, so pointing `import` at a Codex
+  // rollout without the flag runs the Claude parser over it: every record is
+  // skipped and the reader is told nothing is importable about a file that
+  // imports thousands of steps with the right flag. Reproduced against a real
+  // ~/.codex rollout — 12,604 records skipped, then 2,452 steps with
+  // `--format codex-rollout`. The record shapes below are taken from real files
+  // of each format, not invented.
+  let dir: string;
+  let storeDir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ar-sniff-'));
+    storeDir = join(dir, 'store');
+    mkdirSync(storeDir, { recursive: true });
+    ensureDatabase(resolve(storeDir, 'traces.db'));
+  });
+  afterEach(() => {
+    resetConnection();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const write = (name: string, records: unknown[]): string => {
+    const p = join(dir, name);
+    writeFileSync(p, records.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    return p;
+  };
+
+  const run = (path: string, opts: { format?: string } = {}): string => {
+    const err: string[] = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, 'error').mockImplementation((m?: unknown) => { err.push(String(m)); });
+    const prevExit = process.exitCode;
+    try {
+      runImport(path, { dir: storeDir, ...opts });
+    } finally {
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+      process.exitCode = prevExit;
+    }
+    return err.join('\n');
+  };
+
+  const codexRecords = [
+    { type: 'session_meta', timestamp: '2026-08-24T10:52:24Z', payload: { id: 's1', cwd: '/x' } },
+    { type: 'turn_context', timestamp: '2026-08-24T10:52:25Z', payload: { model: 'gpt-5-codex' } },
+    { type: 'response_item', timestamp: '2026-08-24T10:52:26Z', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'hi' }] } },
+  ];
+
+  it('names codex-rollout when the default format read nothing', () => {
+    const out = run(write('rollout.jsonl', codexRecords));
+    expect(out).toContain('Nothing importable found');
+    expect(out).toContain('--format codex-rollout');
+  });
+
+  it('names claude-transcript in the other direction', () => {
+    const path = write('transcript.jsonl', [
+      { type: 'user', sessionId: 's9', message: { content: 'go' } },
+      { type: 'assistant', sessionId: 's9', message: { content: [{ type: 'text', text: 'ok' }] } },
+    ]);
+    const out = run(path, { format: 'codex-rollout' });
+    expect(out).toContain('--format claude-transcript');
+  });
+
+  it('says nothing when the records belong to neither', () => {
+    // A wrong suggestion sends the reader to a second format that also imports
+    // nothing, which is worse than none — the rule `record`'s suggester states.
+    const out = run(write('junk.jsonl', [{ a: 1 }, { b: 2 }]));
+    expect(out).toContain('Nothing importable found');
+    expect(out).not.toContain('--format');
+  });
+
+  it('says nothing when the import worked', () => {
+    const out = run(write('good.jsonl', [
+      { type: 'user', sessionId: 's8', message: { content: 'go' } },
+      { type: 'assistant', sessionId: 's8', message: { content: [{ type: 'text', text: 'done' }] } },
+    ]));
+    expect(out).not.toContain('look like');
+  });
+
+  it('does not suggest the format already being used', () => {
+    // The suggester is silent when the winner IS the current format: the file
+    // is the right kind and empty or unreadable for some other reason.
+    const out = run(write('rollout2.jsonl', codexRecords), { format: 'codex-rollout' });
+    expect(out).not.toContain('look like');
+  });
+});
