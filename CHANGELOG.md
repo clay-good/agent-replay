@@ -902,6 +902,15 @@ and one-way.
   the one headline command that had not adopted it. A literal `null` is
   untouched: it remains the documented no-op that keeps the original value.
 
+- **The dashboard drew a broken panel for a long status name or an unusable
+  score.** A status longer than the panel pushed its row past the box edge,
+  where blessed wraps it and every bar below stops lining up; labels are now
+  capped at half the panel width. And a single non-finite score poisoned the
+  min/max of the score trend, rendering the whole panel as "min NaN%" — those
+  points are dropped now, and a series with nothing else in it reports no data
+  rather than a NaN range. (Fixed in `509a20f`; it had no entry here, found by
+  auditing the release notes against the commits behind them.)
+
 - **`import` told you a Codex rollout had nothing importable in it.**
   `--format` defaults to `claude-transcript`, so pointing `import` at a Codex
   session without the flag ran the Claude parser over it: every record was
