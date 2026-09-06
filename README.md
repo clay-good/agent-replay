@@ -751,6 +751,15 @@ directory that already exists is left exactly as you set it, since the mode of a
 directory you made is your decision. The file modes are set at creation only, so
 if you deliberately open a store up it stays open.
 
+**Copying or backing up a store.** At rest the store is the single file the
+front page promises, `traces.db`. While a writer is attached — a `record`, a
+`run`, the OTel receiver, a hook firing — SQLite's WAL mode adds `traces.db-wal`
+and `traces.db-shm` beside it (both `0600` as well), and the `-wal` holds
+committed data that is not in the `.db` yet. So copy the *directory*, or take an
+`export` (`--format json` is a full backup that `ingest` restores), rather than
+the `.db` alone while something is running. The sidecars disappear when the last
+writer closes the store.
+
 **Removing captured data.** There is no `delete` command: nothing in the CLI
 removes a trace, and every command that writes only adds. To drop a single run,
 call `deleteTrace(db, id)` from the [SDK](#programmatic-api) — it cascades, so

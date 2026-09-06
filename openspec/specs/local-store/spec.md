@@ -37,6 +37,8 @@ A command that CREATES a store implicitly (`record`, `run`, `ingest`, `import`, 
 
 A refusal for a missing store SHALL name a store found in an ancestor of the working directory, when the caller named no directory, so that "run `init` here" cannot be followed into creating a second store for a project that already has one. Resolution SHALL NOT walk up — which store a command reads is decided by `--dir`, `AGENT_REPLAY_DIR`, or the working directory alone.
 
+The store is a single file at rest and three while a writer is attached: WAL mode adds `traces.db-wal` (which holds committed data not yet in the `.db`) and `traces.db-shm`. Documentation of the store SHALL say so where it tells a reader to copy or back it up, since copying the `.db` alone during a capture silently drops what is in the WAL.
+
 The system SHALL create `traces.db` and `config.json` owner-only (`0600`), because a trace holds prompts, tool inputs and tool outputs, and the config holds API keys in plaintext. A directory the system creates for itself SHALL be `0700`.
 
 The system SHALL NOT change the permissions of a directory it did not create — the mode of a directory the user made is the user's decision, and a read-only command must never rewrite one. File modes SHALL be set at creation only, so a store an operator deliberately opened up stays open.
