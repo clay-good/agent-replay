@@ -377,10 +377,28 @@ export function runCheck(opts: CheckOptions = {}): void {
   // the same false green with a subtler cause. Exit 2 (gate broken), not 1
   // (regression) — nothing regressed, the gate could not run as asked.
   if (report.uncompared.length > 0) {
+    // Two different refusals wear the same exit code, and saying the wrong one
+    // is worse than saying nothing: when SOME matched run's baseline does carry
+    // the field, "no baseline entry carries that data" is false on its face —
+    // the reader opens the golden file and finds the value — and every cause
+    // `uncomparedHint` lists is the wrong one, because the field IS recorded.
+    const partial = new Set(report.uncompared_partial);
+    const total = report.uncompared.filter((f) => !partial.has(f));
+    const lines: string[] = [];
+    if (total.length > 0) lines.push(uncomparedHint(total));
+    if (report.uncompared_partial.length > 0) {
+      lines.push(
+        `${report.uncompared_partial.join(', ')}: some matched runs have a baseline that records this and others do not. ` +
+          'A field is only compared when EVERY matched run can exercise it, so that one agent does not pass on another\'s behalf. ' +
+          'Narrow the run to the agents whose baselines carry it (`--agent <name>`), or drop the field from --fields.',
+      );
+    }
     fail(
       2,
-      `Nothing to compare for --fields ${report.uncompared.join(', ')} — no baseline entry carries that data.`,
-      uncomparedHint(report.uncompared),
+      total.length > 0
+        ? `Nothing to compare for --fields ${report.uncompared.join(', ')} — no baseline entry carries that data.`
+        : `Nothing to compare for --fields ${report.uncompared.join(', ')} — not every matched run's baseline carries that data.`,
+      lines.join(' '),
     );
     return;
   }

@@ -1030,6 +1030,41 @@ describe('a requested field the baseline cannot exercise is a broken gate, not a
     expect(report.passed).toBe(1);
   });
 
+  // A MIXED run: one matched agent's baseline records the model, another's does
+  // not. The field is still refused — one agent must not pass on another's
+  // behalf — but the old refusal said "no baseline entry carries that data",
+  // which the reader disproves by opening the golden file, and then offered
+  // only cures for a field that is not recorded at all. The value IS recorded;
+  // the fix is to narrow the run.
+  it('separates "no baseline records it" from "not every matched run does"', () => {
+    const withModel: IngestTraceInput = {
+      agent_name: 'model-bot',
+      status: 'completed',
+      input: { task: 'summarize' },
+      steps: [{ step_number: 1, step_type: 'llm_call', name: 'draft', model: 'gpt-4-turbo' }],
+    };
+    ingestTrace(db, baseline);
+    ingestTrace(db, withModel);
+    const golden = JSON.parse(exportTraces(db, {}, 'golden')) as GoldenEntry[];
+    // Non-vacuous: exactly one side of the mix records a model.
+    expect(golden.some((g) => g.steps_summary.some((s) => s.model != null))).toBe(true);
+    expect(golden.some((g) => g.steps_summary.every((s) => s.model == null))).toBe(true);
+
+    const report = checkGolden(golden, [candidate(baseline), candidate(withModel)], { fields: ['model'] });
+    expect(report.uncompared).toEqual(['model']);
+    // ...and this is the part that was missing: it is refused because only SOME
+    // matched runs carry it, not because none do.
+    expect(report.uncompared_partial).toEqual(['model']);
+    expect(report.ok).toBe(false);
+  });
+
+  it('reports no partial when genuinely no baseline records the field', () => {
+    const golden = makeGolden();
+    const report = checkGolden(golden, [candidate(baseline)], { fields: ['model'] });
+    expect(report.uncompared).toEqual(['model']);
+    expect(report.uncompared_partial).toEqual([]);
+  });
+
   it('exits 2 (gate broken), not 1 (regression), and says so in both output modes', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ar-check-nofield-'));
     try {

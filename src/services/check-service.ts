@@ -61,6 +61,18 @@ export interface GoldenCheckReport {
    */
   uncompared: string[];
   /**
+   * The subset of `uncompared` that SOME matched run's baseline does carry —
+   * the field was refused because another matched run's baseline does not, and
+   * a field is only compared when every matched run can exercise it.
+   *
+   * Kept apart from `uncompared` because the two have opposite remedies: a
+   * field no baseline carries needs a capture path that records it, while this
+   * one is fixed by narrowing the run (`--agent`) to the runs whose baselines
+   * do. Telling a reader in this case that "no baseline step recorded one" is
+   * false on its face — the value is in the file they are looking at.
+   */
+  uncompared_partial: string[];
+  /**
    * Candidates that could not be matched because they recorded NO INPUT, a
    * subset of `unmatched`. Kept apart because the two have different remedies
    * and only one of them is the obvious guess: a renamed agent or a changed
@@ -219,6 +231,19 @@ export function checkGolden(
   const uncompared = explicit && passed + failed > 0 && failed === 0
     ? fields.filter((f) => matchedFor.some((entries) => !entries.some((g) => entryExercises(g, f))))
     : [];
+  // Of those, the fields SOME matched run's baseline does carry.
+  //
+  // The distinction changes both the cause and the cure, and getting it wrong
+  // is the failure mode this refusal already exists to avoid. "No baseline step
+  // recorded one" is simply false in a mixed run — the reader opens the golden
+  // file, finds the model right there, and concludes the tool is broken — and
+  // the remedy that text offers (use a capture path that records the field)
+  // cannot help, because the field IS recorded. The one thing that works is
+  // narrowing the run to the agents whose baselines carry it, which the
+  // all-or-nothing wording never mentions.
+  const uncomparedPartial = uncompared.filter((f) =>
+    matchedFor.some((entries) => entries.some((g) => entryExercises(g, f))),
+  );
 
   return {
     results,
@@ -228,6 +253,7 @@ export function checkGolden(
     unmatched_no_input: unmatchedNoInput,
     uncovered,
     uncompared,
+    uncompared_partial: uncomparedPartial,
     ok: failed === 0 && uncompared.length === 0 && (!opts.strict || (unmatched === 0 && uncovered === 0)),
   };
 }

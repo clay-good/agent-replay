@@ -381,6 +381,18 @@ and one-way.
 
 ### Fixed
 
+- **`check --golden` blamed the wrong thing when only SOME matched runs carry
+  a field.** A field is compared only when every matched run's baseline can
+  exercise it, so that one agent does not pass on another's behalf — but the
+  refusal said "no baseline entry carries that data" and then listed the causes
+  and cures for a field nothing records. In a mixed run that is false on its
+  face: the reader opens the golden file, finds the model right there, and
+  every remedy offered (use a capture path that records it) is beside the
+  point, while the one that works — narrowing with `--agent` — went unmentioned.
+  Hit on the tool's own `demo` data, where one of the two completed traces
+  records a model and the other does not. The two cases are now told apart and
+  each names its own cure; `--json` carries the distinction as
+  `uncompared_partial`.
 - **A codex tool call's arguments were dropped.** `record --format
   codex-exec` read only a shell `command` as a step's input, so an
   `mcp_tool_call` — whose arguments live under `arguments`, exactly as the
