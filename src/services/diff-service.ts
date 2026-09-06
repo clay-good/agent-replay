@@ -146,9 +146,10 @@ export function diffTraces(
 
       // Error — the whole point of "it worked before, what changed?". Without
       // this, a step that failed on one side and succeeded on the other, with
-      // everything else equal, reported no differences at all: the renderer
-      // printed "Traces are identical." directly under a header showing
-      // COMPLETED beside FAILED. Every live capture path records a failed tool
+      // everything else equal, reported no differences at all — under a header
+      // showing COMPLETED beside FAILED. (The renderer said "Traces are
+      // identical." then; it now reports what it compared, for a related
+      // reason: even a full comparison leaves the state snapshots out.) Every live capture path records a failed tool
       // as a normal step with `error` set, so this is the common shape.
       const leftErr = (left.error as string | null) ?? null;
       const rightErr = (right.error as string | null) ?? null;
@@ -164,7 +165,7 @@ export function diffTraces(
 
       // The decision record — the single field this whole tool exists to
       // explain. Without it, two runs that took OPPOSITE actions at the same
-      // step reported "Traces are identical." (exit 0) whenever every other
+      // step reported no differences at all (exit 0) whenever every other
       // field matched, while `decisions` and `why` on the same pair correctly
       // showed one choosing `rm_rf` and the other `safe_path`. `diff --ai` was
       // handed a summary with no differences at all and asked why they diverged.

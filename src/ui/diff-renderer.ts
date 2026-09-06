@@ -19,7 +19,10 @@ export function renderDiff(
    * printed a flat "Traces are identical." over a comparison that had only
    * looked at part of the data — under a header showing COMPLETED beside
    * FAILED. A filter must never imply more similarity than was measured, the
-   * same rule the unknown-field guard already enforces.
+   * same rule the unknown-field guard already enforces. The unfiltered branch
+   * below now follows it too: a full comparison still leaves the state
+   * snapshots out, so it names what it looked at rather than claiming
+   * identity.
    */
   fields?: string[],
 ): string {
