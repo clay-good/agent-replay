@@ -586,3 +586,19 @@ describe('a child whose terminal status we cannot read', () => {
     }
   }, 20000);
 });
+
+describe('a wrapped run records how it was captured', () => {
+  it('stamps source_format like every other path', async () => {
+    // `run` creates its wrapper trace directly rather than through the
+    // recorder, so it was the path 43b33c6 missed: a store holding wrapper
+    // traces could not say what produced them, and `list --source` could not
+    // find them.
+    const db = new Database(':memory:');
+    db.pragma('foreign_keys = ON');
+    runMigrations(db);
+    const result = await runWrapped(db, { command: 'echo', args: ['hi'], agentName: 'wrapped' });
+    const meta = getTrace(db, result.traceId)!.metadata as { source_format?: string };
+    expect(meta.source_format).toBe('run');
+    db.close();
+  });
+});

@@ -63,6 +63,11 @@ export async function runWrapped(db: Database.Database, opts: RunWrappedOptions)
       trigger: 'manual',
       tags: opts.tags,
       input: { command: opts.command, args: opts.args },
+      // The capture path, in the key every other one stamps (43b33c6). `run`
+      // creates this trace itself rather than going through the recorder, so it
+      // was the path that commit missed: a store holding wrapper traces could
+      // not say what produced them, and `list --source` could not find them.
+      metadata: { source_format: 'run' },
     });
   } catch (err) {
     // This runs BEFORE the child is spawned, so the command never ran at all.

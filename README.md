@@ -898,7 +898,7 @@ it, so two runs whose only difference is the context window report none —
 read those with `show <id> --snapshots`.
 
 **"Which capture path produced this trace?"** `show` names it, and
-`list --source <format>` lists the traces from one path (`hook`,
+`list --source <format>` lists the traces from one path (`hook`, `run`,
 `record:codex-exec`, `claude-transcript`, `otel-genai`, `claude-code-logs`).
 The match is exact — the names prefix one another — and a value that matches
 nothing prints the paths the store actually holds — `Source: hook

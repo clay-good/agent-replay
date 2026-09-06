@@ -543,7 +543,9 @@ and one-way.
   both the `diff` line and the regression-gate line. A test runs what the
   walkthrough prints, as printed.
 
-- **A store could not say which capture path produced a trace.** The importers
+- **A store could not say which capture path produced a trace.** (`run`'s
+  wrapper trace was the one path this missed at first — it creates its trace
+  directly rather than through the recorder — and now stamps `run`.) The importers
   stamped `metadata.source_format` and the OTel receiver stamped its own, while
   `hook` recorded only a `dialect` and `record` recorded nothing at all — so a
   store holding several paths (the normal case, and the one where a session ends
