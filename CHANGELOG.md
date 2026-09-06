@@ -443,6 +443,14 @@ and one-way.
 
 ### Fixed
 
+- **An imported Codex rollout's steps were all stored unfinished too.** The twin
+  of the transcript fix below, found the same way: the same Codex session
+  captured by `record --format codex-exec` closed its steps while the rollout
+  import left every one open. A tool call paired with its output record is now
+  closed at its own start, an unpaired one stays open (the session was
+  interrupted there), and every other step type is complete when its record is
+  written. On a real 375-step rollout, nothing is left open.
+
 - **`record --format claude-stream` threw away the token total the stream
   states.** Usage was summed from ASSISTANT records only, so a stream that
   reports it once — at the end, in the `result` record, which is a shape

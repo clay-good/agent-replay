@@ -325,6 +325,25 @@ export function importCodexRollout(
     // claude-transcript importer.
     if (stamp) {
       for (let i = stepsBefore; i < steps.length; i++) steps[i].started_at ??= stamp;
+      // Close what the rollout PROVES finished, the same rule and the same
+      // reason as the sibling claude-transcript importer: a tool call PAIRED
+      // with its output record is finished, an unpaired one means the session
+      // was interrupted there, and every other step type is complete when its
+      // record is written. Left open, every step of every imported rollout sat
+      // in flight under a `completed` trace — and the same Codex session
+      // captured by `record --format codex-exec` closed its steps, so the two
+      // paths disagreed about whether anything had finished.
+      //
+      // The end is the step's own start: the interval to the next record
+      // includes time the user was away, and reading a duration out of it is
+      // what this file's own timing rule forbids.
+      for (let i = stepsBefore; i < steps.length; i++) {
+        const step = steps[i];
+        if (step.ended_at) continue;
+        const unpaired = step.step_type === 'tool_call'
+          && !(typeof step.metadata?.call_id === 'string' && outputs.has(step.metadata.call_id));
+        if (!unpaired) step.ended_at = step.started_at;
+      }
     }
     // The turn's model applies to every step the turn produced, not only its
     // text reply: a `tool_call` step is the model's decision to call a tool and

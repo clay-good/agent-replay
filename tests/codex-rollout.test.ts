@@ -525,3 +525,35 @@ describe('importCodexRollout — the turn model applies to every step of the tur
     expect(trace.steps.length).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe('an imported rollout closes what it proves finished', () => {
+  // The same rule and the same reason as the sibling claude-transcript
+  // importer: left open, every step of every imported rollout sat in flight
+  // under a `completed` trace — and the same Codex session captured by
+  // `record --format codex-exec` closed its steps, so the two paths disagreed
+  // about whether anything had finished.
+  it('closes a call paired with its output, and leaves an unpaired one open', () => {
+    const path = fixture([
+      { timestamp: '2026-09-06T10:00:00.000Z', type: 'session_meta', payload: { id: 'r1', cwd: '/tmp' } },
+      {
+        timestamp: '2026-09-06T10:00:02.000Z', type: 'response_item',
+        payload: { type: 'function_call', name: 'shell', arguments: '{"command":["ls"]}', call_id: 'c1' },
+      },
+      {
+        timestamp: '2026-09-06T10:00:03.000Z', type: 'response_item',
+        payload: { type: 'function_call_output', call_id: 'c1', output: 'a.txt' },
+      },
+      // Interrupted: this one never got its output.
+      {
+        timestamp: '2026-09-06T10:00:04.000Z', type: 'response_item',
+        payload: { type: 'function_call', name: 'shell', arguments: '{"command":["sleep","999"]}', call_id: 'c2' },
+      },
+    ]);
+    const trace = getTrace(db, importCodexRollout(db, path).trace!.id)!;
+    const closed = trace.steps.map((s) => [s.metadata?.call_id, s.ended_at != null]);
+    expect(closed).toEqual([['c1', true], ['c2', false]]);
+    // The step's own start, never the interval to the next record.
+    const paired = trace.steps[0];
+    expect(paired.ended_at).toBe(paired.started_at);
+  });
+});
