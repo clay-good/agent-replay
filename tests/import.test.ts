@@ -7,7 +7,7 @@ import { runMigrations } from '../src/db/migrations.js';
 import { ensureDatabase, resetConnection } from '../src/db/index.js';
 import { runImport } from '../src/commands/import.js';
 import { forkTrace } from '../src/services/fork-service.js';
-import { getTrace } from '../src/services/trace-service.js';
+import { getTrace, createEval } from '../src/services/trace-service.js';
 import { importClaudeTranscript } from '../src/services/importers/claude-transcript.js';
 
 let db: Database.Database;
@@ -1185,5 +1185,71 @@ describe('import refuses input it cannot use', () => {
     const { err, exit } = run(join(dir, 'not-here.jsonl'));
     expect(exit).toBe(1);
     expect(err).toMatch(/ENOENT|no such file/i);
+  });
+});
+
+describe('import --replace says what goes with the trace it replaces', () => {
+  // The fork branch REFUSES rather than take a fork down with its parent.
+  // Evaluations are the other thing that hangs off a trace and cascades with
+  // it, and `--replace` is the documented way to refresh a transcript that has
+  // grown — so the routine refresh silently discarded every stored verdict,
+  // including paid AI ones. A note, not a refusal: an evaluation can be re-run,
+  // and carrying an old verdict onto changed steps would score a run it never
+  // measured.
+  let dir: string;
+  let storeDir: string;
+  let file: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ar-replace-evals-'));
+    storeDir = join(dir, 'store');
+    mkdirSync(storeDir, { recursive: true });
+    ensureDatabase(resolve(storeDir, 'traces.db'));
+    file = join(dir, 'session.jsonl');
+    writeFileSync(file, [
+      JSON.stringify({ type: 'user', sessionId: 's-ev', message: { content: 'go' } }),
+      JSON.stringify({ type: 'assistant', sessionId: 's-ev', message: { content: [{ type: 'text', text: 'done' }] } }),
+    ].join('\n') + '\n');
+  });
+  afterEach(() => {
+    resetConnection();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const run = (opts: Record<string, unknown> = {}): string => {
+    const err: string[] = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, 'error').mockImplementation((m?: unknown) => { err.push(String(m)); });
+    try {
+      runImport(file, { dir: storeDir, ...opts });
+    } finally {
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+    }
+    return err.join('\n').replace(/\x1B\[[0-9;]*m/g, '');
+  };
+
+  it('names how many evaluations the replace destroyed', () => {
+    run();
+    const db = ensureDatabase(resolve(storeDir, 'traces.db'));
+    const id = (db.prepare('SELECT id FROM agent_traces').get() as { id: string }).id;
+    createEval(db, id, { evaluator_type: 'rubric', evaluator_name: 'a', score: 1, passed: true, details: {} });
+    createEval(db, id, { evaluator_type: 'rubric', evaluator_name: 'b', score: 1, passed: true, details: {} });
+
+    const out = run({ replace: true });
+    expect(out).toMatch(/2 stored evaluation result\(s\)/);
+    // ...and points at the trace to evaluate now, not the one that is gone.
+    const fresh = (ensureDatabase(resolve(storeDir, 'traces.db'))
+      .prepare('SELECT id FROM agent_traces').get() as { id: string }).id;
+    expect(out).toContain(fresh);
+    expect(out).not.toContain(id);
+  });
+
+  it('says nothing when the replaced trace had none', () => {
+    // The note must not fire on the ordinary refresh, or it is noise on every
+    // re-import.
+    run();
+    const out = run({ replace: true });
+    expect(out).not.toMatch(/stored evaluation result/);
   });
 });

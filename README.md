@@ -209,7 +209,9 @@ Importing the same session twice does **not** create a second trace:
 
 ```bash
 agent-replay import <same-file>              # "Session already imported as trc_… — nothing changed."
-agent-replay import <same-file> --replace    # re-import it (use this when the transcript has grown)
+agent-replay import <same-file> --replace    # re-import it (use this when the transcript has grown;
+                                             # says how many stored evaluations go with the old trace,
+                                             # and refuses outright if forks derive from it)
 ```
 
 Transcripts are read a line at a time rather than loaded whole, so peak memory tracks the trace being built rather than the file: a 52 MB session imports in ~270 MB instead of ~440 MB, and a session larger than ~512 MB imports at all (it previously failed with "Cannot create a string longer than 0x1fffffe8 characters" and no partial import — a 647 MB transcript now imports its 672,000 steps).

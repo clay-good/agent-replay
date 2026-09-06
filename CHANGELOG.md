@@ -902,6 +902,20 @@ and one-way.
   the one headline command that had not adopted it. A literal `null` is
   untouched: it remains the documented no-op that keeps the original value.
 
+- **`import --replace` silently destroyed the evaluations of the trace it
+  replaced.** The flag is the documented way to refresh a transcript that has
+  grown, and evaluations cascade with the trace they hang off — so a routine
+  refresh threw away every stored verdict, including paid `--ai` ones, and the
+  summary said only which trace id had been replaced. The same command already
+  REFUSES to replace a trace that forks derive from, with a full explanation of
+  what deleting the parent would do to them; evaluations are the other thing
+  attached to a trace and never got that thought. It now names them: "3 stored
+  evaluation result(s) were attached to the replaced trace and are gone with
+  it", and points at the new id to re-run `eval` against. A note rather than a
+  refusal, because an evaluation is re-derivable where a fork's what-if is not —
+  and carrying old verdicts onto a refreshed trace would attach a score to a run
+  it never measured.
+
 - **An AI verdict never said how much of the run it had seen.** The summary
   handed to a judge is budgeted: on a long trace it keeps the failing step, the
   important ones, and as much else as fits, and it tells the MODEL the rest were

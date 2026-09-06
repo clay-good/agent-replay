@@ -225,7 +225,34 @@ export function runImport(filePath: string, opts: ImportOptions = {}): void {
       return;
     }
 
+    // Say what else goes with the trace, before it goes.
+    //
+    // The fork branch above refuses precisely because deleting the parent would
+    // damage something derived from it. EVALUATIONS are the other thing that
+    // hangs off a trace, they cascade with it, and `--replace` is the
+    // documented way to refresh a transcript that has grown — so the routine
+    // refresh silently threw away every stored verdict, including the paid AI
+    // ones. It is a note and not a refusal because an evaluation is
+    // re-derivable (re-run `eval`) where a fork's what-if is not, and because
+    // carrying old verdicts onto a trace whose steps have changed would attach
+    // a score to a run it never measured.
+    const lostEvals = priors.reduce(
+      (n, p) =>
+        n +
+        (db.prepare('SELECT COUNT(*) AS n FROM agent_trace_evals WHERE trace_id = ?').get(p.id) as { n: number }).n,
+      0,
+    );
+
     for (const prior of priors) deleteTrace(db, prior.id);
+
+    if (lostEvals > 0) {
+      console.error(
+        chalk.yellow(
+          `  Note: ${lostEvals} stored evaluation result(s) were attached to the replaced trace and are gone with it.`,
+        ),
+      );
+      console.error(chalk.dim(`  Re-run "agent-replay eval ${report.trace.id}" to evaluate the refreshed trace.`));
+    }
   }
 
   console.log('');
