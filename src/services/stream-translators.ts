@@ -73,7 +73,66 @@ abstract class BaseTranslator implements StreamTranslator {
     return ++this.step;
   }
 
-  abstract translate(obj: Record<string, unknown>): CaptureEvent[];
+  /**
+   * The model the session's most recent model-bearing record named, or null
+   * until one does.
+   *
+   * Neither translator recorded a model anywhere, while every sibling capture
+   * path does — the claude-transcript and codex-rollout importers each track a
+   * current model and stamp the steps a record produced, and the OTel span and
+   * log mappers do the same. A step's `model` is the field `check --golden
+   * --fields model` compares and the one `diff` reports a change in, so a
+   * model swap between two `record --format codex-exec` / `gemini-stream` runs
+   * was invisible, and `show`/`replay` never showed which model produced a
+   * step.
+   *
+   * Tracked as a running cursor rather than read once: a session that switches
+   * models mid-run says so on a later record, and the steps before it belong to
+   * the earlier one. There is no trace-level model column, so an unstamped step
+   * carries the value nowhere at all.
+   */
+  protected currentModel: string | null = null;
+
+  /**
+   * Read the model a record states, from the containers this file already
+   * destructures (the record, its `item`, its `session`). Read from EVERY
+   * record rather than only the ones that produce a model-bearing step: the
+   * value names a property of the SESSION, and one read cannot miss a branch —
+   * the mistake the OTel log mapper made by reading it in the error branch
+   * alone. No vendor-internal name is guessed: `model` is the same key the
+   * importers for these two harnesses read.
+   */
+  private readModel(obj: Record<string, unknown>): void {
+    const m =
+      str(obj.model) ??
+      str((obj.item as Record<string, unknown> | undefined)?.model) ??
+      str((obj.session as Record<string, unknown> | undefined)?.model);
+    if (m) this.currentModel = m;
+  }
+
+  translate(obj: Record<string, unknown>): CaptureEvent[] {
+    // Before the record's own steps are built, so a record that both names a
+    // model and produces steps stamps them with the model in effect at THEIR
+    // time rather than the previous one.
+    this.readModel(obj);
+    const events = this.translateEvent(obj);
+    if (this.currentModel) {
+      for (const e of events) {
+        if (e.type !== 'step' && e.type !== 'step_start') continue;
+        // Never overwrite a value a branch set itself, and never invent one:
+        // with no model reported, steps stay null, which is the honest absence
+        // `check` skips rather than fails on.
+        if (e.model == null) e.model = this.currentModel;
+      }
+    }
+    return events;
+  }
+
+  /**
+   * Map one native record. Every step this returns is stamped with the current
+   * model by `translate` above, so a branch does not have to remember to.
+   */
+  protected abstract translateEvent(obj: Record<string, unknown>): CaptureEvent[];
 
   finalize(): CaptureEvent[] {
     if (!this.traceId || this.ended) return [];
@@ -142,7 +201,7 @@ export class CodexExecTranslator extends BaseTranslator {
   // already fixed for the gemini stream.
   protected expectsTerminalEvent = true;
 
-  translate(obj: Record<string, unknown>): CaptureEvent[] {
+  protected translateEvent(obj: Record<string, unknown>): CaptureEvent[] {
     const type = String(obj.type ?? '');
 
     if (type === 'thread.started') {
@@ -279,7 +338,7 @@ export class GeminiStreamTranslator extends BaseTranslator {
     this.openOrder = this.openOrder.filter((o) => o.num !== num);
   }
 
-  translate(obj: Record<string, unknown>): CaptureEvent[] {
+  protected translateEvent(obj: Record<string, unknown>): CaptureEvent[] {
     const type = String(obj.type ?? '');
 
     if (type === 'init') {

@@ -336,6 +336,17 @@ and one-way.
 
 ### Fixed
 
+- **A translated stream recorded the model nowhere.** `record --format
+  codex-exec` / `gemini-stream` never read the model any record named, while
+  every sibling capture path does — the Claude Code transcript and Codex
+  rollout importers each track the model in force and stamp the steps a record
+  produced, and both OpenTelemetry mappers do the same. A step's `model` is
+  what `diff` reports a change in and what `show`/`replay` display, so a model
+  swap between two captured runs was invisible. Both translators now track the
+  model as a running cursor and stamp the steps that follow, so a session that
+  switches models mid-run keeps each step labelled with the model in effect at
+  its own time. A stream that names no model still stores none — an absence is
+  reported, never guessed.
 - **`check --golden` reported a FIX as a regression.** The per-step
   `step_errors` comparison is deliberately one-directional — a step that stops
   failing is not a regression, because a baseline that captured one flaky

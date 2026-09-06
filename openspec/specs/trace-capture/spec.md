@@ -84,6 +84,18 @@ The system SHALL accept a versioned JSONL event stream on stdin via `agent-repla
 
 The system SHALL translate the documented non-interactive event streams of the major CLIs via `record --format`: `codex-exec` for OpenAI Codex CLI's `codex exec --json` stream (`thread.started` with `thread_id` → trace with `session_id`; `item.completed` items such as `agent_message`, `reasoning`, `command_execution`, `mcp_tool_call`, `file_change`, `web_search` → typed steps; `turn.completed` `usage` → token totals) and `gemini-stream` for Gemini CLI's `--output-format stream-json` (`init` → trace; `tool_use`/`tool_result` → tool_call steps; `message` → output steps; `result` → finalization).
 
+The system SHALL record, on the steps a translated stream produces, the model any record of that stream names — read from the record, its `item`, or its `session` — tracking it as a running value so a session that changes model mid-run labels each step with the model in effect at its own time. A stream that names no model SHALL leave the field unset rather than guessing one.
+
+#### Scenario: Model carried onto a translated stream's steps
+
+- **WHEN** a `codex-exec` stream declares a model on `thread.started` and later items produce steps
+- **THEN** each of those steps records that model, and steps after a record naming a different model record the new one
+
+#### Scenario: A stream that names no model
+
+- **WHEN** a translated stream never names a model
+- **THEN** every step it produces records no model, and `check --golden --fields model` skips those baseline steps rather than comparing an invented value
+
 #### Scenario: Codex exec run captured
 
 - **WHEN** a user runs `codex exec --json "fix the tests" | agent-replay record --format codex-exec`

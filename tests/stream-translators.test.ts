@@ -574,3 +574,82 @@ describe('a translated stream reports what it dropped', () => {
     expect(t.lastSkip()).toBeNull();
   });
 });
+
+// ── the model a stream reports ─────────────────────────────────────────────
+
+describe('the model a translated stream reports', () => {
+  it('stamps codex-exec steps with the model the thread declared', () => {
+    const t = makeTranslator('codex-exec')!;
+    const id = run(t, [
+      { type: 'thread.started', thread_id: 'th_1', model: 'gpt-5-codex' },
+      { type: 'item.completed', item: { item_type: 'command_execution', command: 'ls -la' } },
+      { type: 'item.completed', item: { item_type: 'agent_message', text: 'done' } },
+      { type: 'turn.completed', usage: { input_tokens: 5, output_tokens: 7 } },
+    ]);
+    const trace = getTrace(db, id)!;
+    expect(trace.steps.map((s) => s.model)).toEqual(['gpt-5-codex', 'gpt-5-codex']);
+  });
+
+  it('stamps gemini-stream steps, reading the model off the session object', () => {
+    const t = makeTranslator('gemini-stream')!;
+    const id = run(t, [
+      { type: 'init', session: { id: 's1', model: 'gemini-2.5-pro' } },
+      { type: 'tool_use', id: 't1', name: 'ls', input: {} },
+      { type: 'tool_result', id: 't1', output: { ok: true } },
+      { type: 'message', content: 'done' },
+      { type: 'result', exit_code: 0 },
+    ]);
+    const trace = getTrace(db, id)!;
+    expect(trace.steps.map((s) => s.model)).toEqual(['gemini-2.5-pro', 'gemini-2.5-pro']);
+  });
+
+  it('follows a mid-session model change, leaving earlier steps on the old one', () => {
+    const t = makeTranslator('codex-exec')!;
+    const id = run(t, [
+      { type: 'thread.started', thread_id: 'th_2', model: 'gpt-5-codex' },
+      { type: 'item.completed', item: { item_type: 'command_execution', command: 'ls' } },
+      { type: 'turn_context', item: { model: 'gpt-5-codex-mini' } },
+      { type: 'item.completed', item: { item_type: 'command_execution', command: 'pwd' } },
+      { type: 'turn.completed', usage: {} },
+    ]);
+    const trace = getTrace(db, id)!;
+    expect(trace.steps.map((s) => s.model)).toEqual(['gpt-5-codex', 'gpt-5-codex-mini']);
+  });
+
+  it('stamps a record that both names a model and produces a step with that model', () => {
+    const t = makeTranslator('gemini-stream')!;
+    const id = run(t, [
+      { type: 'init', session_id: 's1' },
+      { type: 'message', content: 'hello', model: 'gemini-2.5-flash' },
+      { type: 'result', exit_code: 0 },
+    ]);
+    const trace = getTrace(db, id)!;
+    expect(trace.steps.map((s) => s.model)).toEqual(['gemini-2.5-flash']);
+  });
+
+  // The anti-fabrication guard, not a regression test: it passes against the
+  // unfixed source too, and that is the point. A stream that names no model
+  // must leave every step null — `check` skips a null-model baseline step, so
+  // an honest absence costs the gate nothing while an invented value fails it.
+  it('leaves the model null when the stream never names one', () => {
+    const t = makeTranslator('codex-exec')!;
+    const id = run(t, [
+      { type: 'thread.started', thread_id: 'th_3' },
+      { type: 'item.completed', item: { item_type: 'command_execution', command: 'ls' } },
+      { type: 'turn.completed', usage: {} },
+    ]);
+    const trace = getTrace(db, id)!;
+    expect(trace.steps.map((s) => s.model)).toEqual([null]);
+  });
+
+  it('ignores a non-string model rather than storing a coerced one', () => {
+    const t = makeTranslator('gemini-stream')!;
+    const id = run(t, [
+      { type: 'init', session_id: 's1', model: { name: 'gemini-2.5-pro' } },
+      { type: 'message', content: 'hi' },
+      { type: 'result', exit_code: 0 },
+    ]);
+    const trace = getTrace(db, id)!;
+    expect(trace.steps.map((s) => s.model)).toEqual([null]);
+  });
+});
