@@ -2372,6 +2372,14 @@ and one-way.
   read the identical attribute — so `stats` showed no cost and `list --sort cost`
   was inert for every span-captured trace. It also ignored a reported
   `total_tokens` when the input/output split was absent.
+- `watch` sat silent for a full poll interval when the trace it attached to had
+  already finished. `setInterval` fires no earlier than the interval, and the
+  status check lived only inside the tick, so the header and the recorded steps
+  printed at once and the verdict waited. At the 500ms default that is
+  invisible; `--interval 60000` left the reader in front of a finished trace for
+  a minute — and `--interval` is exactly the flag someone raises to ease load on
+  a big store, so the more they slowed polling the longer it withheld. It now
+  makes one pass immediately; the step cursor already prevents a repeat.
 - `guard test` reported `✔ No policy violations found.` against a store with no
   enabled policy — a green tick for a check that could not fire. Its two sibling
   evaluation paths, `guard check` and `hook --enforce`, already refuse to answer

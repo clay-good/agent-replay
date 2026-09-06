@@ -188,7 +188,7 @@ export function runWatch(traceId: string | undefined, opts: WatchOptions = {}): 
     console.log('');
   };
 
-  const timer = setInterval(() => {
+  const tick = (): void => {
     printNew();
 
     const row = db.prepare('SELECT status FROM agent_traces WHERE id = ?').get(id) as
@@ -214,7 +214,17 @@ export function runWatch(traceId: string | undefined, opts: WatchOptions = {}): 
     if (row.status !== 'running') {
       finish(row.status);
     }
-  }, pollMs);
+  };
+
+  const timer = setInterval(tick, pollMs);
+  // One pass now, because `setInterval` fires no earlier than `pollMs` and the
+  // trace may ALREADY be finished when this attaches — a `watch` on a run that
+  // ended a second ago, or on a store being tailed after the fact. At the 500ms
+  // default the wait is invisible; at `--interval 60000` the reader sits in
+  // front of a finished trace for a minute, and `--interval` is precisely the
+  // flag someone raises to ease load on a big store. `printNew` cursors on a
+  // seen-set, so this cannot double-print what the attach above already showed.
+  tick();
 
   // Stop cleanly on Ctrl-C.
   process.on('SIGINT', () => {

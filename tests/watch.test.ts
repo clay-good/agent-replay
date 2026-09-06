@@ -161,6 +161,43 @@ describe('isPossiblyAbandoned', () => {
   });
 });
 
+// ── runWatch first pass ───────────────────────────────────────────────────
+
+describe('runWatch checks the trace before it waits', () => {
+  it('reports a trace that was already finished at attach, without waiting a poll', () => {
+    // `setInterval` fires no earlier than the interval, and the status check
+    // lived only inside the tick — so attaching to a run that had ALREADY ended
+    // sat silent for a full poll first. At the 500ms default that is invisible;
+    // `--interval 60000` made it a minute in front of a finished trace, and
+    // `--interval` is exactly the flag someone raises to ease load on a big
+    // store. No timers are advanced here: the verdict must come from the
+    // synchronous first pass.
+    const dir = mkdtempSync(join(tmpdir(), 'ar-watch-first-'));
+    const store = ensureDatabase(resolve(dir, 'traces.db'));
+    const t = startTrace(store, { agent_name: 'w', status: 'running' }, { id: 'trc_already' });
+    appendStep(store, t.id, { step_number: 1, step_type: 'thought', name: 'only-step' });
+    updateTrace(store, t.id, { status: 'completed' });
+
+    const logs: string[] = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((m?: unknown) => { logs.push(String(m ?? '')); });
+    vi.useFakeTimers();
+    try {
+      runWatch(t.id, { dir, interval: '60000' });
+    } finally {
+      vi.useRealTimers();
+      logSpy.mockRestore();
+      process.removeAllListeners('SIGINT');
+      rmSync(dir, { recursive: true, force: true });
+    }
+
+    const plain = logs.map((l) => l.replace(/\x1B\[[0-9;]*m/g, '')).join('\n');
+    expect(plain).toContain('finished');
+    // And the step is printed exactly once: the attach already drew it, and the
+    // immediate pass must not repeat it (printNew cursors on a seen-set).
+    expect(plain.split('only-step')).toHaveLength(2);
+  });
+});
+
 // ── runWatch completion-race drain ────────────────────────────────────────
 
 describe('runWatch drains the tail on completion', () => {
