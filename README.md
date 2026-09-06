@@ -808,7 +808,9 @@ causes, because their cures are opposite: no baseline entry records that field
 **"An AI evaluator scored a long run and I don't trust the number."** Check the
 panel: when the trace did not fit the summary sent to the model, it says
 `Judged over N of M steps`, and the stored result carries `steps_shown` /
-`steps_total`. The summary always keeps the failing step and the important ones,
+`steps_total`. `diff --ai` says the same about differences
+(`Analyzed 15 of 4178 differences`, with `diffs_shown`/`diffs_total` in the
+payload). The summary always keeps the failing step and the important ones,
 but a verdict about step counts or efficiency over a partial run is worth
 reading with that in mind.
 

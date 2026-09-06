@@ -28,6 +28,8 @@ The analysis SHALL be resolved before a `--json` document is written, so `--ai -
 - **WHEN** the same command runs with `--json`
 - **THEN** stdout is a single `{ ok: false, error, hints }` refusal document at exit 1, not a diff document with a null analysis
 
+An AI comparison whose summary carried only part of the divergences SHALL report how many it was formed over, in the returned analysis and in the rendered panel — the summary tells the model the rest exist, and the reader is owed the same.
+
 A comparison that finds nothing SHALL report what it compared rather than that the traces are identical: the diff covers each step's type, name, input, output, model, error and decision plus the trace's input, status and error, and state snapshots are outside it — two traces differing only in their context window are not identical, and saying so sends the reader away from the difference they came for. The message SHALL name where the uncompared data can be read.
 
 ### Requirement: Trace forking

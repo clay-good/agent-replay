@@ -17,7 +17,21 @@ export interface TraceSummary {
    */
   steps_shown: number;
   steps_total: number;
+  /**
+   * The same disclosure for a DIFF summary, whose reduction is the list of
+   * divergences rather than the steps: it carries the first 15 and tells the
+   * model "and N more". Absent from a trace summary, which has no diffs.
+   */
+  diffs_shown?: number;
+  diffs_total?: number;
 }
+
+/**
+ * How many divergences the diff summary lists for the model. Named, because the
+ * count is reported to the caller as well now — a verdict formed over 15 of
+ * 4,178 differences (a real pair, measured) must be able to say so.
+ */
+const DIFF_LIST_LIMIT = 15;
 
 // ── Main summarizer ─────────────────────────────────────────────────────
 
@@ -120,7 +134,7 @@ export function summarizeDiffForLlm(
   // Differences
   if (diff.diffs.length > 0) {
     lines.push(`\nDIFFERENCES (${diff.diffs.length}):`);
-    for (const d of diff.diffs.slice(0, 15)) {
+    for (const d of diff.diffs.slice(0, DIFF_LIST_LIMIT)) {
       // JSON-stringify the values rather than String(): `input`/`output` field
       // diffs carry the parsed objects, and String({...}) is "[object Object]",
       // which would give the AI diff analysis no signal about the most
@@ -140,8 +154,8 @@ export function summarizeDiffForLlm(
       const where = d.step_number === null ? 'Trace' : `Step ${d.step_number}`;
       lines.push(`- ${where}, ${d.field}: LEFT=${leftVal} | RIGHT=${rightVal}`);
     }
-    if (diff.diffs.length > 15) {
-      lines.push(`  ... and ${diff.diffs.length - 15} more`);
+    if (diff.diffs.length > DIFF_LIST_LIMIT) {
+      lines.push(`  ... and ${diff.diffs.length - DIFF_LIST_LIMIT} more`);
     }
   }
 
@@ -154,11 +168,13 @@ export function summarizeDiffForLlm(
     text,
     estimated_tokens: Math.ceil(text.length / 4),
     // The diff summary carries divergences, not steps: it caps the LIST of
-    // differences (and says "and N more" when it does), so step coverage is not
-    // the number that describes it. Reported as complete rather than inventing
-    // a ratio this summary does not measure.
+    // differences, so step coverage is not the number that describes it.
+    // Reported as complete rather than inventing a ratio this summary does not
+    // measure; the ratio that DOES describe it is the diff one below.
     steps_shown: left.steps.length + right.steps.length,
     steps_total: left.steps.length + right.steps.length,
+    diffs_shown: Math.min(diff.diffs.length, DIFF_LIST_LIMIT),
+    diffs_total: diff.diffs.length,
   };
 }
 

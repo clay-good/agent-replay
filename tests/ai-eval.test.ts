@@ -422,6 +422,29 @@ describe('trace summarizer', () => {
     expect(summary.text).not.toContain('more steps omitted');
   });
 
+  it('reports how many divergences a diff summary carried', () => {
+    // The diff summary's reduction is the LIST of differences, not the steps:
+    // it carries the first 15 and tells the model "and N more". Measured on a
+    // real pair: 15 of 4,178.
+    const db = createTestDb();
+    const mk = (name: string) => ingestTrace(db, {
+      agent_name: 'cmp', status: 'completed', input: { task: 't' },
+      steps: Array.from({ length: 30 }, (_, i) => ({
+        step_number: i + 1, step_type: 'tool_call' as const, name: `${name}-${i}`,
+      })),
+    }).id;
+    const a = mk('a');
+    const b = mk('b');
+    const diff = diffTraces(db, a, b);
+    const summary = summarizeDiffForLlm(diff, getTrace(db, a)!, getTrace(db, b)!);
+    expect(diff.diffs.length).toBeGreaterThan(15);
+    expect(summary.diffs_total).toBe(diff.diffs.length);
+    expect(summary.diffs_shown).toBe(15);
+    // The numbers agree with the marker the model is shown.
+    const more = Number(/and (\d+) more/.exec(summary.text)?.[1] ?? 0);
+    expect(summary.diffs_total! - summary.diffs_shown!).toBe(more);
+  });
+
   it('respects token budget', () => {
     const db = createTestDb();
     const trace = ingestTrace(db, makeTrace());

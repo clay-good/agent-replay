@@ -283,6 +283,15 @@ export interface AiDiffAnalysis {
   better_trace: 'left' | 'right' | 'neither';
   reasoning: string;
   key_differences: string[];
+  /**
+   * How many of the comparison's divergences the model was shown, when it was
+   * not all of them. The summary lists the first 15 and tells the MODEL "and N
+   * more"; without these the reader was handed a verdict about "the
+   * comparison" formed over 15 of 4,178 differences (measured on a real pair).
+   * Absent when the model saw everything, so an ordinary analysis is unchanged.
+   */
+  diffs_shown?: number;
+  diffs_total?: number;
   cost: { tokens_used: number; cost_usd: number };
 }
 
@@ -354,6 +363,9 @@ export async function aiDiffAnalysis(
     key_differences: Array.isArray(parsed.key_differences)
       ? (parsed.key_differences as string[]).map(String)
       : [],
+    ...(summary.diffs_total != null && summary.diffs_shown != null && summary.diffs_shown < summary.diffs_total
+      ? { diffs_shown: summary.diffs_shown, diffs_total: summary.diffs_total }
+      : {}),
     cost: {
       tokens_used: response.input_tokens + response.output_tokens,
       cost_usd: response.cost_estimate_usd,

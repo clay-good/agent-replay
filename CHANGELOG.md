@@ -912,7 +912,7 @@ and one-way.
   The stored result now carries `steps_shown`/`steps_total` when the summary was
   partial, and the panel says "Judged over 44 of 1000 steps". Present only when
   partial, so an ordinary trace's output is unchanged, and worded like `stats`,
-  which already discloses how much of the data its own totals were taken over.
+  which already discloses how much of the data its own totals were taken over. The same disclosure covers `diff --ai`, whose summary lists the first 15 divergences and tells only the model that the rest exist: on a real pair that was 15 of 4,178, and the panel now says so.
 
 - **Only the listing said a trace looked abandoned.** `list` marks a run that
   has been `running` past the threshold with `⚠ abandoned?` — a producer that

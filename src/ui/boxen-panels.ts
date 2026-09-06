@@ -309,6 +309,8 @@ export function aiDiffPanel(analysis: {
   better_trace: string;
   reasoning: string;
   key_differences: string[];
+  diffs_shown?: number;
+  diffs_total?: number;
   cost: { tokens_used: number; cost_usd: number };
 }): string {
   const lines: string[] = [];
@@ -324,6 +326,20 @@ export function aiDiffPanel(analysis: {
     for (const diff of analysis.key_differences) {
       lines.push(`  ${chalk.dim('-')} ${chalk.white(safeText(String(diff)))}`);
     }
+  }
+
+  // What the model was shown, when it was not the whole comparison. The summary
+  // lists the first divergences and tells the MODEL the rest exist; the reader
+  // was handed the verdict with no such qualifier. Same disclosure the eval
+  // panel makes about its own summary, and the same rule `stats` follows for
+  // its totals. Present only when partial.
+  if (analysis.diffs_shown != null && analysis.diffs_total != null) {
+    lines.push('');
+    lines.push(
+      chalk.yellow(
+        `Analyzed ${safeText(String(analysis.diffs_shown))} of ${safeText(String(analysis.diffs_total))} differences — the rest did not fit the summary sent to the model.`,
+      ),
+    );
   }
 
   lines.push('');

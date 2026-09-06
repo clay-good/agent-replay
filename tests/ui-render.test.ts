@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { traceTable, evalTable, policyTable } from '../src/ui/table.js';
-import { traceHeaderPanel, summaryPanel, aiEvalPanel } from '../src/ui/boxen-panels.js';
+import { traceHeaderPanel, summaryPanel, aiEvalPanel, aiDiffPanel } from '../src/ui/boxen-panels.js';
 import { formatScorePct, formatCostUsd, safeText, safeLine } from '../src/ui/theme.js';
 import { formatDuration } from '../src/utils/time.js';
 import { renderTimeline, renderTree } from '../src/ui/timeline.js';
@@ -1022,5 +1022,23 @@ describe('aiEvalPanel discloses a partial judgement', () => {
       details: { efficiency_score: 9, cost_usd: 0.01 },
     }));
     expect(out).not.toMatch(/Judged over/);
+  });
+});
+
+describe('aiDiffPanel discloses a partial analysis', () => {
+  it('says how many differences the model was shown', () => {
+    const out = noAnsi(aiDiffPanel({
+      explanation: 'x', better_trace: 'left', reasoning: 'y', key_differences: [],
+      diffs_shown: 15, diffs_total: 4178, cost: { tokens_used: 10, cost_usd: 0.001 },
+    }));
+    expect(out).toMatch(/Analyzed 15 of 4178 differences/);
+  });
+
+  it('says nothing when the model saw them all', () => {
+    const out = noAnsi(aiDiffPanel({
+      explanation: 'x', better_trace: 'left', reasoning: 'y', key_differences: [],
+      cost: { tokens_used: 10, cost_usd: 0.001 },
+    }));
+    expect(out).not.toMatch(/Analyzed/);
   });
 });
