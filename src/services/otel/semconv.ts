@@ -153,9 +153,33 @@ function costUsd(a: Record<string, unknown>): number {
   const c = num(a['gen_ai.usage.cost'] ?? a['cost_usd'] ?? a['cost']);
   return Number.isFinite(c) && c > 0 ? c : 0;
 }
-/** Tokens for one span: the split when present, else a reported total. */
+/**
+ * The CACHE counters a span reports beside its input and output.
+ *
+ * Both the OTel GenAI name for cached prompt tokens and the Anthropic-shaped
+ * one instrumentations emit, since the dialects this receiver already
+ * normalizes disagree about which to send.
+ */
+function cacheTokens(a: Record<string, unknown>): number {
+  return (
+    usage(num(a['gen_ai.usage.cache_creation_input_tokens'] ?? a['gen_ai.usage.cache_creation_tokens'])) +
+    usage(num(a['gen_ai.usage.cached_input_tokens'] ?? a['gen_ai.usage.cache_read_input_tokens'] ?? a['llm.token_count.cache_read']))
+  );
+}
+
+/**
+ * Tokens for one span: the split when present, else a reported total.
+ *
+ * The split INCLUDES the cache counters. This path counted input + output only,
+ * so the same session reported 120 tokens as spans and 9,420 as logs once the
+ * log path learned to count them (3a44a94) — and the spec has said all along
+ * that cache sub-counts aggregate into the totals here. Caught by pairing the
+ * two receivers in tests/cross-path-consistency.test.ts, which is the point of
+ * that file: the endpoint a session lands on is a collector setting, not a
+ * property of the run.
+ */
 function spanTokens(a: Record<string, unknown>): number {
-  const split = inputTokens(a) + outputTokens(a);
+  const split = inputTokens(a) + outputTokens(a) + cacheTokens(a);
   return split > 0 ? split : totalTokensOnly(a);
 }
 

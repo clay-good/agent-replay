@@ -2503,6 +2503,16 @@ and one-way.
   `ended_at - started_at`, `list` reported that 31-second session as 1 second
   and `list --sort duration` ranked it among the shortest in the store. The span
   path was never affected: it maxes over span END times.
+- The OTel SPAN receiver had the same gap, and the fix above exposed it: it
+  summed input and output only, so once `/v1/logs` counted the cache sub-counts
+  one session reported 120 tokens as spans and 9,420 as logs — while the spec
+  had said all along that cache sub-counts aggregate into the totals on this
+  path. Which endpoint a session lands on is a collector setting, not a property
+  of the run. Both the OTel GenAI name for cached prompt tokens and the
+  Anthropic-shaped one instrumentations emit are read, since the dialects this
+  receiver normalizes disagree about which to send. Found by pairing the two
+  receivers in `tests/cross-path-consistency.test.ts`, which now holds that pair
+  so they cannot drift apart again.
 - The OTel log receiver counted only input and output tokens, dropping the cache
   counters both CLIs report beside them — and on a Claude Code session
   `cache_read` is routinely an order of magnitude larger than `input`. The hook

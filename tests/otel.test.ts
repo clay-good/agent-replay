@@ -622,6 +622,57 @@ describe('unroutedRequest', () => {
   });
 });
 
+describe('mapOtlpTraces — cache tokens', () => {
+  it('counts the cache sub-counts a span reports, not just input and output', () => {
+    // The spec has always said cache sub-counts aggregate into the totals here,
+    // and this path summed input + output only. Once the LOG path learned to
+    // count them, one session reported 120 tokens as spans and 9,420 as logs —
+    // and which endpoint a session lands on is a collector setting, not a
+    // property of the run.
+    const [t] = mapOtlpTraces(otlp([
+      span({ traceId: 'c1', spanId: '01', name: 'invoke_agent bot', start: 1 * MS, end: 4 * MS,
+        attrs: { 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'bot' } }),
+      span({ traceId: 'c1', spanId: '02', parentSpanId: '01', name: 'chat', start: 2 * MS, end: 3 * MS,
+        attrs: {
+          'gen_ai.operation.name': 'chat',
+          'gen_ai.usage.input_tokens': 100,
+          'gen_ai.usage.output_tokens': 20,
+          'gen_ai.usage.cache_creation_input_tokens': 300,
+          'gen_ai.usage.cached_input_tokens': 9000,
+        } }),
+    ]) as never);
+    expect(t.total_tokens).toBe(9420);
+  });
+
+  it('reads the Anthropic-shaped cache key too, which instrumentations emit', () => {
+    // The dialects this receiver normalizes disagree about which name to send.
+    const [t] = mapOtlpTraces(otlp([
+      span({ traceId: 'c2', spanId: '01', name: 'invoke_agent bot', start: 1 * MS, end: 4 * MS,
+        attrs: { 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'bot' } }),
+      span({ traceId: 'c2', spanId: '02', parentSpanId: '01', name: 'chat', start: 2 * MS, end: 3 * MS,
+        attrs: {
+          'gen_ai.operation.name': 'chat',
+          'gen_ai.usage.input_tokens': 10,
+          'gen_ai.usage.output_tokens': 5,
+          'gen_ai.usage.cache_read_input_tokens': 900,
+        } }),
+    ]) as never);
+    expect(t.total_tokens).toBe(915);
+  });
+
+  it('still falls back to a reported total when no component is present', () => {
+    // The existing rule, unchanged: a span reporting only a total is not
+    // double-counted, and a span with no usage at all contributes nothing.
+    const [t] = mapOtlpTraces(otlp([
+      span({ traceId: 'c3', spanId: '01', name: 'invoke_agent bot', start: 1 * MS, end: 4 * MS,
+        attrs: { 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'bot' } }),
+      span({ traceId: 'c3', spanId: '02', parentSpanId: '01', name: 'chat', start: 2 * MS, end: 3 * MS,
+        attrs: { 'gen_ai.operation.name': 'chat', 'gen_ai.usage.total_tokens': 77 } }),
+    ]) as never);
+    expect(t.total_tokens).toBe(77);
+  });
+});
+
 describe('mapOtlpTraces — an unrenderable span timestamp', () => {
   // The end/start sets were built from RAW nanos while the formatter rejects a
   // stamp outside the four-digit-year window, so one absurd endTimeUnixNano gave

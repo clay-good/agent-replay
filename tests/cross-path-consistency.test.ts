@@ -8,6 +8,7 @@ import { applyHookPayload } from '../src/services/hook-adapter.js';
 import { importClaudeTranscript } from '../src/services/importers/claude-transcript.js';
 import { importCodexRollout } from '../src/services/importers/codex-rollout.js';
 import { mapOtlpLogs } from '../src/services/otel/log-events.js';
+import { mapOtlpTraces } from '../src/services/otel/semconv.js';
 import { makeTranslator } from '../src/services/stream-translators.js';
 import { applyEvent } from '../src/services/recorder.js';
 import { ingestTrace } from '../src/services/trace-service.js';
@@ -401,5 +402,87 @@ describe('the other capture pairs agree too', () => {
     // rather than decided here. When it is decided, this expectation is the
     // thing to change.
     expect([a.steps[0].name, b.steps[0].name]).toEqual(['ls', 'shell']);
+  });
+});
+
+
+describe('the two OTel receivers front the same store, so they must agree', () => {
+  // `otel serve` accepts /v1/traces and /v1/logs, and which one a session lands
+  // on is a collector setting, not a property of the run. Pairing them found
+  // three defects the per-endpoint tests could not: the log path summed only
+  // input+output tokens while the span path counted its cache sub-counts
+  // (120 vs 9,420 on one session); the log path ended a session at its last
+  // RECORD rather than its last STEP, leaving a step outside its own trace and
+  // reporting a 31-second run as 1 second; and a successful model call becomes
+  // a step on the span path and nothing on the log path (raised as
+  // `openspec/changes/record-log-model-calls`, since closing it changes stored
+  // shape).
+  const NS = (ms: number) => String(ms * 1_000_000);
+  const at = (key: string, value: unknown) => {
+    if (typeof value === 'number') return { key, value: { intValue: String(value) } };
+    if (typeof value === 'boolean') return { key, value: { boolValue: value } };
+    return { key, value: { stringValue: String(value) } };
+  };
+  const attrs = (o: Record<string, unknown>) => Object.entries(o).map(([k, v]) => at(k, v));
+
+  /** One session as log events: a prompt, a tool call, a model call. */
+  function viaLogs() {
+    const [mapped] = mapOtlpLogs({
+      resourceLogs: [{ resource: { attributes: [] }, scopeLogs: [{ logRecords: [
+        { timeUnixNano: NS(1000), eventName: 'claude_code.user_prompt', attributes: attrs({ 'session.id': 'X', prompt: 'fix the build' }) },
+        { timeUnixNano: NS(2000), eventName: 'claude_code.tool_result', attributes: attrs({ 'session.id': 'X', tool_name: 'Bash', success: true, duration_ms: 500 }) },
+        { timeUnixNano: NS(3000), eventName: 'claude_code.api_request', attributes: attrs({ 'session.id': 'X', model: 'claude-opus-5', input_tokens: 100, output_tokens: 20, cache_creation_input_tokens: 300, cache_read_input_tokens: 9000 }) },
+      ] }] }],
+    } as never);
+    return mapped;
+  }
+
+  /** The same session as GenAI spans. */
+  function viaSpans() {
+    const span = (name: string, id: string, parent: string | null, start: number, end: number, a: Record<string, unknown>) => ({
+      traceId: 'aa', spanId: id, parentSpanId: parent ?? undefined, name,
+      startTimeUnixNano: NS(start), endTimeUnixNano: NS(end), attributes: attrs(a),
+    });
+    const [mapped] = mapOtlpTraces({
+      resourceSpans: [{ resource: { attributes: [] }, scopeSpans: [{ spans: [
+        span('invoke_agent claude-code', '01', null, 1000, 3500, { 'gen_ai.operation.name': 'invoke_agent', 'gen_ai.agent.name': 'claude-code', 'session.id': 'X' }),
+        span('execute_tool Bash', '02', '01', 2000, 2500, { 'gen_ai.operation.name': 'execute_tool', 'gen_ai.tool.name': 'Bash' }),
+        span('chat claude-opus-5', '03', '01', 3000, 3400, { 'gen_ai.operation.name': 'chat', 'gen_ai.request.model': 'claude-opus-5', 'gen_ai.usage.input_tokens': 100, 'gen_ai.usage.output_tokens': 20, 'gen_ai.usage.cache_creation_input_tokens': 300, 'gen_ai.usage.cached_input_tokens': 9000 }),
+      ] }] }],
+    } as never);
+    return mapped;
+  }
+
+  it('counts the same tokens for one session, cache included', () => {
+    // The number `stats`, `list --sort tokens` and every cost estimate read.
+    expect(viaLogs().total_tokens).toBe(9420);
+    expect(viaSpans().total_tokens).toBe(viaLogs().total_tokens);
+  });
+
+  it('agrees on the session and the agent', () => {
+    expect(viaLogs().session_id).toBe('X');
+    expect(viaSpans().session_id).toBe('X');
+    expect(viaSpans().agent_name).toBe(viaLogs().agent_name);
+  });
+
+  it('leaves no step outside the trace window on either path', () => {
+    // A log record REPORTS finished work and carries its duration, so a step can
+    // end after the last record was stamped. The span path takes a max over span
+    // END times and never had this.
+    for (const t of [viaLogs(), viaSpans()]) {
+      const start = Date.parse(t.started_at as string);
+      const end = Date.parse(t.ended_at as string);
+      expect(Number.isNaN(end)).toBe(false);
+      for (const step of t.steps ?? []) {
+        expect(Date.parse(step.started_at!)).toBeGreaterThanOrEqual(start);
+        expect(Date.parse(step.ended_at!)).toBeLessThanOrEqual(end);
+      }
+    }
+  });
+
+  it('records which receiver produced each, so a store can tell them apart', () => {
+    const src = (t: { metadata?: unknown }) => (t.metadata as { source_format?: string }).source_format;
+    expect(src(viaLogs())).toBe('claude-code-logs');
+    expect(src(viaSpans())).toBe('otel-genai');
   });
 });
