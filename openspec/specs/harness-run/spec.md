@@ -7,6 +7,13 @@ Even with live capture, agent-replay only observes. Guardrail policies exist but
 
 The system SHALL run an agent process under supervision via `agent-replay run [options] -- <command>`, pre-creating a trace and exposing the recording channel to the child through environment variables (`AGENT_REPLAY_DIR`, `AGENT_REPLAY_TRACE_ID`, `AGENT_REPLAY_EVENTS`), consuming JSONL events the child emits on that channel, and finalizing the trace from the child's exit: exit 0 → `completed`, non-zero → `failed` with the exit code recorded. A child that declares its own TERMINAL status in a `trace_end` event owns the outcome and that status is kept whatever the exit code; a status the store cannot record does not count as a declaration, so the exit code still decides. A child killed by a signal exits `128 + signal` with the signal named in the trace error.
 
+The system SHALL share the wrapper's STORE with a nested `agent-replay` invocation via `AGENT_REPLAY_DIR`, while the wrapper's TRACE is written to only by a child that emits the handed-down `AGENT_REPLAY_TRACE_ID`. A nested translated harness stream generates its own session id and so records a separate trace in that same store.
+
+#### Scenario: Nested capture of a harness stream
+
+- **WHEN** a user runs `run -- sh -c '<harness> | agent-replay record --format <harness-stream>'`
+- **THEN** both traces land in the wrapper's store: the wrapper's, carrying timing and exit status, and the child's, carrying the steps
+
 #### Scenario: Instrumented agent run
 
 - **WHEN** a user runs `agent-replay run --agent-name my-bot -- node agent.js` and the agent emits step events via the SDK
