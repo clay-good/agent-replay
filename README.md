@@ -217,7 +217,9 @@ continuation summary a harness writes when it **compacts** a session counts as
 an envelope too, so a compacted session's prompt is your next real message, not
 10 KB of summary; the summary is kept in `preamble_prompts`, and the trace is
 marked `metadata.compacted` because the steps before the boundary are in an
-earlier transcript file.
+earlier transcript file. `show` says so in the header — a continuation is a
+fragment, and its duration and step count cover only the part after the
+boundary.
 
 Importing the same session twice does **not** create a second trace:
 

@@ -204,6 +204,18 @@ describe('renderDiff', () => {
     expect(() => renderDiff(diff, trace(), trace())).not.toThrow();
   });
 
+  it('marks a compacted continuation in the header', () => {
+    // `import` records `metadata.compacted` when the transcript says so, and
+    // nothing showed it: a continuation read as a whole run, though its
+    // duration covers only the part after the boundary and the earlier steps
+    // are in a file this trace cannot reach.
+    const t = trace();
+    const compacted = { ...t, metadata: { ...(t.metadata ?? {}), compacted: true } };
+    expect(noAnsi(traceHeaderPanel(compacted))).toMatch(/continued after a compaction/);
+    // An ordinary trace says nothing.
+    expect(noAnsi(traceHeaderPanel(t))).not.toMatch(/compaction/);
+  });
+
   it('says a trace STOPPED rather than diverged when it is a prefix of the other', () => {
     // A fresh fork is a copy that has not run yet: it agrees with its parent on
     // every step it has and then stops. `fork` prints `diff <parent> <fork>` as

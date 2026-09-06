@@ -110,6 +110,17 @@ export function traceHeaderPanel(trace: Trace): string {
   if (trace.session_id) {
     lines.push(`${label('Session:')}   ${chalk.white(safeLine(trace.session_id))}`);
   }
+  // A CONTINUATION is a fragment, and the header is where that has to be said.
+  //
+  // `import` records `metadata.compacted` when the transcript states it (a
+  // `compact_boundary` record, or the summary turn's own flag), and nothing
+  // showed it. So a compacted session read as a whole run: the duration covers
+  // only the part after the boundary, the step count is the tail of the
+  // session, and the steps before it are in an earlier file this trace cannot
+  // reach. A reader comparing it to a full session is comparing a fragment.
+  if ((trace.metadata as { compacted?: unknown } | null)?.compacted === true) {
+    lines.push(`${label('Note:')}      ${chalk.yellow('continued after a compaction; earlier steps are elsewhere')}`);
+  }
 
   return box(lines.join('\n'), {
     padding: 1,

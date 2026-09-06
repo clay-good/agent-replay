@@ -443,6 +443,12 @@ and one-way.
 
 ### Fixed
 
+- **A compacted session read as a whole run.** The importer records
+  `metadata.compacted` when the transcript states it, and no view showed it — so
+  a continuation looked like an ordinary trace, though its duration covers only
+  the part after the boundary and the steps before it are in a file this trace
+  cannot reach. The `show` header now says so.
+
 - **`list --json` did not report the "abandoned?" it was drawing.** The table
   marks a run stuck in `running` past the threshold, and the document said
   nothing — so a script scanning a store for stalled runs, which is the natural
