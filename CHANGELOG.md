@@ -103,8 +103,8 @@ and one-way.
   `check --golden` matches a candidate to its baseline by agent name and a hash
   of the trace input, and never matches an empty one — so a
   `record --format codex-exec` / `gemini-stream` capture could not be gated at
-  all: neither harness puts its prompt in the stream, both take it on the
-  command line. The prompt is right there in the shell command, and this passes
+  all: none of the harness streams carries its prompt, since each of them takes
+  it on the command line. The prompt is right there in the shell command, and this passes
   it in, which is the only honest source for it. It fills in only — a native
   producer that sends its own input keeps it — and a blank value is treated as
   absent rather than stored as an empty prompt. The refusal that names this
@@ -396,7 +396,7 @@ and one-way.
   rollout importers each track the model in force and stamp the steps a record
   produced, and both OpenTelemetry mappers do the same. A step's `model` is
   what `diff` reports a change in and what `show`/`replay` display, so a model
-  swap between two captured runs was invisible. Both translators now track the
+  swap between two captured runs was invisible. The translators now track the
   model as a running cursor and stamp the steps that follow, so a session that
   switches models mid-run keeps each step labelled with the model in effect at
   its own time. A stream that names no model still stores none — an absence is
