@@ -828,6 +828,51 @@ describe('the stored prompt is what the person asked', () => {
     expect(trace.metadata.follow_up_prompts).toBeUndefined();
   });
 
+  it('closes what the transcript proves finished, and only that', () => {
+    // A hook-captured session closes its tool_call on PostToolUse; an imported
+    // one left every step open, so the SAME session captured the two ways
+    // disagreed about whether anything had finished, and `show` drew a
+    // `completed` import as though its tools were still running.
+    const path = fixture([
+      { type: 'user', sessionId: 'close-1', timestamp: '2026-09-06T10:00:00.000Z', message: { content: 'go' } },
+      {
+        type: 'assistant', sessionId: 'close-1', timestamp: '2026-09-06T10:00:01.000Z',
+        message: { content: [{ type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'ls' } }] },
+      },
+      {
+        type: 'user', sessionId: 'close-1', timestamp: '2026-09-06T10:00:02.000Z',
+        message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'a.txt' }] },
+      },
+    ]);
+    const trace = getTrace(db, importClaudeTranscript(db, path).trace!.id)!;
+    const tool = trace.steps.find((s) => s.step_type === 'tool_call')!;
+    expect(tool.ended_at).toBeTruthy();
+    // The step's OWN start, never the interval to the next record — that
+    // interval includes time the user was away, and reading a duration out of
+    // it is exactly what the spec forbids.
+    expect(tool.ended_at).toBe(tool.started_at);
+    expect(tool.duration_ms ?? null).toBeNull();
+  });
+
+  it('leaves a tool call with no result open, because the session was interrupted there', () => {
+    const path = fixture([
+      { type: 'user', sessionId: 'close-2', timestamp: '2026-09-06T10:00:00.000Z', message: { content: 'go' } },
+      {
+        type: 'assistant', sessionId: 'close-2', timestamp: '2026-09-06T10:00:01.000Z',
+        message: { content: [{ type: 'tool_use', id: 'tu-never', name: 'Bash', input: { command: 'sleep 999' } }] },
+      },
+      {
+        type: 'assistant', sessionId: 'close-2', timestamp: '2026-09-06T10:00:02.000Z',
+        message: { content: [{ type: 'text', text: 'interrupted' }] },
+      },
+    ]);
+    const trace = getTrace(db, importClaudeTranscript(db, path).trace!.id)!;
+    const byName = Object.fromEntries(trace.steps.map((s) => [s.name, s.ended_at != null]));
+    expect(byName.Bash).toBe(false);
+    // The message beside it is complete when its record is written.
+    expect(byName.assistant_message).toBe(true);
+  });
+
   it('reports the token total, and what it counts, in the summary', () => {
     // A Claude transcript's usage is dominated by cache reads — summed on
     // purpose — so the total is startling out of context: a real session

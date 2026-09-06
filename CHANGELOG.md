@@ -443,6 +443,18 @@ and one-way.
 
 ### Fixed
 
+- **An imported session's steps were all stored unfinished.** A hook-captured
+  session closes its tool call when `PostToolUse` arrives; an import left every
+  step with no `ended_at`, so the SAME session captured the two ways disagreed
+  about whether anything had finished, and `show` drew a `completed` import as
+  though its tools were still running. An imported step is now closed when the
+  transcript proves it finished — a `tool_use` paired with its `tool_result`,
+  and any step whose record is itself the artifact — and left open otherwise,
+  because an unpaired tool call means the session was interrupted there. The end
+  is the step's own start, never the interval to the next record: that interval
+  includes time the user was away. On a real 3,067-step transcript exactly one
+  step stays open, the call that was still running when the file was written.
+
 - **The walkthrough told you to diff "the travel-assistant ids" without saying
   which.** The demo seeds a comparable pair — the same request before and after
   a model upgrade — and then sent the reader to find its two ids in a table of

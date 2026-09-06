@@ -363,6 +363,30 @@ export function importClaudeTranscript(
     // lines above. Only the steps were left out.
     if (stamp) {
       for (let i = stepsBefore; i < steps.length; i++) steps[i].started_at ??= stamp;
+      // Close what the transcript PROVES finished, and only that.
+      //
+      // A hook-captured session closes its tool_call on PostToolUse; an
+      // imported one left every step `ended_at: null`, so the same session
+      // captured the two ways disagreed about whether anything had finished —
+      // and `show` drew a `completed` import as though its tools were still
+      // running.
+      //
+      // A tool_use PAIRED with its tool_result is finished: the pairing is the
+      // proof, and an UNPAIRED one stays open, which is real information (the
+      // session was interrupted there). Every other step type — a message, a
+      // thought — is complete when the record that carries it is written.
+      //
+      // The end is the step's own start, never the interval to the next record:
+      // that interval includes time the user was away, and the spec forbids
+      // reading a duration out of it. So the step reads "finished, duration
+      // unknown", which is what the transcript actually says.
+      for (let i = stepsBefore; i < steps.length; i++) {
+        const step = steps[i];
+        if (step.ended_at) continue;
+        const unpaired = step.step_type === 'tool_call'
+          && !(typeof step.metadata?.tool_use_id === 'string' && toolResults.has(step.metadata.tool_use_id));
+        if (!unpaired) step.ended_at = step.started_at;
+      }
     }
     // The model that produced this record's steps — ALL of them, not just the
     // assistant message. A `tool_call` step is the model's decision to call a
