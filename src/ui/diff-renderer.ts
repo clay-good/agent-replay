@@ -56,11 +56,26 @@ export function renderDiff(
     );
   } else if (diff.diffs.length === 0) {
     lines.push('');
-    lines.push(
-      fields && fields.length > 0
-        ? chalk.greenBright.bold(`  No differences in the selected field(s): ${fields.join(', ')}.`)
-        : chalk.greenBright.bold('  Traces are identical.'),
-    );
+    if (fields && fields.length > 0) {
+      lines.push(chalk.greenBright.bold(`  No differences in the selected field(s): ${fields.join(', ')}.`));
+    } else {
+      // "Identical" is a claim about the whole trace, and this comparison is
+      // not that: it looks at step type, name, input, output, model, error and
+      // decision, plus the trace's input, status and error — and at nothing
+      // else the store holds. Two traces whose STATE SNAPSHOTS differ (one
+      // system prompt against another, which is the difference a reader most
+      // often opens `diff` to find) were reported as identical.
+      //
+      // The filtered branch above already says what it measured, with the rule
+      // written beside it: "a filter must never imply more similarity than was
+      // measured". The unfiltered branch is that rule's neighbour, and it was
+      // making the larger version of the same claim.
+      lines.push(chalk.greenBright.bold('  No differences in the compared fields.'));
+      lines.push(
+        chalk.dim('  Steps (type, name, input, output, model, error, decision) and the trace\'s input, status and error.'),
+      );
+      lines.push(chalk.dim('  State snapshots are not compared — see "agent-replay show <id> --snapshots".'));
+    }
     return lines.join('\n');
   }
 

@@ -171,9 +171,13 @@ describe('renderDiff', () => {
     left_step_count: 2, right_step_count: 2, diffs: [], ...over,
   });
 
-  it('reports identical traces', () => {
+  it('reports no differences without calling the traces identical', () => {
+    // "Identical" is a claim about the whole trace over a comparison that looks
+    // at steps and three trace fields — snapshots, for one, are outside it — so
+    // the renderer names what it compared instead.
     const out = noAnsi(renderDiff(diffResult(), trace(), trace()));
-    expect(out).toMatch(/identical/i);
+    expect(out).toContain('No differences in the compared fields');
+    expect(out).not.toMatch(/identical/i);
   });
 
   it('renders divergences with null, object, and model values without crashing', () => {
@@ -222,7 +226,7 @@ describe('renderDiff verdict and value windowing', () => {
     session_id: null, created_at: '2026-08-17T00:00:00Z',
   } as unknown as Trace);
 
-  it('does not claim two traces are identical over a filtered comparison', () => {
+  it('claims no identity on either branch, filtered or not', () => {
     // With --fields narrowing the diff to nothing, the renderer printed a flat
     // "Traces are identical." under a header showing COMPLETED beside FAILED.
     const empty = {
@@ -230,8 +234,13 @@ describe('renderDiff verdict and value windowing', () => {
       left_trace_id: 'trc_left0000', right_trace_id: 'trc_right000',
       left_step_count: 2, right_step_count: 2,
     } as unknown as TraceDiffResult;
+    // Neither branch claims identity now — the unfiltered one used to, which is
+    // the same over-claim one size larger, since even a full comparison leaves
+    // the state snapshots out.
     const unfiltered = noAnsi(renderDiff(empty, trace('l', 'completed'), trace('r', 'failed')));
-    expect(unfiltered).toContain('Traces are identical.');
+    expect(unfiltered).not.toContain('Traces are identical.');
+    expect(unfiltered).toContain('No differences in the compared fields');
+    expect(unfiltered).toMatch(/snapshots are not compared/i);
 
     const filtered = noAnsi(renderDiff(empty, trace('l', 'completed'), trace('r', 'failed'), ['model']));
     expect(filtered).not.toContain('Traces are identical.');

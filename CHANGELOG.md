@@ -902,6 +902,18 @@ and one-way.
   the one headline command that had not adopted it. A literal `null` is
   untouched: it remains the documented no-op that keeps the original value.
 
+- **`diff` called two traces identical when it had not compared them.** The
+  unfiltered summary printed "Traces are identical." over a comparison that
+  looks at each step's type, name, input, output, model, error and decision plus
+  the trace's input, status and error — and nothing else the store holds. Two
+  traces whose STATE SNAPSHOTS differ, one system prompt against another, which
+  is the difference a reader most often opens `diff` to find, were reported as
+  identical. The `--fields` branch of the same renderer already said what it had
+  measured, with the rule written beside it ("a filter must never imply more
+  similarity than was measured"); its neighbour was making the larger version of
+  the same claim. It now names the fields it compared and points at
+  `show --snapshots` for the data it did not.
+
 - **The dashboard drew a broken panel for a long status name or an unusable
   score.** A status longer than the panel pushed its row past the box edge,
   where blessed wraps it and every bar below stops lining up; labels are now

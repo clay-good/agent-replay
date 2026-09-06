@@ -128,9 +128,16 @@ describe('diff renders for a human', () => {
     expect(text).toMatch(/model/);
   });
 
-  it('reports two identical traces as identical', async () => {
+  it('reports no differences without claiming the traces are identical', async () => {
+    // This asserted /identical/ — the word the renderer used to print over a
+    // comparison that looks at steps and three trace fields and nothing else,
+    // so the test defended the over-claim. What the command owes the reader is
+    // what it compared, and where the rest lives.
     await runDiff(a, a, { dir });
-    expect(noAnsi(out.join('\n'))).toMatch(/identical/i);
+    const text = noAnsi(out.join('\n'));
+    expect(text).toMatch(/No differences in the compared fields/);
+    expect(text).not.toMatch(/identical/i);
+    expect(text).toMatch(/snapshots are not compared/i);
     expect(process.exitCode).toBe(0);
   });
 });
@@ -162,5 +169,45 @@ describe('diff says when --compact does nothing under --json', () => {
     // why the warning is warranted.
     expect(doc()).toHaveProperty('diffs');
     expect(doc()).toHaveProperty('left_step_count', 2);
+  });
+});
+
+describe('a diff of traces that differ only in their snapshot', () => {
+  // The difference a reader most often opens `diff` to find — one system prompt
+  // against another — is not a field this comparison looks at. Saying
+  // "identical" about that pair is the claim the renderer no longer makes.
+  let dir: string;
+  let out: string[];
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let ids: string[];
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ar-diff-ctx-'));
+    const db = ensureDatabase(resolve(dir, 'traces.db'));
+    ids = ['SYSTEM: you are helpful. USER: p', 'SYSTEM: you are TERSE. USER: p'].map((ctx) =>
+      ingestTrace(db, {
+        agent_name: 'ctxbot', status: 'completed', input: { prompt: 'p' },
+        steps: [{
+          step_number: 1, step_type: 'llm_call', name: 'answer',
+          input: { q: 'p' }, output: { a: 'same' },
+          snapshot: { context_window: ctx },
+        }],
+      } as IngestTraceInput).id,
+    );
+    out = [];
+    logSpy = vi.spyOn(console, 'log').mockImplementation((m?: unknown) => { out.push(String(m ?? '')); });
+  });
+  afterEach(() => {
+    logSpy.mockRestore();
+    resetConnection();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('says what was compared and points at the snapshots', async () => {
+    await runDiff(ids[0], ids[1], { dir });
+    const text = out.join('\n').replace(/\x1B\[[0-9;]*m/g, '');
+    expect(text).not.toMatch(/identical/i);
+    expect(text).toContain('No differences in the compared fields');
+    expect(text).toMatch(/--snapshots/);
   });
 });

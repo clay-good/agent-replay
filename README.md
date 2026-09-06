@@ -10,7 +10,7 @@ When your AI agent hallucinates, calls the wrong tool, or breaks in production �
 You deploy an AI agent. It works Monday. Tuesday it hallucinates, makes up a company policy, and tells a customer something completely wrong. Your only debugging option is reading raw JSON logs. `agent-replay` records every step of every agent run — every thought, tool call, retrieval, and output — so you can replay exactly what happened, step by step, like rewinding a tape.
 
 **2. "It worked before, what changed?"**
-You push a new prompt or swap a model and suddenly your agent breaks on cases that used to work. `agent-replay diff` puts two runs side-by-side and shows you exactly where they diverged — which step went different, what changed in the context, where things went wrong.
+You push a new prompt or swap a model and suddenly your agent breaks on cases that used to work. `agent-replay diff` puts two runs side-by-side and shows you exactly where they diverged — which step went different, what its inputs and outputs were, and where things went wrong.
 
 **3. "How do I test a fix without rerunning everything?"**
 You think you know what went wrong but you don't want to burn API credits and time reproducing the exact scenario. `agent-replay fork` lets you take any recorded run, rewind to any step, and change the input or the context there — you re-run your agent from that point instead of from the top, and `diff` the branch against the original.
@@ -388,7 +388,10 @@ that does exist, so a script cannot report success having replayed nothing.
 ### Compare
 
 ```bash
-# Side-by-side diff of two traces
+# Side-by-side diff of two traces (compares each step's type, name, input,
+# output, model, error and decision, plus the trace's input, status and error —
+# state snapshots are not compared, so a run whose only change is its context
+# window reports no differences and says so; read those with `show --snapshots`)
 agent-replay diff <trace-a> <trace-b>
 
 # Summary only
