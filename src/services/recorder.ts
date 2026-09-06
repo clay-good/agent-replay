@@ -40,6 +40,22 @@ export interface ApplyResult {
 }
 
 /**
+ * The end a COMPLETE step implies, from what its own event carries.
+ *
+ * `start + duration` when both are usable, the start alone when only it is, and
+ * undefined when the producer gave no start either — there is nothing to derive
+ * an end from, and inventing the current time would stamp a step with the
+ * moment it happened to be ingested.
+ */
+function impliedEnd(startedAt: unknown, durationMs: unknown): string | undefined {
+  if (typeof startedAt !== 'string' || startedAt === '') return undefined;
+  const start = Date.parse(startedAt);
+  if (Number.isNaN(start)) return undefined;
+  const span = typeof durationMs === 'number' && Number.isFinite(durationMs) && durationMs > 0 ? durationMs : 0;
+  return new Date(start + span).toISOString();
+}
+
+/**
  * Other root traces already recorded for this session, as a note.
  *
  * Bounded: the ids of the first few, because a session with many is a
@@ -138,14 +154,32 @@ export function applyEvent(db: Database.Database, event: CaptureEvent): ApplyRes
 
     case 'step': {
       const droppedRefs: string[] = [];
+      // The instant this complete step is being recorded, used for BOTH ends
+      // when the producer timed neither. The storage layer would default the
+      // start to its own "now" a moment later, and an end computed from a
+      // slightly earlier clock reading would then sit before the start — a
+      // negative duration, from two readings of the same instant.
+      const now = isoNow();
       appendStep(db, event.trace_id!, {
         step_number: event.step_number,
         step_type: event.step_type,
         name: event.name,
         input: event.input,
         output: event.output,
-        started_at: event.started_at,
-        ended_at: event.ended_at,
+        started_at: event.started_at ?? now,
+        // A `step` event is "a complete step in one event" — that is what
+        // distinguishes it from the `step_start`/`step_end` pair, which exists
+        // precisely for a step that is still running. A producer that sends one
+        // without `ended_at` was storing a finished step as unfinished: the
+        // codex-exec translator's `item.completed` records did exactly that, so
+        // every tool call it captured sat in flight for the life of the trace.
+        //
+        // Closed from what the event itself carries — its start plus the
+        // duration it reported, or its start alone — so nothing is invented,
+        // and a `duration_ms` the producer did not send stays null rather than
+        // becoming a measured zero. `step_start` is untouched: a step that has
+        // not ended is exactly what it means.
+        ended_at: event.ended_at ?? impliedEnd(event.started_at ?? now, event.duration_ms),
         duration_ms: event.duration_ms,
         tokens_used: event.tokens_used,
         model: event.model ?? null,

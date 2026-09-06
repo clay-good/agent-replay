@@ -1027,6 +1027,45 @@ describe('a trace written through the SDK re-ingests from its own export', () =>
   });
 });
 
+describe('a `step` event is a COMPLETE step', () => {
+  // That is what distinguishes it from the `step_start`/`step_end` pair, which
+  // exists precisely for a step that is still running. A producer sending
+  // `step` without `ended_at` was storing a finished step as unfinished — the
+  // codex-exec translator's `item.completed` records did exactly that, so every
+  // tool call it captured sat in flight for the life of the trace.
+  it('closes a step the producer did not time', () => {
+    applyEvent(db, { v: 1, type: 'trace_start', trace_id: 'trc_completestep', agent_name: 'a' } as CaptureEvent);
+    applyEvent(db, {
+      v: 1, type: 'step', trace_id: 'trc_completestep', step_number: 1, step_type: 'tool_call', name: 'ls',
+    } as CaptureEvent);
+    const step = getTrace(db, 'trc_completestep')!.steps[0];
+    expect(step.ended_at).toBeTruthy();
+    // Both ends read the SAME instant, so the step can never have a negative
+    // duration from two readings of one moment.
+    expect(step.ended_at).toBe(step.started_at);
+    // A duration the producer did not send stays null — not a measured zero.
+    expect(step.duration_ms ?? null).toBeNull();
+  });
+
+  it('honors a duration the producer did send', () => {
+    applyEvent(db, { v: 1, type: 'trace_start', trace_id: 'trc_timedstep01', agent_name: 'a' } as CaptureEvent);
+    applyEvent(db, {
+      v: 1, type: 'step', trace_id: 'trc_timedstep01', step_number: 1, step_type: 'tool_call', name: 'ls',
+      started_at: '2026-09-06T10:00:00.000Z', duration_ms: 250,
+    } as CaptureEvent);
+    const step = getTrace(db, 'trc_timedstep01')!.steps[0];
+    expect(step.ended_at).toBe('2026-09-06T10:00:00.250Z');
+  });
+
+  it('leaves a step_start open, because that is what it means', () => {
+    applyEvent(db, { v: 1, type: 'trace_start', trace_id: 'trc_openstart01', agent_name: 'a' } as CaptureEvent);
+    applyEvent(db, {
+      v: 1, type: 'step_start', trace_id: 'trc_openstart01', step_number: 1, step_type: 'tool_call', name: 'running',
+    } as CaptureEvent);
+    expect(getTrace(db, 'trc_openstart01')!.steps[0].ended_at).toBeFalsy();
+  });
+});
+
 describe('a stream that opens a session the store already has', () => {
   // Nothing correlates capture paths: the hook adapter finds its OWN open trace
   // for a session, the OTel receiver merges only within its own source format,

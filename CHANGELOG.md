@@ -443,6 +443,18 @@ and one-way.
 
 ### Fixed
 
+- **A `step` capture event stored a finished step as unfinished.** `step` is
+  documented as "a complete step in one event" — that is what distinguishes it
+  from the `step_start`/`step_end` pair, which exists for a step that is still
+  running — but a producer that sent one without `ended_at` got a step left in
+  flight for the life of the trace. `record --format codex-exec` did exactly
+  that for every `item.completed` record, so every tool call it captured was
+  stored as still running. Such a step is now closed from what its own event
+  carries (`started_at + duration_ms`, or the instant it is recorded when the
+  producer timed neither, with both ends reading the same instant so a step can
+  never take a negative duration from two readings of one moment). A
+  `step_start` is untouched.
+
 - **Every step of an OpenTelemetry LOG capture stayed open forever.** A log
   record reports something that already happened — `tool_result`,
   `api_request`, `tool_decision` — and no second record will ever arrive to
