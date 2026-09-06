@@ -212,6 +212,86 @@ describe('a failed tool call is a failure on every path', () => {
   });
 });
 
+describe('every capture path records a tool failure', () => {
+  // The invariant behind the bug above, stated once for all five paths: a tool
+  // that failed must reach the store as a failed step, whatever captured it.
+  // `no_error_steps`, `completeness-check` and `check --fields step_errors` all
+  // read that field, so a path that misses it passes runs that failed.
+  const errorsOf = (traceId: string): (string | null)[] =>
+    getTrace(db, traceId)!.steps.filter((s) => s.step_type === 'tool_call').map((s) => s.error);
+
+  it('hook, claude-stream, codex-exec, transcript and OTel logs all record it', () => {
+    // 1. hook: the failure is inside the PostToolUse result.
+    applyHookPayload(db, { hook_event_name: 'UserPromptSubmit', session_id: 'e-hook', cwd: dir, prompt: 'go' });
+    applyHookPayload(db, { hook_event_name: 'PreToolUse', session_id: 'e-hook', cwd: dir, tool_name: 'Bash', tool_input: { command: 'rm -rf /tmp/x' } });
+    const hook = applyHookPayload(db, {
+      hook_event_name: 'PostToolUse', session_id: 'e-hook', cwd: dir, tool_name: 'Bash',
+      tool_input: { command: 'rm -rf /tmp/x' }, tool_response: { stderr: 'permission denied', is_error: true },
+    });
+    expect(errorsOf(hook.traceId!)).toEqual(['permission denied']);
+
+    // 2. claude-stream: a tool_result block flagged is_error.
+    const cs = makeTranslator('claude-stream')!;
+    let streamId = '';
+    for (const line of [
+      { type: 'system', subtype: 'init', session_id: 'e-stream' },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'rm -rf /tmp/x' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'permission denied', is_error: true }] } },
+      { type: 'result', subtype: 'success' },
+    ]) {
+      for (const event of cs.translate(line as Record<string, unknown>)) streamId = applyEvent(db, event as CaptureEvent).traceId;
+    }
+    expect(errorsOf(streamId)).toEqual(['permission denied']);
+
+    // 3. codex-exec: a non-zero exit code on the completed item.
+    const cx = makeTranslator('codex-exec')!;
+    let codexId = '';
+    for (const line of [
+      { type: 'thread.started', thread_id: 'e-codex' },
+      { type: 'item.completed', item: { type: 'command_execution', command: 'rm -rf /tmp/x', exit_code: 1, aggregated_output: 'permission denied' } },
+      { type: 'turn.completed', usage: {} },
+    ]) {
+      for (const event of cx.translate(line as Record<string, unknown>)) codexId = applyEvent(db, event as CaptureEvent).traceId;
+    }
+    for (const event of cx.finalize()) codexId = applyEvent(db, event as CaptureEvent).traceId;
+    expect(errorsOf(codexId)).toEqual(['exited with code 1']);
+
+    // 4. the transcript importer: is_error on the tool_result.
+    const path = join(dir, 'failed-tool.jsonl');
+    writeFileSync(path, [
+      { type: 'user', sessionId: 'e-file', timestamp: '2026-09-06T10:00:00.000Z', message: { content: 'go' } },
+      {
+        type: 'assistant', sessionId: 'e-file', timestamp: '2026-09-06T10:00:01.000Z',
+        message: { content: [{ type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'rm -rf /tmp/x' } }] },
+      },
+      {
+        type: 'user', sessionId: 'e-file', timestamp: '2026-09-06T10:00:02.000Z',
+        message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'permission denied', is_error: true }] },
+      },
+    ].map((r) => JSON.stringify(r)).join('\n'));
+    expect(errorsOf(importClaudeTranscript(db, path).trace!.id)).toEqual(['permission denied']);
+
+    // 5. the OTel log receiver: success=false with an error attribute.
+    const [mapped] = mapOtlpLogs({
+      resourceLogs: [{
+        resource: { attributes: [{ key: 'service.name', value: { stringValue: 'claude-code' } }] },
+        scopeLogs: [{ logRecords: [{
+          timeUnixNano: '1750000000000000000',
+          body: { stringValue: 'claude_code.tool_result' },
+          attributes: [
+            { key: 'event.name', value: { stringValue: 'claude_code.tool_result' } },
+            { key: 'session.id', value: { stringValue: 'e-otel' } },
+            { key: 'tool_name', value: { stringValue: 'Bash' } },
+            { key: 'success', value: { stringValue: 'false' } },
+            { key: 'error', value: { stringValue: 'permission denied' } },
+          ],
+        }] }],
+      }],
+    } as never);
+    expect(errorsOf(ingestTrace(db, mapped).id)).toEqual(['permission denied']);
+  });
+});
+
 describe('the other capture pairs agree too', () => {
   it('the hook and the OTel log receiver record one Claude session the same way', () => {
     const hook = getTrace(db, captureViaHook('sess-hook-otel'))!;
