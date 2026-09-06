@@ -3,7 +3,7 @@ import { startTrace, appendStep, updateStep, updateTrace } from './trace-service
 import { evaluateStep, verdictForMatches } from './guard-service.js';
 import type { TraceStep } from '../models/types.js';
 import type { GuardAction } from '../models/enums.js';
-import { escapeForMessage } from '../utils/json.js';
+import { escapeForMessage, isFalseish, isTrueish } from '../utils/json.js';
 import { julianDayExpr } from '../utils/time.js';
 
 /**
@@ -383,22 +383,6 @@ function soleOpenAnchor(db: Database.Database, traceId: string): number | undefi
     )
     .all(traceId) as Array<{ step_number: number }>;
   return rows.length === 1 ? rows[0].step_number : undefined;
-}
-
-/** `true`, `1`, `"true"`, `"TRUE"` — the shapes a JSON harness writes for a flag. */
-function isTrueish(v: unknown): boolean {
-  if (v === true || v === 1) return true;
-  if (typeof v !== 'string') return false;
-  const t = v.trim().toLowerCase();
-  return t === 'true' || t === '1';
-}
-
-/** The mirror, for a flag that reports SUCCESS: false, 0, "false", "FALSE". */
-function isFalseish(v: unknown): boolean {
-  if (v === false || v === 0) return true;
-  if (typeof v !== 'string') return false;
-  const t = v.trim().toLowerCase();
-  return t === 'false' || t === '0';
 }
 
 /**

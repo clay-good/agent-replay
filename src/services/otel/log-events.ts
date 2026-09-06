@@ -1,6 +1,7 @@
 import type { IngestTraceInput, IngestStepInput, IngestDecisionInput } from '../../models/types.js';
 import { attrsToMap, decodeAnyValue } from './semconv.js';
 import { isoFromNanos } from './semconv.js';
+import { isFalseish } from '../../utils/json.js';
 
 /** Bucket key for a record with no session.id — never persisted as one. */
 const NO_SESSION_PREFIX = '!nosession:';
@@ -391,7 +392,7 @@ function toolError(a: Record<string, unknown>): string | undefined {
   // Case-insensitively, because an exporter built on the OTel Python SDK
   // stringifies with `str(False)` → "False", which an exact 'false' missed.
   const asText = typeof a.success === 'string' ? a.success.trim().toLowerCase() : undefined;
-  const failed = a.success === false || a.success === 0 || asText === 'false' || asText === '0';
+  const failed = isFalseish(a.success) || isFalseish(asText);
   if (!failed) return undefined;
   return str(a.error) ?? str(a.error_message) ?? str(a.error_type) ?? 'tool failed';
 }

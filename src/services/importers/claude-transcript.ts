@@ -4,6 +4,7 @@ import { readJsonlLines } from './jsonl-reader.js';
 import { dirname, join, basename } from 'node:path';
 import { ingestTrace } from '../trace-service.js';
 import { selectPrompt } from './user-turns.js';
+import { isTrueish } from '../../utils/json.js';
 import type { IngestTraceInput, IngestStepInput, Trace } from '../../models/types.js';
 
 /**
@@ -183,7 +184,7 @@ export function importClaudeTranscript(
       for (const block of content as Block[]) {
         if (block?.type === 'tool_result' && block.tool_use_id) {
           toolResults.set(block.tool_use_id, block.content);
-          if (block.is_error === true) toolErrors.add(block.tool_use_id);
+          if (isTrueish(block.is_error)) toolErrors.add(block.tool_use_id);
         }
         if (block?.type === 'tool_use' && block.id) toolUseIds.add(block.id);
       }
@@ -551,7 +552,7 @@ function buildSubagentSteps(
       for (const block of content as Block[]) {
         if (block?.type === 'tool_result' && block.tool_use_id) {
           toolResults.set(block.tool_use_id, block.content);
-          if (block.is_error === true) toolErrors.add(block.tool_use_id);
+          if (isTrueish(block.is_error)) toolErrors.add(block.tool_use_id);
         }
         if (block?.type === 'tool_use' && block.id) subagentToolUseIds.add(block.id);
       }

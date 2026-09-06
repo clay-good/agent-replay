@@ -1,4 +1,5 @@
 import { generateId } from '../utils/id.js';
+import { isTrueish } from '../utils/json.js';
 import type { CaptureEvent } from './event-protocol.js';
 
 /**
@@ -870,9 +871,3 @@ function codexItemError(item: Record<string, unknown>): string | undefined {
  * `check --golden` and the eval error criteria — while a field literally named
  * `is_error` holding 1 has no other plausible meaning.
  */
-function isTrueish(v: unknown): boolean {
-  if (v === true || v === 1) return true;
-  if (typeof v !== 'string') return false;
-  const t = v.trim().toLowerCase();
-  return t === 'true' || t === '1';
-}

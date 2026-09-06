@@ -224,6 +224,35 @@ export function hasRenderableContent(value: unknown): boolean {
 }
 
 /**
+ * A producer's FLAG, read generously: `true`, `1`, `"true"`, `"TRUE"`.
+ *
+ * Harness payloads are JSON written by someone else, and the same flag arrives
+ * as a boolean from one writer and a string from another. Every path that reads
+ * one shares this definition so they cannot drift: a session captured live and
+ * the same session imported from its transcript must agree about whether a tool
+ * failed, and they did not when the hook adapter compared `=== true` while the
+ * stream translator used this rule.
+ *
+ * Generous on purpose, and only for FAILURE flags: missing a signal stores a
+ * failed run as clean — a false-green gate on exactly the runs this tool exists
+ * to audit — while over-reading one only makes a failure more visible.
+ */
+export function isTrueish(v: unknown): boolean {
+  if (v === true || v === 1) return true;
+  if (typeof v !== 'string') return false;
+  const t = v.trim().toLowerCase();
+  return t === 'true' || t === '1';
+}
+
+/** The mirror, for a flag that reports SUCCESS: `false`, `0`, `"false"`, `"FALSE"`. */
+export function isFalseish(v: unknown): boolean {
+  if (v === false || v === 0) return true;
+  if (typeof v !== 'string') return false;
+  const t = v.trim().toLowerCase();
+  return t === 'false' || t === '0';
+}
+
+/**
  * Truncate `text` to `max` characters, but centered on where it first differs
  * from `other` rather than always cutting from position 0.
  *

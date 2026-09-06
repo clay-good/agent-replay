@@ -3,7 +3,7 @@ import { readJsonlLines } from './jsonl-reader.js';
 import { basename } from 'node:path';
 import { ingestTrace } from '../trace-service.js';
 import { selectPrompt } from './user-turns.js';
-import { truncate } from '../../utils/json.js';
+import { isFalseish, truncate } from '../../utils/json.js';
 import type { IngestTraceInput, IngestStepInput, Trace } from '../../models/types.js';
 import type { ImportReport } from './claude-transcript.js';
 
@@ -460,7 +460,7 @@ function toolFailure(result: unknown): string | undefined {
   const meta = (obj.metadata && typeof obj.metadata === 'object' ? obj.metadata : {}) as Record<string, unknown>;
   const code = num(meta.exit_code ?? obj.exit_code);
   if (code != null && code !== 0) return `exited with code ${code}`;
-  if (obj.success === false || obj.success === 'false') return asText(obj.output) || 'tool reported failure';
+  if (isFalseish(obj.success)) return asText(obj.output) || 'tool reported failure';
   const err = obj.error ?? meta.error;
   if (err != null) {
     const errText = typeof err === 'string' ? err : asText(err) || JSON.stringify(err);

@@ -3,6 +3,7 @@ import Database from 'better-sqlite3';
 import { runMigrations } from '../src/db/migrations.js';
 import { getTrace, listTraces, ingestTrace } from '../src/services/trace-service.js';
 import { applyHookPayload, detectDialect, resolveHookRouting } from '../src/services/hook-adapter.js';
+import { isTrueish, isFalseish } from '../src/utils/json.js';
 import { forkTrace } from '../src/services/fork-service.js';
 import { addPolicy } from '../src/services/guard-service.js';
 import { ensureDatabase, resetConnection } from '../src/db/index.js';
@@ -626,6 +627,20 @@ describe('a tool that failed is recorded as failed', () => {
     // ...and a value that does not say "failed" is not read as one.
     expect(close('v5', { is_error: 'no' }).error).toBeNull();
     expect(close('v6', { success: 'TRUE' }).error).toBeNull();
+  });
+
+  it('shares one definition of the flag with the paths it must agree with', () => {
+    // The bug this replaces was a SECOND definition: the hook compared
+    // `=== true` while the stream translator used `isTrueish`. One helper now,
+    // in utils, imported by the hook, both importers, the stream translators and
+    // the OTel log mapper — so a session captured live and the same session
+    // imported cannot disagree about whether a tool failed.
+    expect(isTrueish('TRUE')).toBe(true);
+    expect(isTrueish(1)).toBe(true);
+    expect(isTrueish('no')).toBe(false);
+    expect(isFalseish('FALSE')).toBe(true);
+    expect(isFalseish(0)).toBe(true);
+    expect(isFalseish('yes')).toBe(false);
   });
 
   it('survives a tool_response of any shape, since a producer writes it', () => {
