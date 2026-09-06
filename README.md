@@ -417,7 +417,12 @@ Steps are compared on `step_type`, `name`, `input`, `output`, `model`,
 changed. Trace-level differences report a step of `trace` (`null` in `--json`)
 and never set `divergence_step`, which means "the first step that went
 different". Steps are paired by `step_number`, so gaps don't misalign the
-comparison. Narrow the comparison with `--fields`; when a filter leaves nothing,
+comparison. When one trace's steps are a **prefix** of the other's — a fresh
+fork, a run that crashed early — the verdict says it *stopped* rather than
+diverged (`RIGHT STOPS AFTER STEP 2`, "identical up to there"), because two
+traces that agree on every step they share have not diverged; `--json` carries
+the same fact as `common_prefix` (`shorter`, `last_common_step`,
+`missing_steps`), and the key is absent when it does not apply. Narrow the comparison with `--fields`; when a filter leaves nothing,
 the verdict says so rather than claiming the traces are identical, and a filter
 naming no field at all is a usage error. The `--json` document records the scope
 too, as `compared_fields` — the list when `--fields` narrowed the comparison and

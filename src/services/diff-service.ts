@@ -266,6 +266,30 @@ export function diffTraces(
     }
   }
 
+  // "Stopped" is not "went differently".
+  //
+  // `divergence_step` is pinned by the first step present on one side only, so
+  // a run that simply ENDS early — a fork nobody has explored yet, a run that
+  // crashed at step 2, a capture whose producer died — was announced as
+  // DIVERGES AT STEP 3 with a row per remaining step, when the two agreed on
+  // every step they both have. `fork` prints `agent-replay diff <parent>
+  // <fork>` as the next thing to run, so that reading was the FIRST thing a
+  // user saw about a copy that had not run at all.
+  //
+  // The test is structural and cheap: every step-level difference is a step
+  // missing from the same side. If any paired step differed there would be a
+  // diff of another field, and if steps were missing from both sides the two
+  // sides would not be prefix and extension.
+  const stepDiffs = diffs.filter((d) => d.step_number != null);
+  const missingFrom = (field: string) => stepDiffs.length > 0 && stepDiffs.every((d) => d.field === field);
+  const shorter = missingFrom('missing_right') ? 'right' : missingFrom('missing_left') ? 'left' : null;
+  const shortSteps = shorter === 'right' ? rightSteps : leftSteps;
+  const longSteps = shorter === 'right' ? leftSteps : rightSteps;
+  // The last step NUMBER they share, not a count: step numbers can have gaps
+  // (the merge-join above exists for exactly that reason), so counting would
+  // name a step the trace does not have.
+  const lastCommon = shortSteps.length > 0 ? (shortSteps[shortSteps.length - 1].step_number as number) : 0;
+
   return {
     left_trace_id: leftTraceId,
     right_trace_id: rightTraceId,
@@ -273,6 +297,15 @@ export function diffTraces(
     left_step_count: leftSteps.length,
     right_step_count: rightSteps.length,
     diffs,
+    ...(shorter
+      ? {
+          common_prefix: {
+            shorter,
+            last_common_step: lastCommon,
+            missing_steps: longSteps.length - shortSteps.length,
+          },
+        }
+      : {}),
   };
 }
 

@@ -44,8 +44,28 @@ export function renderDiff(
     }),
   );
 
-  // Divergence point
-  if (diff.divergence_step != null) {
+  // Divergence point — or the truth, when nothing diverged.
+  //
+  // One trace's steps being a PREFIX of the other's is not a divergence: the
+  // two agree on every step they share and one of them stops. That is the
+  // normal state of a fresh fork (which `fork` itself invites you to diff) and
+  // of a run that crashed early, and both were announced as
+  // DIVERGES AT STEP N over a table of "Left only" rows.
+  if (diff.common_prefix) {
+    const { shorter, last_common_step, missing_steps } = diff.common_prefix;
+    lines.push('');
+    lines.push(
+      boxen(
+        chalk.cyanBright.bold(`  ${shorter.toUpperCase()} STOPS AFTER STEP ${last_common_step}  `),
+        { padding: { left: 2, right: 2, top: 0, bottom: 0 }, borderColor: 'cyan', borderStyle: 'double' },
+      ),
+    );
+    lines.push(
+      chalk.dim(
+        `  Identical up to there; the ${shorter === 'right' ? 'left' : 'right'} has ${missing_steps} more step(s). Nothing they share differs.`,
+      ),
+    );
+  } else if (diff.divergence_step != null) {
     lines.push('');
     lines.push(
       boxen(

@@ -115,6 +115,20 @@ describe('the --json documents keep their shape', () => {
     ]);
   });
 
+  it('diff adds common_prefix only when one trace is a prefix of the other', () => {
+    // The one conditional key in these payloads, so it is pinned in both
+    // directions: two unrelated runs must not carry it (above), and a fork —
+    // which stops where it was made — must.
+    const forkOut = run(['fork', traceA, '--from-step', '2']).stdout;
+    const forkId = (forkOut.match(/trc_[A-Za-z0-9_-]+/g) ?? []).pop() as string;
+    const doc = payload(['diff', traceA, forkId, '--json']) as {
+      common_prefix?: { shorter: string; last_common_step: number; missing_steps: number };
+    };
+    expect(doc.common_prefix?.shorter).toBe('right');
+    expect(doc.common_prefix?.last_common_step).toBe(2);
+    expect(doc.common_prefix?.missing_steps).toBeGreaterThan(0);
+  });
+
   it('eval (an array of stored evaluation rows)', () => {
     const rows = payload(['eval', traceA, '--all', '--json']) as Record<string, unknown>[];
     expect(rows.length).toBeGreaterThan(0);

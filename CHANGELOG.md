@@ -402,6 +402,16 @@ and one-way.
 
 ### Fixed
 
+- **`diff` called a trace that merely STOPPED a divergence.** `divergence_step`
+  was pinned by the first step present on one side only, so a run that ends
+  early — a fork nobody has explored yet, a run that crashed at step 2 — was
+  announced as `DIVERGES AT STEP 3` above a row per remaining step, when the two
+  traces agreed on every step they share. `fork` prints `agent-replay diff
+  <parent> <fork>` as the next command to run, so that was the first thing a
+  user saw about a copy that had not run at all. The verdict now says
+  `RIGHT STOPS AFTER STEP 2 — identical up to there`, and `--json` carries the
+  same fact as `common_prefix` (absent when it does not apply).
+
 - **A compacted session imported with the harness's summary as its prompt.**
   When a long session runs out of context the harness compacts it and the new
   transcript opens with a continuation summary it wrote for itself — as a user

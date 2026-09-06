@@ -204,6 +204,27 @@ describe('renderDiff', () => {
     expect(() => renderDiff(diff, trace(), trace())).not.toThrow();
   });
 
+  it('says a trace STOPPED rather than diverged when it is a prefix of the other', () => {
+    // A fresh fork is a copy that has not run yet: it agrees with its parent on
+    // every step it has and then stops. `fork` prints `diff <parent> <fork>` as
+    // the next command to run, and the answer was DIVERGES AT STEP 3 over a
+    // table of "Left only" rows — a divergence claim about two traces that
+    // never disagreed.
+    const diff = diffResult({
+      divergence_step: 3, left_step_count: 8, right_step_count: 2,
+      common_prefix: { shorter: 'right', last_common_step: 2, missing_steps: 6 },
+      diffs: [
+        { step_number: 3, field: 'missing_right', left_value: 'c', right_value: null },
+        { step_number: 4, field: 'missing_right', left_value: 'd', right_value: null },
+      ],
+    });
+    const out = noAnsi(renderDiff(diff, trace(), trace()));
+    expect(out).toContain('RIGHT STOPS AFTER STEP 2');
+    expect(out).not.toContain('DIVERGES AT STEP');
+    expect(out).toMatch(/Identical up to there/);
+    expect(out).toMatch(/6 more step\(s\)/);
+  });
+
   it('shows the value of a step that exists on only one side', () => {
     // A right-only step (missing_left) must display its value in the Right
     // column, not blank it out as "(none)".

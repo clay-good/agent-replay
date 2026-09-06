@@ -548,6 +548,43 @@ describe('diffTraces', () => {
     expect(result.divergence_step).toBe(1);
   });
 
+  it('marks a trace that merely STOPS as a prefix, not a divergence', () => {
+    // A run that ends early — a fork nobody has explored, a run that crashed at
+    // step 2 — agrees with the other on every step they share. Pinning
+    // `divergence_step` at the first missing step made the renderer announce
+    // DIVERGES AT STEP 3 about traces that never disagreed.
+    const long = ingestTrace(db, {
+      agent_name: 'bot', status: 'completed', input: { q: 1 },
+      steps: [1, 2, 3, 4].map((n) => ({ step_number: n, step_type: 'tool_call' as const, name: `s${n}` })),
+    });
+    const short = ingestTrace(db, {
+      agent_name: 'bot', status: 'completed', input: { q: 1 },
+      steps: [1, 2].map((n) => ({ step_number: n, step_type: 'tool_call' as const, name: `s${n}` })),
+    });
+    const result = diffTraces(db, long.id, short.id);
+    expect(result.common_prefix).toEqual({ shorter: 'right', last_common_step: 2, missing_steps: 2 });
+
+    // Reversed, the shorter side is the left one.
+    expect(diffTraces(db, short.id, long.id).common_prefix?.shorter).toBe('left');
+  });
+
+  it('does not call it a prefix when a step they share differs', () => {
+    const a = ingestTrace(db, {
+      agent_name: 'bot', status: 'completed', input: { q: 1 },
+      steps: [
+        { step_number: 1, step_type: 'tool_call' as const, name: 'search' },
+        { step_number: 2, step_type: 'tool_call' as const, name: 'book' },
+      ],
+    });
+    const b = ingestTrace(db, {
+      agent_name: 'bot', status: 'completed', input: { q: 1 },
+      steps: [{ step_number: 1, step_type: 'tool_call' as const, name: 'browse' }],
+    });
+    const result = diffTraces(db, a.id, b.id);
+    expect(result.common_prefix).toBeUndefined();
+    expect(result.divergence_step).toBe(1);
+  });
+
   it('reports a trace-level status/error difference with a null step number', () => {
     const steps = [{ step_number: 1, step_type: 'output' as const, name: 'respond', output: { t: 'x' } }];
     const ok = ingestTrace(db, { agent_name: 'bot', status: 'completed', input: { q: 1 }, steps });

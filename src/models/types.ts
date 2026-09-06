@@ -258,6 +258,18 @@ export interface TraceDiffResult {
   left_step_count: number;
   right_step_count: number;
   diffs: StepDiff[];
+  /**
+   * Set when one trace's steps are a PREFIX of the other's: everything the two
+   * share is identical, and one of them simply stops. Absent otherwise.
+   */
+  common_prefix?: {
+    /** The trace that stops early. */
+    shorter: 'left' | 'right';
+    /** The last step number both traces have, and agree on. */
+    last_common_step: number;
+    /** How many further steps the longer trace has. */
+    missing_steps: number;
+  };
 }
 
 // ── Fork Types ────────────────────────────────────────────────────────────
