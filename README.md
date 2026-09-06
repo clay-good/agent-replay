@@ -549,7 +549,11 @@ agent-replay guard remove <policy-id>
 
 `guard test` summarizes what a recorded run would have hit: how many matches
 would have blocked it (`deny`, and `require_review`, which fails closed unless
-someone approves it) and how many would only have warned.
+someone approves it) and how many would only have warned. It is a **report, not a
+gate**: the matches go to stdout (so `guard test <id> > findings.txt` captures
+them, while the progress line stays on stderr) and it exits `0` whatever it
+finds, including a `deny` that matched every step. Gate on `guard check` or
+`hook --enforce`, which are the paths that answer with an exit code.
 
 Every guard subcommand that reads or changes an existing policy refuses a directory with no store (exit `2`) instead of creating one — otherwise `guard list` answers "No guardrail policies found" about a project whose policies are one directory up, and names the store it found there. `guard add` may create the store it writes into, but says when that store is a second one below a project that already has one, since a policy the enforcement path never opens is a guardrail that cannot fire.
 
