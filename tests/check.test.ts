@@ -697,6 +697,55 @@ describe('runCheck refuses a gate with nothing to check', () => {
 });
 
 describe('export --format golden warns about a baseline it cannot trust', () => {
+  it('names baseline entries that share an agent+input key', async () => {
+    // `check` passes a candidate that reproduces ANY baseline for its key —
+    // deliberately, since repeated runs of a scenario are all valid baselines.
+    // The consequence is silent: a store holding a good run and a regressed run
+    // of the same request exports both, and the gate then blesses the regressed
+    // shape forever. The export is the last moment where re-exporting from
+    // vetted runs still costs nothing.
+    const { runExport } = await import('../src/commands/export.js');
+    const dir = mkdtempSync(join(tmpdir(), 'ar-export-dup-'));
+    try {
+      const cdb = ensureDatabase(resolve(dir, 'traces.db'));
+      ingestTrace(cdb, baseline);
+      // Same agent, same input, different shape: the regressed twin.
+      ingestTrace(cdb, {
+        ...baseline,
+        steps: [...(baseline.steps ?? []), { step_number: 99, step_type: 'output' as const, name: 'extra' }],
+      });
+
+      const errs: string[] = [];
+      const errSpy = vi.spyOn(console, 'error').mockImplementation((m?: unknown) => void errs.push(String(m)));
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        runExport(undefined, { format: 'golden', dir });
+      } finally {
+        errSpy.mockRestore();
+        logSpy.mockRestore();
+      }
+      expect(errs.join('\n')).toMatch(/2 of 2 baseline entries share an agent\+input key \(1 scenario\)/);
+      expect(errs.join('\n')).toMatch(/reproduces ANY baseline for its key/);
+
+      // One vetted run, exported by id, says nothing.
+      const { listTraces } = await import('../src/services/trace-service.js');
+      const one = listTraces(cdb, { limit: 1 }).items[0].id;
+      const quiet: string[] = [];
+      const quietSpy = vi.spyOn(console, 'error').mockImplementation((m?: unknown) => void quiet.push(String(m)));
+      const logSpy2 = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        runExport(one, { format: 'golden', dir });
+      } finally {
+        quietSpy.mockRestore();
+        logSpy2.mockRestore();
+      }
+      expect(quiet.join('\n')).not.toMatch(/share an agent/);
+    } finally {
+      resetConnection();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('names entries that did not come from a completed run', async () => {
     // A baseline is meant to hold known-good runs, but nothing filters by
     // status: a `running` entry bakes in a partial shape, so the next correct

@@ -443,6 +443,15 @@ and one-way.
 
 ### Fixed
 
+- **A golden baseline could bless a regression without saying so.** `check`
+  passes a candidate that reproduces ANY baseline entry for its agent+input key,
+  which is right — repeated runs of one scenario are all valid baselines — but
+  it means a baseline exported from a store that also holds a regressed run of
+  the same request accepts that run's shape forever, and nothing said so. The
+  export now reports how many entries share a key, beside the warning it already
+  gives for entries that did not come from a completed run, at the one moment
+  when narrowing to vetted runs still costs nothing.
+
 - **Two of the demo's three decision points had no decision record.** `demo` is
   what a first run shows, and `decisions`, `why` and `check --fields decisions`
   all read the structured record rather than the step's prose output — so the

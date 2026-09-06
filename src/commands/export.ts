@@ -9,6 +9,7 @@ import { ensureDatabase } from '../db/index.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { parseSinceToIso } from '../utils/time.js';
 import { errorMessage } from '../utils/json.js';
+import { inputHash } from '../services/check-service.js';
 import { resolveDataDir, storeExists, storeAboveNote } from '../utils/paths.js';
 
 export interface ExportOptions {
@@ -272,12 +273,40 @@ function warnAboutBaseline(output: string): void {
     console.error(chalk.yellow('  ⚠ No traces matched — this golden baseline is empty and cannot detect a regression.'));
     return;
   }
-  let entries: { metadata?: { status?: unknown } }[];
+  let entries: { metadata?: { status?: unknown }; agent_name?: string; input?: Record<string, unknown> }[];
   try {
     entries = JSON.parse(output);
   } catch {
     return; // the export we just produced; unparseable is not something to report on
   }
+  // Several entries sharing one agent+input key is not an error — repeated runs
+  // of a scenario are all valid baselines, and `check` deliberately passes a
+  // candidate that reproduces ANY of them. It is worth SAYING, because the
+  // export that produces it is the ordinary one: a store that holds a good run
+  // and a regressed run of the same request writes both, and the gate then
+  // blesses the regressed shape forever, silently. Naming it here is the last
+  // moment where re-exporting from vetted runs still costs nothing.
+  const byKey = new Map<string, number>();
+  for (const e of entries) {
+    const input = (e as { input?: Record<string, unknown> }).input;
+    const agent = (e as { agent_name?: string }).agent_name;
+    if (!agent || input == null || Object.keys(input).length === 0) continue;
+    const key = `${agent}::${inputHash(input)}`;
+    byKey.set(key, (byKey.get(key) ?? 0) + 1);
+  }
+  const shared = [...byKey.values()].filter((n) => n > 1);
+  if (shared.length > 0) {
+    const extra = shared.reduce((sum, n) => sum + n, 0);
+    console.error(
+      chalk.yellow(
+        `  ⚠ ${extra} of ${entries.length} baseline entries share an agent+input key (${shared.length} scenario${shared.length === 1 ? '' : 's'}).`,
+      ),
+    );
+    console.error(
+      chalk.dim('    A candidate passes if it reproduces ANY baseline for its key, so a regressed run exported here blesses its own shape. Narrow with --tag known-good, or export the run you vetted by id.'),
+    );
+  }
+
   const other = entries.filter((e) => e?.metadata?.status !== 'completed').length;
   if (other > 0) {
     console.error(
