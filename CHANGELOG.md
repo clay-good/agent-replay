@@ -443,6 +443,19 @@ and one-way.
 
 ### Fixed
 
+- **A hook-captured tool FAILURE was stored as a clean success.** Only a
+  `post_tool_fail` event marked a step failed — and Claude Code has no such
+  event: it sends `PostToolUse` with the result, and the failure lives inside it
+  (`is_error: true`, the same flag the transcript importer already reads). So
+  the primary live capture path recorded failed tool calls as clean ones, and
+  the same session imported from its transcript recorded them as failed: the
+  deterministic evaluators scored 1.0 against 0.7 on `no_error_steps` for one
+  session, and `check --golden --fields step_errors` — the field that exists to
+  catch a step that starts failing — was blind on live captures. The result's
+  own signals are now read (`is_error`, `success: false`, a non-zero
+  `exit_code`, an `error` field), with the most specific text the payload
+  carries, and a successful call is left clean.
+
 - **An imported Codex rollout's steps were all stored unfinished too.** The twin
   of the transcript fix below, found the same way: the same Codex session
   captured by `record --format codex-exec` closed its steps while the rollout

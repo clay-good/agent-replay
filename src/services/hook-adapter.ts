@@ -385,6 +385,31 @@ function soleOpenAnchor(db: Database.Database, traceId: string): number | undefi
   return rows.length === 1 ? rows[0].step_number : undefined;
 }
 
+/**
+ * Failure text carried by a tool RESULT payload, or undefined when it succeeded.
+ *
+ * The three signals here are the ones the harnesses actually send and the
+ * sibling paths already read: `is_error` (Claude Code's `tool_result` flag, read
+ * by the transcript importer), `success: false` (what the OTel log mapper reads
+ * off `claude_code.tool_result`), and an `error` field. A non-zero `exit_code`
+ * on the result's own top level counts too — a shell tool that reports one has
+ * failed by its own account.
+ *
+ * The text is the most specific thing the payload carries, so the stored error
+ * says something a reader can act on rather than "tool failed" every time.
+ */
+function toolResultFailure(result: Record<string, unknown> | undefined): string | undefined {
+  if (!result) return undefined;
+  const text = (): string | undefined =>
+    errorText(result.error) ?? str(result.stderr) ?? str(result.message) ?? str(result.content) ?? str(result.stdout);
+  if (result.is_error === true || result.is_error === 'true') return text() ?? 'tool failed';
+  if (result.success === false || result.success === 'false') return text() ?? 'tool reported failure';
+  const code = typeof result.exit_code === 'number' ? result.exit_code : Number(result.exit_code);
+  if (Number.isFinite(code) && code !== 0) return text() ?? `exited with code ${code}`;
+  if (result.error != null) return errorText(result.error) ?? 'tool failed';
+  return undefined;
+}
+
 /** The open subagent anchor step for an agent_id, if any. */
 function findAnchor(db: Database.Database, traceId: string, agentId: string): number | undefined {
   const row = db
@@ -622,11 +647,32 @@ export function applyHookPayload(
         const delta = Date.parse(ended) - Date.parse(open.started_at);
         const duration = Number.isFinite(delta) ? Math.max(0, delta) : undefined;
         const result = (payload.tool_output ?? payload.tool_response) as Record<string, unknown> | undefined;
+        // A failure in the RESULT, not only in the event name.
+        //
+        // Only a `post_tool_fail` event marked a step failed — and Claude Code
+        // has no such event: it sends PostToolUse with the result, and the
+        // failure lives INSIDE it (`is_error: true`, the same flag the
+        // transcript importer reads off a `tool_result`). So a live hook capture
+        // stored a failed tool call as a clean one, and the same session
+        // imported from its transcript stored it as failed: the deterministic
+        // evaluators scored 1.0 against 0.7 on `no_error_steps` for one session
+        // (measured), and `check --golden --fields step_errors` — the field that
+        // exists to catch a step that STARTS failing — was blind on the primary
+        // live path.
+        //
+        // Read in the same direction as both importers: for a failure FLAG,
+        // missing a signal is the expensive mistake (a false-green gate on
+        // exactly the runs this tool exists to audit), while over-reading one
+        // only makes a failure more visible. Only unambiguous, vendor-generic
+        // signals are read.
+        const failure = action === 'post_tool_fail'
+          ? (errorText(payload.error) ?? 'tool failed')
+          : toolResultFailure(result);
         updateStep(db, traceId, open.step_number, {
           output: result ?? null,
           ended_at: ended,
           duration_ms: duration,
-          error: action === 'post_tool_fail' ? (errorText(payload.error) ?? 'tool failed') : undefined,
+          error: failure,
         });
         return open.step_number;
       }).immediate();

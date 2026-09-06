@@ -173,6 +173,45 @@ describe('one session captured two ways records the same facts', () => {
   });
 });
 
+describe('a failed tool call is a failure on every path', () => {
+  // The sharpest form of the premise: an evaluator must score one session the
+  // same however it was captured. It did not — the hook stored a failed call
+  // clean (only a `post_tool_fail` EVENT counted, which Claude Code never
+  // sends) while the transcript importer read `is_error` off the tool_result.
+  // `no_error_steps` then scored 1.0 against 0.7 for one session.
+  it('the hook and the importer agree that the tool failed', () => {
+    applyHookPayload(db, { hook_event_name: 'UserPromptSubmit', session_id: 'fail-hook', cwd: dir, prompt: 'delete it' });
+    applyHookPayload(db, {
+      hook_event_name: 'PreToolUse', session_id: 'fail-hook', cwd: dir,
+      tool_name: 'Bash', tool_input: { command: 'rm -rf /tmp/x' },
+    });
+    const hookRes = applyHookPayload(db, {
+      hook_event_name: 'PostToolUse', session_id: 'fail-hook', cwd: dir,
+      tool_name: 'Bash', tool_input: { command: 'rm -rf /tmp/x' },
+      tool_response: { stderr: 'permission denied', is_error: true },
+    });
+
+    const path = join(dir, 'failed.jsonl');
+    writeFileSync(path, [
+      { type: 'user', sessionId: 'fail-file', timestamp: '2026-09-06T10:00:00.000Z', message: { content: 'delete it' } },
+      {
+        type: 'assistant', sessionId: 'fail-file', timestamp: '2026-09-06T10:00:01.000Z',
+        message: { content: [{ type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'rm -rf /tmp/x' } }] },
+      },
+      {
+        type: 'user', sessionId: 'fail-file', timestamp: '2026-09-06T10:00:02.000Z',
+        message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'permission denied', is_error: true }] },
+      },
+    ].map((r) => JSON.stringify(r)).join('\n'));
+
+    const hook = getTrace(db, hookRes.traceId!)!;
+    const imported = getTrace(db, importClaudeTranscript(db, path).trace!.id)!;
+    const errorOf = (t: typeof hook) => t.steps.find((s) => s.step_type === 'tool_call')!.error;
+    expect(errorOf(hook)).toBe('permission denied');
+    expect(errorOf(imported)).toBe(errorOf(hook));
+  });
+});
+
 describe('the other capture pairs agree too', () => {
   it('the hook and the OTel log receiver record one Claude session the same way', () => {
     const hook = getTrace(db, captureViaHook('sess-hook-otel'))!;

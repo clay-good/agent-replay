@@ -589,6 +589,44 @@ describe('a subagent stop that names no agent, and what finalize says', () => {
   });
 });
 
+describe('a tool that failed is recorded as failed', () => {
+  // Only a `post_tool_fail` EVENT marked a step failed — and Claude Code has no
+  // such event: it sends PostToolUse with the result, and the failure lives
+  // inside it. So a live capture stored a failed tool call as a clean one while
+  // the same session imported from its transcript stored it as failed, and the
+  // evaluators scored the two differently (1.0 vs 0.7 on `no_error_steps`).
+  const close = (session: string, response: Record<string, unknown>) => {
+    apply({ hook_event_name: 'UserPromptSubmit', session_id: session, prompt: 'go' });
+    apply({ hook_event_name: 'PreToolUse', session_id: session, tool_name: 'Bash', tool_input: { command: 'rm -rf /tmp/x' } });
+    const res = apply({
+      hook_event_name: 'PostToolUse', session_id: session,
+      tool_name: 'Bash', tool_input: { command: 'rm -rf /tmp/x' }, tool_response: response,
+    });
+    return getTrace(db, res.traceId!)!.steps.find((s) => s.step_type === 'tool_call')!;
+  };
+
+  it('reads is_error, the flag the transcript importer already reads', () => {
+    expect(close('f1', { stderr: 'permission denied', is_error: true }).error).toBe('permission denied');
+  });
+
+  it('reads success:false and a non-zero exit_code', () => {
+    expect(close('f2', { success: false, message: 'tool said no' }).error).toBe('tool said no');
+    expect(close('f3', { exit_code: 2, stderr: 'boom' }).error).toBe('boom');
+  });
+
+  it('says something usable when the failure carries no text', () => {
+    expect(close('f4', { is_error: true }).error).toBe('tool failed');
+  });
+
+  it('leaves a successful call clean', () => {
+    // Over-reading a failure would slander a working run, and the evaluators
+    // read this field.
+    expect(close('ok1', { stdout: 'a.txt', is_error: false }).error).toBeNull();
+    expect(close('ok2', { stdout: 'a.txt' }).error).toBeNull();
+    expect(close('ok3', { exit_code: 0, stdout: 'a.txt' }).error).toBeNull();
+  });
+});
+
 describe('a hook-captured trace records how it was captured', () => {
   it('stamps source_format beside the dialect', () => {
     // `dialect` says WHICH HARNESS; `source_format` says HOW — the key the
