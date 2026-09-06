@@ -474,10 +474,12 @@ function ingestOtlpTraces(
   // (e.g. a non-array `resourceSpans`/`scopeSpans`/`spans`, which `?? []` does
   // not guard against) throws here and must answer 400, not fall through to the
   // outer 500 — a 5xx tells OTLP exporters to retry the same bad batch forever.
-  let totalSpans: number;
   let traces: MappedOtelTrace[];
   try {
-    totalSpans = countSpans(otlp);
+    // Walked purely to reject a malformed body: a non-array resourceSpans /
+    // scopeSpans / spans is not iterable, so this throws exactly where
+    // mapOtlpTraces would, before anything is written.
+    countSpans(otlp);
     traces = mapOtlpTraces(otlp);
   } catch {
     return { status: 400, payload: { error: 'invalid OTLP body: resourceSpans/scopeSpans/spans must be arrays' } };
@@ -493,13 +495,28 @@ function ingestOtlpTraces(
   // transactions inside still work.)
   storeOtelBatch(db, traces, stats);
 
-  // Root/agent spans define traces rather than steps, so mappedSpans can be
-  // fewer than totalSpans without any rejection. Only report partial_success
-  // when spans were genuinely undecodable (no traceId → dropped in flatten).
-  const rejected = traces.length === 0 && totalSpans > 0 ? totalSpans : 0;
-  if (rejected > 0) {
-    return { status: 200, payload: { partialSuccess: { rejectedSpans: rejected, errorMessage: 'no mappable spans in batch' } } };
-  }
+  // No partial_success on this endpoint, deliberately: the span path rejects
+  // NOTHING. Every span becomes a step or a trace — `flattenSpans` drops none,
+  // and a span with no trace id is deliberately kept as its own synthetic trace
+  // rather than refused (grouping the id-less ones together would fuse
+  // unrelated services, so each gets its own). There is therefore no count of
+  // dropped spans to report.
+  //
+  // This used to answer `partialSuccess: { rejectedSpans: totalSpans }` when the
+  // batch mapped to zero traces, explained as "spans genuinely undecodable (no
+  // traceId → dropped in flatten)". That reason stopped being true when the
+  // id-less span became a synthetic trace, and with every span yielding a trace
+  // the condition cannot hold at all — an unreachable branch promising a
+  // report this endpoint can never make. The /v1/logs endpoint DOES report
+  // partial_success, and honestly: its mapper keeps only `gemini_cli.*` /
+  // `claude_code.*` events, so records really are discarded there and the count
+  // is real. The difference between the two endpoints is the mappers, not an
+  // oversight here.
+  //
+  // A span id repeated inside one batch is dropped, but that is a REDELIVERY
+  // and not a rejection — the merge path drops a span id it has already stored
+  // for the same reason and is likewise silent, so reporting one and not the
+  // other would make an exporter's retry look like data loss.
   return { status: 200, payload: {} };
 }
 

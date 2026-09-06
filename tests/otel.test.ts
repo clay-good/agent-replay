@@ -1243,3 +1243,51 @@ describe('a root span keeps the attributes only a step would have consumed', () 
     expect(trace.steps[0].metadata).not.toHaveProperty('model');
   });
 });
+
+describe('the /v1/traces endpoint rejects nothing, and says so by answering a bare 200', () => {
+  // This endpoint once answered `partialSuccess: { rejectedSpans: N }` when a
+  // batch mapped to zero traces, justified as "spans genuinely undecodable (no
+  // traceId → dropped in flatten)". Nothing is dropped in flatten, and an
+  // id-less span is deliberately KEPT as its own synthetic trace, so the
+  // condition could not hold — an unreachable branch promising a report this
+  // endpoint cannot make. These pin the two facts that make it unreachable, so
+  // it cannot be reintroduced on the old reasoning.
+  it('keeps a span with no trace id as a trace, and reports no rejection', () => {
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    const res = handleTracesExport(
+      db,
+      JSON.stringify({ resourceSpans: [{ scopeSpans: [{ spans: [{ spanId: 'a1', name: 'chat', attributes: [] }] }] }] }),
+      stats,
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.payload).toEqual({});
+    expect(listTraces(db, {}).items).toHaveLength(1);
+  });
+
+  it('reports no rejection for spans carrying no recognizable attributes', () => {
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    const res = handleTracesExport(
+      db,
+      JSON.stringify({ resourceSpans: [{ scopeSpans: [{ spans: [{ traceId: 'zz', spanId: 'b1', name: 'something-random', attributes: [] }] }] }] }),
+      stats,
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.payload).toEqual({});
+    expect(listTraces(db, {}).items).toHaveLength(1);
+  });
+
+  it('still refuses a malformed body with 400, which is what the span walk is for', () => {
+    const stats: OtelStats = { acceptedSpans: 0, acceptedTraces: 0 };
+    for (const body of [
+      { resourceSpans: 5 },
+      { resourceSpans: { a: 1 } },
+      { resourceSpans: [{ scopeSpans: [{ spans: 7 }] }] },
+    ]) {
+      expect(handleTracesExport(db, JSON.stringify(body), stats).status).toBe(400);
+    }
+    // An empty batch is well-formed, not a rejection.
+    expect(handleTracesExport(db, JSON.stringify({ resourceSpans: [] }), stats)).toEqual({ status: 200, payload: {} });
+  });
+});
