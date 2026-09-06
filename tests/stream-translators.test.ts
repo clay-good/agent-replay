@@ -4,6 +4,10 @@ import { runMigrations } from '../src/db/migrations.js';
 import { getTrace } from '../src/services/trace-service.js';
 import { applyEvent } from '../src/services/recorder.js';
 import { makeTranslator } from '../src/services/stream-translators.js';
+import { importClaudeTranscript } from '../src/services/importers/claude-transcript.js';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { StreamTranslator } from '../src/services/stream-translators.js';
 
 let db: Database.Database;
@@ -807,5 +811,87 @@ describe('ClaudeStreamTranslator', () => {
     t.translate(init);
     expect(t.translate({ type: 'stream_event' })).toEqual([]);
     expect(t.lastSkip()).toMatch(/unrecognized claude-stream event type/);
+  });
+});
+
+/**
+ * The README promises the piped and on-disk Claude Code paths "stay in step".
+ * That is a claim about two independent code paths agreeing, which nothing
+ * enforced — and the translator was written against the importer, so it is
+ * exactly the pairing that drifts when only one of them is changed.
+ */
+describe('claude-stream and the transcript importer agree', () => {
+  const stamp = '2026-09-06T10:00:00.000Z';
+  const assistantTurn = {
+    type: 'assistant',
+    sessionId: 'sX',
+    session_id: 'sX',
+    timestamp: stamp,
+    message: {
+      model: 'claude-opus-5',
+      usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 7 },
+      content: [
+        { type: 'thinking', thinking: 'list them' },
+        { type: 'tool_use', id: 'tu_1', name: 'Bash', input: { command: 'ls' } },
+      ],
+    },
+  };
+  const toolResult = {
+    type: 'user',
+    sessionId: 'sX',
+    session_id: 'sX',
+    timestamp: stamp,
+    message: { content: [{ type: 'tool_result', tool_use_id: 'tu_1', content: 'a.ts' }] },
+  };
+  const reply = {
+    type: 'assistant',
+    sessionId: 'sX',
+    session_id: 'sX',
+    timestamp: stamp,
+    message: { model: 'claude-opus-5', usage: { output_tokens: 12 }, content: [{ type: 'text', text: 'One file.' }] },
+  };
+
+  it('produces the same steps, models and token total for one session', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ar-eq-'));
+    try {
+      const file = join(dir, 't.jsonl');
+      writeFileSync(
+        file,
+        [
+          { type: 'user', sessionId: 'sX', timestamp: stamp, message: { content: [{ type: 'text', text: 'what files are here' }] } },
+          assistantTurn,
+          toolResult,
+          reply,
+        ]
+          .map((r) => JSON.stringify(r))
+          .join('\n') + '\n',
+      );
+      const report = importClaudeTranscript(db, file);
+      const imported = getTrace(db, report.trace!.id)!;
+
+      const t = makeTranslator('claude-stream')!;
+      const streamed = getTrace(
+        db,
+        run(t, [
+          { type: 'system', subtype: 'init', session_id: 'sX', model: 'claude-opus-5' },
+          assistantTurn,
+          toolResult,
+          reply,
+          { type: 'result', subtype: 'success', is_error: false, result: 'One file.' },
+        ]),
+      )!;
+
+      const shape = (tr: typeof imported) =>
+        tr.steps.map((s) => [s.step_type, s.name, s.model, JSON.stringify(s.output), s.error ?? null]);
+
+      // Non-vacuous: three real steps on both sides, not two empty lists.
+      expect(imported.steps).toHaveLength(3);
+      expect(shape(streamed)).toEqual(shape(imported));
+      expect(streamed.total_tokens).toBe(imported.total_tokens);
+      expect(streamed.agent_name).toBe(imported.agent_name);
+      expect(streamed.output).toEqual(imported.output);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
