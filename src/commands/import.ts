@@ -296,6 +296,22 @@ export function runImport(filePath: string, opts: ImportOptions = {}): void {
       'Trace ID': report.trace.id,
       'Session': report.trace.session_id ?? '(none)',
       'Steps': report.steps,
+      // The token total, WHERE IT IS MADE, with what it counts.
+      //
+      // A Claude transcript's usage blocks are dominated by
+      // `cache_read_input_tokens` — the importer sums all four fields on
+      // purpose, since that is what the session actually consumed — and the
+      // result is startling out of context: one real session on this machine
+      // imports as 1,089,468,689 tokens. The number first met the reader in
+      // `stats` ("Total tokens: 1,089,468,689") with nothing to explain it, and
+      // a figure a user cannot account for reads as a bug in the tool.
+      ...(report.trace.total_tokens != null
+        ? {
+            'Tokens': `${report.trace.total_tokens.toLocaleString('en-US')}${
+              format === 'claude-transcript' ? ' (prompt, completion and cache)' : ''
+            }`,
+          }
+        : {}),
       'Records imported': report.imported,
       'Records skipped': report.skipped,
     }),

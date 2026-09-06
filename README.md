@@ -240,6 +240,12 @@ transcript of a session you also captured live therefore adds a second trace for
 it, and says so: both are kept, since a transcript and a live capture record
 different things, but every store-wide count includes both.
 
+The import summary reports the trace's token total and what it counts. For a
+Claude transcript that is prompt, completion **and cache** tokens — the cache
+fields carry nearly all of a real session's consumption, so the figure is far
+larger than a reader expects (a single long session imports as over a billion),
+and meeting it first in `stats` with no explanation reads as a bug.
+
 Transcripts are read a line at a time rather than loaded whole, so peak memory tracks the trace being built rather than the file: a 52 MB session imports in ~270 MB instead of ~440 MB, and a session larger than ~512 MB imports at all (it previously failed with "Cannot create a string longer than 0x1fffffe8 characters" and no partial import — a 647 MB transcript now imports its 672,000 steps).
 
 Sessions are identified by session id, source format **and** source filename — a Claude Code subagent sidecar (`<session>/subagents/agent-*.jsonl`) carries the same session id as its parent transcript, so the file has to be part of the identity. A file that carries no session id is imported each time it is named, and a trace imported before this identity existed is never replaced.

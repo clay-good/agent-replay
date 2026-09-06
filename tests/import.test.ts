@@ -828,6 +828,36 @@ describe('the stored prompt is what the person asked', () => {
     expect(trace.metadata.follow_up_prompts).toBeUndefined();
   });
 
+  it('reports the token total, and what it counts, in the summary', () => {
+    // A Claude transcript's usage is dominated by cache reads — summed on
+    // purpose — so the total is startling out of context: a real session
+    // imports as over a billion tokens, and the reader first met that number in
+    // `stats` with nothing to explain it.
+    const path = fixture([
+      { type: 'user', sessionId: 'tok-1', message: { content: 'go' } },
+      {
+        type: 'assistant', sessionId: 'tok-1',
+        message: {
+          content: [{ type: 'text', text: 'done' }],
+          usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 100, cache_read_input_tokens: 900_000 },
+        },
+      },
+    ]);
+    const out: string[] = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((m?: unknown) => void out.push(String(m ?? '')));
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      runImport(path, { dir });
+    } finally {
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+    }
+    const panel = out.join('\n').replace(/\x1B\[[0-9;]*m/g, '');
+    expect(panel).toContain('900,115');
+    expect(panel).toContain('prompt, completion and cache');
+    resetConnection();
+  });
+
   it('says when the session was already captured live', () => {
     // The identity check keys on session id AND source format AND source file,
     // so it only recognizes a previous IMPORT. A live capture of the same

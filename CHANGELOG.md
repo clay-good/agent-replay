@@ -443,6 +443,14 @@ and one-way.
 
 ### Fixed
 
+- **An import never showed the token total it had just computed.** A Claude
+  transcript's usage is dominated by `cache_read_input_tokens`, which the
+  importer sums on purpose — that is what the session consumed — so a real
+  session imports as over a billion tokens. The reader first met that figure in
+  `stats` ("Total tokens: 1,338,442,110") with nothing to explain it, and a
+  number you cannot account for reads as a bug in the tool. The import summary
+  now reports it, and says what it counts.
+
 - **`record` opened a second trace for a session already being captured, without
   saying so.** The third of the same family: nothing correlates capture paths,
   so a stream whose `trace_start` carries the session id of a hook-captured run
