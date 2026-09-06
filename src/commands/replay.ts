@@ -12,6 +12,13 @@ import { errorMessage, truncate, hasRenderableContent } from '../utils/json.js';
 import { formatDuration } from '../utils/time.js';
 import { resolveDataDir, storeExists, storeAboveNote } from '../utils/paths.js';
 
+/** The delay a step with no recorded duration is replayed at. */
+const DEFAULT_STEP_MS = 500;
+/** No single step waits longer than this, however slow the original was. */
+const MAX_STEP_DELAY_MS = 3000;
+/** Steps beyond which the replay says how to narrow it, matching `show`. */
+const LARGE_TRACE_STEPS = 200;
+
 export interface ReplayOptions {
   speed?: string;
   pause?: boolean;
@@ -152,6 +159,25 @@ export async function runReplay(
       chalk.dim(` steps ${steps[0].step_number}-${steps[steps.length - 1].step_number}`) +
       chalk.dim(speed === 0 ? ' (instant)' : ` at ${speed}x speed`),
   );
+
+  // How long this will actually take, before it starts taking it.
+  //
+  // `show` learned to name its windowing flags on a large trace; this command
+  // has the same flags and the same problem twice over — a 20,000-step trace
+  // prints 60,018 lines, and at the default 5x speed it also SLEEPS through
+  // every step (a 100-step trace of 1-second steps takes ~20 s; an imported
+  // session of 3,000 steps takes far longer). The estimate uses the same
+  // per-step delay the replay itself applies, so it cannot promise a pace the
+  // command does not keep.
+  const estimateMs = speed === 0
+    ? 0
+    : steps.reduce((sum, s) => sum + Math.min((s.duration_ms ?? DEFAULT_STEP_MS) / speed, MAX_STEP_DELAY_MS), 0);
+  if (steps.length > LARGE_TRACE_STEPS || estimateMs > 15_000) {
+    const howLong = estimateMs > 0 ? `, about ${formatDuration(Math.round(estimateMs))} at ${speed}x` : '';
+    console.log(
+      chalk.dim(`  ${steps.length.toLocaleString()} steps${howLong} — narrow with --from-step/--to-step, or --speed 0 for instant.`),
+    );
+  }
   console.log('');
 
   // Replay each step
@@ -219,8 +245,8 @@ async function replayStep(step: TraceStep, speed: number): Promise<void> {
   const num = chalk.dim(String(step.step_number).padStart(2));
 
   // Calculate simulated delay
-  const actualMs = step.duration_ms ?? 500;
-  const delayMs = speed === 0 ? 0 : Math.min(actualMs / speed, 3000); // cap at 3s
+  const actualMs = step.duration_ms ?? DEFAULT_STEP_MS;
+  const delayMs = speed === 0 ? 0 : Math.min(actualMs / speed, MAX_STEP_DELAY_MS);
 
   // Start spinner
   const spinner = stepSpinner(step.step_type as StepType);

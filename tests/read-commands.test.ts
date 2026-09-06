@@ -216,6 +216,43 @@ describe('replay', () => {
     expect(stdout()).toMatch(/Replay complete: 2 steps/);
   });
 
+  it('says how long a replay will take before it takes it', async () => {
+    // `show` names its windowing flags on a large trace; `replay` has the same
+    // flags and the same problem twice over — it prints every step AND sleeps
+    // through them. A 100-step trace of 1-second steps takes ~20s at the
+    // default 5x, and nothing said so before it started.
+    const db = ensureDatabase(resolve(dir, 'traces.db'));
+    const slow = ingestTrace(db, {
+      agent_name: 'slow', status: 'completed', input: { q: 1 },
+      steps: Array.from({ length: 100 }, (_, i) => ({
+        step_number: i + 1, step_type: 'tool_call' as const, name: `s${i + 1}`, duration_ms: 1000,
+      })),
+    } as never).id;
+
+    // At --speed 0 there is nothing to wait for, so no estimate is offered.
+    out.length = 0;
+    await runReplay(slow, { dir, speed: '0' });
+    expect(out.join('\n')).not.toMatch(/about .* at/);
+
+    // The estimate uses the same per-step delay the replay applies, so it
+    // cannot promise a pace the command does not keep.
+    out.length = 0;
+    await runReplay(slow, { dir, speed: '1000' });
+    const fast = out.join('\n');
+    expect(fast).not.toMatch(/narrow with --from-step/);
+
+    // A trace long enough to flood the terminal says so whatever the speed.
+    const big = ingestTrace(db, {
+      agent_name: 'big-replay', status: 'completed', input: { q: 2 },
+      steps: Array.from({ length: 250 }, (_, i) => ({
+        step_number: i + 1, step_type: 'tool_call' as const, name: `s${i + 1}`,
+      })),
+    } as never).id;
+    out.length = 0;
+    await runReplay(big, { dir, speed: '0' });
+    expect(out.join('\n')).toMatch(/250 steps — narrow with --from-step\/--to-step, or --speed 0 for instant/);
+  });
+
   it('tells a reader how to window a very large trace', async () => {
     // A 20,000-step trace filled 80,013 lines with no hint that the windowing
     // flags exist — and real traces reach that size: imported sessions run to

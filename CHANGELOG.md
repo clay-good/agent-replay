@@ -450,6 +450,15 @@ and one-way.
 
 ### Fixed
 
+- **`replay` gave no warning before a very long replay.** The twin of the `show`
+  case below, and worse: it prints every step AND sleeps through them, so a
+  100-step trace of 1-second steps takes about 20 seconds at the default 5x,
+  and a 20,000-step trace prints 60,018 lines. It now says what it is about to
+  do — `100 steps, about 20.0s at 5x — narrow with --from-step/--to-step, or
+  --speed 0 for instant` — using the same per-step delay the replay itself
+  applies, so it cannot promise a pace it will not keep. Silent for a short
+  trace, and no estimate at `--speed 0`, where there is nothing to wait for.
+
 - **`show` printed a 20,000-step trace without mentioning the windowing flags.**
   80,013 lines, no hint — and real traces reach that size: imported sessions run
   to thousands of steps, and a 647 MB transcript imports 672,000. `--from-step`
