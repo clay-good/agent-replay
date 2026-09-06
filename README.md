@@ -338,7 +338,7 @@ agent-replay watch
 agent-replay watch <trace-id> --interval 200
 ```
 
-A trace deleted while you are watching it ends the tail with a message and exit `1`, rather than leaving it polling an id that is gone. With no id it picks the most recent `running` trace — by start *instant*, not by the spelling of the timestamp — so it's the natural companion to a hook-instrumented session in another terminal. It exits when the trace is finalized. A trace that has been `running` long enough to look abandoned is called out when `watch` attaches, since a tail on a run whose producer died prints nothing and reads like an agent that is thinking; `list` and `show` mark the same trace, and `show --json` reports it as `possibly_abandoned`.
+A trace deleted while you are watching it ends the tail with a message and exit `1`, rather than leaving it polling an id that is gone. With no id it picks the most recent `running` trace — by start *instant*, not by the spelling of the timestamp — so it's the natural companion to a hook-instrumented session in another terminal. It exits when the trace is finalized. A trace that has been `running` long enough to look abandoned is called out when `watch` attaches, since a tail on a run whose producer died prints nothing and reads like an agent that is thinking; `list` and `show` mark the same trace, and `show --json` reports it as `possibly_abandoned`. A **fork** is never marked abandoned however long it sits — it is a copy left `running` for you to explore, not a capture that died — and `list` marks it `⑂ fork`, which is also why `list` counts it and `stats` does not.
 
 `--interval` is in milliseconds and is capped at `2147483647` ms — above that
 Node's timer overflows and clamps to 1 ms, polling the database about a
@@ -1146,7 +1146,8 @@ const trace = ingestTrace(db, {
   status: 'completed',
   steps: [{ step_number: 1, step_type: 'output', name: 'answer', output: { text: 'done' } }],
 });
-const full = getTrace(db, trace.id); // trace with its steps, evals, and decisions
+const full = getTrace(db, trace.id); // trace with its steps and evals
+// A step's decision record, when it has one, is on the step itself: full.steps[0].decision
 ```
 
 To record a run live from TypeScript, use the `TraceRecorder` SDK — the same incremental engine the `record` command uses, no files or subprocess required:

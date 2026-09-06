@@ -393,6 +393,18 @@ and one-way.
 
 ### Fixed
 
+- **Every fork was reported as an abandoned capture half an hour after you
+  made it.** `fork` copies a run up to a step and leaves the copy `running` for
+  you to explore, and the staleness marker only asked "still running, and old?"
+  — so `list`, the `show` header, `show --json` and the dashboard all called a
+  healthy what-if sandbox a run whose producer had died, and none of the
+  remedies that marker implies applied. `getMostRecentRunningTrace` already drew
+  exactly this line (it refuses to attach `watch` to a fork); the marker did
+  not. A fork is now never marked abandoned, and the listing says what it
+  actually is (`⑂ fork`) — until now a fork appeared there as a second live run
+  of the same agent, with the same status and token count, which is also why
+  `list` counts it and `stats` does not.
+
 - **`otel serve` dropped every export in silence when the store broke.** A
   mistyped path was announced on the receiver's console; a batch that could not
   be STORED was not. A store gone read-only, a full disk or a damaged file

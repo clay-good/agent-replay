@@ -82,6 +82,8 @@ Each poll SHALL read the steps written since the previous one, not the whole tra
 
 A trace still `running` past the abandoned threshold SHALL be marked as such wherever it is presented — the listing, the `show` header, `watch`'s attach line — and reported in `show --json` as a derived `possibly_abandoned`, never as a stored column. A producer that died without finalizing is indistinguishable from one still working, and a view that omits the marker disagrees with the one the reader just came from.
 
+A FORK SHALL NOT be marked abandoned at any age, and SHALL be marked as a fork in the listing. `fork` leaves its copy `running` for the user to explore, so the marker fired on every what-if sandbox half an hour after it was made and reported a healthy copy as a capture whose writer had died — the same line `getMostRecentRunningTrace` already draws when it refuses to attach `watch` to a fork. The listing SHALL say what the trace IS instead: a fork carries its parent's agent name, status and token count, so without a marker it reads as a second live run of the same agent, and `list` counts it where `stats` does not.
+
 A trace that DISAPPEARS from the store while being watched SHALL end the tail with a message naming it and exit 1, not be polled indefinitely: a deleted trace is not a quiet one, and a watcher that cannot tell the difference reports the wrong thing about a live run.
 
 The poll interval SHALL be settable with `--interval <ms>`. Because Node stores a timer delay in a 32-bit signed integer and CLAMPS anything larger to 1 ms, a value above that range SHALL be refused (exit 2) rather than polled: it plainly asks to poll almost never and would instead poll about a thousand times a second, the inverse of the request. `--interval` SHALL be validated BEFORE the trace is resolved, so a typo is a usage error even when there is nothing to watch. A trace named explicitly that does not exist SHALL be an error (exit 1); finding nothing running in the auto case is a normal empty state and SHALL stay at exit 0.
@@ -111,4 +113,9 @@ The system SHALL flag traces still in status `running` past a staleness threshol
 
 - **WHEN** a trace has been `running` for longer than the staleness threshold
 - **THEN** `agent-replay list` marks it as possibly abandoned
+
+#### Scenario: A what-if fork left open for an afternoon
+
+- **WHEN** a fork made three hours ago is listed and shown
+- **THEN** it is marked `⑂ fork`, not `⚠ abandoned?`, and `show --json` reports `possibly_abandoned: false`
 

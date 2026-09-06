@@ -5,6 +5,8 @@ import { join, resolve } from 'node:path';
 import { ensureDatabase, resetConnection } from '../src/db/index.js';
 import { ingestTrace, attachDecision, getTrace, getStepSnapshot } from '../src/services/trace-service.js';
 import { runShow } from '../src/commands/show.js';
+import { runList } from '../src/commands/list.js';
+import { forkTrace } from '../src/services/fork-service.js';
 import { runWhy } from '../src/commands/why.js';
 import { runDecisions } from '../src/commands/decisions.js';
 import { runReplay } from '../src/commands/replay.js';
@@ -498,6 +500,36 @@ describe('an abandoned-looking trace says so everywhere, not just in the listing
     const doc = JSON.parse(out.join('\n')) as { possibly_abandoned: boolean; status: string };
     expect(doc.status).toBe('running');
     expect(doc.possibly_abandoned).toBe(true);
+  });
+
+  it('never calls a fork abandoned, however long it sits', async () => {
+    // `fork` copies a run up to a step and leaves the copy `running` for the
+    // user to explore. Half an hour later every what-if sandbox in the store
+    // was reported as a capture whose writer had died — in the listing, in
+    // `show`, in `show --json` and on the dashboard — when nothing is wrong
+    // with it and none of the marker's remedies apply.
+    const db = ensureDatabase(resolve(dir, 'traces.db'));
+    const forked = forkTrace(db, id, 1, {}).forked_trace_id;
+    db.prepare('UPDATE agent_traces SET started_at = ? WHERE id = ?').run(
+      new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+      forked,
+    );
+    out.length = 0;
+    await runShow(forked, { dir, json: true });
+    const doc = JSON.parse(out.join('\n')) as { possibly_abandoned: boolean; status: string; parent_trace_id: string };
+    expect(doc.status).toBe('running');
+    expect(doc.parent_trace_id).toBe(id);
+    expect(doc.possibly_abandoned).toBe(false);
+
+    // The listing says what it IS instead.
+    out.length = 0;
+    await runList({ dir });
+    const table = out.join('\n').replace(/\x1B\[[0-9;]*m/g, '');
+    const forkRow = table.split('\n').find((l) => l.includes(forked.slice(0, 12)));
+    expect(forkRow).toMatch(/⑂ fork/);
+    expect(forkRow).not.toMatch(/abandoned\?/);
+    // The run it was forked from is genuinely stale, and still says so.
+    expect(table.split('\n').find((l) => l.includes(id.slice(0, 12)))).toMatch(/abandoned\?/);
   });
 
   it('says nothing for a run that started moments ago', async () => {

@@ -1477,12 +1477,24 @@ export const ABANDONED_THRESHOLD_MS = 30 * 60 * 1000;
 /**
  * Whether a trace looks abandoned: still `running` and started longer ago than
  * the staleness threshold. `nowMs` is injectable for testing.
+ *
+ * A FORK is never abandoned, however long it sits. `fork` copies a run up to a
+ * step and leaves the copy `running` for the user to explore, so every what-if
+ * sandbox in the store crossed the threshold half an hour after it was created
+ * and was then reported — in `list`, in `show`, in `show --json`, on the
+ * dashboard and by `watch` — as a capture whose writer had died. Nothing is
+ * wrong with it, and nothing the marker suggests would help.
+ * `getMostRecentRunningTrace` already draws exactly this line
+ * (`parent_trace_id IS NULL`, so `watch` never attaches to a fork); this is the
+ * same rule at the other site that reads `status = 'running'` as "a capture is
+ * in progress".
  */
 export function isPossiblyAbandoned(
-  trace: Pick<Trace, 'status' | 'started_at'>,
+  trace: Pick<Trace, 'status' | 'started_at'> & { parent_trace_id?: string | null },
   thresholdMs: number = ABANDONED_THRESHOLD_MS,
   nowMs: number = Date.now(),
 ): boolean {
+  if (trace.parent_trace_id) return false;
   if (trace.status !== 'running') return false;
   const started = Date.parse(trace.started_at);
   if (Number.isNaN(started)) return false;

@@ -49,9 +49,18 @@ export function traceTable(traces: Trace[]): string {
   const AGENT_NAME_MAX = 40;
 
   for (const t of traces) {
-    const status = isPossiblyAbandoned(t)
-      ? `${statusBadge(t.status as TraceStatus)} ${chalk.yellow('⚠ abandoned?')}`
-      : statusBadge(t.status as TraceStatus);
+    // A fork is marked as one. It is a copy of a run up to a step, left
+    // `running` for the user to explore and never executed, so the listing
+    // showed it as a live run of the same agent — same status, same token
+    // count, one row above the trace it was forked from. `show` names its
+    // parent and `stats` excludes it from the store's totals (which is why
+    // `list` says 6 traces where `stats` says 5); the listing said nothing.
+    const marker = t.parent_trace_id
+      ? ` ${chalk.cyan('⑂ fork')}`
+      : isPossiblyAbandoned(t)
+        ? ` ${chalk.yellow('⚠ abandoned?')}`
+        : '';
+    const status = `${statusBadge(t.status as TraceStatus)}${marker}`;
     table.push([
       chalk.dim(safeText(t.id.slice(0, 12))),
       chalk.white(safeLine(truncateToWidth(t.agent_name, AGENT_NAME_MAX))),
