@@ -77,6 +77,15 @@ and one-way.
 
 ### Added
 
+- `import --format claude-transcript` dropped the run's git context, which every
+  Claude record carries (`gitBranch`, `cwd`) and which the codex-rollout
+  importer already stores as `metadata.git`. Which branch a run came from is how
+  a reader tells two runs of one agent apart, and `check --golden` compares runs
+  across branches by design. Now recorded under the same key, so the question
+  has one answer whichever importer produced the trace — with only what the
+  records state: no commit hash is inferred, and a session that reported several
+  branches lists them instead of being reduced to its first (19 of 600 real
+  sessions do, usually a detached `HEAD` that later resolved).
 - **`export --agent-exact <name>`, so a golden baseline can name ONE agent.**
   `--agent` matches by substring, which is right for browsing and wrong for
   building a gate: `--agent checkout` also writes `checkout-v2`'s runs into the
@@ -2372,15 +2381,6 @@ and one-way.
   read the identical attribute — so `stats` showed no cost and `list --sort cost`
   was inert for every span-captured trace. It also ignored a reported
   `total_tokens` when the input/output split was absent.
-- `import --format claude-transcript` dropped the run's git context, which every
-  Claude record carries (`gitBranch`, `cwd`) and which the codex-rollout
-  importer already stores as `metadata.git`. Which branch a run came from is how
-  a reader tells two runs of one agent apart, and `check --golden` compares runs
-  across branches by design. Now recorded under the same key, so the question
-  has one answer whichever importer produced the trace — with only what the
-  records state: no commit hash is inferred, and a session that reported several
-  branches lists them instead of being reduced to its first (19 of 600 real
-  sessions do, usually a detached `HEAD` that later resolved).
 - `import --format claude-transcript` stored harness machinery as the question a
   session was asked. The prompt is chosen by SHAPE — a turn starting with `<`,
   plus a few known notices — which was measured over the whole corpus and is
@@ -2417,14 +2417,6 @@ and one-way.
 - The shared "no enabled policies" sentence offered `--allow-empty`, a gate's
   escape hatch that `guard test` does not have, so it is omitted there rather
   than sending the reader after a flag that does not exist.
-- The two lines `list` prints when a filter matches nothing echoed producer
-  values to the terminal unescaped — the agent names present, and the capture
-  paths present. A trace is written by the agent under test, which chooses its
-  own `agent_name`, and the native protocol lets a producer set its own
-  `source_format`, so `list --agent typo` could emit whatever escape sequence
-  the agent had named itself: a raw `\r` returns the cursor to column 0 and
-  overwrites the line above. The listing table beside them already neutralized
-  both. Now escaped with the same one-line escaper every other row uses.
 - `list` told you to run `agent-replay demo` when a FILTER matched nothing, not
   only when the store was empty — so `list --agent typo` against a store holding
   hundreds of traces read as though they were gone. Only `--source` had been
@@ -3007,6 +2999,14 @@ and one-way.
   `guard test`, the eval table beside the panel that was already escaped, and the
   dashboard, where the bytes also corrupt blessed's width math for the whole
   layout.
+- The two lines `list` prints when a filter matches nothing echoed producer
+  values to the terminal unescaped — the agent names present, and the capture
+  paths present. A trace is written by the agent under test, which chooses its
+  own `agent_name`, and the native protocol lets a producer set its own
+  `source_format`, so `list --agent typo` could emit whatever escape sequence
+  the agent had named itself: a raw `\r` returns the cursor to column 0 and
+  overwrites the line above. The listing table beside them already neutralized
+  both. Now escaped with the same one-line escaper every other row uses.
 
 - `ingest --dry-run` passed files the real run could never load. A step's
   `error` was the one TEXT column bound without coercion, so a structured error
