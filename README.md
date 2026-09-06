@@ -449,7 +449,7 @@ The events channel is **append-only**: open it with `a`, never `w`. A producer t
 
 ### Regression check (CI)
 
-Turn known-good runs into a regression gate. Export a golden dataset once, then `check` new runs against it — the comparison is structural (step count, step types and names, tool-call inputs, final status) rather than raw output text, so non-deterministic wording never causes false failures. It exits non-zero on any regression, ready for CI.
+Turn known-good runs into a regression gate. Export a golden dataset once, then `check` new runs against it — the comparison is structural (step count, step types and names, tool-call inputs, final status) rather than raw output text, so how the agent *words its answer* never causes a failure. Tool-call inputs are a deliberate exception: they are compared verbatim, because a changed tool query is the divergence a purely structural gate is blind to — which also means model-authored argument text diverges when the model rephrases it (`{"query":"weather in Paris today"}` against `{"query":"Paris weather today"}` is a reported regression). If your agent's arguments vary run to run, gate on the rest: `--fields step_count,step_types,step_names,step_errors,status`. It exits non-zero on any regression, ready for CI.
 
 ```bash
 # Capture a golden dataset from passing runs
