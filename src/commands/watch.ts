@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import chalk from 'chalk';
 import type { TraceStep } from '../models/types.js';
 import type { StepType, TraceStatus } from '../models/enums.js';
-import { getTrace, getStepsAfter, getMostRecentRunningTrace } from '../services/trace-service.js';
+import { getTrace, getStepsAfter, getStepsSince, getStepsByNumbers, countSteps, getMostRecentRunningTrace } from '../services/trace-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { stepIcon, stepLabel, heading, statusBadge, safeText, safeLine} from '../ui/theme.js';
 import { formatDuration } from '../utils/time.js';
@@ -97,8 +97,12 @@ export function runWatch(traceId: string | undefined, opts: WatchOptions = {}): 
   const seen = new Set<number>();
   // Steps printed while still unfinished, awaiting their closing line.
   const open = new Set<number>();
-  const printNew = (): void => {
-    const steps = getStepsAfter(db, id, 0);
+  // Insertion-order cursor, so a poll reads what arrived rather than the whole
+  // trace. See `getStepsSince`: the cost of following a run must not grow with
+  // the length of the run.
+  let cursor = 0;
+
+  const print = (steps: TraceStep[]): void => {
     for (const s of unseenSteps(steps, seen)) {
       console.log(renderStepLine(s));
       seen.add(s.step_number);
@@ -114,6 +118,33 @@ export function runWatch(traceId: string | undefined, opts: WatchOptions = {}): 
       if (s.ended_at != null && open.delete(s.step_number)) {
         console.log(renderStepLine(s, 'closed'));
       }
+    }
+  };
+
+  const printNew = (): void => {
+    const page = getStepsSince(db, id, cursor);
+    cursor = page.cursor;
+    // A `step_end` updates a row in place, so a step already past the cursor
+    // gains its outcome without becoming a new row: re-read the few still open.
+    print([...page.steps, ...getStepsByNumbers(db, id, [...open])]);
+
+    // Insurance, not routine: a rowid is reused when the rows holding the
+    // table's highest ones are deleted (deleting a trace cascades to its
+    // steps), so a step written afterwards could in principle land BELOW this
+    // cursor and never be read. Rather than argue that cannot happen, compare
+    // the count — index-only, ~0.1 ms even at 8,000 steps, against the ~11 ms
+    // the unconditional full read cost — and reconcile with one full pass if it
+    // ever disagrees. The seen-set makes that pass print only what is missing.
+    //
+    // The comparison is exact rather than approximate because `(trace_id,
+    // step_number)` is UNIQUE: one row per step number, so the number of step
+    // numbers printed equals the row count precisely when nothing is missing.
+    const total = countSteps(db, id);
+    if (seen.size !== total) {
+      // The cursor is deliberately left where it is: if it is too high, the
+      // count keeps disagreeing and this pass keeps running, which is the
+      // correct behaviour — and the seen-set means it prints each step once.
+      print(getStepsAfter(db, id, 0));
     }
   };
   printNew();

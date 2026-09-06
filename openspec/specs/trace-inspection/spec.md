@@ -78,6 +78,8 @@ The system SHALL render the step hierarchy via `agent-replay show <trace-id> --t
 
 The system SHALL live-tail a running trace via `agent-replay watch [trace-id]`, rendering new steps as they are written; with no trace ID given, it SHALL follow the most recently started `running` trace, and it SHALL announce final status when the trace completes.
 
+Each poll SHALL read the steps written since the previous one, not the whole trace, so that the cost of following a run does not grow with the length of the run — a live tail is used on long sessions, which is exactly where re-reading everything twice a second is most expensive. The cursor SHALL be write order, not step number, because producer-supplied step numbers need not increase and a step written after a higher-numbered one must still reach the tail. A step closed in place (`step_end`) SHALL be re-read by number while it is open, and the tail SHALL reconcile against the trace's step COUNT so a step that lands outside the cursor cannot be dropped.
+
 The poll interval SHALL be settable with `--interval <ms>`. Because Node stores a timer delay in a 32-bit signed integer and CLAMPS anything larger to 1 ms, a value above that range SHALL be refused (exit 2) rather than polled: it plainly asks to poll almost never and would instead poll about a thousand times a second, the inverse of the request. `--interval` SHALL be validated BEFORE the trace is resolved, so a typo is a usage error even when there is nothing to watch. A trace named explicitly that does not exist SHALL be an error (exit 1); finding nothing running in the auto case is a normal empty state and SHALL stay at exit 0.
 
 #### Scenario: Tail a running trace

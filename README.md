@@ -336,6 +336,8 @@ Node's timer overflows and clamps to 1 ms, polling the database about a
 thousand times a second rather than almost never, so it is a usage error (exit
 `2`) instead.
 
+Each poll reads only what has been written since the last one, so watching a session that has been running for hours costs the same as watching one that just started.
+
 A producer that opens a step and closes it later (the two-phase `step_start`/`step_end` protocol) gets two lines per step: the announcement when the step starts, and a closing line carrying what only the end knows — duration, tokens, and any error. A producer that writes a complete step in one event gets a single line. Text that came from the agent (step names, errors, models, decision rationales) is escaped before it reaches your terminal, so a control sequence in a tool's stderr cannot retarget the terminal you are watching from.
 
 ### Explain decisions

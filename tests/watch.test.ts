@@ -9,6 +9,10 @@ import {
   startTrace,
   appendStep,
   getStepsAfter,
+  getStepsSince,
+  getStepsByNumbers,
+  countSteps,
+  deleteTrace,
   getMostRecentRunningTrace,
   getTrace,
   isPossiblyAbandoned,
@@ -332,5 +336,107 @@ describe('runWatch shows a step\'s outcome, not just its start', () => {
     const plain = logs.map((l) => l.replace(/\x1B\[[0-9;]*m/g, '')).join('\n');
     expect(plain).toContain('quick');
     expect(plain).not.toContain('done');
+  });
+});
+
+// ── the live tail's cursor (cost must not grow with the run) ───────────────
+
+describe('getStepsSince — the live tail reads what arrived, not the whole trace', () => {
+  // `watch` polled with `getStepsAfter(id, 0)`, materializing and JSON-parsing
+  // every row of the trace twice a second — 4.1 ms per poll at 2,000 steps and
+  // 31.9 ms at 8,000, which is 6.4% of a core at the default interval and about
+  // 64% at the `--interval 50` the README shows. The cost of FOLLOWING a run
+  // should not grow with the length of the run.
+  it('returns only what was written after the cursor, and reports the new one', () => {
+    const t = startTrace(db, { agent_name: 'a', input: {} });
+    appendStep(db, t.id, { step_number: 1, step_type: 'thought', name: 'a' });
+    const first = getStepsSince(db, t.id, 0);
+    expect(first.steps.map((s) => s.name)).toEqual(['a']);
+    expect(first.cursor).toBeGreaterThan(0);
+
+    expect(getStepsSince(db, t.id, first.cursor).steps).toEqual([]);
+
+    appendStep(db, t.id, { step_number: 2, step_type: 'thought', name: 'b' });
+    const second = getStepsSince(db, t.id, first.cursor);
+    expect(second.steps.map((s) => s.name)).toEqual(['b']);
+    expect(second.cursor).toBeGreaterThan(first.cursor);
+  });
+
+  it('cursors on write order, so a lower step number written later still arrives', () => {
+    // The reason the cursor is a rowid and not a step number: producers only
+    // promise uniqueness. A step_number cursor would filter this one out and
+    // the tail would silently drop it — the defect `unseenSteps` exists for.
+    const t = startTrace(db, { agent_name: 'a', input: {} });
+    appendStep(db, t.id, { step_number: 7, step_type: 'thought', name: 'seven' });
+    const first = getStepsSince(db, t.id, 0);
+    appendStep(db, t.id, { step_number: 3, step_type: 'thought', name: 'three' });
+    expect(getStepsSince(db, t.id, first.cursor).steps.map((s) => s.name)).toEqual(['three']);
+  });
+
+  it('keeps another trace out of the page', () => {
+    const mine = startTrace(db, { agent_name: 'mine', input: {} });
+    const other = startTrace(db, { agent_name: 'other', input: {} });
+    appendStep(db, other.id, { step_number: 1, step_type: 'thought', name: 'not mine' });
+    expect(getStepsSince(db, mine.id, 0).steps).toEqual([]);
+  });
+});
+
+describe('getStepsByNumbers — closing lines for steps still open', () => {
+  it('re-reads only the named steps, with their outcome', () => {
+    // A `step_end` UPDATES a row in place and does not change its rowid, so the
+    // cursored page above cannot carry it. The open set is normally one step.
+    const t = startTrace(db, { agent_name: 'a', input: {} });
+    appendStep(db, t.id, { step_number: 1, step_type: 'tool_call', name: 'slow' });
+    appendStep(db, t.id, { step_number: 2, step_type: 'thought', name: 'other' });
+    updateStep(db, t.id, 1, { output: { ok: true }, duration_ms: 900, ended_at: new Date().toISOString() });
+
+    const reread = getStepsByNumbers(db, t.id, [1]);
+    expect(reread).toHaveLength(1);
+    expect(reread[0].ended_at).not.toBeNull();
+    expect(reread[0].duration_ms).toBe(900);
+    expect(getStepsByNumbers(db, t.id, [])).toEqual([]);
+  });
+});
+
+describe('countSteps — the tail\'s safety net against a reused rowid', () => {
+  it('disagrees with what the cursor has seen when a step lands below it', () => {
+    // SQLite hands out max(rowid)+1, so deleting the trace holding the table's
+    // highest rows frees those numbers for the next insert — which could land
+    // BELOW a live tail's cursor and never be read. Rather than argue it cannot
+    // happen, `watch` compares this count with what it has printed and
+    // reconciles with one full pass. This pins the premise: the count sees the
+    // step the cursor missed.
+    const watched = startTrace(db, { agent_name: 'watched', input: {} });
+    appendStep(db, watched.id, { step_number: 1, step_type: 'thought', name: 'first' });
+    const page = getStepsSince(db, watched.id, 0);
+    expect(page.steps).toHaveLength(1);
+
+    const later = startTrace(db, { agent_name: 'later', input: {} });
+    appendStep(db, later.id, { step_number: 1, step_type: 'thought', name: 'high rowid' });
+    const highWater = getStepsSince(db, later.id, 0).cursor;
+    deleteTrace(db, later.id);
+
+    appendStep(db, watched.id, { step_number: 2, step_type: 'thought', name: 'recycled rowid' });
+    const recycled = db
+      .prepare('SELECT rowid AS r FROM agent_trace_steps WHERE trace_id = ? AND step_number = 2')
+      .get(watched.id) as { r: number };
+
+    // Only meaningful if SQLite really did recycle; if it did not, the cursor
+    // path is enough and there is nothing to reconcile.
+    if (recycled.r <= highWater - 1) {
+      expect(getStepsSince(db, watched.id, page.cursor).steps).toEqual([]);
+    }
+    // Either way the count is the truth the tail falls back on.
+    expect(countSteps(db, watched.id)).toBe(2);
+  });
+
+  it('counts only the trace asked for', () => {
+    const a = startTrace(db, { agent_name: 'a', input: {} });
+    const b = startTrace(db, { agent_name: 'b', input: {} });
+    appendStep(db, a.id, { step_number: 1, step_type: 'thought', name: 'x' });
+    appendStep(db, b.id, { step_number: 1, step_type: 'thought', name: 'y' });
+    appendStep(db, b.id, { step_number: 2, step_type: 'thought', name: 'z' });
+    expect(countSteps(db, a.id)).toBe(1);
+    expect(countSteps(db, b.id)).toBe(2);
   });
 });

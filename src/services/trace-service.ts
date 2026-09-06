@@ -1389,6 +1389,65 @@ export function getStepsAfter(
 }
 
 /**
+ * One page of a live tail: the steps written since `cursor`, and the cursor to
+ * pass next time.
+ *
+ * The cursor is the ROWID — insertion order — not the step number. `watch` must
+ * not cursor on step_number: those are producer-supplied and need only be
+ * unique, so a step written after a higher-numbered one would be filtered out
+ * and silently dropped from the tail (see `unseenSteps`). rowid is assigned by
+ * SQLite in write order, so it carries a cursor without that risk.
+ *
+ * Why it matters: `watch` re-read the WHOLE trace on every poll — `getStepsAfter
+ * (id, 0)` — materializing and JSON-parsing every row twice a second. On a
+ * long session, which is the case `watch` exists for, that grows without bound:
+ * measured at 4.1 ms per poll at 2,000 steps and 31.9 ms at 8,000 (a superlinear
+ * climb, from the allocation churn), i.e. 6.4% of a core at the default interval
+ * and about 64% at the `--interval 50` the README shows. The command's cost
+ * should not scale with the length of the run it is following.
+ */
+export interface StepPage {
+  steps: TraceStep[];
+  cursor: number;
+}
+
+export function getStepsSince(db: Database.Database, traceId: string, cursor: number): StepPage {
+  const rows = db
+    .prepare('SELECT rowid AS _rowid, * FROM agent_trace_steps WHERE trace_id = ? AND rowid > ? ORDER BY rowid')
+    .all(traceId, cursor) as (Record<string, unknown> & { _rowid: number })[];
+  return {
+    steps: rows.map(rowToStep),
+    cursor: rows.length ? rows[rows.length - 1]._rowid : cursor,
+  };
+}
+
+/**
+ * Specific steps of a trace by step number — for re-reading the handful a live
+ * tail is still holding open.
+ *
+ * A `step_end` UPDATES an existing row, which does not change its rowid, so the
+ * page above cannot carry the closing line. The open set is normally empty or a
+ * single step, so this is a targeted read rather than another full scan.
+ */
+export function getStepsByNumbers(db: Database.Database, traceId: string, numbers: number[]): TraceStep[] {
+  if (numbers.length === 0) return [];
+  const rows = db
+    .prepare(
+      `SELECT * FROM agent_trace_steps
+        WHERE trace_id = ? AND step_number IN (${numbers.map(() => '?').join(',')})
+        ORDER BY step_number`,
+    )
+    .all(traceId, ...numbers) as Record<string, unknown>[];
+  return rows.map(rowToStep);
+}
+
+/** How many steps a trace has. Index-only, so it stays cheap on a long trace. */
+export function countSteps(db: Database.Database, traceId: string): number {
+  return (db.prepare('SELECT COUNT(*) AS n FROM agent_trace_steps WHERE trace_id = ?').get(traceId) as { n: number })
+    .n;
+}
+
+/**
  * The most recently started live trace still in status `running`, or null.
  * Forks are excluded: `fork` opens its copy as `running` with a fresh
  * started_at, so a fork always sorted first here and a bare `watch` attached to

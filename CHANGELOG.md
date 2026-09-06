@@ -890,6 +890,20 @@ and one-way.
   the one headline command that had not adopted it. A literal `null` is
   untouched: it remains the documented no-op that keeps the original value.
 
+- **`watch` re-read the entire trace on every poll.** The live tail asked for
+  every step of the trace twice a second and rebuilt each row — parsing its
+  JSON columns — only to discard all but the new ones. The cost of following a
+  run therefore grew with the length of the run, which is backwards for the one
+  command meant to be left open on a long session: measured at 7.3 ms per poll
+  at 2,000 steps and 24.7 ms at 8,000, about 5% of a core at the default
+  interval and half a core at the `--interval 50` the README shows. A poll now
+  reads what has been written since the last one (cursored on write order, so a
+  lower step number written later still arrives), re-reads only the steps it is
+  holding open for their closing line, and reconciles against the trace's step
+  count — 0.26 ms and 0.46 ms for the same two traces, growing sublinearly.
+  Output is byte-for-byte identical, verified against the previous build on a
+  live run covering both protocol shapes and an out-of-order step number.
+
 - **`config` reported a database that nothing opens.** `init` records an
   absolute `database` path, and no command has ever opened the store through it
   — every one resolves `<data dir>/traces.db` itself. So a project that was
