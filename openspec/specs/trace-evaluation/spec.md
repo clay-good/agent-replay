@@ -74,6 +74,14 @@ The gate SHALL refuse rather than report a pass whenever it cannot actually comp
 - **THEN** the command reports a `step_errors` divergence and exits non-zero, even when every other structural field matches
 - **AND** a step that stops failing is NOT reported, since a fix is not a regression
 
+#### Scenario: The model is swapped underneath a passing gate
+
+- **WHEN** a matched candidate ran a step on a different model than its golden counterpart, and `model` is among the compared fields
+- **THEN** the command reports a `model` divergence and exits non-zero
+- **AND** `model` is NOT in the default field set, because a model swap is usually intentional and should not fail an ordinary regression check
+- **AND** only a step whose golden counterpart recorded a model is compared, so a baseline captured without per-step models is skipped step by step rather than faulted
+- **AND** a `--fields model` run in which NO baseline entry carries a model is the gate-broken refusal above (exit 2), not a pass: the sources that record one are an imported Claude Code transcript or Codex rollout, an OpenTelemetry capture (spans carrying a model attribute, or a Gemini CLI / Claude Code log session), and an agent instrumented through the SDK or the native `record` protocol — a hook-captured session records none, because the harness's hook payload does not name the model
+
 #### Scenario: The agent chooses differently
 
 - **WHEN** a matched candidate records a different `chosen` option than its golden counterpart at the same step, and `decisions` is among the compared fields

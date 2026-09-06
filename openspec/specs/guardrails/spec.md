@@ -19,6 +19,13 @@ The system SHALL match steps against pattern fields — `step_type` (exact), `na
 
 `guard add` SHALL REFUSE, at write time, a pattern that cannot match as written: one with no recognized match key, a `step_type` that is not a real step type, or a `name_regex` that is invalid or unsafe against catastrophic backtracking. A policy stored in a form that silently fails to match is worse than no policy, because the gate reports green.
 
+A blocking policy (`deny` or `require_review`) that matches only on `output_contains` cannot fire during enforcement, which runs BEFORE a tool call when there is no output yet. `guard add` SHALL say so at write time, and `guard list` SHALL repeat it, naming the offending policies — the listing is the durable record an audit reads, and the row reads `DENY / Enabled: Yes`, an armed kill switch that is inert. The warning SHALL be silent when every blocking policy can fire, and SHALL NOT flag a `warn` policy on output, which is a legitimate post-hoc rule.
+
+#### Scenario: A blocking policy that can never block
+
+- **WHEN** a `deny` policy matches only on `output_contains` and a user runs `guard list`
+- **THEN** the listing names it and explains that enforcement runs before the tool call, while noting it still matches in `guard test` and recorded traces
+
 #### Scenario: AND semantics
 
 - **WHEN** a pattern specifies both `step_type: tool_call` and `name_contains: delete`
