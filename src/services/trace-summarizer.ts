@@ -8,6 +8,15 @@ import { effectiveTokens } from '../utils/totals.js';
 export interface TraceSummary {
   text: string;
   estimated_tokens: number;
+  /**
+   * How many of the trace's steps the summary actually carries, and how many it
+   * has. The text tells the JUDGE when steps were dropped ("... N more steps
+   * omitted"); these say the same thing to the caller, so a verdict computed
+   * over part of a run can be reported as such. `stats` already makes this
+   * distinction for its own totals ("over N of M").
+   */
+  steps_shown: number;
+  steps_total: number;
 }
 
 // ── Main summarizer ─────────────────────────────────────────────────────
@@ -68,9 +77,12 @@ export function summarizeTrace(
   }
 
   const text = lines.join('\n');
+  const omitted = Number(/\((\d+) more steps omitted/.exec(text)?.[1] ?? 0);
   return {
     text,
     estimated_tokens: Math.ceil(text.length / 4),
+    steps_total: trace.steps.length,
+    steps_shown: trace.steps.length - omitted,
   };
 }
 
@@ -141,6 +153,12 @@ export function summarizeDiffForLlm(
   return {
     text,
     estimated_tokens: Math.ceil(text.length / 4),
+    // The diff summary carries divergences, not steps: it caps the LIST of
+    // differences (and says "and N more" when it does), so step coverage is not
+    // the number that describes it. Reported as complete rather than inventing
+    // a ratio this summary does not measure.
+    steps_shown: left.steps.length + right.steps.length,
+    steps_total: left.steps.length + right.steps.length,
   };
 }
 

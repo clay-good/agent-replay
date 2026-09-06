@@ -805,6 +805,13 @@ causes, because their cures are opposite: no baseline entry records that field
 (use a capture path that does), or only some matched runs record it (narrow with
 `--agent`).
 
+**"An AI evaluator scored a long run and I don't trust the number."** Check the
+panel: when the trace did not fit the summary sent to the model, it says
+`Judged over N of M steps`, and the stored result carries `steps_shown` /
+`steps_total`. The summary always keeps the failing step and the important ones,
+but a verdict about step counts or efficiency over a partial run is worth
+reading with that in mind.
+
 **"`eval --rubric` fails a run that did exactly what I asked."** A criterion's
 `pattern` is a case-insensitive regular expression, not a literal string:
 `"$5.00"` cannot match the text `$5.00`. Escape it — `\$5\.00`. See

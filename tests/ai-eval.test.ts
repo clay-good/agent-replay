@@ -388,6 +388,40 @@ describe('trace summarizer', () => {
     expect(summary.text).toContain('2.0s');
   });
 
+  it('reports how much of the run the summary carries', () => {
+    // The text tells the JUDGE when steps were dropped; these tell the CALLER,
+    // so a verdict computed over part of a run can be reported as such — the
+    // distinction `stats` already makes about its own totals ("over N of M").
+    const db = createTestDb();
+    const many = ingestTrace(db, {
+      agent_name: 'long-bot',
+      status: 'completed',
+      input: { task: 'x' },
+      steps: Array.from({ length: 400 }, (_, i) => ({
+        step_number: i + 1,
+        step_type: 'tool_call' as const,
+        name: `step ${i}`,
+        output: { text: 'x'.repeat(200) },
+      })),
+    });
+    const summary = summarizeTrace(getTrace(db, many.id)!);
+    expect(summary.steps_total).toBe(400);
+    expect(summary.steps_shown).toBeLessThan(400);
+    // The two numbers agree with the marker the judge is shown.
+    const omitted = Number(/\((\d+) more steps omitted/.exec(summary.text)?.[1] ?? 0);
+    expect(summary.steps_total - summary.steps_shown).toBe(omitted);
+  });
+
+  it('reports full coverage for a trace that fits', () => {
+    // The negative half: a short run must not be labelled partial, or the
+    // disclosure means nothing.
+    const db = createTestDb();
+    const small = ingestTrace(db, makeTrace());
+    const summary = summarizeTrace(getTrace(db, small.id)!);
+    expect(summary.steps_shown).toBe(summary.steps_total);
+    expect(summary.text).not.toContain('more steps omitted');
+  });
+
   it('respects token budget', () => {
     const db = createTestDb();
     const trace = ingestTrace(db, makeTrace());

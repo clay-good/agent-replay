@@ -931,6 +931,24 @@ export async function runAiEval(
   parsed.passed = parsed.score >= preset.threshold;
   parsed.details.threshold = preset.threshold;
 
+  // What the judge was actually shown.
+  //
+  // The summary is budgeted: on a long run it keeps the failing step, the
+  // important ones, and as much else as fits, and tells the JUDGE the rest were
+  // dropped ("... N more steps omitted"). Nothing told the READER — so a verdict
+  // reasoning about step counts, latency and token usage (which is exactly what
+  // the efficiency and optimization presets are asked to weigh) was reported as
+  // a score over "the run" when it may have covered a fraction of it. Measured
+  // on a real 1,000-step import: 44 steps shown.
+  //
+  // Recorded only when it is partial, so an ordinary trace's details are
+  // unchanged, and named the way `stats` names the same distinction for its own
+  // totals — the number beside how much of the data it was taken over.
+  if (summary.steps_shown < summary.steps_total) {
+    parsed.details.steps_shown = summary.steps_shown;
+    parsed.details.steps_total = summary.steps_total;
+  }
+
   // Add LLM metadata to details
   parsed.details.llm_model = response.model;
   parsed.details.llm_provider = response.provider;

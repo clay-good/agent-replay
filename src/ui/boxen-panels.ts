@@ -259,6 +259,24 @@ export function aiEvalPanel(evalResult: { evaluator_name: string; score: number;
     lines.push(chalk.dim(safeText(truncate(JSON.stringify(d, null, 2), 500))));
   }
 
+  // What the judge was shown, when it was not the whole run.
+  //
+  // The summary handed to the model is budgeted, and on a long trace it carries
+  // the failing step, the important ones, and as much else as fits. The model is
+  // told the rest were dropped; without this line the reader was not, and a
+  // verdict about "the run" could have been formed over a fraction of it — most
+  // misleadingly for the presets asked to weigh step counts and efficiency.
+  // Present only when partial, and worded like `stats`, which discloses the same
+  // thing about its own totals.
+  if (d.steps_shown != null && d.steps_total != null) {
+    lines.push('');
+    lines.push(
+      chalk.yellow(
+        `Judged over ${safeText(String(d.steps_shown))} of ${safeText(String(d.steps_total))} steps — the rest did not fit the summary sent to the model.`,
+      ),
+    );
+  }
+
   // Cost footer
   if (d.cost_usd != null) {
     lines.push('');

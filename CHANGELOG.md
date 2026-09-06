@@ -902,6 +902,18 @@ and one-way.
   the one headline command that had not adopted it. A literal `null` is
   untouched: it remains the documented no-op that keeps the original value.
 
+- **An AI verdict never said how much of the run it had seen.** The summary
+  handed to a judge is budgeted: on a long trace it keeps the failing step, the
+  important ones, and as much else as fits, and it tells the MODEL the rest were
+  dropped ("... N more steps omitted"). Nothing told the reader. So a score — most
+  misleadingly from the presets asked to weigh step counts, latency and token
+  usage — was reported as covering "the run" when it could have covered a
+  fraction of it: measured on a real 1,000-step import, the judge saw 44 steps.
+  The stored result now carries `steps_shown`/`steps_total` when the summary was
+  partial, and the panel says "Judged over 44 of 1000 steps". Present only when
+  partial, so an ordinary trace's output is unchanged, and worded like `stats`,
+  which already discloses how much of the data its own totals were taken over.
+
 - **Only the listing said a trace looked abandoned.** `list` marks a run that
   has been `running` past the threshold with `⚠ abandoned?` — a producer that
   died without finalizing looks exactly like one still thinking. `show`, the

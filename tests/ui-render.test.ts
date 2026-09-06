@@ -998,3 +998,29 @@ describe('the AI panels escape every model-supplied field they render', () => {
     expect(out).toMatch(/0\.000123/);
   });
 });
+
+describe('aiEvalPanel discloses a partial judgement', () => {
+  // The summary handed to a judge is budgeted; on a long run it carries the
+  // failing step, the important ones, and as much else as fits. The model is
+  // told the rest were dropped — the reader was not, so a verdict about "the
+  // run" could have been formed over a fraction of it.
+  it('says how many steps the judge was shown when it was not all of them', () => {
+    const out = noAnsi(aiEvalPanel({
+      evaluator_name: 'ai-optimization',
+      score: 0.4,
+      passed: false,
+      details: { efficiency_score: 4, steps_shown: 44, steps_total: 1000, cost_usd: 0.01 },
+    }));
+    expect(out).toMatch(/Judged over 44 of 1000 steps/);
+  });
+
+  it('says nothing when the judge saw the whole run', () => {
+    const out = noAnsi(aiEvalPanel({
+      evaluator_name: 'ai-optimization',
+      score: 0.9,
+      passed: true,
+      details: { efficiency_score: 9, cost_usd: 0.01 },
+    }));
+    expect(out).not.toMatch(/Judged over/);
+  });
+});
