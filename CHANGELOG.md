@@ -2417,6 +2417,14 @@ and one-way.
 - The shared "no enabled policies" sentence offered `--allow-empty`, a gate's
   escape hatch that `guard test` does not have, so it is omitted there rather
   than sending the reader after a flag that does not exist.
+- The two lines `list` prints when a filter matches nothing echoed producer
+  values to the terminal unescaped — the agent names present, and the capture
+  paths present. A trace is written by the agent under test, which chooses its
+  own `agent_name`, and the native protocol lets a producer set its own
+  `source_format`, so `list --agent typo` could emit whatever escape sequence
+  the agent had named itself: a raw `\r` returns the cursor to column 0 and
+  overwrites the line above. The listing table beside them already neutralized
+  both. Now escaped with the same one-line escaper every other row uses.
 - `list` told you to run `agent-replay demo` when a FILTER matched nothing, not
   only when the store was empty — so `list --agent typo` against a store holding
   hundreds of traces read as though they were gone. Only `--source` had been

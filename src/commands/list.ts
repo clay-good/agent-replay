@@ -4,7 +4,7 @@ import type { ListTracesFilter } from '../models/types.js';
 import { isPossiblyAbandoned, listTraces } from '../services/trace-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { traceTable } from '../ui/table.js';
-import { heading } from '../ui/theme.js';
+import { heading, safeLine } from '../ui/theme.js';
 import { parseSinceToIso } from '../utils/time.js';
 import { errorMessage } from '../utils/json.js';
 import { resolveDataDir } from '../utils/paths.js';
@@ -159,7 +159,7 @@ export function runList(opts: ListOptions = {}): void {
       console.log(
         chalk.dim(
           present.length > 0
-            ? `  Capture paths in this store: ${present.join(', ')}.`
+            ? `  Capture paths in this store: ${present.map(safeLine).join(', ')}.`
             : '  No trace in this store records which capture path produced it.',
         ),
       );
@@ -173,7 +173,13 @@ export function runList(opts: ListOptions = {}): void {
         .prepare('SELECT DISTINCT agent_name FROM agent_traces ORDER BY agent_name LIMIT 11')
         .all() as Array<{ agent_name: string }>).map((r) => r.agent_name);
       if (agents.length > 0) {
-        const shown = agents.slice(0, 10);
+        // Escaped, like every other site that prints a producer value: the
+        // agent under test chooses its own name and a store's `source_format`,
+        // so both reach here attacker-influenced. The listing TABLE right above
+        // already neutralizes them; these lines are one-line rows, so `safeLine`
+        // — a raw `\r` here returns the cursor to column 0 and overwrites what
+        // was already printed.
+        const shown = agents.slice(0, 10).map(safeLine);
         console.log(
           chalk.dim(`  Agents in this store: ${shown.join(', ')}${agents.length > shown.length ? ', …' : ''}.`),
         );

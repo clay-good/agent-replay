@@ -668,6 +668,35 @@ describe('an abandoned-looking trace says so everywhere, not just in the listing
     expect(text).not.toMatch(/to load sample data/);
   });
 
+  it('escapes the producer values it names, as the listing table already does', () => {
+    // A trace is written by the agent under test: it chooses its own
+    // `agent_name`, and the native protocol lets a producer set its own
+    // `source_format`. Both reach these lines. The table above them already
+    // neutralizes such values; these two did not, so `list --agent typo` echoed
+    // whatever the agent had named itself straight to the terminal — a raw
+    // `\r` returns the cursor to column 0 and overwrites the line above it.
+    const evil = `bot${String.fromCharCode(27)}[31mRED${String.fromCharCode(27)}[0m${String.fromCharCode(13)}OVERWRITTEN`;
+    const db2 = ensureDatabase(resolve(dir, 'traces.db'));
+    ingestTrace(db2, {
+      agent_name: evil, status: 'completed', input: { q: 1 },
+      metadata: { source_format: `src${String.fromCharCode(27)}[32mGREEN` },
+      steps: [{ step_number: 1, step_type: 'output', name: 'o' }],
+    } as never);
+
+    out.length = 0;
+    runList({ dir, agent: 'no-such-agent-xyz' });
+    const agentsLine = out.join('\n');
+    expect(agentsLine).toContain('Agents in this store');
+    expect(agentsLine).not.toContain(String.fromCharCode(27));
+    expect(agentsLine).not.toContain(String.fromCharCode(13));
+
+    out.length = 0;
+    runList({ dir, source: 'no-such-source-xyz' });
+    const sourceLine = out.join('\n');
+    expect(sourceLine).toContain('Capture paths in this store');
+    expect(sourceLine).not.toContain(String.fromCharCode(27));
+  });
+
   it('still offers the demo hint when the store really is empty', () => {
     // The control: the hint is right for the case it was written for.
     const emptyDir = mkdtempSync(join(tmpdir(), 'ar-emptylist-'));
