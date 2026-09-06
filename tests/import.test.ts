@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { runMigrations } from '../src/db/migrations.js';
@@ -1123,5 +1123,67 @@ describe('import points at the format that would have read the file', () => {
     // is the right kind and empty or unreadable for some other reason.
     const out = run(write('rollout2.jsonl', codexRecords), { format: 'codex-rollout' });
     expect(out).not.toContain('look like');
+  });
+});
+
+describe('import refuses input it cannot use', () => {
+  // Both guards sit in the command layer and had no test. The `--format` check
+  // runs BEFORE the store is opened, which is the rule the rest of the CLI
+  // follows (`check --fields` was moved ahead of the store for the same
+  // reason): a typo must not create a store on its way to being rejected.
+  let dir: string;
+  let storeDir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ar-import-refuse-'));
+    storeDir = join(dir, 'store');
+  });
+  afterEach(() => {
+    resetConnection();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const run = (path: string, opts: { format?: string } = {}): { err: string; exit: unknown } => {
+    const err: string[] = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, 'error').mockImplementation((m?: unknown) => { err.push(String(m)); });
+    const prevExit = process.exitCode;
+    process.exitCode = 0;
+    let exit: unknown;
+    try {
+      runImport(path, { dir: storeDir, ...opts });
+      exit = process.exitCode;
+    } finally {
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+      process.exitCode = prevExit;
+    }
+    return { err: err.join('\n'), exit };
+  };
+
+  it('names the supported formats for an unknown --format, and creates no store', () => {
+    const path = join(dir, 'anything.jsonl');
+    writeFileSync(path, '{}\n');
+    const { err, exit } = run(path, { format: 'claude-code' });
+    expect(exit).toBe(2);
+    expect(err).toContain('claude-transcript');
+    expect(err).toContain('codex-rollout');
+    expect(existsSync(join(storeDir, 'traces.db'))).toBe(false);
+  });
+
+  it('reports a file it cannot read as a failed import, naming the reason', () => {
+    // A directory passed where a file was meant is the ordinary way here: the
+    // path completes to one, and the read throws EISDIR.
+    mkdirSync(join(dir, 'a-directory'), { recursive: true });
+    const { err, exit } = run(join(dir, 'a-directory'));
+    expect(exit).toBe(1);
+    expect(err).toMatch(/Import failed/);
+    expect(err).toMatch(/EISDIR|directory/i);
+  });
+
+  it('reports a missing file the same way', () => {
+    const { err, exit } = run(join(dir, 'not-here.jsonl'));
+    expect(exit).toBe(1);
+    expect(err).toMatch(/ENOENT|no such file/i);
   });
 });
