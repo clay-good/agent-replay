@@ -2372,6 +2372,15 @@ and one-way.
   read the identical attribute — so `stats` showed no cost and `list --sort cost`
   was inert for every span-captured trace. It also ignored a reported
   `total_tokens` when the input/output split was absent.
+- `show --evals` could not say which run of an evaluator was current. An
+  evaluation is a record, not a slot — re-running one appends, and the store
+  keeps that history on purpose — but the table showed every run identically, so
+  a second `eval` just doubled it, and an evaluator whose rubric changed between
+  runs appeared twice with two different scores and nothing to choose between
+  them. The rows already arrived newest-first and `evaluated_at` was already
+  stored; neither reached the reader. The table now carries a `When` column and
+  marks the runs a later one superseded. Nothing is marked when each evaluator
+  ran once.
 - `eval`'s live progress line reported `✔ 100%` for an evaluation that measured
   nothing. Both shapes that reach that state score 1.0 and pass so they cannot
   fail a gate on a trace they do not apply to — an AI preset its `applicable`

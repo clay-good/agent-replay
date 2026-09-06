@@ -80,6 +80,30 @@ export function traceTable(traces: Trace[]): string {
 
 // ── Eval results table ────────────────────────────────────────────────────
 
+/**
+ * Which rows are no longer an evaluator's latest word.
+ *
+ * The newest run of each evaluator is the current one; every earlier run of the
+ * same evaluator is history. Decided by `evaluated_at` where it is present, and
+ * otherwise by position — the rows arrive newest-first, and a record predating
+ * the column should not silently outrank one that carries it.
+ */
+function supersededRows(evals: EvalResult[]): Set<number> {
+  const currentOf = new Map<string, number>();
+  for (const [i, e] of evals.entries()) {
+    const seen = currentOf.get(e.evaluator_name);
+    if (seen == null) {
+      currentOf.set(e.evaluator_name, i);
+      continue;
+    }
+    const a = Date.parse(evals[seen].evaluated_at ?? '');
+    const b = Date.parse(e.evaluated_at ?? '');
+    if (!Number.isNaN(b) && (Number.isNaN(a) || b > a)) currentOf.set(e.evaluator_name, i);
+  }
+  const current = new Set(currentOf.values());
+  return new Set(evals.map((_, i) => i).filter((i) => !current.has(i)));
+}
+
 export function evalTable(evals: EvalResult[]): string {
   if (evals.length === 0) return chalk.dim('  No evaluations found.');
 
@@ -90,18 +114,35 @@ export function evalTable(evals: EvalResult[]): string {
       colors.primary('Score'),
       colors.primary('Result'),
       colors.primary('Details'),
+      colors.primary('When'),
     ],
     style: { head: [], border: ['dim'] },
   });
 
-  for (const e of evals) {
+  // An evaluation is a RECORD, not a slot: running `eval` twice appends, and the
+  // store keeps that history on purpose. But the table showed every run with
+  // nothing to tell them apart, so a second run simply doubled it — and once a
+  // rubric changed between runs, one evaluator appeared twice with two
+  // different scores and no way to know which was current. Rows have always
+  // arrived newest-first (`ORDER BY evaluated_at DESC, rowid DESC`); nothing
+  // said so, and `evaluated_at` was stored and read by nobody outside the
+  // dashboard.
+  //
+  // A relative timestamp alone does not answer it: two runs seconds apart both
+  // read "1m ago", which is exactly how duplicates get made. So the CURRENT
+  // result for each evaluator is named, and the ones it superseded say so.
+  const superseded = supersededRows(evals);
+
+  for (const [i, e] of evals.entries()) {
     const details = summarizeDetails(e.details);
+    const when = e.evaluated_at ? formatRelativeTime(e.evaluated_at) : '';
     table.push([
-      chalk.white(safeLine(e.evaluator_name)),
+      superseded.has(i) ? chalk.dim(safeLine(e.evaluator_name)) : chalk.white(safeLine(e.evaluator_name)),
       chalk.dim(e.evaluator_type),
       scoreBadge(e.score),
       passBadge(e.passed),
       chalk.dim(safeLine(details)),
+      chalk.dim(superseded.has(i) ? [when, 'superseded'].filter(Boolean).join(' · ') : (when || '-')),
     ]);
   }
 

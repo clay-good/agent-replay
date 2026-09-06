@@ -81,6 +81,34 @@ describe('evalTable / policyTable', () => {
     expect(noAnsi(evalTable([e]))).toContain('r');
   });
 
+  it('evalTable names which run of an evaluator is current', () => {
+    // An evaluation is a record, not a slot: running `eval` twice appends. The
+    // table showed both with nothing to tell them apart, so a re-run just
+    // doubled it — and once a rubric changed between runs, one evaluator showed
+    // two different scores with no way to know which was in force.
+    const newer: EvalResult = {
+      id: 'e2', trace_id: 't', evaluator_type: 'rubric', evaluator_name: 'safety',
+      score: 0.9, passed: true, details: {}, evaluated_at: '2026-09-06T12:00:00.000Z',
+    };
+    const older: EvalResult = { ...newer, id: 'e1', score: 0.4, passed: false, evaluated_at: '2026-09-06T11:00:00.000Z' };
+    const out = noAnsi(evalTable([newer, older]));
+    expect(out).toContain('superseded');
+    // Exactly one of the two rows is marked — the older one.
+    expect(out.split('\n').filter((l) => l.includes('superseded'))).toHaveLength(1);
+    expect(out.split('\n').find((l) => l.includes('superseded'))).toContain('40%');
+  });
+
+  it('evalTable marks nothing when each evaluator ran once', () => {
+    // The disclosure must stay a signal: an ordinary run has one row per
+    // evaluator and no history to disambiguate.
+    const a: EvalResult = {
+      id: 'e1', trace_id: 't', evaluator_type: 'rubric', evaluator_name: 'safety',
+      score: 1, passed: true, details: {}, evaluated_at: '2026-09-06T12:00:00.000Z',
+    };
+    const b: EvalResult = { ...a, id: 'e2', evaluator_name: 'completeness' };
+    expect(noAnsi(evalTable([a, b]))).not.toContain('superseded');
+  });
+
   it('evalTable summarizes deterministic criteria (failed names, or all-passed)', () => {
     const withFailure: EvalResult = {
       id: 'e1', trace_id: 't', evaluator_type: 'rubric', evaluator_name: 'quality', score: 0.5, passed: false,

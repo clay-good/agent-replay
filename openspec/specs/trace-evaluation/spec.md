@@ -45,12 +45,18 @@ A cost figure priced WITHOUT a published rate for the model SHALL say so. The ra
 
 ### Requirement: Eval result persistence
 
-The system SHALL persist every evaluation as an eval record (evaluator type `rubric`, `llm_judge`, or `policy_check`; name; score; passed; details) attached to the trace and visible via `show --evals`.
+The system SHALL persist every evaluation as an eval record (evaluator type `rubric`, `llm_judge`, or `policy_check`; name; score; passed; details) attached to the trace and visible via `show --evals`. An evaluation is a RECORD, not a slot: re-running an evaluator appends, and the history is kept. Because of that, a listing SHALL make clear which run of each evaluator is CURRENT and which it superseded — otherwise a second run only doubles the table, and an evaluator whose rubric changed between runs appears twice with two different scores and no way to tell which is in force. A relative timestamp alone does not settle it, since two runs seconds apart read the same.
 
 #### Scenario: Results retrievable
 
 - **WHEN** evaluations have run against a trace
 - **THEN** `agent-replay show <id> --evals` lists each result with score and pass/fail
+
+#### Scenario: An evaluator that has been run twice
+
+- **WHEN** `show --evals` lists a trace whose `safety-check` has run twice with different scores
+- **THEN** the later run is presented as current and the earlier one is marked superseded
+
 
 ### Requirement: Golden regression check
 

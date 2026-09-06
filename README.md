@@ -351,6 +351,13 @@ evaluations and snapshots sections, so pairing it with `--evals` or
 `--snapshots` gets you neither; `show` says so rather than leaving you to read
 the absence as "this trace has none".
 
+`--evals` lists every evaluation the trace has, newest first — an evaluation is
+a record, not a slot, so re-running one appends rather than replacing it. The
+`When` column dates each run, and any run a later one replaced is marked
+`superseded`, so an evaluator whose rubric changed between runs can still be
+read: the unmarked row is the one in force. Nothing is marked when each
+evaluator has run once.
+
 `--steps-only` and `--tree` shape the human view only — a `--json` document is the whole trace either way — so pairing either with `--json` says the flag did nothing rather than implying the payload was narrowed. (`steps` carries `parent_step_number` and `caused_by_step_number`, so a consumer can rebuild the tree itself.) `diff --json --compact` says the same.
 
 `show --json --snapshots` carries the snapshots too, attached to each step as `snapshot` (`null` where a step has none) — the same shape `export --with-snapshots` writes, so the document re-ingests with its snapshots intact. The steps are only rewritten when you ask for it, so a `show --json` without the flag is unchanged.
