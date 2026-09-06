@@ -15,7 +15,7 @@ The system SHALL provide built-in deterministic presets — `hallucination-check
 
 ### Requirement: Custom rubrics
 
-The system SHALL evaluate traces against user-supplied YAML/JSON rubric files (`--rubric <file>`) containing pattern-based criteria with expected presence/absence, weights, and a pass threshold.
+The system SHALL evaluate traces against user-supplied YAML/JSON rubric files (`--rubric <file>`) containing pattern-based criteria with expected presence/absence, weights, and a pass threshold. Each criterion's `pattern` SHALL be a case-insensitive regular expression, and that SHALL be stated where the format is documented: a pattern written as a literal string silently means something else (`$5.00` cannot match the text `$5.00`), and the resulting verdict is a failure the run did not earn.
 
 #### Scenario: Rubric evaluation
 

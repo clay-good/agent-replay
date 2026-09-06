@@ -162,3 +162,37 @@ describe('a rubric file that cannot be trusted is a usage error, not a verdict',
     expect(process.exitCode).toBe(2);
   });
 });
+
+describe('a rubric pattern is a regular expression, and the README says so', () => {
+  // The format documentation used to show `pattern` without saying what it is,
+  // and the difference is a verdict: `pattern: "$5.00"` cannot match the text
+  // `$5.00` — `$` anchors — so a criterion written as a literal string fails a
+  // run that did exactly what was asked, and `eval` exits 1 over it. These pin
+  // the two properties the README now states.
+  it('is case-insensitive', async () => {
+    // The trace's output is "the answer is 42".
+    await evalRubric(JSON.stringify({
+      name: 'case', threshold: 0.5,
+      criteria: [{ name: 'shouty', pattern: 'THE ANSWER', expected: true, weight: 1 }],
+    }));
+    expect(process.exitCode).toBe(0);
+  });
+
+  it('treats metacharacters as regex, so a literal needs escaping', async () => {
+    // Unescaped: `$` anchors and the criterion cannot match, which is the
+    // false failure the README now warns about.
+    await evalRubric(JSON.stringify({
+      name: 'literal', threshold: 0.5,
+      criteria: [{ name: 'answer-42', pattern: '$42', expected: true, weight: 1 }],
+    }));
+    expect(process.exitCode).toBe(1);
+
+    // Escaped, matching the README's own example, it scores.
+    process.exitCode = 0;
+    await evalRubric(JSON.stringify({
+      name: 'escaped', threshold: 0.5,
+      criteria: [{ name: 'answer-42', pattern: 'is 42', expected: true, weight: 1 }],
+    }));
+    expect(process.exitCode).toBe(0);
+  });
+});

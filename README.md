@@ -824,7 +824,13 @@ These require an API key. They use the cheapest models by default (see the provi
 
 ### Custom Rubrics
 
-Create a YAML or JSON file with pattern-based criteria:
+Create a YAML or JSON file with pattern-based criteria. Each `pattern` is a
+**case-insensitive regular expression**, not a literal string — so `hello|hi`
+means either word, and a pattern meant literally has to escape the regex
+metacharacters in it. `pattern: "$5.00"` never matches the text `$5.00`, because
+`$` anchors and `.` matches anything: write `\$5\.00`. A pattern that cannot
+compile is a usage error before anything is scored, rather than a criterion that
+silently scores 0.
 
 ```yaml
 name: my-custom-check
@@ -838,6 +844,10 @@ criteria:
     pattern: "badword1|badword2"
     expected: false
     weight: 2
+  - name: quotes_the_price      # a literal string, escaped
+    pattern: "\\$5\\.00"
+    expected: true
+    weight: 1
 ```
 
 ```bash
