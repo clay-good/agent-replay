@@ -230,6 +230,22 @@ export function mapOtlpLogs(otlp: Record<string, unknown>): IngestTraceInput[] {
       }
 
       if (evt === 'claude_code.tool_decision') {
+        // UNVERIFIED, and deliberately left alone: the `decided_by` mapping
+        // below tests for `allow`/`deny`, which is the GUARD/HOOK vocabulary
+        // (`guard add --action`, the hook adapter's permission decisions), not
+        // one this file's telemetry is known to use. Its gemini twin above maps
+        // the telemetry vocabulary the spec documents (`auto_accept` → policy,
+        // otherwise user), and the OTel design doc says these Claude events
+        // "map the same way" — so if the real records say something else, every
+        // Claude log-captured decision is being recorded as `by policy`,
+        // including ones a person approved at the prompt.
+        //
+        // Settling it needs a real `claude_code.tool_decision` record — the
+        // same evidence bar `stream-translators.ts` states for vendor fields,
+        // and the reason the Gemini CLI importer is still unwritten. Do not
+        // flip the mapping on a reading of vendor docs: `chosen` is stored
+        // verbatim either way, so only the ACTOR is at stake, and guessing an
+        // actor is what this codebase refuses to do.
         const name = str(a.tool_name) ?? 'tool';
         const decision = str(a.decision);
         if (decision) {
