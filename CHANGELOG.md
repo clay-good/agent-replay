@@ -336,6 +336,19 @@ and one-way.
 
 ### Fixed
 
+- **`check --golden`'s "nothing to compare" refusal explained the wrong cause,
+  and for one field prescribed a cure that cannot work.** A single generic hint
+  covered every field and named causes belonging to two of them: `--fields
+  decisions` was explained as "a store captured without per-step models, or a
+  baseline with no tool_call steps", neither of which has anything to do with
+  decisions. Worse, the one cure it offered — re-export the baseline from runs
+  that exercise the field — cannot help `--fields model` on a hook-captured
+  store, because the harness's hook payload does not name the model, so no
+  re-export of those runs will ever carry one. A refusal that names a cause but
+  prescribes the wrong cure is worse than a vague one: the reader exhausts the
+  suggestion and concludes the tool is broken. The hint is now written per
+  field, from the same condition the gate actually tests, and the `model` case
+  names the capture paths that do record one.
 - **`list --json` and `show --json` could not report the duration the tool
   itself was printing.** Both commands display a duration derived from the
   trace's own `started_at`/`ended_at` when the producer set no

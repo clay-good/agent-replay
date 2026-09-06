@@ -1000,10 +1000,30 @@ describe('a requested field the baseline cannot exercise is a broken gate, not a
       const human = runCheckCapturing({ golden: goldenPath, dir, fields: 'model' });
       expect(human.code).toBe(2);
       expect(human.err).toMatch(/Nothing to compare for --fields model/);
+      // The hint must name the cause for the field that ACTUALLY came back
+      // uncompared, and a cure that can work. `model` is the field whose
+      // obvious cure does not always apply — a hook-captured session records no
+      // model, so "re-export the baseline" is advice the reader can follow to
+      // no effect — so the refusal says which capture paths do record one.
+      expect(human.err).toMatch(/hook-captured session cannot/i);
+      expect(human.err).toMatch(/imported Claude Code transcript or Codex rollout/);
+      // And it must NOT explain a model failure with another field's cause.
+      expect(human.err).not.toMatch(/tool_call step/);
+      expect(human.err).not.toMatch(/recorded a decision/);
 
       const asJson = runCheckCapturing({ golden: goldenPath, dir, fields: 'model', json: true });
       expect(asJson.code).toBe(2);
       expect(JSON.parse(asJson.out).ok).toBe(false);
+
+      // A DIFFERENT field must be explained by its own cause. The single generic
+      // hint this replaced described `--fields decisions` as "a store captured
+      // without per-step models, or a baseline with no tool_call steps" —
+      // neither of which has anything to do with decisions.
+      const decisions = runCheckCapturing({ golden: goldenPath, dir, fields: 'decisions' });
+      expect(decisions.code).toBe(2);
+      expect(decisions.err).toMatch(/Nothing to compare for --fields decisions/);
+      expect(decisions.err).toMatch(/no baseline step recorded a decision/i);
+      expect(decisions.err).not.toMatch(/per-step model|hook-captured/i);
     } finally {
       resetConnection();
       rmSync(dir, { recursive: true, force: true });

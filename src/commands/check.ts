@@ -380,7 +380,7 @@ export function runCheck(opts: CheckOptions = {}): void {
     fail(
       2,
       `Nothing to compare for --fields ${report.uncompared.join(', ')} — no baseline entry carries that data.`,
-      'The baseline was exported from runs that never recorded it (a store captured without per-step models, or a baseline with no tool_call steps). Re-export the baseline from runs that exercise the field, or drop it from --fields.',
+      uncomparedHint(report.uncompared),
     );
     return;
   }
@@ -447,3 +447,52 @@ function short(v: unknown): string {
   const out = s != null ? truncate(s, 60) : String(s);
   return escapeForMessage(out);
 }
+
+/**
+ * Why the named fields had nothing to compare, and what actually fixes each.
+ *
+ * One generic sentence used to cover every field, and it named causes belonging
+ * to two of them: `--fields decisions` was explained as "a store captured
+ * without per-step models, or a baseline with no tool_call steps", neither of
+ * which has anything to do with decisions. Worse, it prescribed one cure —
+ * "re-export the baseline from runs that exercise the field" — that cannot work
+ * for `model` on a HOOK-captured store: the harness's hook payload does not name
+ * the model, so no re-export of those runs will ever carry one. A refusal that
+ * names a cause but prescribes the wrong cure is worse than a vague one, because
+ * the reader exhausts the suggestion and concludes the tool is broken.
+ *
+ * Each cause below is the actual condition `entryExercises` tests for that field.
+ */
+function uncomparedHint(fields: string[]): string {
+  const explained = new Set(['model', 'decisions', 'tool_inputs', 'step_errors', 'step_types', 'step_names']);
+  const parts: string[] = [];
+
+  if (fields.includes('model')) {
+    parts.push(
+      'model: no baseline step recorded one. Not every capture path does — a HOOK-captured session cannot, because the harness\'s hook payload does not name the model, so re-exporting those runs will never help. A model comes from an imported Claude Code transcript or Codex rollout, an OpenTelemetry capture (spans carrying a model attribute, or a Gemini CLI / Claude Code log session), or your own agent via the SDK or `record`.',
+    );
+  }
+  if (fields.includes('decisions')) {
+    parts.push(
+      'decisions: no baseline step recorded a decision. A baseline exported before decisions were comparable carries none, so re-export it from current runs — but if the agent records no decisions, no baseline ever will.',
+    );
+  }
+  if (fields.includes('tool_inputs')) {
+    parts.push('tool_inputs: no baseline entry has a tool_call step carrying an input.');
+  }
+  if (fields.includes('step_errors')) {
+    parts.push('step_errors: no baseline step records whether it failed, which means the baseline predates the field — re-export it from current runs.');
+  }
+  const shapeless = fields.filter((f) => f === 'step_types' || f === 'step_names');
+  if (shapeless.length > 0) {
+    parts.push(`${shapeless.join(', ')}: the matched baseline entries record no steps at all.`);
+  }
+  const rest = fields.filter((f) => !explained.has(f));
+  if (rest.length > 0) {
+    parts.push(`${rest.join(', ')}: the baseline was exported from runs that never recorded it — re-export it from runs that exercise the field.`);
+  }
+
+  parts.push('Or drop the field from --fields.');
+  return parts.join(' ');
+}
+
