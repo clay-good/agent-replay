@@ -894,6 +894,17 @@ and one-way.
   the one headline command that had not adopted it. A literal `null` is
   untouched: it remains the documented no-op that keeps the original value.
 
+- **`watch` tailed a trace that had been deleted, forever.** The tick's status
+  read returns nothing when the row is gone — `import --replace` drops the prior
+  copies of a session it is re-importing, and `deleteTrace` is part of the
+  published API — and the branch was written `if (row && ...)`, so the missing
+  case fell straight through. The tail went on polling an id that no longer
+  existed, which on screen is indistinguishable from an agent that has gone
+  quiet. It now stops, says the trace was deleted while it was watching, and
+  exits `1`: the code a named trace that does not exist already uses. `check`
+  had counted "a trace deleted while this ran" among the states it must account
+  for; the live view owed the same.
+
 - **`check --golden` created a store before deciding it had nothing to check.**
   The regression gate never turned green wrongly — no store means no candidates,
   which is already exit `2` — but it wrote a ~143 KB store into the working

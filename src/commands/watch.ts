@@ -183,7 +183,24 @@ export function runWatch(traceId: string | undefined, opts: WatchOptions = {}): 
     const row = db.prepare('SELECT status FROM agent_traces WHERE id = ?').get(id) as
       | { status: TraceStatus }
       | undefined;
-    if (row && row.status !== 'running') {
+    // The row is GONE, not merely unfinished. A trace can be deleted under a
+    // live tail — `import --replace` drops the prior copies of a session it is
+    // re-importing, and the SDK's `deleteTrace` is exported — and this branch
+    // read `row &&`, so the missing case fell through and the tail went on
+    // polling an id that no longer exists, forever, looking exactly like an
+    // agent that had gone quiet. `check` already names "a trace deleted while
+    // this ran" as a state it has to account for; a watcher owes the same
+    // honesty. Stop and say so, at the exit code a named trace that does not
+    // exist already uses.
+    if (!row) {
+      clearInterval(timer);
+      console.log('');
+      console.log(chalk.red(`  Trace ${escapeForMessage(id)} is no longer in the store — it was deleted while this was watching.`));
+      console.log('');
+      process.exitCode = 1;
+      return;
+    }
+    if (row.status !== 'running') {
       finish(row.status);
     }
   }, pollMs);

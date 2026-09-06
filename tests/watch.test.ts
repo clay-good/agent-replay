@@ -216,6 +216,49 @@ describe('runWatch drains the tail on completion', () => {
   });
 });
 
+describe('runWatch when the trace is deleted under it', () => {
+  it('stops and says so, instead of tailing an id that no longer exists', () => {
+    // A trace can go away under a live tail: `import --replace` drops the prior
+    // copies of the session it is re-importing, and `deleteTrace` is part of the
+    // published API. The tick's status read returns undefined then, and the
+    // branch was written `if (row && ...)`, so the missing case fell through and
+    // the tail polled forever — indistinguishable from an agent that had gone
+    // quiet. `check` already counts "a trace deleted while this ran" as a state
+    // it must account for.
+    const dir = mkdtempSync(join(tmpdir(), 'ar-watch-del-'));
+    const db = ensureDatabase(resolve(dir, 'traces.db'));
+    const t = startTrace(db, { agent_name: 'w', status: 'running' }, { id: 'trc_watchgone' });
+    appendStep(db, t.id, { step_number: 1, step_type: 'thought', name: 'first' });
+
+    const logs: string[] = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((m?: unknown) => { logs.push(String(m ?? '')); });
+    const prevExit = process.exitCode;
+    process.exitCode = 0;
+
+    vi.useFakeTimers();
+    try {
+      runWatch(t.id, { dir, interval: '20' });
+      deleteTrace(db, t.id);
+      vi.advanceTimersByTime(20); // the poll that finds the row gone
+      const pollsAfter = logs.length;
+      vi.advanceTimersByTime(200); // ...and no further polling
+      expect(logs.length).toBe(pollsAfter);
+    } finally {
+      vi.useRealTimers();
+      logSpy.mockRestore();
+      process.removeAllListeners('SIGINT');
+      rmSync(dir, { recursive: true, force: true });
+    }
+
+    const plain = logs.map((l) => l.replace(/\x1B\[[0-9;]*m/g, '')).join('\n');
+    expect(plain).toContain('no longer in the store');
+    expect(plain).toContain('trc_watchgone');
+    // The exit code a named trace that does not exist already uses.
+    expect(process.exitCode).toBe(1);
+    process.exitCode = prevExit;
+  });
+});
+
 // ── renderStepLine ────────────────────────────────────────────────────────
 
 describe('renderStepLine', () => {

@@ -329,7 +329,7 @@ agent-replay watch
 agent-replay watch <trace-id> --interval 200
 ```
 
-With no id it picks the most recent `running` trace — by start *instant*, not by the spelling of the timestamp — so it's the natural companion to a hook-instrumented session in another terminal. It exits when the trace is finalized.
+A trace deleted while you are watching it ends the tail with a message and exit `1`, rather than leaving it polling an id that is gone. With no id it picks the most recent `running` trace — by start *instant*, not by the spelling of the timestamp — so it's the natural companion to a hook-instrumented session in another terminal. It exits when the trace is finalized.
 
 `--interval` is in milliseconds and is capped at `2147483647` ms — above that
 Node's timer overflows and clamps to 1 ms, polling the database about a
