@@ -23,6 +23,22 @@ export interface LlmResponse {
   text: string;
   input_tokens: number;
   output_tokens: number;
+  /**
+   * The provider stopped because the answer hit the token ceiling, so `text` is
+   * a PREFIX of what the model was writing.
+   *
+   * Every provider states this outright and it was read by nobody, which left
+   * the callers to infer a cut-off answer from the wreckage: the AI diff hit an
+   * unparseable JSON object and presented a `better_trace: "neither"` verdict
+   * the model never gave, and the AI eval stored `score: 0, passed: false` for
+   * a run it never finished judging. Both are recoverable by raising
+   * `--max-tokens`, which neither could say because neither knew.
+   *
+   * Absent rather than `false` when the provider reported a normal stop, so a
+   * response from a shape this does not recognize is never claimed to be
+   * complete.
+   */
+  truncated?: true;
   model: string;
   provider: string;
   cost_estimate_usd: number;
@@ -268,6 +284,7 @@ async function callAnthropic(
     text,
     input_tokens: inputTokens,
     output_tokens: outputTokens,
+    ...(data.stop_reason === 'max_tokens' ? { truncated: true as const } : {}),
     model,
     provider: 'anthropic',
     cost_estimate_usd: estimateCost(model, inputTokens, outputTokens),
@@ -306,7 +323,7 @@ async function callGoogle(
     body: JSON.stringify(body),
   }, 'google', timeoutMs);
 
-  const candidates = data.candidates as Array<{ content: { parts: Array<{ text: string }> } }> | undefined;
+  const candidates = data.candidates as Array<{ content: { parts: Array<{ text: string }> }; finishReason?: string }> | undefined;
   const text = candidates?.[0]?.content?.parts?.[0]?.text ?? '';
   const usageMeta = data.usageMetadata as { promptTokenCount?: number; candidatesTokenCount?: number } | undefined;
   const inputTokens = usageMeta?.promptTokenCount ?? 0;
@@ -316,6 +333,7 @@ async function callGoogle(
     text,
     input_tokens: inputTokens,
     output_tokens: outputTokens,
+    ...(candidates?.[0]?.finishReason === 'MAX_TOKENS' ? { truncated: true as const } : {}),
     model,
     provider: 'google',
     cost_estimate_usd: estimateCost(model, inputTokens, outputTokens),
@@ -357,7 +375,7 @@ async function callOpenai(
     body: JSON.stringify(body),
   }, 'openai', timeoutMs);
 
-  const choices = data.choices as Array<{ message: { content: string } }> | undefined;
+  const choices = data.choices as Array<{ message: { content: string }; finish_reason?: string }> | undefined;
   const text = choices?.[0]?.message?.content ?? '';
   const usage = data.usage as { prompt_tokens: number; completion_tokens: number } | undefined;
   const inputTokens = usage?.prompt_tokens ?? 0;
@@ -367,6 +385,7 @@ async function callOpenai(
     text,
     input_tokens: inputTokens,
     output_tokens: outputTokens,
+    ...(choices?.[0]?.finish_reason === 'length' ? { truncated: true as const } : {}),
     model,
     provider: 'openai',
     cost_estimate_usd: estimateCost(model, inputTokens, outputTokens),

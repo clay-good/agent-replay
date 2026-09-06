@@ -2372,6 +2372,18 @@ and one-way.
   read the identical attribute — so `stats` showed no cost and `list --sort cost`
   was inert for every span-captured trace. It also ignored a reported
   `total_tokens` when the input/output split was absent.
+- `diff --ai` printed `Better trace: neither` when it could not parse the
+  model's reply — but `neither` is one of the three verdicts the model is
+  offered ("the two runs are equivalent"), so a reply that gave no answer was
+  reported as a judgement, in the same slot as a real one. It now reports
+  `unknown`, and so does a reply naming an option outside the three.
+- Nothing read the provider's own statement that it stopped at the output
+  ceiling (`stop_reason`/`finish_reason`), so the one recoverable AI failure —
+  an answer cut off mid-JSON — was indistinguishable from a model that answered
+  badly. `diff --ai` now names the ceiling and `--max-tokens` in its reasoning,
+  and an AI eval records `truncated_at_max_tokens` beside its stored
+  `score: 0`, so a zero from a judge that never finished can be told apart from
+  a judge that finished and failed the run. Read from all three providers.
 - An OTel log session ended when its last record was STAMPED, not when its last
   step finished — but a log record reports work that already happened and says
   how long it took, so a `tool_result` at t=2s carrying `duration_ms: 30000`

@@ -934,6 +934,12 @@ export async function runAiEval(
       passed: false,
       details: {
         parse_error: true,
+        // WHY it could not be parsed, when the provider said so. A judge whose
+        // answer was cut off at the ceiling stores a failing verdict it never
+        // reached, and without this the stored 0 is indistinguishable from a
+        // judge that genuinely failed the run. Recoverable by raising
+        // `--max-tokens`, which the reader could not know to do.
+        ...(response.truncated ? { truncated_at_max_tokens: true } : {}),
         // Surrogate-safe, and marked as cut. This is STORED, so a lone
         // surrogate here does not just misdraw once — it round-trips into
         // `show`, `export`, and the next prompt built from this trace.

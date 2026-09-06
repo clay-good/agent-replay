@@ -313,7 +313,13 @@ export function diffTraces(
 
 export interface AiDiffAnalysis {
   explanation: string;
-  better_trace: 'left' | 'right' | 'neither';
+  /**
+   * The model's verdict, or `unknown` when it did not give one — a reply that
+   * could not be parsed, or one naming something outside the three options.
+   * `neither` is a real verdict ("both runs are equivalent") and stopped being
+   * the fallback for "no answer", which reported a judgement nobody made.
+   */
+  better_trace: 'left' | 'right' | 'neither' | 'unknown';
   reasoning: string;
   key_differences: string[];
   /**
@@ -379,19 +385,31 @@ export async function aiDiffAnalysis(
   try {
     parsed = extractJson(response.text);
   } catch {
+    // No verdict was given, so none is reported. `better_trace: 'neither'` used
+    // to fill this slot, which reads as the model having weighed both runs and
+    // called them equal — a judgement it never made. `unknown` is rendered in
+    // the same place and cannot be mistaken for one.
+    //
+    // When the provider says it stopped at the ceiling, say that and name the
+    // flag that fixes it: an unparseable answer is the EXPECTED result of a
+    // JSON object cut off mid-write, and the caller was left to guess.
     parsed = {
       explanation: truncate(response.text, 500),
-      better_trace: 'neither',
-      reasoning: 'Could not parse structured response',
+      better_trace: 'unknown',
+      reasoning: response.truncated
+        ? `The model's answer was cut off at the ${llmOpts.max_tokens ?? DEFAULT_EVAL_MAX_TOKENS}-token ceiling, so it could not be parsed. Re-run with a larger --max-tokens.`
+        : 'Could not parse structured response',
       key_differences: [],
     };
   }
 
   return {
     explanation: String(parsed.explanation ?? ''),
-    better_trace: (['left', 'right', 'neither'].includes(String(parsed.better_trace))
-      ? String(parsed.better_trace) as 'left' | 'right' | 'neither'
-      : 'neither'),
+    better_trace: (['left', 'right', 'neither', 'unknown'].includes(String(parsed.better_trace))
+      ? String(parsed.better_trace) as AiDiffAnalysis['better_trace']
+      // An answer outside the options is not a verdict for `neither`, which is
+      // itself one of the options the model was offered.
+      : 'unknown'),
     reasoning: String(parsed.reasoning ?? ''),
     key_differences: Array.isArray(parsed.key_differences)
       ? (parsed.key_differences as string[]).map(String)

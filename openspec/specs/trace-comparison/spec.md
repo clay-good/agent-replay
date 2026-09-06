@@ -35,6 +35,13 @@ The analysis SHALL be resolved before a `--json` document is written, so `--ai -
 - **WHEN** the same command runs with `--json`
 - **THEN** stdout is a single `{ ok: false, error, hints }` refusal document at exit 1, not a diff document with a null analysis
 
+A verdict SHALL be reported only when the model gave one. A reply that cannot be parsed, or one naming an option outside those offered, SHALL be reported as `unknown` rather than as `neither` — `neither` is itself one of the three verdicts (the runs are equivalent), so using it for "no answer" prints a judgement nobody made. Where the provider states that it stopped at the output ceiling, the analysis SHALL say so and name the flag that raises it, since an unparseable reply is the expected result of a JSON answer cut off mid-write. An AI evaluation, which fails closed with `score: 0`, SHALL likewise record that its judge was cut off, so a stored zero can be told apart from a judge that finished and failed the run.
+
+#### Scenario: The model's answer is cut off
+
+- **WHEN** `diff --ai` receives a reply the provider marked as stopped at the token ceiling, and it cannot be parsed
+- **THEN** the verdict is `unknown`, not `neither`, and the reasoning names the ceiling and `--max-tokens`
+
 An AI comparison whose summary carried only part of the divergences SHALL report how many it was formed over, in the returned analysis and in the rendered panel — the summary tells the model the rest exist, and the reader is owed the same.
 
 A comparison that finds nothing SHALL report what it compared rather than that the traces are identical: the diff covers each step's type, name, input, output, model, error and decision plus the trace's input, status and error, and state snapshots are outside it — two traces differing only in their context window are not identical, and saying so sends the reader away from the difference they came for. The message SHALL name where the uncompared data can be read.

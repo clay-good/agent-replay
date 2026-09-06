@@ -1186,6 +1186,75 @@ describe('the AI eval surface holds up against a hostile or sloppy model reply',
 });
 
 
+/** A reply the provider cut off at the token ceiling. */
+function llmTruncated(text: string): Response {
+  return {
+    status: 200,
+    json: async () => ({ content: [{ text }], usage: { input_tokens: 50, output_tokens: 20 }, stop_reason: 'max_tokens' }),
+  } as unknown as Response;
+}
+
+describe('an answer the model never finished is not reported as a verdict', () => {
+  const opts = { provider: 'anthropic' as const, api_key: 'k', model: 'claude-haiku-4-5-20251001' };
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('reports diff --ai as unknown, not as "neither", when the reply cannot be parsed', async () => {
+    // `neither` is one of the three verdicts the model is OFFERED — it means
+    // "the two runs are equivalent". Using it as the fallback for "no answer"
+    // printed a judgement nobody made, in the same slot as a real one.
+    const { aiDiffAnalysis } = await import('../src/services/diff-service.js');
+    const db = createTestDb();
+    const left = ingestTrace(db, makeTrace());
+    const right = ingestTrace(db, makeTrace({ status: 'completed', error: undefined }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(llmText('{"explanation": "the left run')));
+
+    const out = await aiDiffAnalysis(db, left.id, right.id, opts);
+    expect(out.better_trace).toBe('unknown');
+  });
+
+  it('names the token ceiling when that is why the reply could not be parsed', async () => {
+    // The provider states this outright (`stop_reason: "max_tokens"`) and it
+    // was read by nobody, so the one recoverable failure mode looked identical
+    // to a model that answered badly.
+    const { aiDiffAnalysis } = await import('../src/services/diff-service.js');
+    const db = createTestDb();
+    const left = ingestTrace(db, makeTrace());
+    const right = ingestTrace(db, makeTrace({ status: 'completed', error: undefined }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(llmTruncated('{"explanation": "the left run')));
+
+    const out = await aiDiffAnalysis(db, left.id, right.id, { ...opts, max_tokens: 4096 });
+    expect(out.better_trace).toBe('unknown');
+    expect(out.reasoning).toContain('4096');
+    expect(out.reasoning).toContain('--max-tokens');
+  });
+
+  it('records on an AI eval that its judge was cut off, so the stored 0 can be explained', async () => {
+    // The eval path fails closed, which is right — but a stored
+    // `score: 0, passed: false` from a judge that never finished reading is
+    // indistinguishable from one that genuinely failed the run.
+    const db = createTestDb();
+    const trace = ingestTrace(db, makeTrace());
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(llmTruncated('{"root_cause": "wrong pa')));
+
+    const result = await runAiEval(db, trace.id, 'ai-root-cause', opts);
+    expect(result.score).toBe(0);
+    expect((result.details as Record<string, unknown>).truncated_at_max_tokens).toBe(true);
+  });
+
+  it('leaves a normally-stopped unparseable reply unflagged', async () => {
+    // Absent rather than false: a reply that stopped normally and still could
+    // not be parsed is a different problem, and raising --max-tokens will not
+    // fix it.
+    const db = createTestDb();
+    const trace = ingestTrace(db, makeTrace());
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(llmText('not json at all')));
+
+    const result = await runAiEval(db, trace.id, 'ai-root-cause', opts);
+    expect((result.details as Record<string, unknown>).truncated_at_max_tokens).toBeUndefined();
+    expect((result.details as Record<string, unknown>).parse_error).toBe(true);
+  });
+});
+
 describe('diff --ai honors the configured output ceiling', () => {
   afterEach(() => vi.unstubAllGlobals());
 
