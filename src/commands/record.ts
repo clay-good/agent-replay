@@ -14,6 +14,7 @@ import { existsSync } from 'node:fs';
 
 export interface RecordOptions {
   format?: string;
+  agentName?: string;
   input?: string;
   tags?: string;
   leaveOpen?: boolean;
@@ -27,7 +28,7 @@ const FORMATS = ['native', 'codex-exec', 'gemini-stream'];
  * incrementally. Reads the native JSONL protocol by default, or translates a
  * harness's own stream via `--format codex-exec` / `gemini-stream`. Still-open
  * traces are finalized as `timeout` on EOF unless `--leave-open`. `--input`
- * supplies the prompt for a stream that does not carry one.
+ * and `--agent-name` supply the prompt and the label a stream does not carry.
  */
 export async function runRecord(opts: RecordOptions = {}): Promise<void> {
   const format = opts.format ?? 'native';
@@ -57,6 +58,29 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
   // prevent.
   const suppliedInput = (opts.input ?? '').trim();
 
+  // The operator's label for this run.
+  //
+  // A translated stream names its agent after the HARNESS — every
+  // `--format codex-exec` capture is called `codex` — so a store collecting two
+  // different Codex-based workflows could not tell them apart: `list --agent`,
+  // `stats` and `check --agent` all group by that one name. The stream cannot
+  // know the label; the operator does.
+  //
+  // Unlike `--input`, this OVERRIDES what the stream said. An input is data the
+  // producer captured, so the producer knows better; a name is a label, and the
+  // one typed on the command line is the operator's answer to "what is this
+  // run?".
+  //
+  // Blank is treated as absent rather than refused, the rule `run --agent-name`
+  // follows: `agent_name` is required and non-empty everywhere else (ingest
+  // refuses `""`), so storing a blank would write a trace this store's own
+  // export -> ingest round trip cannot reproduce.
+  const suppliedName = (opts.agentName ?? '').trim() !== '' ? (opts.agentName as string) : null;
+
+  if (opts.agentName != null && suppliedName == null) {
+    console.error(chalk.yellow('  ⚠ --agent-name was blank; keeping the name the stream reports.'));
+  }
+
   const extraTags = (opts.tags ?? '')
     .split(',')
     .map((s) => s.trim())
@@ -78,6 +102,9 @@ export async function runRecord(opts: RecordOptions = {}): Promise<void> {
   let inputLines = 0;
 
   const apply = (event: CaptureEvent): void => {
+    if (event.type === 'trace_start' && suppliedName) {
+      event.agent_name = suppliedName;
+    }
     if (event.type === 'trace_start' && suppliedInput) {
       // Fill in only, never override: a native producer that sends its own
       // input knows more about the run than the command line does, and

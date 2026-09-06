@@ -86,6 +86,13 @@ The system SHALL translate the documented non-interactive event streams of the m
 
 The system SHALL record, on the steps a translated stream produces, the model any record of that stream names — read from the record, its `item`, or its `session` — tracking it as a running value so a session that changes model mid-run labels each step with the model in effect at its own time. A stream that names no model SHALL leave the field unset rather than guessing one.
 
+The system SHALL accept `record --agent-name <name>`, recording it as the agent name of every trace the stream opens, overriding the name the stream reports. A blank value SHALL fall back to the stream's own name with a warning rather than storing an empty name.
+
+#### Scenario: Labelling a translated capture
+
+- **WHEN** a user pipes a codex stream into `record --format codex-exec --agent-name nightly-refactor`
+- **THEN** the trace is recorded under that name instead of `codex`
+
 The system SHALL accept `record --input <text>`, recording it as the prompt of any trace the stream opens without an input of its own, so a capture in a format whose harness takes its prompt on the command line can be matched by `check --golden`. A blank value SHALL be treated as absent, and an input the producer sent SHALL NOT be overridden.
 
 #### Scenario: Prompt supplied for a translated stream

@@ -65,6 +65,15 @@ and one-way.
 
 ### Added
 
+- **`record --agent-name <name>`, so two piped workflows are not one agent.**
+  A translated stream names its agent after the harness, so every
+  `record --format codex-exec` capture was called `codex` — a store collecting
+  two different Codex-based workflows could not tell them apart, and
+  `list --agent`, `stats` and `check --agent` all grouped them together.
+  Unlike `--input` it overrides what the stream said: an input is data the
+  producer captured, a name is a label. A blank value falls back to the
+  stream's name, with a warning, rather than storing an empty one that
+  `ingest` would refuse on restore.
 - **`record --input <text>`, which makes a piped harness run gateable.**
   `check --golden` matches a candidate to its baseline by agent name and a hash
   of the trace input, and never matches an empty one — so a

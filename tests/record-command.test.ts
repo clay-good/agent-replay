@@ -192,3 +192,34 @@ describe('record --input', () => {
     expect(JSON.parse(input)).toEqual({});
   });
 });
+
+describe('record --agent-name', () => {
+  const codex = [
+    JSON.stringify({ type: 'thread.started', thread_id: 'th_n' }),
+    JSON.stringify({ type: 'item.completed', item: { item_type: 'command_execution', command: 'ls' } }),
+    JSON.stringify({ type: 'turn.completed', usage: {} }),
+  ];
+  const names = () =>
+    store((db) => db.prepare('SELECT agent_name FROM agent_traces ORDER BY id').pluck().all() as string[]);
+
+  it('labels a translated capture, which otherwise takes the harness name', async () => {
+    await record(codex, { format: 'codex-exec', agentName: 'nightly-refactor' });
+    expect(names()).toEqual(['nightly-refactor']);
+  });
+
+  it('keeps the harness name when the flag is not given', async () => {
+    await record(codex, { format: 'codex-exec' });
+    expect(names()).toEqual(['codex']);
+  });
+
+  it('overrides the name a native producer sent, since a name is a label', async () => {
+    await record([start, end], { agentName: 'renamed' });
+    expect(names()).toEqual(['renamed']);
+  });
+
+  it('falls back to the stream name on a blank value, and says so', async () => {
+    await record(codex, { format: 'codex-exec', agentName: '   ' });
+    expect(names()).toEqual(['codex']);
+    expect(stderr()).toContain('--agent-name was blank');
+  });
+});
