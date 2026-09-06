@@ -224,6 +224,39 @@ export function hasRenderableContent(value: unknown): boolean {
 }
 
 /**
+ * Every token an Anthropic-shaped `usage` object reports, not just the uncached
+ * pair.
+ *
+ * `input + output` alone drops the two CACHE fields, which is where nearly all
+ * of a real Claude Code session's consumption lives: on a 52 MB transcript the
+ * pair totalled 1,216,025 against an actual 581,945,188 — the stored figure was
+ * 0.2% of the truth.
+ *
+ * ONE definition, shared by every path that reads this shape (the transcript
+ * importer and its subagent twin, the claude-stream translator), for the reason
+ * the importer already gives for sharing it within its own file: so the paths
+ * "cannot drift apart on what a token total means". A session captured live and
+ * the same session imported must report the same number.
+ *
+ * Each field is clamped at zero — a negative count is not a token total, and it
+ * would survive capture only to be REJECTED on re-ingest, making an export of
+ * that trace unrestorable.
+ */
+export function anthropicUsageTokens(usage: Record<string, unknown> | undefined): number {
+  if (!usage) return 0;
+  const n = (v: unknown): number => {
+    const parsed = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  };
+  return (
+    n(usage.input_tokens) +
+    n(usage.output_tokens) +
+    n(usage.cache_creation_input_tokens) +
+    n(usage.cache_read_input_tokens)
+  );
+}
+
+/**
  * A producer's FLAG, read generously: `true`, `1`, `"true"`, `"TRUE"`.
  *
  * Harness payloads are JSON written by someone else, and the same flag arrives

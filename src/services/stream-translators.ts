@@ -1,5 +1,5 @@
 import { generateId } from '../utils/id.js';
-import { isTrueish } from '../utils/json.js';
+import { anthropicUsageTokens, isTrueish } from '../utils/json.js';
 import type { CaptureEvent } from './event-protocol.js';
 
 /**
@@ -557,7 +557,7 @@ export class ClaudeStreamTranslator extends BaseTranslator {
       // stream carries tool results, and any usage echoed on it belongs to the
       // turn already counted — adding both double counts the session.
       if (type === 'assistant' && message?.usage) {
-        this.totalTokens += claudeUsageTokens(message.usage as Record<string, unknown>);
+        this.totalTokens += anthropicUsageTokens(message.usage as Record<string, unknown>);
       }
       const content = message?.content;
       const blocks: ContentBlock[] = Array.isArray(content)
@@ -680,7 +680,7 @@ export class ClaudeStreamTranslator extends BaseTranslator {
       // vendor's own total wins when it states one.
       const resultUsage = obj.usage;
       if (resultUsage != null && typeof resultUsage === 'object' && !Array.isArray(resultUsage)) {
-        const resultTokens = claudeUsageTokens(resultUsage as Record<string, unknown>);
+        const resultTokens = anthropicUsageTokens(resultUsage as Record<string, unknown>);
         if (resultTokens > 0) this.totalTokens = resultTokens;
       }
       const subtype = str(obj.subtype);
@@ -716,14 +716,6 @@ export function makeTranslator(format: string): StreamTranslator | null {
  * claude-transcript importer sums, so a piped run and an imported one of the
  * same session report the same total.
  */
-function claudeUsageTokens(usage: Record<string, unknown>): number {
-  return (
-    toNum(usage.input_tokens) +
-    toNum(usage.output_tokens) +
-    toNum(usage.cache_creation_input_tokens) +
-    toNum(usage.cache_read_input_tokens)
-  );
-}
 
 /** Text of a tool result's content, which is a string or an array of blocks. */
 function blockText(content: unknown): string {

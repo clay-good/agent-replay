@@ -176,6 +176,43 @@ describe('one session captured two ways records the same facts', () => {
   });
 });
 
+describe('one session reports the same token total either way', () => {
+  // The transcript importer and the claude-stream translator both read an
+  // Anthropic `usage` object, and both must count the CACHE fields — that is
+  // where nearly all of a real session's consumption lives (on a 52 MB
+  // transcript, the uncached pair was 0.2% of the truth). Two copies of that
+  // rule is how a live capture and an import of the same session come to
+  // report different numbers.
+  it('counts prompt, completion and both cache fields on both paths', () => {
+    const usage = { input_tokens: 100, output_tokens: 20, cache_creation_input_tokens: 300, cache_read_input_tokens: 900 };
+
+    const path = join(dir, 'tokens.jsonl');
+    writeFileSync(path, [
+      { type: 'user', sessionId: 'tok-file', timestamp: '2026-09-06T10:00:00.000Z', message: { content: 'go' } },
+      {
+        type: 'assistant', sessionId: 'tok-file', timestamp: '2026-09-06T10:00:01.000Z',
+        message: { content: [{ type: 'text', text: 'done' }], usage },
+      },
+    ].map((r) => JSON.stringify(r)).join('\n'));
+    const imported = getTrace(db, importClaudeTranscript(db, path).trace!.id)!;
+
+    const translator = makeTranslator('claude-stream')!;
+    let streamId = '';
+    for (const line of [
+      { type: 'system', subtype: 'init', session_id: 'tok-stream' },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'done' }], usage } },
+      { type: 'result', subtype: 'success' },
+    ]) {
+      for (const event of translator.translate(line as Record<string, unknown>)) {
+        streamId = applyEvent(db, event as CaptureEvent).traceId;
+      }
+    }
+
+    expect(imported.total_tokens).toBe(1320);
+    expect(getTrace(db, streamId)!.total_tokens).toBe(imported.total_tokens);
+  });
+});
+
 describe('a failed tool call is a failure on every path', () => {
   // The sharpest form of the premise: an evaluator must score one session the
   // same however it was captured. It did not — the hook stored a failed call

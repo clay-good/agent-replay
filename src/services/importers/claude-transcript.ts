@@ -4,7 +4,7 @@ import { readJsonlLines } from './jsonl-reader.js';
 import { dirname, join, basename } from 'node:path';
 import { ingestTrace } from '../trace-service.js';
 import { selectPrompt } from './user-turns.js';
-import { isTrueish } from '../../utils/json.js';
+import { anthropicUsageTokens, isTrueish } from '../../utils/json.js';
 import type { IngestTraceInput, IngestStepInput, Trace } from '../../models/types.js';
 
 /**
@@ -76,13 +76,10 @@ interface Block {
  * the two cannot drift apart on what a token total means.
  */
 export function usageTokens(usage: Record<string, unknown> | undefined): number {
-  if (!usage) return 0;
-  return (
-    toNum(usage.input_tokens) +
-    toNum(usage.output_tokens) +
-    toNum(usage.cache_creation_input_tokens) +
-    toNum(usage.cache_read_input_tokens)
-  );
+  // One definition, in utils, shared with the claude-stream translator, which
+  // reads the same shape off a live stream. Kept exported here because the
+  // subagent twin below and the tests name it.
+  return anthropicUsageTokens(usage);
 }
 
 function toNum(v: unknown): number {
