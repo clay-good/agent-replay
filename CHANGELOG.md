@@ -443,6 +443,14 @@ and one-way.
 
 ### Fixed
 
+- **`list --json` did not report the "abandoned?" it was drawing.** The table
+  marks a run stuck in `running` past the threshold, and the document said
+  nothing — so a script scanning a store for stalled runs, which is the natural
+  reader of `list --json` and the one that cannot see a glyph, had to
+  re-implement the threshold. `show --json` was given `possibly_abandoned` for
+  exactly this reason; the listing, where such a scan actually happens, was
+  missed. It now carries the same derived field.
+
 - **A `step` capture event stored a finished step as unfinished.** `step` is
   documented as "a complete step in one event" — that is what distinguishes it
   from the `step_start`/`step_end` pair, which exists for a step that is still

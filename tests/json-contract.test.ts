@@ -68,6 +68,18 @@ describe('the --json documents keep their shape', () => {
     expect(keysOf(payload(['list', '--json']))).toEqual(['items', 'total']);
   });
 
+  it('list items carry the derived fields the table draws', () => {
+    // The table marks a stalled run "⚠ abandoned?" and a fork "⑂ fork"; a
+    // script reading the document sees neither glyph, so the facts behind them
+    // have to be in the payload. `possibly_abandoned` was added to `show --json`
+    // for this reason and missing here, which is where a store-wide scan for
+    // stuck runs actually happens.
+    const item = (payload(['list', '--json']) as { items: Record<string, unknown>[] }).items[0];
+    for (const key of ['possibly_abandoned', 'effective_tokens', 'effective_duration_ms', 'parent_trace_id']) {
+      expect(Object.keys(item)).toContain(key);
+    }
+  });
+
   it('stats', () => {
     expect(keysOf(payload(['stats', '--json']))).toEqual(['by_agent', 'by_status', 'overall', 'since']);
   });

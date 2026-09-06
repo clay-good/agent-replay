@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import chalk from 'chalk';
 import type { ListTracesFilter } from '../models/types.js';
-import { listTraces } from '../services/trace-service.js';
+import { isPossiblyAbandoned, listTraces } from '../services/trace-service.js';
 import { ensureDatabase } from '../db/index.js';
 import { traceTable } from '../ui/table.js';
 import { heading } from '../ui/theme.js';
@@ -102,7 +102,18 @@ export function runList(opts: ListOptions = {}): void {
   }
 
   if (opts.json) {
-    console.log(JSON.stringify({ items: traces, total }, null, 2));
+    // `possibly_abandoned`, the same derived field `show --json` carries.
+    //
+    // The TABLE marks a stalled run "⚠ abandoned?" and the document said
+    // nothing, so a script scanning the store for stuck runs — the natural
+    // reader of `list --json`, and the one that cannot see a glyph — had to
+    // re-implement the threshold. `show --json` was given this field for
+    // exactly that reason; `list` is where it is actually needed.
+    //
+    // Derived on the display path only, never stored: same rule as
+    // `effective_tokens` beside it.
+    const items = traces.map((t) => ({ ...t, possibly_abandoned: isPossiblyAbandoned(t) }));
+    console.log(JSON.stringify({ items, total }, null, 2));
     return;
   }
 

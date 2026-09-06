@@ -502,6 +502,17 @@ describe('an abandoned-looking trace says so everywhere, not just in the listing
     expect(doc.possibly_abandoned).toBe(true);
   });
 
+  it('reports possibly_abandoned in list --json, where a scan for stuck runs happens', () => {
+    // The listing draws "⚠ abandoned?" and the document said nothing, so a
+    // script had to re-implement the threshold to find what the table was
+    // already showing it.
+    out.length = 0;
+    runList({ dir, json: true });
+    const doc = JSON.parse(out.join('\n')) as { items: Array<{ id: string; possibly_abandoned: boolean }> };
+    const stale = doc.items.find((t) => t.id === id)!;
+    expect(stale.possibly_abandoned).toBe(true);
+  });
+
   it('never calls a fork abandoned, however long it sits', async () => {
     // `fork` copies a run up to a step and leaves the copy `running` for the
     // user to explore. Half an hour later every what-if sandbox in the store
