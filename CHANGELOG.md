@@ -443,6 +443,14 @@ and one-way.
 
 ### Fixed
 
+- **The walkthrough told you to diff "the travel-assistant ids" without saying
+  which.** The demo seeds a comparable pair — the same request before and after
+  a model upgrade — and then sent the reader to find its two ids in a table of
+  six. It now prints them, derived from the data (the agent with two runs of the
+  same input, which is what makes them comparable) rather than hardcoded, in
+  both the `diff` line and the regression-gate line. A test runs what the
+  walkthrough prints, as printed.
+
 - **A store could not say which capture path produced a trace.** The importers
   stamped `metadata.source_format` and the OTel receiver stamped its own, while
   `hook` recorded only a `dialect` and `record` recorded nothing at all — so a

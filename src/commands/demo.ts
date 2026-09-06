@@ -12,6 +12,7 @@ import { heading, separator, colors } from '../ui/theme.js';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage } from '../utils/json.js';
 import { resolveDataDir, dirWasNamed } from '../utils/paths.js';
+import { julianDayExpr } from '../utils/time.js';
 
 export interface DemoOptions {
   interactive?: boolean;
@@ -152,6 +153,27 @@ export async function runDemo(opts: DemoOptions = {}): Promise<void> {
     return;
   }
 
+  // The comparable PAIR, by id, so the two commands that need one are
+  // copy-pasteable. "diff <travel-assistant ids>" tells the reader to go and
+  // find them in a table of six; the walkthrough already hands out a real id
+  // for `show`, and these are the ones that make `diff` and `check` show
+  // anything at all. Derived, not hardcoded: the pair is whichever agent has
+  // two runs of the SAME input, which is exactly what makes them comparable.
+  const pair = db
+    .prepare(
+      `SELECT id FROM agent_traces
+        WHERE parent_trace_id IS NULL
+          AND (agent_name, input) IN (
+            SELECT agent_name, input FROM agent_traces
+             WHERE parent_trace_id IS NULL AND input IS NOT NULL AND input != '{}'
+             GROUP BY agent_name, input HAVING COUNT(*) > 1
+          )
+        ORDER BY ${julianDayExpr('started_at')} ASC, started_at ASC LIMIT 2`,
+    )
+    .all() as Array<{ id: string }>;
+  const older = pair[0]?.id.slice(0, 8);
+  const newer = pair[1]?.id.slice(0, 8);
+
   console.log(separator());
   console.log('');
   console.log(colors.primary.bold('  Interactive Walkthrough'));
@@ -166,7 +188,9 @@ export async function runDemo(opts: DemoOptions = {}): Promise<void> {
   // agents compares two unrelated runs and prints a wall of one-sided rows;
   // the two travel-assistant runs are the same request before and after a
   // model upgrade, which is the comparison this command is for.
-  console.log(`    ${chalk.cyanBright('5.')} ${chalk.white('agent-replay diff <travel-assistant ids>')} ${chalk.dim('— The same booking, before and after a model upgrade')}`);
+  console.log(
+    `    ${chalk.cyanBright('5.')} ${chalk.white(`agent-replay diff ${older ?? '<id-a>'} ${newer ?? '<id-b>'}`)} ${chalk.dim('— The same request, before and after a model upgrade')}`,
+  );
   console.log(`    ${chalk.cyanBright('6.')} ${chalk.white('agent-replay fork <id> --from-step 3')} ${chalk.dim('— Fork at step 3')}`);
   console.log(`    ${chalk.cyanBright('7.')} ${chalk.white('agent-replay eval <id> --preset hallucination-check')}`);
   console.log(`       ${chalk.dim('— Run hallucination evaluator')}`);
@@ -192,7 +216,7 @@ export async function runDemo(opts: DemoOptions = {}): Promise<void> {
   // from the older one catches the newer one.
   console.log(chalk.white('  Gate a regression (the older travel-assistant run is the baseline):'));
   console.log('');
-  console.log(`       ${chalk.white('agent-replay export <older-id> --format golden --output golden.json')}`);
+  console.log(`       ${chalk.white(`agent-replay export ${older ?? '<older-id>'} --format golden --output golden.json`)}`);
   console.log(`       ${chalk.white('agent-replay check --golden golden.json --agent-exact travel-assistant')}`);
   console.log(`       ${chalk.dim('— exits 1 on the newer run: same steps, different tool query and choice')}`);
   console.log('');

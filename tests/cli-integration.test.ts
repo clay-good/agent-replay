@@ -1465,6 +1465,43 @@ describe('CLI integration', () => {
     expect(freshOut).not.toContain('will be lost');
   });
 
+  it('the walkthrough prints the comparable pair by id, and those commands work', () => {
+    // "diff <travel-assistant ids>" sends the reader to find two ids in a table
+    // of six. These two are the whole point of the pair — the same request
+    // before and after a model upgrade — so the walkthrough hands them over,
+    // and what it prints has to run as printed.
+    const store = mkdtempSync(join(tmpdir(), 'ar-demo-pair-')) + '/.agent-replay';
+    mkdirSync(store, { recursive: true });
+    const walk = spawnSync(process.execPath, [CLI, 'demo', '--dir', store], {
+      encoding: 'utf8', input: '\n'.repeat(12), timeout: 60000,
+    });
+    const diffLine = walk.stdout.replace(/\x1B\[[0-9;]*m/g, '').match(/agent-replay diff (\S+) (\S+)/);
+    expect(diffLine).toBeTruthy();
+    const [, left, right] = diffLine!;
+    expect(left).toMatch(/^trc_/);
+    expect(right).toMatch(/^trc_/);
+    expect(left).not.toBe(right);
+
+    // Run it as printed: two runs of ONE agent that diverge.
+    const diff = JSON.parse(
+      execFileSync(process.execPath, [CLI, 'diff', left, right, '--json', '--dir', store], { encoding: 'utf8', stdio: 'pipe' }),
+    ) as { divergence_step: number | null; diffs: unknown[] };
+    expect(diff.divergence_step).toBe(3);
+    expect(diff.diffs.length).toBeGreaterThan(0);
+
+    // ...and the gate line's own id makes a baseline the newer run fails.
+    const exportId = walk.stdout.replace(/\x1B\[[0-9;]*m/g, '').match(/agent-replay export (\S+) --format golden/)![1];
+    const golden = join(store, 'golden.json');
+    execFileSync(process.execPath, [CLI, 'export', exportId, '--format', 'golden', '--output', golden, '--dir', store], {
+      encoding: 'utf8', stdio: 'pipe',
+    });
+    const gate = spawnSync(process.execPath, [CLI, 'check', '--golden', golden, '--agent-exact', 'travel-assistant', '--dir', store], {
+      encoding: 'utf8', timeout: 60000,
+    });
+    expect(gate.status).toBe(1);
+    rmSync(store, { recursive: true, force: true });
+  }, 70000);
+
   it('the walkthrough hint names a trace that actually has a decision', () => {
     // The hint's second half says to run `decisions <id>` on the trace it
     // names. The selector took the first trace carrying a session id — which
