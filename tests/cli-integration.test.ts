@@ -1414,6 +1414,60 @@ describe('CLI integration', () => {
     rmSync(parent, { recursive: true, force: true });
   });
 
+  it('demo --reset names what it is about to destroy', () => {
+    // Every other --reset guard is about WHERE it deletes; none of them opens
+    // the store, so a real captured run, its evaluations and a hand-written
+    // policy went under one line reading "Cleared existing data." `demo` is the
+    // sample-data command, and nobody reaching for fresh samples expects their
+    // own capture to be what goes.
+    const store = mkdtempSync(join(tmpdir(), 'ar-reset-say-')) + '/.agent-replay';
+    mkdirSync(store, { recursive: true });
+    const runFile = join(store, '..', 'run.json');
+    writeFileSync(
+      runFile,
+      JSON.stringify({
+        agent_name: 'production-bot',
+        session_id: 'real-1',
+        status: 'completed',
+        steps: [
+          { step_number: 1, step_type: 'thought', name: 'plan', content: 'plan' },
+          { step_number: 2, step_type: 'output', name: 'reply', content: 'done' },
+        ],
+      }),
+    );
+    execFileSync(process.execPath, [CLI, 'ingest', runFile, '--dir', store], { encoding: 'utf8', stdio: 'pipe' });
+    const id = JSON.parse(
+      execFileSync(process.execPath, [CLI, 'list', '--json', '--dir', store], { encoding: 'utf8', stdio: 'pipe' }),
+    ).items[0].id as string;
+    execFileSync(process.execPath, [CLI, 'eval', id, '--preset', 'safety-check', '--dir', store], {
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+
+    const out = execFileSync(process.execPath, [CLI, 'demo', '--reset', '--no-interactive', '--dir', store], {
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+
+    // The counts are the point: the trace and the evaluation that go with it.
+    expect(out).toMatch(/Clearing 1 trace, 1 evaluation result/);
+    expect(out).toContain(join(store, 'traces.db'));
+    // Still cleared — a report, not a refusal.
+    expect(
+      JSON.parse(execFileSync(process.execPath, [CLI, 'list', '--json', '--dir', store], { encoding: 'utf8', stdio: 'pipe' }))
+        .items.some((t: { agent_name: string }) => t.agent_name === 'production-bot'),
+    ).toBe(false);
+
+    // Nothing to clear says nothing: a first-run --reset has no store to name.
+    const fresh = mkdtempSync(join(tmpdir(), 'ar-reset-fresh-')) + '/.agent-replay';
+    mkdirSync(fresh, { recursive: true });
+    const freshOut = execFileSync(process.execPath, [CLI, 'demo', '--reset', '--no-interactive', '--dir', fresh], {
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+    expect(freshOut).not.toContain('Clearing');
+  });
+
   it('closes every step when a parallel tool batch\'s PostToolUse hooks race', async () => {
     // A harness that dispatches tools in parallel fires the matching PostToolUse
     // hooks near-simultaneously, each as its own process. With the find and the

@@ -1,6 +1,8 @@
 import { existsSync, rmSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import chalk from 'chalk';
+import Database from 'better-sqlite3';
+import type { Database as DatabaseType } from 'better-sqlite3';
 import { ensureDatabase } from '../db/index.js';
 import { runInit } from './init.js';
 import { listTraces } from '../services/trace-service.js';
@@ -23,6 +25,37 @@ export interface DemoOptions {
  * The actual seed data is loaded from src/demo/seed-data.ts (created in Prompt 11).
  * This command handles init, reset, seeding, and the walkthrough flow.
  */
+/**
+ * What a store holds, for the line `--reset` prints before deleting it.
+ *
+ * Read-only and best-effort: a store that cannot be opened (corrupt, locked,
+ * written by a newer schema) still gets cleared — the point of the line is to
+ * name the loss when it can, never to stand between the user and the flag they
+ * typed.
+ */
+function describeStoreContents(dbPath: string): string {
+  let db: DatabaseType | undefined;
+  try {
+    db = new Database(dbPath, { readonly: true });
+    const count = (sql: string): number => (db!.prepare(sql).get() as { n: number }).n;
+    const traces = count('SELECT COUNT(*) AS n FROM agent_traces');
+    const evals = count('SELECT COUNT(*) AS n FROM agent_trace_evals');
+    const policies = count('SELECT COUNT(*) AS n FROM guardrail_policies');
+    const parts = [`${traces} ${traces === 1 ? 'trace' : 'traces'}`];
+    if (evals > 0) parts.push(`${evals} evaluation ${evals === 1 ? 'result' : 'results'}`);
+    if (policies > 0) parts.push(`${policies} guardrail ${policies === 1 ? 'policy' : 'policies'}`);
+    return parts.join(', ');
+  } catch {
+    return 'the existing store';
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      // Nothing to do: the file is about to be unlinked either way.
+    }
+  }
+}
+
 export async function runDemo(opts: DemoOptions = {}): Promise<void> {
   const baseDir = resolve(resolveDataDir(opts.dir));
   const dbPath = resolve(baseDir, 'traces.db');
@@ -56,8 +89,24 @@ export async function runDemo(opts: DemoOptions = {}): Promise<void> {
     // sidecars bounds the blast radius to data this command created, and a
     // directory that holds no store has nothing to reset.
     if (existsSync(dbPath)) {
+      // Say what is being destroyed, before destroying it.
+      //
+      // Every guard above is about WHERE this deletes — a store named only by
+      // the environment, a directory that is not one of ours, the tree around
+      // the file. None of them opens the store, so the command could not say
+      // what was inside: a real captured run, its evaluations and a hand-written
+      // guardrail policy were unlinked under one line reading "Cleared existing
+      // data." `demo` is the sample-data command, and a user reaching for fresh
+      // samples has no reason to expect their own store is what goes.
+      //
+      // Counted, not judged: which traces are "real" is not something this
+      // command can know — the demo's own rows look like any other — so it
+      // reports the blast radius and leaves the reading to the person who typed
+      // `--reset`, exactly as `import --replace` names what goes with the trace
+      // it replaces. Still a report and not a refusal: `--reset` is documented
+      // as clearing the store, and honouring that is the contract.
+      console.log(chalk.dim(`  Clearing ${describeStoreContents(dbPath)} from ${dbPath}.`));
       for (const suffix of ['', '-wal', '-shm']) rmSync(dbPath + suffix, { force: true });
-      console.log(chalk.dim('  Cleared existing data.'));
     }
   }
 

@@ -768,8 +768,10 @@ call `deleteTrace(db, id)` from the [SDK](#programmatic-api) — it cascades, so
 the trace's steps, decisions, snapshots and evaluations go with it. To drop
 everything, delete the store: `rm -rf .agent-replay` (or the directory `--dir`
 names), which also removes `config.json` and the API keys in it. `demo --reset`
-clears a store before reloading the samples, and refuses a directory that does
-not look like one it created.
+clears a store before reloading the samples; it refuses a directory that does
+not look like one it created, and names the traces, evaluations and policies it
+is about to clear — the directory checks cannot tell a previous demo from a real
+capture, so the counts are what tell you.
 
 ## Troubleshooting
 

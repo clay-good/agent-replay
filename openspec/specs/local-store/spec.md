@@ -15,11 +15,18 @@ A leading `~` or `~/` SHALL be expanded to the user's home directory. A shell ex
 
 A destructive command SHALL gate on the same decision, not on the raw option: a blank `--dir` does not name a target, so `demo --reset` must still refuse to inherit its target from the environment.
 
+A destructive command SHALL also name WHAT it removes, not only guard WHERE it removes from. `demo --reset` SHALL report the trace, evaluation and guardrail-policy counts held by the store it is about to clear, and the path of that store, before unlinking it: the guards on the target are naming heuristics, and a store that passes all of them may still hold a real captured run rather than a previous demo. The counts SHALL be reported rather than judged — the demo's own rows are indistinguishable from any other — and reported rather than refused, since clearing the store is what the flag documents. A store that cannot be opened SHALL still be cleared.
+
 #### Scenario: The store is a directory or two up
 
 - **WHEN** a command that needs a store is run from a subdirectory of a project whose store is at an ancestor's `.agent-replay/`, with no `--dir` given
 - **THEN** the refusal names that store and both ways to reach it, rather than only advising `init` — which would create a second store and split the project's traces
 - **AND** the store actually used is unchanged: resolution does not walk up, it only reports
+
+#### Scenario: --reset over a store that is not demo data
+
+- **WHEN** `demo --reset` is run against a store holding a captured run and its evaluations
+- **THEN** the counts and the store path are named before the store is cleared, and the store is still cleared
 
 #### Scenario: Blank value falls through
 

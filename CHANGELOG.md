@@ -393,6 +393,20 @@ and one-way.
 
 ### Fixed
 
+- **`demo --reset` deleted a real store under one line reading "Cleared
+  existing data."** Every guard on `--reset` is about WHERE it deletes — a
+  store named only by `AGENT_REPLAY_DIR`, a directory whose name is not one of
+  ours, the tree around the file — and none of them opens the store, so the
+  command could not say what was inside. A store holding a captured production
+  run, its three evaluations and a hand-written guardrail policy passes all of
+  them, and was unlinked without any of that being named. `demo` is the
+  sample-data command, and a user reaching for fresh samples has no reason to
+  expect their own capture is what goes. It now reports the trace, evaluation
+  and policy counts, and the store path, before unlinking: `Clearing 1 trace,
+  1 evaluation result from /path/to/traces.db.` Counted, not judged — the
+  demo's own rows look like any other — and a report rather than a refusal,
+  since clearing the store is what the flag documents.
+
 - **`check --golden` blamed the wrong thing when only SOME matched runs carry
   a field.** A field is compared only when every matched run's baseline can
   exercise it, so that one agent does not pass on another's behalf — but the
