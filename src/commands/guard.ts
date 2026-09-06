@@ -22,11 +22,13 @@ import { openSync, readSync, closeSync } from 'node:fs';
 import { startSpinner, successSpinner, failSpinner } from '../ui/spinner.js';
 import { errorMessage, safeParseInt, truncate} from '../utils/json.js';
 import { resolveDataDir, storeExists, storeAboveNote, storeSplitNote } from '../utils/paths.js';
+import { makeRefuse } from '../utils/refuse.js';
 
 // ── guard list ───────────────────────────────────────────────────────────
 
 export interface GuardListOptions {
   dir?: string;
+  json?: boolean;
 }
 
 export function runGuardList(opts: GuardListOptions = {}): void {
@@ -40,16 +42,56 @@ export function runGuardList(opts: GuardListOptions = {}): void {
   // that is worse than for traces — the reader concludes the project has no
   // guardrails when it has a full set, one directory up.
   if (!storeExists(resolveDataDir(opts.dir))) {
-    console.error(chalk.red(`  No trace store at ${dbPath}.`));
-    console.error(chalk.dim('  Run "agent-replay init" in the project directory, or pass --dir <path>.'));
+    // Answered in the caller's shape: a `--json` reader gets the refusal as a
+    // document, the same contract every other reading command keeps.
     const above = storeAboveNote(opts.dir);
-    if (above) console.error(chalk.dim(`  ${above}`));
-    process.exitCode = 2;
+    makeRefuse(opts.json)(2, `No trace store at ${dbPath}.`, [
+      'Run "agent-replay init" in the project directory, or pass --dir <path>.',
+      ...(above ? [above] : []),
+    ]);
     return;
   }
   const db = ensureDatabase(dbPath);
 
   const policies = listPolicies(db);
+
+  // The blocking policies that cannot block live, computed once: the table
+  // prints them as a warning and `--json` carries the same list, so an audit
+  // done by a script sees what an audit done by eye sees.
+  const inert = policies.filter(
+    (p) => (p.action === 'deny' || p.action === 'require_review')
+      && (p.match_pattern as { output_contains?: unknown } | null)?.output_contains != null,
+  );
+
+  if (opts.json) {
+    // A policy set is configuration, and configuration is what a CI job most
+    // wants to assert on ("no disabled deny policies", "this rule is present").
+    // Every other reading command answers `--json`; this one printed a table
+    // only, so the check had to be a table scrape or a raw SQLite read.
+    //
+    // Warnings travel WITH the data rather than being left in the rendering:
+    // the table's `⚠ ... cannot block live` is the whole point of auditing a
+    // policy set, and a JSON reader that could not see it would be told
+    // `DENY / enabled` about a rule that never fires.
+    console.log(
+      JSON.stringify(
+        {
+          policies,
+          warnings: inert.length > 0
+            ? [{
+                type: 'blocking_policy_matches_on_output',
+                policies: inert.map((p) => p.name),
+                detail:
+                  'Enforcement runs before a tool call, when there is no output yet, so these cannot block live. They still match in `guard test` and on recorded traces.',
+              }]
+            : [],
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
 
   if (policies.length === 0) {
     console.log('');
@@ -79,10 +121,6 @@ export function runGuardList(opts: GuardListOptions = {}): void {
   // stays as it is; the explanation is the same one `guard add` gives.
   // Enabled state is deliberately not part of the test: enabling one of these
   // later would not make it block either.
-  const inert = policies.filter(
-    (p) => (p.action === 'deny' || p.action === 'require_review')
-      && (p.match_pattern as { output_contains?: unknown } | null)?.output_contains != null,
-  );
   if (inert.length > 0) {
     const names = inert.map((p) => p.name).join(', ');
     console.log(chalk.yellow(`  ⚠ ${inert.length} blocking ${inert.length === 1 ? 'policy matches' : 'policies match'} on output, so ${inert.length === 1 ? 'it cannot' : 'they cannot'} block live: ${names}`));

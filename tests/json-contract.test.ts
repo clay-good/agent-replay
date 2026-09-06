@@ -96,6 +96,10 @@ describe('the --json documents keep their shape', () => {
     expect(Object.keys(doc.steps[0])).toContain('snapshot');
   });
 
+  it('guard list', () => {
+    expect(keysOf(payload(['guard', 'list', '--json']))).toEqual(['policies', 'warnings']);
+  });
+
   it('decisions', () => {
     expect(keysOf(payload(['decisions', traceA, '--json']))).toEqual(['decisions', 'trace_id']);
   });

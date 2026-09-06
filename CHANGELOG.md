@@ -77,6 +77,15 @@ and one-way.
 
 ### Added
 
+- **`guard list --json`.** A policy set is configuration, and configuration is
+  what a CI job wants to assert on ("this rule is present", "no blocking policy
+  is disabled") — but `guard list` printed a table only, so the check had to
+  scrape it or read SQLite directly. It answers `{ policies, warnings }`, and
+  the warnings travel with the data: a blocking policy that matches on output
+  reads as `DENY / enabled` while being unable to fire live, and a JSON reader
+  now sees that just as the table's reader does. A missing store is refused as
+  JSON, like every other reading command.
+
 - **A capture that recorded nothing now names the format that would have
   worked.** There are four `--format` values, and piping the wrong one is the
   easy mistake: every line parses as JSON, the translator recognizes none of

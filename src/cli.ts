@@ -286,7 +286,8 @@ const guardCmd = program
 
 guardCmd
   .command('list')
-  .description('Show all guardrail policies')
+  .description('Show all guardrail policies (scriptable, --json)')
+  .option('--json', 'Output raw JSON')
   .option('--dir <path>', 'Custom data directory')
   .action(async (opts) => {
     const { runGuardList } = await import('./commands/guard.js');

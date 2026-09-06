@@ -932,6 +932,42 @@ describe('the guard commands', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('answers --json with the policy set and the warnings the table shows', async () => {
+    // A policy set is configuration, and configuration is what a CI job asserts
+    // on. Every other reading command answers `--json`; `guard list` printed a
+    // table only, so the check had to scrape it or open SQLite directly.
+    const { runGuardList, runGuardAdd } = await import('../src/commands/guard.js');
+    runGuardAdd({ name: 'no-delete', pattern: '{"name_contains":"delete"}', action: 'deny', dir });
+    runGuardAdd({ name: 'leak-audit', pattern: '{"output_contains":"secret"}', action: 'deny', dir });
+    out.length = 0;
+    runGuardList({ dir, json: true });
+    const doc = JSON.parse(stdout()) as {
+      policies: Array<{ name: string; action: string; enabled: boolean }>;
+      warnings: Array<{ type: string; policies: string[] }>;
+    };
+    expect(doc.policies.map((p) => p.name).sort()).toEqual(['leak-audit', 'no-delete']);
+    expect(doc.policies.every((p) => p.enabled)).toBe(true);
+    // The warning the table prints travels WITH the data: a reader told
+    // "DENY / enabled" about a rule that can never fire live has been misled,
+    // whether it is reading a table or a document.
+    expect(doc.warnings).toHaveLength(1);
+    expect(doc.warnings[0].type).toBe('blocking_policy_matches_on_output');
+    expect(doc.warnings[0].policies).toEqual(['leak-audit']);
+  });
+
+  it('answers --json with an empty set rather than prose, and refuses in JSON', async () => {
+    const { runGuardList } = await import('../src/commands/guard.js');
+    runGuardList({ dir, json: true });
+    expect(JSON.parse(stdout())).toEqual({ policies: [], warnings: [] });
+
+    out.length = 0;
+    runGuardList({ dir: `${dir}/nope`, json: true });
+    const refusal = JSON.parse(stdout()) as { ok: boolean; error: string };
+    expect(refusal.ok).toBe(false);
+    expect(refusal.error).toMatch(/No trace store/);
+    expect(process.exitCode).toBe(2);
+  });
+
   it('lists policies, and says how to add one when there are none', async () => {
     const { runGuardList, runGuardAdd } = await import('../src/commands/guard.js');
     runGuardList({ dir });

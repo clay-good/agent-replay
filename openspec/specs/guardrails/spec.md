@@ -20,6 +20,11 @@ The subcommands that READ or MODIFY an existing policy (`list`, `remove`, `enabl
 - **WHEN** a user runs `agent-replay guard add --name no-deletes --pattern '{"step_type":"tool_call","name_contains":"delete"}' --action deny`
 - **THEN** the policy is stored, enabled, and visible in `guard list`
 
+#### Scenario: A CI job asserts on the policy set
+
+- **WHEN** `agent-replay guard list --json` is run
+- **THEN** it prints `{ policies, warnings }`, where `warnings` names any blocking policy that matches on output
+
 ### Requirement: Step match patterns
 
 The system SHALL match steps against pattern fields — `step_type` (exact), `name_contains` (case-insensitive substring), `name_regex`, `input_contains`, `output_contains` — combining specified fields with AND logic. An empty pattern SHALL match nothing.
@@ -27,6 +32,8 @@ The system SHALL match steps against pattern fields — `step_type` (exact), `na
 `guard add` SHALL REFUSE, at write time, a pattern that cannot match as written: one with no recognized match key, a `step_type` that is not a real step type, or a `name_regex` that is invalid or unsafe against catastrophic backtracking. A policy stored in a form that silently fails to match is worse than no policy, because the gate reports green.
 
 A blocking policy (`deny` or `require_review`) that matches only on `output_contains` cannot fire during enforcement, which runs BEFORE a tool call when there is no output yet. `guard add` SHALL say so at write time, and `guard list` SHALL repeat it, naming the offending policies — the listing is the durable record an audit reads, and the row reads `DENY / Enabled: Yes`, an armed kill switch that is inert. The warning SHALL be silent when every blocking policy can fire, and SHALL NOT flag a `warn` policy on output, which is a legitimate post-hoc rule.
+
+`guard list` SHALL also answer `--json`, since a policy set is configuration and a CI job is the natural reader of it, and the JSON SHALL carry the same warnings the table prints (as `warnings[]`, naming the policies) rather than leaving them in the rendering — a reader told `DENY / enabled` about a rule that can never fire live has been misled whether it is reading a table or a document. A missing store SHALL be refused in the caller's shape, as it is for every other reading command.
 
 #### Scenario: A blocking policy that can never block
 
