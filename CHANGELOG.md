@@ -624,8 +624,9 @@ and one-way.
   those candidates separately and says which case it is looking at: that they
   recorded no input, that re-exporting will not change it, that the capture has
   to record an input, and where that usually comes from (`hook --no-input`, the
-  `codex-exec` / `gemini-stream` translators, which record no input at all, or
-  OpenTelemetry spans carrying no prompt attribute). A mixed run reports how
+  `codex-exec` / `gemini-stream` translators, which record no input of their
+  own — `record --input` now supplies one — or OpenTelemetry spans carrying no
+  prompt attribute). A mixed run reports how
   many of each. When every candidate has a real input the original wording is
   unchanged, minus the `hook --no-input` guess that now has its own branch.
 
