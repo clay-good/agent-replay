@@ -65,6 +65,18 @@ and one-way.
 
 ### Added
 
+- **`record --format claude-stream`, live capture for Claude Code.** Claude
+  Code was reachable through hooks and OpenTelemetry but not by piping, which
+  is the path a CI job actually uses: `claude -p` in a script has no settings
+  file to register hooks in and no collector to point at. The translator reads
+  the same `system` / `assistant` / `user` / `result` records, with the same
+  content blocks, that the transcript importer already reads off disk, so the
+  two paths stay in step — `text` becomes an `output` step, `thinking` a
+  `thought` step, and a `tool_use`/`tool_result` pair one `tool_call` step
+  whose `is_error` result lands on the step's error field. Token totals include
+  both cache fields, an interrupted run is left open rather than reported
+  completed, and a non-success `result` subtype (`error_max_turns`) fails the
+  trace on its own.
 - **`record --agent-name <name>`, so two piped workflows are not one agent.**
   A translated stream names its agent after the harness, so every
   `record --format codex-exec` capture was called `codex` — a store collecting

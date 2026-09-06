@@ -722,3 +722,90 @@ describe('a codex item tool input', () => {
     expect(getTrace(db, id)!.steps[0].input).toEqual({});
   });
 });
+
+// ── claude -p --output-format stream-json ──────────────────────────────────
+
+describe('ClaudeStreamTranslator', () => {
+  const init = { type: 'system', subtype: 'init', session_id: 's1', model: 'claude-opus-5' };
+
+  it('maps a whole session: thinking, a paired tool call, and the reply', () => {
+    const t = makeTranslator('claude-stream')!;
+    const id = run(t, [
+      init,
+      {
+        type: 'assistant',
+        message: {
+          model: 'claude-opus-5',
+          usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 100 },
+          content: [
+            { type: 'thinking', thinking: 'list the files' },
+            { type: 'tool_use', id: 'tu_1', name: 'Bash', input: { command: 'ls' } },
+          ],
+        },
+      },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu_1', content: 'a.ts' }] } },
+      { type: 'assistant', message: { usage: { output_tokens: 12 }, content: [{ type: 'text', text: 'Two files.' }] } },
+      { type: 'result', subtype: 'success', is_error: false, result: 'Two files.' },
+    ]);
+    const trace = getTrace(db, id)!;
+    expect(trace.agent_name).toBe('claude-code');
+    expect(trace.session_id).toBe('s1');
+    expect(trace.status).toBe('completed');
+    expect(trace.output).toEqual({ text: 'Two files.' });
+    // Both cache fields count, like the transcript importer: 10+5+100+12.
+    expect(trace.total_tokens).toBe(127);
+    expect(trace.steps.map((s) => [s.step_type, s.name])).toEqual([
+      ['thought', 'thinking'],
+      ['tool_call', 'Bash'],
+      ['output', 'assistant_message'],
+    ]);
+    expect(trace.steps[1].output).toEqual({ result: 'a.ts' });
+    expect(trace.steps.every((s) => s.model === 'claude-opus-5')).toBe(true);
+  });
+
+  it('records a tool result flagged is_error on the step, not as a clean call', () => {
+    const t = makeTranslator('claude-stream')!;
+    const id = run(t, [
+      init,
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: {} }] } },
+      {
+        type: 'user',
+        message: { content: [{ type: 'tool_result', tool_use_id: 't1', is_error: true, content: 'command failed' }] },
+      },
+      { type: 'result', subtype: 'success' },
+    ]);
+    expect(getTrace(db, id)!.steps[0].error).toBe('command failed');
+  });
+
+  it('treats a non-success result subtype as a failure even without is_error', () => {
+    const t = makeTranslator('claude-stream')!;
+    const id = run(t, [init, { type: 'result', subtype: 'error_max_turns' }]);
+    const trace = getTrace(db, id)!;
+    expect(trace.status).toBe('failed');
+    expect(trace.error).toBe('error_max_turns');
+  });
+
+  it('leaves an interrupted run open rather than reporting it completed', () => {
+    const t = makeTranslator('claude-stream')!;
+    const id = run(t, [
+      init,
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: {} }] } },
+    ]);
+    // No `result` record: EOF mid-run must not close the trace as a clean one.
+    expect(getTrace(db, id)!.status).toBe('running');
+  });
+
+  it('reports a tool_result that matches no open call instead of losing it', () => {
+    const t = makeTranslator('claude-stream')!;
+    t.translate(init);
+    t.translate({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'nope', content: 'x' }] } });
+    expect(t.lastSkip()).toMatch(/matched no open tool call/);
+  });
+
+  it('reports an event type it does not know', () => {
+    const t = makeTranslator('claude-stream')!;
+    t.translate(init);
+    expect(t.translate({ type: 'stream_event' })).toEqual([]);
+    expect(t.lastSkip()).toMatch(/unrecognized claude-stream event type/);
+  });
+});

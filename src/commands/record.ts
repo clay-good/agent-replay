@@ -21,12 +21,13 @@ export interface RecordOptions {
   dir?: string;
 }
 
-const FORMATS = ['native', 'codex-exec', 'gemini-stream'];
+const FORMATS = ['native', 'codex-exec', 'gemini-stream', 'claude-stream'];
 
 /**
  * `agent-replay record` — consume an event stream from stdin and write traces
  * incrementally. Reads the native JSONL protocol by default, or translates a
- * harness's own stream via `--format codex-exec` / `gemini-stream`. Still-open
+ * harness's own stream via `--format codex-exec` / `gemini-stream` /
+ * `claude-stream`. Still-open
  * traces are finalized as `timeout` on EOF unless `--leave-open`. `--input`
  * and `--agent-name` supply the prompt and the label a stream does not carry.
  */

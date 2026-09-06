@@ -106,6 +106,7 @@ abstract class BaseTranslator implements StreamTranslator {
     const m =
       str(obj.model) ??
       str((obj.item as Record<string, unknown> | undefined)?.model) ??
+      str((obj.message as Record<string, unknown> | undefined)?.model) ??
       str((obj.session as Record<string, unknown> | undefined)?.model);
     if (m) this.currentModel = m;
   }
@@ -486,12 +487,222 @@ export class GeminiStreamTranslator extends BaseTranslator {
   }
 }
 
+// ── Claude Code `--output-format stream-json` ───────────────────────────────
+
+/** One content block of an Anthropic message, as the stream carries them. */
+interface ContentBlock {
+  type?: string;
+  text?: string;
+  thinking?: string;
+  name?: string;
+  id?: string;
+  input?: Record<string, unknown>;
+  tool_use_id?: string;
+  content?: unknown;
+  is_error?: boolean;
+}
+
+/**
+ * `claude -p "..." --output-format stream-json`.
+ *
+ * Claude Code was reachable through hooks and OpenTelemetry but not by piping,
+ * which is the path a CI job actually uses — `claude -p` in a script has no
+ * settings file to register hooks in and no collector to point at.
+ *
+ * The record shapes are not guessed: this stream carries the same `system` /
+ * `assistant` / `user` / `result` records, with the same Anthropic content
+ * blocks, that `importers/claude-transcript.ts` already reads off disk, so the
+ * two paths are kept deliberately in step — `text` becomes an `output` step,
+ * `thinking` a `thought` step, and a `tool_use`/`tool_result` pair one
+ * `tool_call` step that records the result's failure on its `error` field.
+ *
+ * The prompt is NOT read from the stream: `claude -p` takes it as a
+ * command-line argument, exactly as codex and gemini do, and `record --input`
+ * is how it gets supplied. Inventing one from the first `user` record would
+ * capture a tool-result echo as the run's question.
+ */
+export class ClaudeStreamTranslator extends BaseTranslator {
+  protected agentName = 'claude-code';
+  // `result` is this stream's terminal event, so EOF without it means the run
+  // was interrupted — the same rule both sibling translators follow.
+  protected expectsTerminalEvent = true;
+  /** Open tool steps by `tool_use` id, which this stream always supplies. */
+  private openTools = new Map<string, number>();
+
+  protected translateEvent(obj: Record<string, unknown>): CaptureEvent[] {
+    const type = String(obj.type ?? '');
+
+    if (type === 'system') {
+      // `subtype: "init"` opens the session; any other system record is
+      // informational and opens nothing on its own.
+      const session = str(obj.session_id);
+      return str(obj.subtype) === 'init' ? this.ensureStart(session, {}) : [];
+    }
+
+    if (type === 'assistant' || type === 'user') {
+      const message = obj.message as Record<string, unknown> | undefined;
+      // Usage is counted from the ASSISTANT record only. A `user` record in this
+      // stream carries tool results, and any usage echoed on it belongs to the
+      // turn already counted — adding both double counts the session.
+      if (type === 'assistant' && message?.usage) {
+        this.totalTokens += claudeUsageTokens(message.usage as Record<string, unknown>);
+      }
+      const content = message?.content;
+      const blocks: ContentBlock[] = Array.isArray(content)
+        ? (content as ContentBlock[])
+        // A string `content` is the whole message, which the transcript
+        // importer handles too — normalized here so one code path covers both.
+        : typeof content === 'string'
+          ? [{ type: type === 'assistant' ? 'text' : 'input_text', text: content }]
+          : [];
+
+      const pre = this.ensureStart(str(obj.session_id));
+      const events: CaptureEvent[] = [...pre];
+      for (const block of blocks) {
+        switch (block?.type) {
+          case 'text': {
+            if (type !== 'assistant' || !block.text) break;
+            this.finalOutput = block.text;
+            events.push({
+              v: 1,
+              type: 'step',
+              trace_id: this.traceId!,
+              step_number: this.nextStep(),
+              step_type: 'output',
+              name: 'assistant_message',
+              output: { text: block.text },
+              metadata: { source: 'claude-stream' },
+            } as CaptureEvent);
+            break;
+          }
+          case 'thinking': {
+            events.push({
+              v: 1,
+              type: 'step',
+              trace_id: this.traceId!,
+              step_number: this.nextStep(),
+              step_type: 'thought',
+              name: 'thinking',
+              output: { text: block.thinking ?? block.text ?? '' },
+              metadata: { source: 'claude-stream' },
+            } as CaptureEvent);
+            break;
+          }
+          case 'tool_use': {
+            const num = this.nextStep();
+            if (block.id) this.openTools.set(block.id, num);
+            events.push({
+              v: 1,
+              type: 'step_start',
+              trace_id: this.traceId!,
+              step_number: num,
+              step_type: 'tool_call',
+              name: str(block.name) ?? 'tool',
+              input: block.input ?? {},
+              metadata: { source: 'claude-stream', tool_use_id: block.id ?? null },
+            } as CaptureEvent);
+            break;
+          }
+          case 'tool_result': {
+            const num = block.tool_use_id != null ? this.openTools.get(block.tool_use_id) : undefined;
+            if (num == null) {
+              // Reported, not swallowed: the result carries the tool's output,
+              // and with no open call to attach it to that payload is gone —
+              // the same loss the gemini branch counts.
+              this.skipSkipped(`tool_result matched no open tool call${block.tool_use_id ? ` (id ${block.tool_use_id})` : ''}`);
+              break;
+            }
+            if (block.tool_use_id) this.openTools.delete(block.tool_use_id);
+            const text = blockText(block.content);
+            events.push({
+              v: 1,
+              type: 'step_end',
+              trace_id: this.traceId!,
+              step_number: num,
+              output: text ? { result: text } : (block.content as Record<string, unknown>) ?? null,
+              // `is_error` is how this stream reports a failed tool call, and
+              // every sibling path records that on the step's `error` so the
+              // failure survives into the store. Read the same generous way
+              // (`"true"`, 1) the gemini branch reads its own.
+              error: isTrueish(block.is_error) ? (text || 'tool failed') : undefined,
+            } as CaptureEvent);
+            break;
+          }
+          default:
+            break;
+        }
+      }
+      // A record whose blocks produced nothing (a user turn echoing text, an
+      // unknown block type) is a line this translator did not use. Say so, for
+      // the reason the unknown-type branches below do.
+      if (events.length === pre.length) {
+        this.skipSkipped(`no usable content in ${JSON.stringify(type)} record`);
+      }
+      return events;
+    }
+
+    if (type === 'result') {
+      this.sawTerminal = true;
+      // The final text, when the record carries one — `finalOutput` already
+      // holds the last assistant message otherwise.
+      const text = str(obj.result);
+      if (text) this.finalOutput = text;
+      // `is_error` is this stream's failure signal, and `subtype` names the
+      // kind (`error_max_turns`, `error_during_execution`). A `subtype` that is
+      // not "success" counts as a failure on its own, since a run can end in an
+      // error subtype without the boolean.
+      const subtype = str(obj.subtype);
+      if (isTrueish(obj.is_error) || (subtype != null && subtype !== 'success')) {
+        this.failed = true;
+        this.errorText = this.errorText ?? text ?? subtype ?? 'run failed';
+      }
+      return this.finalize();
+    }
+
+    this.skipReason = `unrecognized claude-stream event type ${JSON.stringify(type)}`;
+    return [];
+  }
+
+  /** Record a skip without clobbering one already set for this line. */
+  private skipSkipped(reason: string): void {
+    this.skipReason = this.skipReason ?? reason;
+  }
+}
+
 // ── Factory ─────────────────────────────────────────────────────────────────
 
 export function makeTranslator(format: string): StreamTranslator | null {
   if (format === 'codex-exec') return new CodexExecTranslator();
   if (format === 'gemini-stream') return new GeminiStreamTranslator();
+  if (format === 'claude-stream') return new ClaudeStreamTranslator();
   return null;
+}
+
+/**
+ * Tokens from an Anthropic `usage` object, including BOTH cache fields — where
+ * most of a real session's consumption lives. The same four keys the
+ * claude-transcript importer sums, so a piped run and an imported one of the
+ * same session report the same total.
+ */
+function claudeUsageTokens(usage: Record<string, unknown>): number {
+  return (
+    toNum(usage.input_tokens) +
+    toNum(usage.output_tokens) +
+    toNum(usage.cache_creation_input_tokens) +
+    toNum(usage.cache_read_input_tokens)
+  );
+}
+
+/** Text of a tool result's content, which is a string or an array of blocks. */
+function blockText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((b) => (typeof b === 'string' ? b : (b as ContentBlock)?.text ?? ''))
+      .filter(Boolean)
+      .join('\n');
+  }
+  return '';
 }
 
 /** A finite number from a producer value, or 0 — never a string to concatenate. */
