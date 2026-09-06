@@ -13,7 +13,7 @@ You deploy an AI agent. It works Monday. Tuesday it hallucinates, makes up a com
 You push a new prompt or swap a model and suddenly your agent breaks on cases that used to work. `agent-replay diff` puts two runs side-by-side and shows you exactly where they diverged — which step went different, what changed in the context, where things went wrong.
 
 **3. "How do I test a fix without rerunning everything?"**
-You think you know what went wrong but you don't want to burn API credits and time reproducing the exact scenario. `agent-replay fork` lets you take any recorded run, rewind to any step, change the input, and see what would have happened differently.
+You think you know what went wrong but you don't want to burn API credits and time reproducing the exact scenario. `agent-replay fork` lets you take any recorded run, rewind to any step, and change the input or the context there — you re-run your agent from that point instead of from the top, and `diff` the branch against the original.
 
 **4. "How do I know if my agent is actually good?"**
 You have no systematic way to evaluate agent quality. `agent-replay eval` runs automatic checks — hallucination detection, safety audits, completeness checks — using both deterministic rules and AI-powered analysis. Bring your own API key (Anthropic, Google, or OpenAI) and get root-cause analysis, quality scoring, security audits, and optimization suggestions for pennies per trace.
@@ -428,6 +428,26 @@ agent-replay fork <trace-id> --from-step 2 --modify-input '{"task":"revised prom
 # Tag the fork
 agent-replay fork <trace-id> --from-step 4 --tag experiment-1
 ```
+
+A fork is a **branch point, not a simulation**: it copies steps 1..N of the
+original into a new trace, links it back (`parent_trace_id`, `forked_from_step`),
+applies your modified input or context, and leaves it `running` with a `manual`
+trigger. Nothing is re-executed — this tool never runs your agent for you. What
+happens next is yours:
+
+```bash
+# `fork` prints the new id; --tag makes it easy to pick up in a script,
+# since fork has no --json of its own
+agent-replay fork <trace-id> --from-step 2 --modify-input '{"task":"revised prompt"}' --tag what-if
+FORK=$(agent-replay list --json --tag what-if | jq -r '.items[0].id')
+
+# re-run your agent from that point, recording onto the fork by id:
+my-agent --resume-from "$FORK" | agent-replay record   # events carrying "trace_id": "$FORK"
+agent-replay diff <trace-id> "$FORK"                   # what the change did
+```
+
+Forks are excluded from `check --golden`, `export --format golden` and `stats`,
+since a never-executed copy is not a run — see those sections.
 
 An **empty** value for `--modify-input`, `--modify-context` or `--tag` is a
 usage error (exit `2`), for the same reason it is on `list`: a flag built from
