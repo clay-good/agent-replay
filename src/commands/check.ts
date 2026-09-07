@@ -440,6 +440,20 @@ export function runCheck(opts: CheckOptions = {}): void {
     }
     if (r.passed) {
       console.log(`  ${chalk.green('✔')} ${chalk.dim(escapeForMessage(r.trace_id.slice(0, 12)))} ${escapeForMessage(r.agent_name)} — ${chalk.green('pass')}`);
+      // A pass whose comparison could not cover the whole baseline shape. Every
+      // positional field compares min(golden, candidate) steps, so a run that
+      // stopped early has the rest of the baseline unlooked-at — and with
+      // `step_count` narrowed away, that is a green verdict over a fraction of
+      // the expected run. Only printed when it happened, so an ordinary pass is
+      // unchanged.
+      if (r.partial_shape) {
+        const p = r.partial_shape;
+        console.log(
+          chalk.yellow(
+            `      compared ${p.compared} of ${p.golden_steps} baseline step(s) — this run recorded ${p.candidate_steps}; add step_count to --fields to gate on the difference.`,
+          ),
+        );
+      }
     } else {
       console.log(`  ${chalk.redBright('✘')} ${chalk.dim(escapeForMessage(r.trace_id.slice(0, 12)))} ${escapeForMessage(r.agent_name)} — ${chalk.redBright('REGRESSED')}`);
       for (const d of r.divergences) {

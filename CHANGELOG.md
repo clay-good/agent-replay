@@ -3011,6 +3011,18 @@ and one-way.
   `guard test`, the eval table beside the panel that was already escaped, and the
   dashboard, where the bytes also corrupt blessed's width math for the whole
   layout.
+- `check --golden` could pass green over a fraction of the expected run. Every
+  positional field compares `min(golden, candidate)` steps, so a candidate that
+  stopped after 3 of a baseline's 10 has 7 steps nobody looked at. The default
+  fields catch it — `step_count` diverges and the result is a regression — but
+  narrowing (`--fields step_errors`, say) dropped that guard and reported
+  "1 passed" for a run that reproduced 30% of the shape. Narrowing is the
+  caller's choice and the verdict is unchanged; what the gate may not do is let
+  "step_errors match" stand in for "step_errors match over the part that
+  exists". A pass in that state now says how much of the baseline it covered and
+  how to gate on the difference, and `--json` carries `partial_shape`. Nothing
+  is printed when the shapes agree or when `step_count` is already gating, so an
+  ordinary pass and every red are unchanged.
 - `guard check`'s own DENY/WARN line — the CI gate's human output — printed the
   matched policy's name and reason raw. The JSON verdict on stdout was safe
   (`JSON.stringify` escapes), but the stderr line that lands in a CI log had

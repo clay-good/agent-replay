@@ -565,6 +565,14 @@ from vetted runs still costs nothing. A divergence report names the trace, the
 step, and the differing field, with its two values windowed around where they
 first differ — tool payloads share a long prefix, so cutting from the start
 printed the same characters on both sides of the arrow and called them a
+A pass whose comparison could not cover the whole baseline shape says so:
+positional fields compare `min(golden, candidate)` steps, so a run that stopped
+early leaves the rest of the baseline unlooked-at. With the default fields that
+is a regression (`step_count` diverges); if you narrow `--fields` past it, the
+pass reports `compared N of M baseline step(s)` and `--json` carries
+`partial_shape`. The verdict is still yours to choose — add `step_count` to gate
+on the difference.
+
 difference. The summary also reports baseline entries **no candidate exercised** — a scenario whose run crashed or never happened at all, which otherwise leaves a gate green with nothing to say about it. Those count as failures under `--strict`, alongside unmatched runs.
 
 Build the baseline from runs that finished cleanly: `export --format golden` warns when entries did not come from a completed run — a `running` trace bakes in a partial shape the next correct run "regresses" against, and a `failed`/`timeout` one makes reproducing the failure pass green. The warning reports how many of the entries that covers, not which condition each hit; filter with `--tag known-good` or `--status completed`.

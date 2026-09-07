@@ -34,6 +34,23 @@ export interface TraceCheckResult {
   matched: boolean;
   passed: boolean;
   divergences: Divergence[];
+  /**
+   * Set on a PASS whose comparison could not cover the whole baseline shape.
+   *
+   * Every positional field compares `min(golden, candidate)` steps, so a run
+   * that stopped after 3 of a baseline's 10 steps has 7 steps nobody looked at.
+   * With the default fields that is caught — `step_count` diverges and the
+   * result is a regression — but `--fields step_errors` (or any narrowing that
+   * drops `step_count`) turned it into a silent green: "1 passed", for a run
+   * that reproduced 30% of the expected shape.
+   *
+   * Narrowing the fields is the caller's choice and is not overridden here. The
+   * claim the gate makes is what changes: "step_errors match" becomes
+   * "step_errors match over the part that exists", and the reader is owed the
+   * difference. Absent whenever the lengths agree or `step_count` is gating, so
+   * an ordinary pass carries nothing.
+   */
+  partial_shape?: { compared: number; golden_steps: number; candidate_steps: number };
 }
 
 export interface GoldenCheckReport {
@@ -188,11 +205,15 @@ export function checkGolden(
     // could even hide a real regression as "unmatched" once the bucket emptied.
     const usedEntries: GoldenEntry[] = [bucket[0]];
     let divergences = diffAgainstGolden(trace, bucket[0], fields);
+    // Which entry the verdict actually came from, so the coverage note below
+    // describes the shape that was compared rather than the first in the bucket.
+    let best = bucket[0];
     for (let i = 1; i < bucket.length && divergences.length > 0; i++) {
       usedEntries.push(bucket[i]);
       const div = diffAgainstGolden(trace, bucket[i], fields);
       if (div.length < divergences.length) {
         divergences = div;
+        best = bucket[i];
       }
     }
 
@@ -201,7 +222,22 @@ export function checkGolden(
     const ok = divergences.length === 0;
     if (ok) passed++;
     else failed++;
-    results.push({ trace_id: trace.id, agent_name: trace.agent_name, matched: true, passed: ok, divergences });
+    // Only on a pass, and only when the length difference is not already being
+    // gated: with `step_count` among the fields this same situation is a
+    // divergence, so saying it twice would make the note noise on every red.
+    const goldenSteps = Array.isArray(best.steps_summary) ? best.steps_summary.length : 0;
+    const candidateSteps = trace.steps.length;
+    const partial = ok && !fields.includes('step_count') && goldenSteps !== candidateSteps
+      ? { compared: Math.min(goldenSteps, candidateSteps), golden_steps: goldenSteps, candidate_steps: candidateSteps }
+      : undefined;
+    results.push({
+      trace_id: trace.id,
+      agent_name: trace.agent_name,
+      matched: true,
+      passed: ok,
+      divergences,
+      ...(partial ? { partial_shape: partial } : {}),
+    });
   }
 
   // Count ENTRIES, not bucket keys: a key can hold several baselines (repeated

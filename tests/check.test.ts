@@ -1723,3 +1723,67 @@ describe('check --golden pointed at a directory with no store', () => {
     expect(process.exitCode).toBe(2);
   });
 });
+
+
+describe('a pass that could not cover the whole baseline shape says so', () => {
+  // Every positional field compares min(golden, candidate) steps, so a run that
+  // stopped after 3 of a baseline's 10 has 7 steps nobody looked at. With the
+  // default fields `step_count` catches that and the result is a regression;
+  // narrowing to `--fields step_errors` turned it into a silent green — "1
+  // passed" for a run that reproduced 30% of the expected shape.
+  //
+  // Narrowing is the caller's choice and the verdict is left alone. What the
+  // gate may not do is let "step_errors match" stand in for "step_errors match
+  // over the part that exists".
+  const mkSteps = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      step_number: i + 1, step_type: 'tool_call' as const, name: `t${i + 1}`, input: { i: i + 1 },
+    }));
+
+  /** A baseline of `goldenLen` steps and a candidate of `candidateLen`. */
+  function pair(goldenLen: number, candidateLen: number) {
+    ingestTrace(db, {
+      agent_name: 'shapebot', status: 'completed', input: { task: 'x' },
+      started_at: '2026-09-06T10:00:00.000Z', steps: mkSteps(goldenLen),
+    } as IngestTraceInput);
+    const golden = JSON.parse(exportTraces(db, { agent_name: 'shapebot' }, 'golden')) as GoldenEntry[];
+    const cand = candidate({
+      agent_name: 'shapebot', status: 'completed', input: { task: 'x' },
+      started_at: '2026-09-06T11:00:00.000Z', steps: mkSteps(candidateLen),
+    } as IngestTraceInput);
+    return { golden, cand };
+  }
+
+  it('reports how much of the baseline the comparison covered', () => {
+    const { golden, cand } = pair(10, 3);
+    const report = checkGolden(golden, [cand], { fields: ['step_errors'] });
+    expect(report.passed).toBe(1);
+    expect(report.results[0].partial_shape).toEqual({ compared: 3, golden_steps: 10, candidate_steps: 3 });
+  });
+
+  it('says nothing when the shapes agree', () => {
+    // The cry-wolf guard: an ordinary pass must carry no note at all.
+    const { golden, cand } = pair(3, 3);
+    const report = checkGolden(golden, [cand], { fields: ['step_errors'] });
+    expect(report.passed).toBe(1);
+    expect(report.results[0].partial_shape).toBeUndefined();
+  });
+
+  it('says nothing when step_count is already gating the difference', () => {
+    // With the default fields the length difference IS the regression, so
+    // repeating it as a note would make it noise on every red.
+    const { golden, cand } = pair(10, 3);
+    const report = checkGolden(golden, [cand], {});
+    expect(report.failed).toBe(1);
+    expect(report.results[0].partial_shape).toBeUndefined();
+  });
+
+  it('also covers a candidate LONGER than its baseline', () => {
+    // The other direction of the same hole: steps past the baseline's length
+    // are never compared either.
+    const { golden, cand } = pair(3, 9);
+    const report = checkGolden(golden, [cand], { fields: ['step_errors'] });
+    expect(report.passed).toBe(1);
+    expect(report.results[0].partial_shape).toEqual({ compared: 3, golden_steps: 3, candidate_steps: 9 });
+  });
+});
