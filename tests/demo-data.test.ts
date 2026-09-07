@@ -182,6 +182,8 @@ describe('seedDemoData', () => {
   it('all seeded traces have steps', () => {
     seedDemoData(db);
     const { items } = listTraces(db, { limit: 25 });
+    // Assert the premise: a seed that inserted nothing would skip the loop.
+    expect(items.length).toBeGreaterThan(0);
     for (const trace of items) {
       const full = getTrace(db, trace.id);
       expect(full).not.toBeNull();

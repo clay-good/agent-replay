@@ -419,6 +419,9 @@ describe('mapOtlpLogs — data fidelity', () => {
     ]));
     const start = Date.parse(t.started_at as string);
     const end = Date.parse(t.ended_at as string);
+    // Assert the premise: with no steps the loop below never runs and this test
+    // passes green, which is exactly the regression it exists to catch.
+    expect(t.steps!.length).toBeGreaterThan(0);
     for (const step of t.steps!) {
       expect(Date.parse(step.started_at!)).toBeGreaterThanOrEqual(start);
       expect(Date.parse(step.ended_at!)).toBeLessThanOrEqual(end);

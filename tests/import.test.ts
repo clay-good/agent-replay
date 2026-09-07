@@ -294,6 +294,9 @@ describe('importClaudeTranscript — when each step happened', () => {
 
   it('(original window check, fully timestamped)', () => {
     const trace = getTrace(db, importClaudeTranscript(db, timed()).trace!.id)!;
+    // Assert the premise: an import that produced no steps would skip the loop
+    // and pass, hiding the very failure this checks for.
+    expect(trace.steps.length).toBeGreaterThan(0);
     for (const s of trace.steps) {
       expect(s.started_at! >= trace.started_at, `step ${s.step_number} starts before its trace`).toBe(true);
       expect(s.started_at! <= trace.ended_at!, `step ${s.step_number} starts after its trace ended`).toBe(true);

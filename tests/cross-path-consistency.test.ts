@@ -473,6 +473,9 @@ describe('the two OTel receivers front the same store, so they must agree', () =
       const start = Date.parse(t.started_at as string);
       const end = Date.parse(t.ended_at as string);
       expect(Number.isNaN(end)).toBe(false);
+      // Assert the premise: a path that produced no steps would otherwise skip
+      // the loop below and pass.
+      expect((t.steps ?? []).length).toBeGreaterThan(0);
       for (const step of t.steps ?? []) {
         expect(Date.parse(step.started_at!)).toBeGreaterThanOrEqual(start);
         expect(Date.parse(step.ended_at!)).toBeLessThanOrEqual(end);

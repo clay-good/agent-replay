@@ -177,7 +177,11 @@ describe('CodexExecTranslator', () => {
       { type: 'tool_result', id: 't2', error: [], result: 'fine too' },
       { type: 'result', exit_code: 0 },
     ], false);
-    for (const step of getTrace(db, id)!.steps.filter((s) => s.step_type === 'tool_call')) {
+    // Assert the premise: a translator that produced no tool_call steps would
+    // skip the loop and pass, which is the regression this guards against.
+    const toolSteps = getTrace(db, id)!.steps.filter((s) => s.step_type === 'tool_call');
+    expect(toolSteps.length).toBeGreaterThan(0);
+    for (const step of toolSteps) {
       expect(step.error).toBeNull();
     }
   });
@@ -281,7 +285,11 @@ describe('GeminiStreamTranslator', () => {
       { type: 'tool_result', id: 't2', error: false, result: 'ok2' },
       { type: 'result', exit_code: 0 },
     ], false);
-    for (const step of getTrace(db, id)!.steps.filter((s) => s.step_type === 'tool_call')) {
+    // Assert the premise: a translator that produced no tool_call steps would
+    // skip the loop and pass, which is the regression this guards against.
+    const toolSteps = getTrace(db, id)!.steps.filter((s) => s.step_type === 'tool_call');
+    expect(toolSteps.length).toBeGreaterThan(0);
+    for (const step of toolSteps) {
       expect(step.error).toBeNull();
     }
   });
