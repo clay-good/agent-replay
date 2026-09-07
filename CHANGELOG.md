@@ -7,29 +7,35 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 A broad hardening pass across the whole CLI, with one theme above the rest:
-**a command should never report success, or a number, that it did not
-actually measure.** Highlights: consistent exit codes and strict argument
-parsing for scripting and CI; gates that fail when they cannot do their job
-rather than passing green (`check --golden`, `eval`, `record`, `guard check`);
-correctness of the comparison, evaluation, and golden-regression paths
-(`diff`, `eval`, `check --golden`); guardrail enforcement that fails closed
-(`hook --enforce`); readers that show what is actually stored (`show`,
-`replay`, `list`, `stats`); more faithful live capture and import (`record`,
-`run`, `import`, `fork`); a more robust OpenTelemetry receiver that keeps the
-content, timing, and identity its dialects carry; output that is safe to look
-at, since a trace is written by the agent under test and every command that
-prints one now escapes what it shows (and an id, which is rendered nearly
-everywhere, must be an identifier before it can be stored at all); honesty
-about WHICH STORE a command is using, since resolution follows the working
-directory and a hook fires from wherever the agent stands, so every command
-that only reads now refuses a store that is not there and every command that
-creates one says when it is creating a second below a project that already has
-one; a package that works when installed — `require('agent-replay')` threw on
-load and the published TypeScript types did not resolve, both now covered by a
-CI job that installs the tarball and uses it; and work that no longer grows with
-what it is looking at: a whole-store `export` that is no longer quadratic in the
-size of the store, and a `watch` whose polling no longer costs more the longer
-the run it is following.
+**a command should never report success, or a number, that it did not actually
+measure.** Highlights: consistent exit codes and strict argument parsing for
+scripting and CI; gates that fail when they cannot do their job rather than
+passing green (`check --golden`, `eval`, `record`, `guard check`); correctness
+of the comparison, evaluation, and golden-regression paths (`diff`, `eval`,
+`check --golden`); the same rule applied to the AI paths, where an answer the
+model never gave is no longer reported as one — a reply that could not be
+parsed, a reply cut off at the token ceiling, a score the model simply
+omitted, and a cost priced from a rate table that does not cover the
+configured model; one session captured two ways recording the same facts,
+since which capture path a run lands on — hook or transcript, `/v1/traces` or
+`/v1/logs` — is a configuration choice and not a property of the run;
+guardrail enforcement that fails closed (`hook --enforce`); readers that show
+what is actually stored (`show`, `replay`, `list`, `stats`); more faithful
+live capture and import (`record`, `run`, `import`, `fork`); a more robust
+OpenTelemetry receiver that keeps the content, timing, and identity its
+dialects carry; output that is safe to look at, since a trace is written by
+the agent under test and every command that prints one now escapes what it
+shows (and an id, which is rendered nearly everywhere, must be an identifier
+before it can be stored at all); honesty about WHICH STORE a command is using,
+since resolution follows the working directory and a hook fires from wherever
+the agent stands, so every command that only reads now refuses a store that is
+not there and every command that creates one says when it is creating a second
+below a project that already has one; a package that works when installed —
+`require('agent-replay')` threw on load and the published TypeScript types did
+not resolve, both now covered by a CI job that installs the tarball and uses
+it; and work that no longer grows with what it is looking at: a whole-store
+`export` that is no longer quadratic in the size of the store, and a `watch`
+whose polling no longer costs more the longer the run it is following.
 
 Three things to know before upgrading:
 
