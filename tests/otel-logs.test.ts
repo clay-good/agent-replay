@@ -425,6 +425,45 @@ describe('mapOtlpLogs — data fidelity', () => {
     }
   });
 
+  it("attributes a Claude tool decision to the person who made it", () => {
+    // This tested for `allow`/`deny` — the GUARD/HOOK vocabulary, not the one
+    // this telemetry field uses — so neither ever matched and EVERY Claude
+    // log-captured decision was stored `decided_by: 'policy'`, including ones a
+    // person clicked at the prompt. Claude Code 2.1.260 ships the field's schema
+    // as the literal enum ["user_temporary","user_permanent","user_reject"],
+    // described as allow-once / always-allow / deny, and says the vocabulary
+    // matches these OTel events. All three are the person's call.
+    for (const chosen of ['user_temporary', 'user_permanent', 'user_reject']) {
+      const [t] = mapOtlpLogs(otlpLogs([
+        logRecord('claude_code.tool_decision', { 'session.id': `d-${chosen}`, tool_name: 'Bash', decision: chosen }, MS),
+      ]));
+      const step = t.steps!.find((s) => s.step_type === 'decision')!;
+      expect(step.decision!.chosen).toBe(chosen);
+      expect(step.decision!.decided_by).toBe('user');
+    }
+  });
+
+  it('keeps the vendor word verbatim, so the actor call can be revisited', () => {
+    // `chosen` is stored as sent — nothing is normalized away — so if the
+    // judgement that a cached always-allow is still the user's is ever
+    // revisited, the data needed to redo it is on the record.
+    const [t] = mapOtlpLogs(otlpLogs([
+      logRecord('claude_code.tool_decision', { 'session.id': 'd-raw', tool_name: 'Write', decision: 'user_permanent' }, MS),
+    ]));
+    const step = t.steps!.find((s) => s.step_type === 'decision')!;
+    expect(step.name).toBe('tool_decision:Write');
+    expect(step.decision!.chosen).toBe('user_permanent');
+  });
+
+  it('still marks a Gemini auto-accept as policy', () => {
+    // The control: the gemini twin has a real policy-ish value and keeps it.
+    const [t] = mapOtlpLogs(otlpLogs([
+      logRecord('gemini_cli.tool_call', { 'session.id': 'g-auto', function_name: 'run_shell', success: true, decision: 'auto_accept' }, MS),
+    ]));
+    const step = t.steps!.find((s) => s.step_type === 'decision')!;
+    expect(step.decision!.decided_by).toBe('policy');
+  });
+
   it('records the model on a failed model call, not only in its name', () => {
     // The model was put in `name` alone, leaving the `model` column null on
     // every log-derived step — so a capture of these CLIs had no model recorded

@@ -2513,6 +2513,18 @@ and one-way.
   `ended_at - started_at`, `list` reported that 31-second session as 1 second
   and `list --sort duration` ranked it among the shortest in the store. The span
   path was never affected: it maxes over span END times.
+- Every Claude Code tool decision captured over OTel was recorded as made by
+  POLICY, including ones a person approved at the prompt. The mapping tested the
+  value against `allow`/`deny` — the guard/hook vocabulary, which belongs to a
+  different field — and `claude_code.tool_decision` never carries either, so the
+  test never matched and everything fell to the `policy` branch. The code said
+  so itself and asked for evidence before flipping: Claude Code ships this
+  field's schema as the enum `user_temporary` / `user_permanent` /
+  `user_reject` (allow-once / always-allow / deny), noting that the vocabulary
+  matches these OTel events. All three are the person's call, so all three are
+  now `user`, and the vendor's own word is kept verbatim in `chosen` so the
+  attribution can be revisited without re-capturing. `decisions`, `why` and
+  `check --fields decisions` all read this record.
 - The OTel SPAN receiver had the same gap, and the fix above exposed it: it
   summed input and output only, so once `/v1/logs` counted the cache sub-counts
   one session reported 120 tokens as spans and 9,420 as logs — while the spec
