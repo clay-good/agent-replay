@@ -35,6 +35,14 @@
     "sqlite",
     "observability"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/clay-good/agent-replay.git"
+  },
+  "homepage": "https://github.com/clay-good/agent-replay#readme",
+  "bugs": {
+    "url": "https://github.com/clay-good/agent-replay/issues"
+  },
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",

@@ -77,6 +77,11 @@ and one-way.
 
 ### Added
 
+- The package manifest now carries `repository`, `homepage` and `bugs`. Without
+  `repository` npm shows no source link on the package page, `npm repo` cannot
+  resolve, GitHub does not link the package back to the repo, and provenance and
+  supply-chain tooling that keys off it finds nothing. The published tarball is
+  otherwise unchanged — still `LICENSE`, `README.md`, `dist/` and the manifest.
 - `import --format claude-transcript` dropped the run's git context, which every
   Claude record carries (`gitBranch`, `cwd`) and which the codex-rollout
   importer already stores as `metadata.git`. Which branch a run came from is how
