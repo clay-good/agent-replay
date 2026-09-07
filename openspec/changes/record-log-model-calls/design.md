@@ -2,13 +2,21 @@
 
 ## Open Questions
 
-1. **Does a CLI emit both `api_request` and `api_response` for one call?** The
-   token accumulator adds counts from either, and each vendor is believed to
-   emit only one — Claude Code `api_request`, Gemini CLI `api_response`. If
-   that is wrong, today's token totals are already doubled, and option 1 would
-   double the steps too. Confirm against a real capture before building
-   anything: this is the one question whose answer could change what the
-   existing numbers mean.
+1. ~~**Does a CLI emit both `api_request` and `api_response` for one call?**~~
+   **ANSWERED — no, and nothing is doubled.** Claude Code 2.1.260 emits
+   `api_request` and never `api_response`: the shipped bundle contains exactly
+   one `To("api_request", {...})` emission and zero `To("api_response", ...)`
+   (the string `api_response` appears there only as an error category and a
+   request-id classifier). Its attributes are
+   `{ model, input_tokens, output_tokens, cache_read_tokens,
+   cache_creation_tokens, cost_usd, cost_usd_micros, duration_ms, request_id,
+   ... }`. Gemini CLI sends `api_response` with the `*_token_count` forms. So
+   the `??` chain reads one or the other, never both, and today's totals are
+   correct. Option 1 would likewise produce one step per call, not two.
+   (This also confirmed the cache attribute names: the SHORT
+   `cache_read_tokens` / `cache_creation_tokens` go on the wire — the
+   `*_input_tokens` forms are the SDK usage object's own fields. The receiver
+   reads both; the order was corrected to put the real ones first.)
 2. **Is a baseline break acceptable?** Option 1 gives every log-captured
    baseline new steps, so the first `check --golden` after the upgrade reports a
    regression the tool itself caused. The repo's precedent is `--fields

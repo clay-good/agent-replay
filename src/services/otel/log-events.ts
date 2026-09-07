@@ -466,11 +466,20 @@ function usage(n: number): number {
  * cannot make the number go backwards.
  */
 function recordTokens(a: Record<string, unknown>): number {
+  // The names each emitter actually sends, verified rather than guessed.
+  // Claude Code 2.1.260 emits
+  //   To("api_request", { input_tokens, output_tokens,
+  //                       cache_read_tokens, cache_creation_tokens, ... })
+  // — the SHORT cache names. `cache_read_input_tokens` /
+  // `cache_creation_input_tokens` are the field names on the SDK usage object
+  // it reads those values FROM, not what goes on the wire; they are kept
+  // because other instrumentations do send them. Gemini CLI sends the
+  // `*_token_count` forms.
   const parts =
     usage(num(a.input_token_count ?? a['gen_ai.usage.input_tokens'] ?? a.input_tokens)) +
     usage(num(a.output_token_count ?? a['gen_ai.usage.output_tokens'] ?? a.output_tokens)) +
-    usage(num(a.cache_creation_input_tokens ?? a.cache_creation_tokens ?? a['gen_ai.usage.cache_creation_input_tokens'])) +
-    usage(num(a.cache_read_input_tokens ?? a.cache_read_tokens ?? a.cached_content_token_count ?? a['gen_ai.usage.cached_input_tokens']));
+    usage(num(a.cache_creation_tokens ?? a.cache_creation_input_tokens ?? a['gen_ai.usage.cache_creation_input_tokens'])) +
+    usage(num(a.cache_read_tokens ?? a.cache_read_input_tokens ?? a.cached_content_token_count ?? a['gen_ai.usage.cached_input_tokens']));
   const reported = usage(num(a.total_token_count ?? a['gen_ai.usage.total_tokens'] ?? a.total_tokens));
   return Math.max(parts, reported);
 }

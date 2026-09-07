@@ -425,6 +425,25 @@ describe('mapOtlpLogs — data fidelity', () => {
     }
   });
 
+  it("reads the attribute shape Claude Code actually emits", () => {
+    // Pinned against the real emitter rather than an assumed shape. Claude Code
+    // 2.1.260 emits `To("api_request", { model, input_tokens, output_tokens,
+    // cache_read_tokens, cache_creation_tokens, cost_usd, duration_ms, ... })`
+    // — the SHORT cache names; the `*_input_tokens` forms are the SDK usage
+    // object's fields, not what goes on the wire.
+    const [t] = mapOtlpLogs(otlpLogs([
+      logRecord('claude_code.api_request', {
+        'session.id': 'real-shape', model: 'claude-opus-5',
+        input_tokens: 100, output_tokens: 20,
+        cache_read_tokens: 9000, cache_creation_tokens: 300,
+        cost_usd: 0.42, duration_ms: 1500,
+      }, MS),
+    ]));
+    expect(t.total_tokens).toBe(9420);
+    expect(t.total_cost_usd).toBeCloseTo(0.42, 6);
+    expect((t.metadata as { model?: string }).model).toBe('claude-opus-5');
+  });
+
   it("attributes a Claude tool decision to the person who made it", () => {
     // This tested for `allow`/`deny` — the GUARD/HOOK vocabulary, not the one
     // this telemetry field uses — so neither ever matched and EVERY Claude
