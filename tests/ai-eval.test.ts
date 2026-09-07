@@ -1376,7 +1376,12 @@ describe('an answer the model never finished is not reported as a verdict', () =
     const out = await aiDiffAnalysis(db, left.id, right.id, { ...opts, max_tokens: 4096 });
     expect(out.better_trace).toBe('unknown');
     expect(out.reasoning).toContain('4096');
-    expect(out.reasoning).toContain('--max-tokens');
+    // The remedy has to name something the caller actually has. There is no
+    // `--max-tokens` flag on any command — the ceiling is a config key — and
+    // pointing at a flag that does not exist is the defect this pass fixed in
+    // `guard test`, which had offered `--allow-empty` to a command without one.
+    expect(out.reasoning).toContain('config set ai.max_tokens');
+    expect(out.reasoning).not.toContain('--max-tokens');
   });
 
   it('records on an AI eval that its judge was cut off, so the stored 0 can be explained', async () => {

@@ -397,7 +397,12 @@ export async function aiDiffAnalysis(
       explanation: truncate(response.text, 500),
       better_trace: 'unknown',
       reasoning: response.truncated
-        ? `The model's answer was cut off at the ${llmOpts.max_tokens ?? DEFAULT_EVAL_MAX_TOKENS}-token ceiling, so it could not be parsed. Re-run with a larger --max-tokens.`
+        // Name the remedy the caller ACTUALLY has: there is no `--max-tokens`
+        // flag on any command; the ceiling is a config key. Pointing at a flag
+        // that does not exist is the same defect this pass fixed in
+        // `guard test`, which had offered `--allow-empty` to a command without
+        // one — and it reappeared here, in the fix immediately before it.
+        ? `The model's answer was cut off at the ${llmOpts.max_tokens ?? DEFAULT_EVAL_MAX_TOKENS}-token ceiling, so it could not be parsed. Raise it with "agent-replay config set ai.max_tokens <n>" and re-run.`
         : 'Could not parse structured response',
       key_differences: [],
     };

@@ -909,7 +909,8 @@ causes, because their cures are opposite: no baseline entry records that field
 tool could read — `unknown` is not one of the three answers it is offered, so
 it can't be confused with `neither` ("the two runs are equivalent"). If the
 reasoning says the answer was cut off at the token ceiling, re-run with a
-larger `--max-tokens` (or `config set ai.max_tokens`); a long comparison
+a larger ceiling — `agent-replay config set ai.max_tokens <n>`, which is the
+only way to raise it; a long comparison
 routinely needs more than the 1024 default. An AI *eval* whose judge was cut
 off stores `truncated_at_max_tokens` beside its `score: 0`, for the same
 reason: the gate fails closed, and the zero should be readable as "never

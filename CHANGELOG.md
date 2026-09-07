@@ -2506,7 +2506,8 @@ and one-way.
 - Nothing read the provider's own statement that it stopped at the output
   ceiling (`stop_reason`/`finish_reason`), so the one recoverable AI failure —
   an answer cut off mid-JSON — was indistinguishable from a model that answered
-  badly. `diff --ai` now names the ceiling and `--max-tokens` in its reasoning,
+  badly. `diff --ai` now names the ceiling and `config set ai.max_tokens` in its
+  reasoning,
   and an AI eval records `truncated_at_max_tokens` beside its stored
   `score: 0`, so a zero from a judge that never finished can be told apart from
   a judge that finished and failed the run. Read from all three providers.
